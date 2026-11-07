@@ -191,7 +191,7 @@ impl Pending {
                 }
                 Scope::Lyrics { .. } => self.changed.lyrics = true,
                 Scope::Rekey { .. }
-                | Scope::Queue
+                | Scope::Queue { .. }
                 | Scope::Held { .. }
                 | Scope::Analysis { .. }
                 | Scope::AlbumLoudness { .. } => {}

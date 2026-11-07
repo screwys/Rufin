@@ -150,34 +150,25 @@ impl Records {
         });
     }
 
-    /// This device's queue and session records as the Store last saved them. The queue is
-    /// encoded again only when it changed.
-    pub(super) async fn session_changes(&self) -> Result<Vec<store::Change>, String> {
+    /// This device's queue and session records as the Store last saved them. Unless `entries`
+    /// changed, the queue keeps the revision its session last recorded.
+    pub(super) async fn session_changes(
+        &self,
+        entries: bool,
+    ) -> Result<Vec<store::Change>, String> {
         let auto_dj = self.owner()?.settings.file().load().ui.auto_dj_enabled;
         let queue = self.catalog.restore_queue().await.map_err(string_error)?;
-        let revision = store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?;
+        let revision = match self.sessions.borrow().get(&self.device) {
+            Some(session) if !entries => session.queue_revision.clone(),
+            _ => store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?,
+        };
         let ids = [
             format!("queue:{}", self.device),
             format!("session:{}", self.device),
         ];
-        let stored = self
-            .store
-            .digests(Select::Ids(&ids))
-            .await
-            .map_err(string_error)?;
+        // The queue's value is encoded when it is sent.
         let shape = (&revision, queue.repeat_mode, queue.shuffled, auto_dj);
-        let mut items = Vec::new();
-        if stored.get(&ids[0]) != Some(&store::digest(&shape).map_err(string_error)?) {
-            let value = QueueValue {
-                revision: revision.clone(),
-                items: self.queue_items(&queue.entries).await?,
-                order: queue.order.to_vec(),
-                repeat: queue.repeat_mode,
-                shuffle: queue.shuffled,
-                auto_dj,
-            };
-            items.push(Item::digested(ids[0].clone(), None, &value, &shape)?);
-        }
+        let mut items = vec![Item::digested(ids[0].clone(), None, &(), &shape)?];
         let mut current = None;
         if let Some(row) = queue.rows.first() {
             let item = self
@@ -208,6 +199,23 @@ impl Records {
         );
         items.push(Item::digested(ids[1].clone(), None, &session, &digest)?);
         self.diff(items, Select::Ids(&ids), false).await
+    }
+
+    /// This device's queue record as it leaves the device.
+    pub(super) async fn queue_item(&self) -> Result<Item, String> {
+        let auto_dj = self.owner()?.settings.file().load().ui.auto_dj_enabled;
+        let queue = self.catalog.restore_queue().await.map_err(string_error)?;
+        let revision = store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?;
+        let shape = (&revision, queue.repeat_mode, queue.shuffled, auto_dj);
+        let value = QueueValue {
+            revision: revision.clone(),
+            items: self.queue_items(&queue.entries).await?,
+            order: queue.order.to_vec(),
+            repeat: queue.repeat_mode,
+            shuffle: queue.shuffled,
+            auto_dj,
+        };
+        Item::digested(format!("queue:{}", self.device), None, &value, &shape)
     }
 
     async fn queue_items(&self, entries: &[library::QueueEntry]) -> Result<Vec<QueueItem>, String> {

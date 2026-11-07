@@ -54,7 +54,7 @@ const COMPARED: [(&str, bool); 9] = [
     // A cleared cache is not a deletion.
     ("album-loudness", false),
 ];
-/// Kinds whose rows hold their value.
+/// Kinds whose rows hold their value. This device's own queue is encoded when it is sent.
 const BODIES: [&str; 3] = ["device", "session", "queue"];
 const PREFERENCES: [&str; 5] = [
     "prefer_distinct_track_covers",
@@ -471,7 +471,7 @@ impl Records {
         for item in items {
             seen.insert(item.id.clone());
             if !item.held && stored.get(&item.id) != Some(&item.digest) {
-                let body = BODIES.contains(&kind(&item.id));
+                let body = BODIES.contains(&kind(&item.id)) && kind(&item.id) != "queue";
                 changes.push(store::Change {
                     id: item.id,
                     parent: item.parent,
@@ -544,7 +544,7 @@ impl Records {
             let (listens, listened) = self.unrecorded_listens().await?;
             written.extend(listens);
             written.extend(self.unrecorded_analysis().await?);
-            written.extend(self.session_changes().await?);
+            written.extend(self.session_changes(true).await?);
             return self.write(written, listened).await;
         };
         let mut kinds = Vec::new();
@@ -555,7 +555,7 @@ impl Records {
         let mut hashes = Vec::new();
         let mut albums = Vec::new();
         let mut heard = false;
-        let mut queue = false;
+        let mut queue = None;
         for scope in scopes {
             match scope {
                 Scope::Held { uris } => states.extend(uris.iter().cloned()),
@@ -576,7 +576,7 @@ impl Records {
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Analysis { hash } => hashes.push(*hash),
                 Scope::AlbumLoudness { members } => albums.push(members.clone()),
-                Scope::Queue => queue = true,
+                Scope::Queue { entries } => queue = Some(queue == Some(true) || *entries),
                 _ => {}
             }
         }
@@ -641,8 +641,8 @@ impl Records {
             written.extend(listens);
             listened = last;
         }
-        if queue {
-            written.extend(self.session_changes().await?);
+        if let Some(entries) = queue {
+            written.extend(self.session_changes(entries).await?);
         }
         self.write(written, listened).await
     }
@@ -824,6 +824,7 @@ impl Records {
             }
             "album-loudness" => self.album_loudness_items(objects).await?,
             "setting" => self.settings_items().await?,
+            "queue" => vec![self.queue_item().await?],
             _ => Vec::new(),
         };
         if let Some(objects) = objects {

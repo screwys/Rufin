@@ -94,8 +94,11 @@ pub enum Scope {
     },
     /// Playlist folders.
     Folders,
-    /// The saved queue or its playback state.
-    Queue,
+    /// The saved queue or its playback state; `entries` when its entries or their order
+    /// changed.
+    Queue {
+        entries: bool,
+    },
     /// Tracks whose downloaded copy was added or removed.
     Downloads {
         tracks: Vec<DownloadChange>,

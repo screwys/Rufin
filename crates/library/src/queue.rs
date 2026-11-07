@@ -425,7 +425,7 @@ impl Catalog {
     pub async fn save_queue(&self, state: &QueueRestore) -> LibraryResult<()> {
         let mut write = self.write().await?;
         save_queue_on(write.connection().await?, state).await?;
-        write.changed(Scope::Queue);
+        write.changed(Scope::Queue { entries: true });
         write.commit().await?;
         Ok(())
     }
@@ -433,8 +433,11 @@ impl Catalog {
     /// Saves playback's queue edits. Clients hear of the queue only when rows changed.
     pub async fn apply_queue_update(&self, update: &QueueUpdate) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        if apply_queue_update_on(write.connection().await?, update).await? > 0 {
-            write.changed(Scope::Queue);
+        let (entries, state) = apply_queue_update_on(write.connection().await?, update).await?;
+        if entries > 0 || state {
+            write.changed(Scope::Queue {
+                entries: entries > 0,
+            });
         }
         write.commit().await?;
         Ok(())
@@ -556,12 +559,11 @@ pub(crate) async fn save_queue_on(
     .map(drop)
 }
 
-/// Writes a queue update. The rows it changed.
-/// Writes a queue update. The rows it changed.
+/// Writes a queue update: the entry rows it changed, and whether the saved state changed.
 async fn apply_queue_update_on(
     connection: &mut sqlx::SqliteConnection,
     update: &QueueUpdate,
-) -> LibraryResult<u64> {
+) -> LibraryResult<(u64, bool)> {
     let mut changed = 0;
     if update.replace {
         changed += sqlx::raw_sql("DELETE FROM queue_entries; DELETE FROM queue_contexts;")
@@ -623,17 +625,17 @@ async fn apply_queue_update_on(
             WHERE (track_key,rank,shuffle_rank) IS NOT (excluded.track_key,excluded.rank,excluded.shuffle_rank)")
             .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?.rows_affected();
     }
-    if update.state {
-        changed += save_settings(
+    let state = update.state
+        && save_settings(
             connection,
             update.current_index,
             update.progress_millis,
             update.repeat_mode,
             update.shuffled,
         )
-        .await?;
-    }
-    Ok(changed)
+        .await?
+            > 0;
+    Ok((changed, state))
 }
 
 /// The stored keys of the contexts an update's entries name; contexts not stored yet are

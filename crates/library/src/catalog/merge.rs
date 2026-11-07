@@ -1565,7 +1565,7 @@ impl Catalog {
                 .bind(serde_json::to_string(&contexts)?)
                 .execute(&mut *connection)
                 .await?;
-            write.changed(Scope::Queue);
+            write.changed(Scope::Queue { entries: true });
         }
         let connection = write.connection().await?;
         // Provider playlists go first, so their entries hold none of the source's tracks.
