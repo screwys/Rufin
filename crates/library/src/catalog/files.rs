@@ -583,11 +583,14 @@ pub(super) async fn merge_local_file_uris_on(
                     }],
                 );
             }
-            sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
+            let queued = sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
                 .bind(old_key)
                 .bind(current_key)
                 .execute(write.connection().await?)
                 .await?;
+            if queued.rows_affected() > 0 {
+                write.changed(Scope::Queue { entries: true });
+            }
             let sources: Vec<SourceKey> = sqlx::query_scalar("UPDATE home_entries SET entity_key=?2 WHERE entity_kind='track' AND entity_key=?1 RETURNING source_key")
                 .bind(old_key)
                 .bind(current_key)
