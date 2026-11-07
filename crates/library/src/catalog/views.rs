@@ -675,6 +675,8 @@ pub(crate) struct Inputs {
 
 /// Whether `parts` and `year`, joined by spaces and lowercased, hold the lowercase `text`; a
 /// `word` text matches a whole word only. The joined text reuses one buffer per thread.
+// The Android targets' thread_local expansion hides its const block from this lint.
+#[allow(clippy::missing_const_for_thread_local)]
 pub(crate) fn holds(parts: &[&str], year: Option<i16>, text: &str, word: bool) -> bool {
     use std::fmt::Write as _;
     thread_local!(static JOINED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
