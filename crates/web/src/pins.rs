@@ -33,6 +33,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         let mut item = browser::row_data(
             &products,
             &row,
+            true,
             &rufin_core::menu::menu(&products.source, &settings, &row),
             &scope,
             None,

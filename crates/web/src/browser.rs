@@ -105,19 +105,21 @@ struct Shown<'a> {
     form: &'a Form,
 }
 
-/// A row's JSON for the page's script: what the API lists for it, its menu, the page it opens
-/// and the page it plays, as core gives them for a row of `view`'s page or for a row outside a
-/// page; each keeps the source and music folder of `scope`. A track has no page it plays.
+/// A row's JSON for the page's script: what the API lists for it, with `art` its pictures'
+/// previews, its menu, the page it opens and the page it plays, as core gives them for a row of
+/// `view`'s page or for a row outside a page; each keeps the source and music folder of
+/// `scope`. A track has no page it plays.
 pub(super) fn row_data(
     products: &ProductHandles,
     row: &Row,
+    art: bool,
     menu: &Menu,
     scope: &page::PageToken,
     view: Option<&rufin_core::view::View>,
 ) -> Value {
     use rufin_core::route::Route;
     use rufin_core::view::PlayTarget;
-    let mut value = page::row_json(products, row, true, scope);
+    let mut value = page::row_json(products, row, art, scope);
     value["menu"] = json!(menu);
     let (route, target) = match view {
         Some(view) => (view.row_route(row), view.row_target(row)),
@@ -150,6 +152,7 @@ impl<'a> Shown<'a> {
         list: &page::PageToken,
         view: &rufin_core::view::View,
         row: Row,
+        art: bool,
         title: Option<String>,
         fields: &[LibraryField],
         index: usize,
@@ -157,7 +160,7 @@ impl<'a> Shown<'a> {
         form: &'a Form,
     ) -> Self {
         let menu = rufin_core::menu::menu(&products.source, settings, &row);
-        let mut data = row_data(products, &row, &menu, list, Some(view));
+        let mut data = row_data(products, &row, art, &menu, list, Some(view));
         if let Some(title) = &title {
             data[if matches!(row, Row::Tag(_)) {
                 "name"
@@ -412,6 +415,7 @@ pub(super) fn library(
                 token,
                 &opened.view,
                 row.clone(),
+                true,
                 None,
                 &fields,
                 index,
@@ -529,6 +533,8 @@ pub(super) fn home(
                                 token,
                                 &opened.view,
                                 row,
+                                // Genre chips show their names only.
+                                block != "Genres",
                                 Some(title),
                                 fields,
                                 index,
