@@ -725,7 +725,7 @@ async fn reload_on(
     owner
         .shared
         .catalog
-        .mark_playlist_file_synced(link.playlist, &before)
+        .mark_playlist_file_synced(link.playlist, &before, 0)
         .await
         .map_err(string_error)?;
     crate::playlists::enrich_imported_playlist(owner, report.playlist).await?;
@@ -740,6 +740,9 @@ async fn save_on(
     if !overwrite && link.revision.as_deref() != Some(revision(owner, link).await?.as_str()) {
         return Err(FILE_CONFLICT.into());
     }
+    let catalog = &owner.shared.catalog;
+    let edits = catalog.playlist_file_edits(link.playlist).await;
+    let edits = edits.map_err(string_error)?;
     if let Some(path) = local_path(owner, link) {
         export_local_on(
             owner,
@@ -805,10 +808,8 @@ async fn save_on(
         })?;
     }
     let next = revision(owner, link).await?;
-    owner
-        .shared
-        .catalog
-        .mark_playlist_file_synced(link.playlist, &next)
+    catalog
+        .mark_playlist_file_synced(link.playlist, &next, edits)
         .await
         .map_err(string_error)?;
     Ok(())

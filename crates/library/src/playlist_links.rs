@@ -302,7 +302,9 @@ mod tests {
         catalog
             .ignore_playlist_file(Some(&source), "0/ignored.pls")
             .await?;
-        catalog.mark_playlist_file_synced(playlist, "third").await?;
+        catalog
+            .mark_playlist_file_synced(playlist, "third", 0)
+            .await?;
         catalog.close().await?;
         let catalog = Catalog::open(&path).await?;
         let restored = catalog
@@ -683,14 +685,27 @@ impl Catalog {
             .any(|(_, record)| record.flags & crate::catalog::snapshot::LINKED != 0)
     }
 
+    /// How many edits the playlist took since its file last held them.
+    pub async fn playlist_file_edits(&self, playlist: PlaylistKey) -> LibraryResult<u32> {
+        let mut reader = self.acquire_reader().await?;
+        let edits =
+            sqlx::query_scalar("SELECT dirty FROM playlist_file_links WHERE playlist_key=?1")
+                .bind(playlist)
+                .fetch_optional(&mut *reader)
+                .await?;
+        Ok(edits.unwrap_or(0))
+    }
+
+    /// The file holds `revision` and the first `edits` edits; later ones keep it dirty.
     pub async fn mark_playlist_file_synced(
         &self,
         playlist: PlaylistKey,
         revision: &str,
+        edits: u32,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=0,error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR dirty<>0 OR error IS NOT NULL)")
-            .bind(playlist).bind(revision).execute(write.connection().await?).await?;
+        sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=max(dirty-?3,0),error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR ?3<>0 OR error IS NOT NULL)")
+            .bind(playlist).bind(revision).bind(edits).execute(write.connection().await?).await?;
         write.commit().await?;
         Ok(())
     }
@@ -782,7 +797,7 @@ pub(crate) async fn mark_dirty_on(
         .get(playlist.raw())
         .is_some_and(|record| record.flags & crate::catalog::snapshot::LINKED != 0);
     if linked {
-        sqlx::query("UPDATE playlist_file_links SET dirty=1 WHERE playlist_key=?1 AND dirty=0")
+        sqlx::query("UPDATE playlist_file_links SET dirty=dirty+1 WHERE playlist_key=?1")
             .bind(playlist)
             .execute(connection)
             .await?;
