@@ -533,10 +533,10 @@ impl JellyfinEmbySource {
                 if let Some(listed) = listed.as_mut().filter(|_| kind == "track") {
                     listed.insert(object.clone());
                 }
-                states.entry(kind).or_default().push((
-                    object,
-                    super::item::user_state(&item["UserData"], kind == "track"),
-                ));
+                states
+                    .entry(kind)
+                    .or_default()
+                    .push((object, super::item::user_state(&item["UserData"])));
             }
             for (kind, rows) in states {
                 observation.write_native_user_data(kind, &rows).await?;

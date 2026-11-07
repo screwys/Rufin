@@ -715,9 +715,8 @@ async fn write_user_data(
         .filter_map(|item| {
             let state = library::NativeUserState {
                 rating: rating(item, rated),
-                play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0 && kind == "track"),
-                last_played: field::<i64>(item, "lastViewedAt")
-                    .filter(|v| *v >= 0 && kind == "track"),
+                play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0),
+                last_played: field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
                 ..Default::default()
             };
             Some((plex_id(kind, &id(&item["ratingKey"])?), state))

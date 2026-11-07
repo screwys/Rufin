@@ -721,7 +721,7 @@ async fn track_page(
         {
             lyrics.push((uri.as_str(), payload.as_str()));
         }
-        track.state.merge(&row.user_data);
+        track.state.merge(&row.user_data, true);
         write.see(&track);
         write.put(track);
     }
@@ -741,6 +741,8 @@ async fn native_states(
         rows: &[(&str, &NativeUserState)],
         state: fn(&mut R) -> &mut NativeState,
     ) -> LibraryResult<()> {
+        // Plays count tracks only; a collection shows the totals of its members.
+        let plays = R::FAMILY == Family::Track;
         // Only rows whose stored state the incoming one changes are read and written.
         let incoming = rows
             .iter()
@@ -751,8 +753,8 @@ async fn native_states(
                     object,
                     state.favorite,
                     rating,
-                    state.play_count,
-                    state.last_played,
+                    state.play_count.filter(|_| plays),
+                    state.last_played.filter(|_| plays),
                 )
             })
             .collect::<Vec<_>>();
@@ -774,7 +776,7 @@ async fn native_states(
             if write.newer(R::FAMILY, record.key()) {
                 continue;
             }
-            state(&mut record).merge(incoming);
+            state(&mut record).merge(incoming, plays);
             write.put(record);
         }
         Ok(())

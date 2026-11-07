@@ -79,14 +79,14 @@ pub(crate) struct NativeState {
 }
 
 impl NativeState {
-    /// Sparse source facts: an absent field keeps the stored value.
-    pub(crate) fn merge(&mut self, incoming: &NativeUserState) {
+    /// Sparse source facts: an absent field keeps the stored value; plays apply when `plays`.
+    pub(crate) fn merge(&mut self, incoming: &NativeUserState, plays: bool) {
         self.favorite = incoming.favorite.or(self.favorite);
         if let Some(rating) = incoming.rating {
             self.rating = rating;
         }
-        self.play_count = incoming.play_count.or(self.play_count);
-        self.last_played = incoming.last_played.or(self.last_played);
+        self.play_count = incoming.play_count.filter(|_| plays).or(self.play_count);
+        self.last_played = incoming.last_played.filter(|_| plays).or(self.last_played);
     }
 }
 

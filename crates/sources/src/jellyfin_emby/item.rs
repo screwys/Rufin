@@ -59,7 +59,7 @@ pub(super) fn album_from_item(
             genres: genre_credits_from_pairs(server, &item["GenreItems"]),
             ..Default::default()
         },
-        user_data: user_state(&item["UserData"], false),
+        user_data: user_state(&item["UserData"]),
         object_id: server.object_id("album", &item_id),
         artwork_binding: image_ref
             .as_ref()
@@ -153,7 +153,7 @@ pub(super) fn track_from_item(
             genres: genre_credits_from_pairs(server, &item["GenreItems"]),
             ..Default::default()
         },
-        user_data: user_state(&item["UserData"], true),
+        user_data: user_state(&item["UserData"]),
         object_id,
         album_object_id,
         artwork_binding: image_ref
@@ -279,7 +279,7 @@ pub(super) fn artist_from_item(
             musicbrainz_artist_id: source_id(&item["ProviderIds"], "MusicBrainzArtist"),
             ..Default::default()
         },
-        user_data: user_state(&item["UserData"], false),
+        user_data: user_state(&item["UserData"]),
         object_id: server.object_id("artist", &item_id),
         artwork_binding: primary_image_ref(server, "artist", &item_id, item)
             .as_ref()
@@ -380,13 +380,13 @@ fn duration_seconds(ticks: Option<i64>) -> u32 {
 }
 
 /// An item's user data; a track's also counts its plays.
-pub(super) fn user_state(data: &Value, track: bool) -> library::NativeUserState {
+pub(super) fn user_state(data: &Value) -> library::NativeUserState {
     let present = data.is_object();
     library::NativeUserState {
         favorite: present.then(|| favorite(data)),
         rating: present.then(|| user_rating(data).map(|rating| i64::from(rating) * 10)),
-        play_count: play_count(data).filter(|_| track).map(i64::from),
-        last_played: crate::policy::unix_seconds(field(data, "LastPlayedDate")).filter(|_| track),
+        play_count: play_count(data).map(i64::from),
+        last_played: crate::policy::unix_seconds(field(data, "LastPlayedDate")),
         ..Default::default()
     }
 }
