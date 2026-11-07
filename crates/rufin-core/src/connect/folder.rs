@@ -243,7 +243,11 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<u64, Str
         segments.sort_by_key(|segment| (segment.first, segment.last));
         let mut end = read;
         for segment in segments {
-            // The cursor stays below a segment that is not written completely yet.
+            // The cursor stays below a segment not delivered yet, as segments are named after
+            // the one written before them, and below one that is not written completely yet.
+            if segment.first > end + 1 {
+                break;
+            }
             let rows = match open(session, &folder.read(&segment.handle).await?) {
                 Ok(rows) => rows,
                 Err(error) => {
