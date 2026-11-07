@@ -56,7 +56,7 @@ let listPosition = () => 0;
 
 // Pages the list of `token` in windows as it scrolls, from row `at`; `extra` parameters, such
 // as a new order, apply to the first window, which names the page as it opened.
-async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
+async function loadLibrary(token, extra, signal, initialPage, at) {
   signal.throwIfAborted();
   const content = $("content"), scroller = $("main"), pages = new Map();
   const before = el("div"), after = el("div");
@@ -64,7 +64,7 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
   after.setAttribute("aria-hidden", "true");
   content.prepend(before);
   content.append(after);
-  let total = knownTotal, pageHeight = 1, lastHeight = null, pending = null;
+  let total = null, pageHeight = 1, lastHeight = null, pending = null;
   libraryTotal = total;
   let header = null, timer, resize;
   signal.addEventListener("abort", () => {
@@ -329,7 +329,7 @@ function empty(title, description, action) {
 
 // Loads the page shown; a reread (`at`, the row to show at the top) keeps what it shows
 // until the new rows replace it, and Home keeps its scroll and carousel positions.
-async function loadView(initial = false, knownTotal = null, extra = {}, at = null) {
+async function loadView(initial = false, extra = {}, at = null) {
   const offsets = new Map(at === null ? [] : [...$("content").querySelectorAll(".home-section")]
     .map((node) => [node.dataset.block, Number(node.dataset.offset)]));
   for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
@@ -372,7 +372,7 @@ async function loadView(initial = false, knownTotal = null, extra = {}, at = nul
       showPage(home);
       bindHome(signal, offsets);
       if (home.missed) showChanged(JSON.parse(home.missed));
-    } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal, at ?? 0);
+    } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, at ?? 0);
   } catch (error) {
     if (!signal.aborted) {
       if (state.source) empty(tr("Could not load this page"), error.message);
@@ -412,7 +412,7 @@ async function refreshPage(verdict) {
     updateSources(configured);
     return reopen();
   }
-  return loadView(false, null, {}, listPosition());
+  return loadView(false, {}, listPosition());
 }
 
 // Turns a row's favorite over, and shows it on every row and heart that shows its media.
@@ -612,20 +612,18 @@ function init() {
     event.preventDefault();
     navigate(JSON.parse(shown.back));
   });
+  // A search and a chosen order read the page with the search and the order the toolbar
+  // shows; the order goes with the first window, and the page names it from then on.
+  const order = () => {
+    clearTimeout(searchTimer);
+    opened.options = { ...opened.options, filter: $("search").value };
+    const sort = $("sort").value, descending = $("descending").getAttribute("aria-pressed");
+    run(() => loadView(false, sort ? { sort, descending } : {}));
+  };
   $("search").addEventListener("input", () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      opened.options = { ...opened.options, filter: $("search").value };
-      run(loadView);
-    }, 200);
+    searchTimer = setTimeout(order, 200);
   });
-  // A chosen order goes with the first window; the page names it from then on.
-  const order = () => {
-    run(() => loadView(false, libraryTotal, {
-      sort: $("sort").value,
-      descending: $("descending").getAttribute("aria-pressed"),
-    }));
-  };
   $("sort").addEventListener("change", order);
   $("descending").addEventListener("click", () => {
     showOrder($("sort").value, $("descending").getAttribute("aria-pressed") !== "true");

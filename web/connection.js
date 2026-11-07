@@ -169,7 +169,7 @@ async function connect() {
     },
     session.signal,
   );
-  if (shown) await loadView(true, null, {}, Number(new URLSearchParams(location.search).get("offset")));
+  if (shown) await loadView(true, {}, Number(new URLSearchParams(location.search).get("offset")));
   else if (!initial) await loadView();
   void refreshContinuation();
 }
