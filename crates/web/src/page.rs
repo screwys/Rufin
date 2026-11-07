@@ -533,7 +533,7 @@ pub(super) fn json(products: &ProductHandles, opened: &Opened, limit: usize, tot
         })
         .collect::<Vec<_>>();
     let mut value = json!({
-        "activity_sensitive":opened.view.reads_activity(),"sort":sort_name(opened.token.list(), sort),"descending":descending,
+        "sort":sort_name(opened.token.list(), sort),"descending":descending,
         "total":total.then_some(opened.view.len()),"offset":opened.offset,"limit":limit,"page":opened.token,
     });
     value[rows_name(&opened.token.route)] = rows.into();

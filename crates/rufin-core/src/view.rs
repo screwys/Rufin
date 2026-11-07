@@ -1076,11 +1076,6 @@ impl View {
         (sort, descending)
     }
 
-    /// Whether plays change what it shows.
-    pub fn reads_activity(&self) -> bool {
-        read_order(&self.route, &self.options, &self.settings).2
-    }
-
     /// Whether it reads the same in `selected` as in the library it opened in.
     pub fn reads_same_in(&self, selected: Option<&SelectedLibrary>) -> bool {
         Scope::of(&self.route).same(self.selected.as_ref(), selected)

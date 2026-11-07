@@ -1134,7 +1134,7 @@ async fn events(
                         let now = sidebar.borrow_and_update().ui.sidebar.clone();
                         if now == pins { Vec::new() } else { pins = now; vec![json!({"pins_changed":true})] }
                     },
-                    changed = catalog.next() => changed_json(&products, stream.pages.page(stream.id).as_deref(), &changed?),
+                    changed = catalog.next() => vec![changed_json(&products, stream.pages.page(stream.id).as_deref(), &changed?)],
                 }
             };
             Some((
@@ -1156,33 +1156,19 @@ async fn events(
     event_response(Body::new(StreamBody::new(stream)))
 }
 
-/// The update frames of one catalog change. The first carries the flags and what the change
-/// shows on the stream's page ([`show_changed`]); then the first changed playlist, or null when
-/// any may have changed. Each further playlist gets a frame of its own.
+/// The update frame of one catalog change: its flags and what it shows on the stream's page
+/// ([`show_changed`]).
 fn changed_json(
     products: &ProductHandles,
     shown: Option<&rufin_core::view::View>,
     changed: &rufin_core::source::feed::Changed,
-) -> Vec<Value> {
-    let mut first = json!({
+) -> Value {
+    let mut value = json!({
         "catalog_acquired": changed.all || !changed.sources.is_empty(),
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
-        "activity_changed": changed.listened,
     });
-    show_changed(products, &mut first, shown, changed);
-    if changed.playlist_lists {
-        first["playlists"] = Value::Null;
-        return vec![first];
-    }
-    let mut playlists = changed.playlists.iter();
-    if let Some(playlist) = playlists.next() {
-        first["playlists"] = json!(playlist);
-    }
-    std::iter::once(first)
-        .chain(playlists.map(|playlist| {
-            json!({"catalog_acquired":false,"pins_changed":false,"activity_changed":false,"playlists":playlist})
-        }))
-        .collect()
+    show_changed(products, &mut value, shown, changed);
+    value
 }
 
 /// What `changed` shows on `shown`, the page a client shows: whether it reads the page again
