@@ -1627,10 +1627,20 @@ impl Actor {
         quality: DownloadQuality,
     ) -> Result<bool, String> {
         let encoding = library::media_encoding_key(quality.encoding());
-        let Some(mut file) = (self.catalog.download_file(media_uri).await)
-            .map_err(|error| error.to_string())?
-            .filter(|file| file.encoding == encoding || file.encoding == "unknown")
-        else {
+        let previous =
+            (self.catalog.download_file(media_uri).await).map_err(|error| error.to_string())?;
+        // CUE tracks of one sheet share the copy of their backing file.
+        let usable = previous
+            .clone()
+            .filter(|file| file.encoding == encoding || file.encoding == "unknown");
+        let Some(mut file) = (match usable {
+            Some(file) => Some(file),
+            None => (self
+                .catalog
+                .cue_sibling_download(media_uri, &encoding)
+                .await)
+                .map_err(|error| error.to_string())?,
+        }) else {
             return Ok(false);
         };
         let paths = completed_download_paths(&self.root, &file)?;
@@ -1642,13 +1652,20 @@ impl Actor {
         }) {
             return Ok(false);
         }
-        file.media_uri = media_uri.into();
-        file.source_id = source_id.map(ToString::to_string);
-        let mut owners = download_owners(&file)?;
-        if !owners.insert(owner.clone()) {
+        let mut owners = previous
+            .as_ref()
+            .map(download_owners)
+            .transpose()?
+            .unwrap_or_default();
+        if !owners.insert(owner.clone())
+            && previous.as_ref().is_some_and(|old| old.path == file.path)
+        {
             self.retire_previous_files(&mut file).await?;
             return Ok(true);
         }
+        file.retired_documents = self.retired_after(previous.as_ref(), &file.path).await?;
+        file.media_uri = media_uri.into();
+        file.source_id = source_id.map(ToString::to_string);
         file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
         let placement = download_placement(&paths, file.completed_size).await?;
         file.storage_root = placement.root;
@@ -1658,7 +1675,29 @@ impl Actor {
             .save_download(&file)
             .await
             .map_err(|error| error.to_string())?;
+        self.retire_previous_files(&mut file).await?;
         Ok(true)
+    }
+
+    /// The documents a track's record still has to delete once it points at `path`.
+    async fn retired_after(
+        &self,
+        previous: Option<&library::DownloadFile>,
+        path: &str,
+    ) -> Result<String, String> {
+        let mut retired: Vec<String> = previous
+            .filter(|file| !file.retired_documents.is_empty())
+            .map(|file| serde_json::from_str(&file.retired_documents))
+            .transpose()
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
+        if let Some(previous) = previous.filter(|old| old.managed && old.path != path)
+            && !(self.catalog.download_file_shared(previous).await)
+                .map_err(|error| error.to_string())?
+        {
+            retired.push(previous.path.clone());
+        }
+        serde_json::to_string(&retired).map_err(|error| error.to_string())
     }
 
     async fn enqueue(
@@ -2265,28 +2304,10 @@ impl Actor {
         file.owners = serde_json::to_string(&owners)
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
         file.completed_size = Some(i64::try_from(finished.completed_size).unwrap_or(i64::MAX));
-        let mut retired: Vec<String> = previous
-            .as_ref()
-            .filter(|file| !file.retired_documents.is_empty())
-            .map(|file| serde_json::from_str(&file.retired_documents))
-            .transpose()
-            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?
-            .unwrap_or_default();
-        if let Some(previous) = previous
-            .as_ref()
-            .filter(|old| old.managed && old.path != file.path)
-        {
-            let used = self
-                .catalog
-                .download_file_shared(previous)
-                .await
-                .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
-            if !used {
-                retired.push(previous.path.clone());
-            }
-        }
-        file.retired_documents = serde_json::to_string(&retired)
-            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        file.retired_documents = self
+            .retired_after(previous.as_ref(), &file.path)
+            .await
+            .map_err(DownloadFailure::NeedsAttention)?;
         let placement = download_placement(&finished.paths, file.completed_size)
             .await
             .map_err(DownloadFailure::NeedsAttention)?;

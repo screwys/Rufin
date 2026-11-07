@@ -42,6 +42,20 @@ impl Catalog {
             .await?)
     }
 
+    /// A copy of a CUE track's backing file at this encoding, kept for another track of its sheet.
+    pub async fn cue_sibling_download(
+        &self,
+        uri: &str,
+        encoding: &str,
+    ) -> LibraryResult<Option<DownloadFile>> {
+        let Some(sheet) = crate::cue_media_parts(uri).and(uri.rsplitn(3, '/').nth(2)) else {
+            return Ok(None);
+        };
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT * FROM downloads WHERE substr(media_uri,1,length(?1))=?1 AND quality IN (?2,'unknown') LIMIT 1")
+            .bind(format!("{sheet}/")).bind(encoding).fetch_optional(&mut *reader).await?)
+    }
+
     /// Whether another record uses the same file.
     pub async fn download_file_shared(&self, file: &DownloadFile) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
