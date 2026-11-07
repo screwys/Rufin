@@ -969,27 +969,12 @@ impl PlaybackOwner {
             seed: random_u64(),
         })
     }
+    /// Moves on from the repeat mode the player shows, wherever it plays.
     pub fn cycle_repeat(&self) {
-        if self
-            .rufin
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
-            && let Some(projection) = self.current_projection()
-        {
-            self.set_repeat(next_repeat(projection.view.controls.repeat_mode));
-            return;
-        }
-        match self.settings.edit(|stored| {
-            stored.ui.repeat_mode = next_repeat(stored.ui.repeat_mode);
-            Ok(stored.ui.repeat_mode)
-        }) {
-            Ok(repeat) => self.send(Command::SetRepeat(repeat)),
-            Err(error) => {
-                warn!(%error, "could not save repeat setting");
-                self.set_repeat(QueueRepeatMode::Off);
-            }
-        }
+        let shown = (self.updates.current()).map(|view| view.controls.repeat_mode);
+        self.set_repeat(next_repeat(
+            shown.unwrap_or_else(|| self.settings.load().ui.repeat_mode),
+        ));
     }
     pub fn set_repeat(&self, repeat: QueueRepeatMode) {
         if let Err(error) = self.settings.edit(|stored| {
