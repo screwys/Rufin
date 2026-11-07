@@ -284,7 +284,7 @@ private fun PlayerFooterButton(icon: String, label: String, action: () -> Unit) 
 private fun PlayerCover(player: PlayerConnection, artwork: PlayerArtwork?, modifier: Modifier) {
     val duration = if (LocalReduceMotion.current) 0 else 240
     val binding = player.currentItem?.artworkBinding?.toList()
-    val identity = remember(player.bridge, binding) {
+    val identity = remember(player.bridge, binding, player.artworkGeneration) {
         binding?.let { player.bridge?.artworkIdentity(it.toByteArray()) }
     }
     val cover = identity to artwork

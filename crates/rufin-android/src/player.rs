@@ -498,6 +498,14 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
+    /// What [`Self::artwork_identity`] reads besides the binding: the artwork policy and the
+    /// invalidations. An identity changes only with it.
+    pub fn artwork_generation(&self) -> String {
+        self.products
+            .artwork
+            .generation(&self.products.settings.load().artwork_policy())
+    }
+
     /// The image `binding` shows now, under the artwork policy and invalidations.
     pub fn artwork_identity(&self, binding: Vec<u8>) -> String {
         self.products

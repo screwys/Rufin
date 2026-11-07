@@ -348,6 +348,12 @@ impl Artwork {
         self.pipeline.key(request)
     }
 
+    /// What a key reads besides its request's binding and sizes: `external` and the
+    /// invalidations that ran. A key changes only with it.
+    pub fn generation(&self, external: &ExternalPolicy) -> String {
+        self.pipeline.generation(external)
+    }
+
     pub fn load(&self, request: ArtworkRequest) -> ArtworkLoad {
         self.pipeline.load(request)
     }

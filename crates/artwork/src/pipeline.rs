@@ -13,7 +13,7 @@ use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
     ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkRequest, DecodedImage,
-    PendingArtwork, RequestId, RgbaImage, SourceResolver,
+    ExternalPolicy, PendingArtwork, RequestId, RgbaImage, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
@@ -244,6 +244,13 @@ impl Pipeline {
 
     pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
         request_key(&lock_state(&self.shared), request)
+    }
+
+    pub(crate) fn generation(&self, external: &ExternalPolicy) -> String {
+        let state = lock_state(&self.shared);
+        let epochs = state.source_epochs.values();
+        let invalidations = epochs.fold(state.external_epoch, |sum, at| sum.wrapping_add(*at));
+        ArtworkKey::binding_digest(&format!("{external:?}\0{invalidations}"))
     }
 
     pub(crate) fn retry_external(&self) -> Result<(), ArtworkError> {

@@ -92,6 +92,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     internal var bridge by mutableStateOf<AndroidPlayer?>(null)
         private set
+    /** What artwork identities read besides their binding, read again with each committed change
+     * and preference: an identity changes only with it. */
+    internal val artworkGeneration by derivedStateOf(structuralEqualityPolicy()) {
+        connection.catalogChanges; connection.preferences; bridge?.artworkGeneration()
+    }
     val service get() = connection.service
     val currentLyrics get() = lyrics?.takeIf { it.mediaId != null && it.mediaId == currentId }
     val lyricsToken get() = lyrics?.currentMediaId

@@ -38,7 +38,7 @@ import java.util.TreeMap
 internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int): PlayerArtwork? {
     val binding = remember(identityBytes) { identityBytes?.toList() } ?: return null
     val bridge = player.bridge
-    val identity = remember(bridge, binding) { bridge?.artworkIdentity(binding.toByteArray()) } ?: return null
+    val identity = remember(bridge, binding, player.artworkGeneration) { bridge?.artworkIdentity(binding.toByteArray()) } ?: return null
     return key(identity) {
         val cached = remember(bridge, pixels) { player.artworkCache.peek(identity, pixels) }
         val loaded by produceState(cached, bridge, pixels, binding) {
