@@ -583,9 +583,8 @@ impl LyricsService {
         }
         for authority in acquisition_order(request.plan.prefers_server()) {
             if use_cache
-                && self
-                    .resolve_cached_candidate(&request, &mut fallback, authority)
-                    .await
+                && authority == LyricsAuthority::External
+                && self.resolve_cached_candidate(&request, &mut fallback).await
             {
                 return;
             }
@@ -627,16 +626,9 @@ impl LyricsService {
         self: &Arc<Self>,
         request: &LyricsRequest,
         fallback: &mut LyricsFallback,
-        authority: LyricsAuthority,
     ) -> bool {
-        let (role, language, script) = match authority {
-            LyricsAuthority::Source => cache_key_for(LyricsRole::Original, ""),
-            LyricsAuthority::External => cache_key(&request.plan),
-        };
-        let authority = match authority {
-            LyricsAuthority::Source => "source",
-            LyricsAuthority::External => "external",
-        };
+        let (role, language, script) = cache_key(&request.plan);
+        let authority = "external";
         let Some(cached) = self
             .catalog
             .lyrics_cache_for_role(
@@ -702,18 +694,20 @@ impl LyricsService {
         request: &LyricsRequest,
         fallback: &mut LyricsFallback,
     ) -> bool {
-        let Some(source) = self.source(&request.context).await else {
-            return false;
+        // Without a source, or for a local file read already, only cached source lyrics are left.
+        let source = (self.source(&request.context).await).filter(|source| {
+            !((library::file_media_path(request.media_uri()).is_some() || request.cue_track)
+                && matches!(&source.implementation, sources::Implementation::Local(_)))
+        });
+        let cached = match source {
+            Some(source) => {
+                source
+                    .cached_lyrics(&self.catalog, request.media_uri())
+                    .await
+            }
+            None => Ok(sources::Source::stored_lyrics(&self.catalog, request.media_uri()).await),
         };
-        if (library::file_media_path(request.media_uri()).is_some() || request.cue_track)
-            && matches!(&source.implementation, sources::Implementation::Local(_))
-        {
-            return false;
-        }
-        match source
-            .cached_lyrics(&self.catalog, request.media_uri())
-            .await
-        {
+        match cached {
             Ok(Some(candidate)) => {
                 if !cached_lyrics_allowed(&candidate, &request.plan, request.cue_track) {
                     return false;

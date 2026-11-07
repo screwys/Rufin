@@ -1555,40 +1555,8 @@ impl Source {
         catalog: &Catalog,
         media_uri: &str,
     ) -> SourceResult<Option<lyrics::LyricsBundle>> {
-        match catalog
-            .lyrics_cache_for_role(
-                media_uri,
-                "original",
-                "",
-                "",
-                "source",
-                &library::ReadCancellation::new(),
-            )
-            .await
-        {
-            Ok(Some(cached)) => {
-                if let Some(bundle) = lyrics::LyricsBundle::from_cache_payload(&cached.lyrics)
-                    .and_then(lyrics::lyrics_with_displayable_content)
-                    .filter(|bundle| {
-                        bundle.origin == lyrics::LyricsOrigin::Native
-                            || bundle.origin == lyrics::LyricsOrigin::Local
-                                && library::cue_media_parts(media_uri).is_none()
-                    })
-                {
-                    return Ok(Some(bundle));
-                }
-                let _ = catalog
-                    .remove_lyrics_cache(
-                        media_uri,
-                        "source",
-                        &cached.role,
-                        &cached.language,
-                        &cached.script,
-                    )
-                    .await;
-            }
-            Ok(None) => {}
-            Err(error) => tracing::warn!(%error, "could not read source lyrics cache"),
+        if let Some(bundle) = Self::stored_lyrics(catalog, media_uri).await {
+            return Ok(Some(bundle));
         }
         let native = match self.read_lyrics(catalog, media_uri).await {
             Err(SourceError::NotFound) => None,
@@ -1614,6 +1582,46 @@ impl Source {
                 .await?;
         }
         Ok(bundle)
+    }
+
+    /// A track's cached source lyrics; a row that cannot show goes.
+    pub async fn stored_lyrics(catalog: &Catalog, media_uri: &str) -> Option<lyrics::LyricsBundle> {
+        match catalog
+            .lyrics_cache_for_role(
+                media_uri,
+                "original",
+                "",
+                "",
+                "source",
+                &library::ReadCancellation::new(),
+            )
+            .await
+        {
+            Ok(Some(cached)) => {
+                if let Some(bundle) = lyrics::LyricsBundle::from_cache_payload(&cached.lyrics)
+                    .and_then(lyrics::lyrics_with_displayable_content)
+                    .filter(|bundle| {
+                        bundle.origin == lyrics::LyricsOrigin::Native
+                            || bundle.origin == lyrics::LyricsOrigin::Local
+                                && library::cue_media_parts(media_uri).is_none()
+                    })
+                {
+                    return Some(bundle);
+                }
+                let _ = catalog
+                    .remove_lyrics_cache(
+                        media_uri,
+                        "source",
+                        &cached.role,
+                        &cached.language,
+                        &cached.script,
+                    )
+                    .await;
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not read source lyrics cache"),
+        }
+        None
     }
 
     async fn read_lyrics(
