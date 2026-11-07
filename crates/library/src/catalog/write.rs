@@ -137,8 +137,6 @@ pub struct StateChange {
     pub favorite: bool,
     /// The rating it shows now.
     pub rating: Option<u8>,
-    /// Whether the rating it shows changed.
-    pub rating_changed: bool,
 }
 
 impl StateChange {
@@ -1441,7 +1439,6 @@ impl<'a> Write<'a> {
                     key: item.key(),
                     favorite: after.0,
                     rating: after.1,
-                    rating_changed: after.1 != before.1,
                 })
             })
             .collect::<Vec<_>>();

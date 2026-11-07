@@ -1707,11 +1707,18 @@ impl View {
             | Body::Folders { tracks: read, .. } => {
                 read.favorites_only || orders(read.effective_sort())
             }
+            // Favorites and ratings change a smart playlist's members, and an artist page's
+            // favorite tracks.
             Body::Rows {
                 read: Read::List(read) | Read::AlbumTracks(read),
                 ..
+            } => {
+                read.favorites_only
+                    || orders(read.sort)
+                    || matches!(read.kind, ListKind::SmartPlaylists { .. })
             }
-            | Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
+            Body::Releases { favorites: Some(_), .. } => true,
+            Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
             Body::Search(..) => search_sorts(&self.settings)
                 .into_iter()
                 .any(|(field, _)| orders(field)),
@@ -2316,8 +2323,8 @@ pub fn refresh_unread(
     }
 }
 
-/// Whether a committed change can change the sidebar pins. Plays, ratings and the music
-/// folder change only what smart playlist pins count.
+/// Whether a committed change can change the sidebar pins. Plays, favorites, ratings and the
+/// music folder change only what smart playlist pins count.
 pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
     changed.all
         || changed.pins
@@ -2325,7 +2332,7 @@ pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
         || changed.playlist_lists
         || !changed.sources.is_empty()
         || !changed.playlists.is_empty()
-        || (changed.listened || changed.items.iter().any(|item| item.rating_changed))
+        || (changed.listened || !changed.items.is_empty())
             && owner.shared.settings.load().ui.sidebar.pins_use_activity()
 }
 
