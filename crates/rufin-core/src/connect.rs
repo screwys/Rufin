@@ -1083,9 +1083,13 @@ impl ConnectOwner {
         ended.and(closed)
     }
 
-    /// Ends the session: the departure reaches the devices online, then `connect.sqlite` and
-    /// the profile key go.
-    async fn end(&self, network: Option<&ConnectNetwork>, removed: bool) -> Result<(), String> {
+    /// Ends the session: the departure reaches the devices online and the sync folder, then
+    /// `connect.sqlite` and the profile key go.
+    async fn end(
+        self: &Arc<Self>,
+        network: Option<&ConnectNetwork>,
+        removed: bool,
+    ) -> Result<(), String> {
         let Some(session) = self
             .session
             .lock()
@@ -1101,6 +1105,7 @@ impl ConnectOwner {
                     if let Some(network) = network {
                         network.push(sequence).await;
                     }
+                    folder::write(self, &session).await;
                 }
                 Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "Could not announce Connect departure"),
