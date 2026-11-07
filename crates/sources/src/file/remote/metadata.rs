@@ -5,9 +5,12 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
 impl FileSource {
+    /// The file's lyrics: a sidecar first, then the embedded text. `siblings` are the names a
+    /// listing found in the file's directory; candidates there that it did not list are not
+    /// read.
     pub(crate) async fn read_track_lyrics(
         &self,
-        database: &library::Database,
+        siblings: Option<&std::collections::BTreeSet<String>>,
         relative: &str,
         track: &mut crate::file::media::ScannedTrack,
     ) -> SourceResult<()> {
@@ -16,18 +19,14 @@ impl FileSource {
             &track.track.metadata.title,
             track.track.cue_path.is_some(),
         );
-        track.lyrics_paths = candidates
-            .iter()
-            .map(|path| self.location(path))
-            .collect::<SourceResult<_>>()?;
         let input = self.input().await?;
-        if self.document_access().is_none() && track.track.cue_path.is_none() {
-            let available = database
-                .source_files(self.source_id.as_str(), &track.lyrics_paths)
-                .await?;
-            candidates.retain(|relative| {
-                self.location(relative)
-                    .is_ok_and(|path| available.iter().any(|file| file.path == path))
+        if let Some(siblings) =
+            siblings.filter(|_| self.document_access().is_none() && track.track.cue_path.is_none())
+        {
+            let directory = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+            candidates.retain(|candidate| {
+                let (parent, name) = candidate.rsplit_once('/').unwrap_or(("", candidate));
+                parent != directory || siblings.contains(name)
             });
         }
         let sidecar = self.sidecar_lyrics(&input, &candidates).await?;
@@ -62,46 +61,6 @@ impl FileSource {
             }
         }
         Ok(None)
-    }
-
-    pub(crate) async fn observe_lyrics_dependencies(
-        &self,
-        catalog: &mut library::Catalog<'_>,
-        paths: &[String],
-    ) -> SourceResult<()> {
-        let input = self.input().await?;
-        let mut observations = Vec::new();
-        let mut missing = Vec::new();
-        for path in paths
-            .iter()
-            .filter(|path| crate::file::lyrics::is_sidecar(path))
-            .collect::<std::collections::BTreeSet<_>>()
-        {
-            match self.stat(&input, &self.relative(path)?).await {
-                Ok(mut file) => {
-                    file.path = path.clone();
-                    file.state = library::LocalFileState::Rejected;
-                    observations.push((file, Vec::new()));
-                }
-                Err(SourceError::NotFound) => missing.push(path.clone()),
-                Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
-                Err(error) => tracing::warn!(%error, "Could not inspect lyrics sidecar"),
-            }
-        }
-        catalog
-            .write_file_observations(&observations, Vec::new(), true)
-            .await?;
-        let missing = catalog
-            .database
-            .source_files(catalog.source_id, &missing)
-            .await?
-            .into_iter()
-            .map(|file| file.path)
-            .collect::<Vec<_>>();
-        catalog
-            .remove_source_files(&missing, catalog.observed.unwrap_or(i64::MAX))
-            .await?;
-        Ok(())
     }
 
     pub(crate) fn lyrics_candidates(&self, relative: &str, title: &str, cue: bool) -> Vec<String> {
@@ -149,7 +108,7 @@ impl FileSource {
             .unwrap_or_default();
         let temporary = format!("{parent}.rufin-write-{token}.tmp");
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceMetadataError::Write(
                     "Peer access provides audio bytes".into(),
                 ));
@@ -295,33 +254,28 @@ impl FileSource {
 
     pub(crate) async fn lyrics(
         &self,
-        database: &library::Database,
-        media_uri: &str,
+        catalog: &library::Catalog,
+        playable: &library::Playable,
     ) -> SourceResult<Option<String>> {
+        let media_uri = playable.media_uri.as_str();
         if library::source_entity_parts(media_uri)
             .is_none_or(|(source, kind, _)| source != self.source_id || kind != "track")
         {
             return Err(SourceError::NotFound);
         }
-        let track = database
-            .track(&(media_uri), &library::ReadCancellation::new())
-            .await?
-            .ok_or(SourceError::NotFound)?;
-        let file = database
-            .observed_media_file(media_uri)
+        let file = playable.file.as_ref().ok_or(SourceError::NotFound)?;
+        let track = catalog
+            .track(media_uri, &library::ReadCancellation::new())
             .await?
             .ok_or(SourceError::NotFound)?;
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
-        let candidates = self.lyrics_candidates(
-            &relative,
-            &track.metadata.title,
-            track.access.cue_path.is_some(),
-        );
+        let cue = playable.cue_path.is_some();
+        let candidates = self.lyrics_candidates(&relative, &track.metadata.title, cue);
         if let Some(text) = self.sidecar_lyrics(&input, &candidates).await? {
             return Ok(Some(text));
         }
-        if track.access.cue_path.is_some() {
+        if cue {
             return Ok(None);
         }
         let reader = crate::file::remote::reader::FileReader::open(

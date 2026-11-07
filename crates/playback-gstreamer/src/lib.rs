@@ -1,5 +1,7 @@
 use audio_processing::ResolvedStream;
-use audio_processing::{configure_sources, ensure_gstreamer_initialized};
+use audio_processing::{
+    ContentFailure, configure_sources, content_failure, ensure_gstreamer_initialized,
+};
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
@@ -22,6 +24,15 @@ mod visualizer;
 
 pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
+
+/// Starts the GStreamer backend that every Rufin host plays through.
+pub fn start_backend(
+    processing: tokio::sync::watch::Receiver<ProcessingRequest>,
+) -> Result<Box<dyn PlaybackBackend>, String> {
+    GStreamerPlaybackBackend::new(processing)
+        .map(|backend| Box::new(backend) as Box<dyn PlaybackBackend>)
+        .map_err(|error| error.to_string())
+}
 #[cfg(unix)]
 pub use process::restart_with_http1;
 
@@ -73,19 +84,13 @@ fn failure_kind(error: &glib::Error, element: Option<&gst::Element>) -> FailureK
             _ => FailureKind::Unclassified,
         };
     }
-    if let Some(error) = error.kind::<gst::StreamError>() {
-        return match error {
-            gst::StreamError::CodecNotFound
-            | gst::StreamError::TypeNotFound
-            | gst::StreamError::WrongType
-            | gst::StreamError::Format => FailureKind::UnsupportedFormat,
-            _ => FailureKind::Decode,
-        };
+    match content_failure(error, element) {
+        Some(ContentFailure::Unsupported) => FailureKind::UnsupportedFormat,
+        Some(ContentFailure::Corrupt) => FailureKind::Decode,
+        // A network source stops its stream when the connection fails.
+        None if has_class("Network") => FailureKind::Connection,
+        None => FailureKind::Unclassified,
     }
-    if error.kind::<gst::CoreError>() == Some(gst::CoreError::MissingPlugin) {
-        return FailureKind::UnsupportedFormat;
-    }
-    FailureKind::Unclassified
 }
 
 fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -104,6 +109,7 @@ mod tests {
         let element = |factory| gst::ElementFactory::make(factory).build().unwrap();
         let file = element("filesrc");
         let sink = element("fakesink");
+        let http = element("souphttpsrc");
         let cases = [
             (
                 glib::Error::new(gst::ResourceError::NotFound, "missing"),
@@ -129,6 +135,11 @@ mod tests {
                 glib::Error::new(gst::StreamError::Decode, "corrupt"),
                 None,
                 FailureKind::Decode,
+            ),
+            (
+                glib::Error::new(gst::StreamError::Failed, "connection refused"),
+                Some(&http),
+                FailureKind::Connection,
             ),
             (
                 glib::Error::new(gst::CoreError::StateChange, "state"),

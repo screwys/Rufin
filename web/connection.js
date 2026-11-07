@@ -10,7 +10,7 @@ import {
   run,
 } from "./ui.js";
 
-import { disposeHome, loadView, restoreView, viewRequest } from "./library.js";
+import { disposeHome, loadView, navigate, opened, showChanged, showPage, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -41,8 +41,9 @@ async function login() {
   token = "";
 }
 
+// The events stream names itself so the page reads it sends become the page it follows.
 function browserHeaders() {
-  return { "X-Rufin-CSRF": csrf };
+  return { "X-Rufin-CSRF": csrf, ...(state.stream ? { "X-Rufin-Events": String(state.stream) } : {}) };
 }
 
 async function api(path, method = "GET", data, signal = session?.signal) {
@@ -143,33 +144,34 @@ async function connect() {
   $("login-dialog").close();
   $("app").inert = false;
   updateSources(configured);
-  if (initialPage) {
-    restoreView();
-    if (rendered) {
-      state.source = $("content").dataset.source;
-      state.selectedLibrary = $("content").dataset.folder || null;
-    }
-    initialPage = false;
-  }
-  await loadView(rendered);
-  void refreshContinuation();
+  const shown = rendered && $("content").querySelector("[data-page]");
+  const initial = initialPage;
+  initialPage = false;
+  if (shown) {
+    state.source = $("content").dataset.source;
+    state.selectedLibrary = $("content").dataset.folder || null;
+    showPage(shown.dataset);
+  } else if (initial) navigate("Home");
   stream(
-    "/events",
+    // The stream follows the page shown when it connects, then the pages it reads; it starts
+    // before the page loads, so it hears what commits meanwhile.
+    () => `/events${opened && opened !== "sources" ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
     (value) => {
+      if (value.stream) state.stream = value.stream;
       if (Object.hasOwn(value, "playback")) showPlayback(value.playback);
       if (value.queue) showQueue(value.queue);
       if (value.source) showSourceProgress(value.source);
       if (value.lyrics) showLyrics(value.lyrics);
       if (value.appearance) applyColors(value.appearance);
       if (value.pins_changed) run(refreshPins);
-      if (value.catalog_acquired) run(async () => {
-        updateSources(await api("/sources"));
-        await loadView();
-      });
-      else if (value.activity_changed && $("content").querySelector('[data-activity-sensitive="true"]')) run(loadView);
+      if (value.catalog_acquired) run(async () => updateSources(await api("/sources")));
+      showChanged(value);
     },
     session.signal,
   );
+  if (shown) await loadView(true, {}, Number(new URLSearchParams(location.search).get("offset")));
+  else if (!initial) await loadView();
+  void refreshContinuation();
 }
 
 async function stream(path, receive, signal) {
@@ -177,7 +179,8 @@ async function stream(path, receive, signal) {
   while (!signal.aborted) {
     let retryAfter = 1500;
     try {
-      const response = await fetch(`/api${path}`, {
+      state.stream = null;
+      const response = await fetch(`/api${path()}`, {
         signal,
         headers: browserHeaders(),
       });
@@ -303,13 +306,13 @@ function init() {
 }
 
 const state = {
-  visibleItems: [],
   source: "",
   playback: null,
   currentMediaUri: null,
   currentRun: null,
   selectedLibrary: null,
   randomSource: null,
+  stream: null,
 };
 
 export { init, api, fragment, session, state };

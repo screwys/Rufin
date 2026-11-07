@@ -320,7 +320,6 @@ impl GoogleCastController {
             }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
-            | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }

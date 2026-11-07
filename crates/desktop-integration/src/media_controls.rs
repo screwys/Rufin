@@ -8,7 +8,7 @@ mod freedesktop {
     use mpris_server::{
         LoopStatus, Metadata, PlaybackStatus, Player as MprisPlayer, Time, TrackId as MprisTrackId,
     };
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode, RunId, TransportStatus};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode, RunId, TransportStatus};
     use tracing::warn;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -365,9 +365,9 @@ mod freedesktop {
             playback_status: playback.map_or(PlaybackStatus::Stopped, |playback| {
                 mpris_playback_status(playback.transport.effective_state())
             }),
-            loop_status: mpris_loop_status(
-                playback.map_or(RepeatMode::Off, |playback| playback.controls.repeat_mode),
-            ),
+            loop_status: mpris_loop_status(playback.map_or(QueueRepeatMode::Off, |playback| {
+                playback.controls.repeat_mode
+            })),
             shuffle: playback.is_some_and(|playback| playback.controls.shuffle_enabled),
             metadata: mpris_metadata(playback, art_url),
             volume: playback.map_or(1.0, |playback| playback.controls.volume.clamp(0.0, 1.0)),
@@ -383,7 +383,9 @@ mod freedesktop {
     }
 
     fn mpris_metadata(playback: Option<&PlaybackView>, art_url: Option<String>) -> Metadata {
-        let Some(entry) = playback.and_then(|playback| playback.transport.current.as_ref()) else {
+        let Some((transport, entry)) = playback
+            .and_then(|playback| Some((&playback.transport, playback.transport.current.as_ref()?)))
+        else {
             return Metadata::builder().trackid(MprisTrackId::NO_TRACK).build();
         };
         let mut builder = Metadata::builder()
@@ -391,13 +393,9 @@ mod freedesktop {
             .title(entry.row.track.metadata.title.clone())
             .artist([entry.row.track.metadata.artist.clone()])
             .album(entry.row.track.metadata.album.clone())
+            // The length playback found, which a catalog without durations lacks.
             .length(Time::from_micros(
-                entry
-                    .row
-                    .track
-                    .metadata
-                    .duration_millis
-                    .saturating_mul(1_000),
+                (transport.duration_millis as i64).saturating_mul(1_000),
             ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
@@ -428,19 +426,19 @@ mod freedesktop {
         Time::from_millis(position_millis.min(i64::MAX as u64) as i64)
     }
 
-    fn mpris_loop_status(repeat_mode: RepeatMode) -> LoopStatus {
+    fn mpris_loop_status(repeat_mode: QueueRepeatMode) -> LoopStatus {
         match repeat_mode {
-            RepeatMode::Off => LoopStatus::None,
-            RepeatMode::One => LoopStatus::Track,
-            RepeatMode::All => LoopStatus::Playlist,
+            QueueRepeatMode::Off => LoopStatus::None,
+            QueueRepeatMode::One => LoopStatus::Track,
+            QueueRepeatMode::All => LoopStatus::Playlist,
         }
     }
 
-    fn repeat_mode_from_mpris(status: LoopStatus) -> RepeatMode {
+    fn repeat_mode_from_mpris(status: LoopStatus) -> QueueRepeatMode {
         match status {
-            LoopStatus::None => RepeatMode::Off,
-            LoopStatus::Track => RepeatMode::One,
-            LoopStatus::Playlist => RepeatMode::All,
+            LoopStatus::None => QueueRepeatMode::Off,
+            LoopStatus::Track => QueueRepeatMode::One,
+            LoopStatus::Playlist => QueueRepeatMode::All,
         }
     }
 
@@ -457,11 +455,115 @@ mod freedesktop {
     #[cfg(test)]
     mod tests {
         use super::{
-            RepeatMode, TransportStatus, mpris_desired_state, mpris_loop_status, mpris_metadata,
-            mpris_set_position_matches, mpris_time, mpris_track_id, repeat_mode_from_mpris,
+            QueueRepeatMode, TransportStatus, mpris_desired_state, mpris_loop_status,
+            mpris_metadata, mpris_set_position_matches, mpris_time, mpris_track_id,
+            repeat_mode_from_mpris,
         };
-        use crate::discord::tests::test_view;
-        use playback::{CurrentMediaId, RunId};
+        use playback::{
+            ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, QueueProvenance, QueueRow,
+            QueueSummaryView, RunId, TrackReference, TransportView,
+        };
+        use std::sync::Arc;
+
+        fn test_view(
+            run: u64,
+            album: &str,
+            state: TransportStatus,
+            position_millis: u64,
+        ) -> PlaybackView {
+            let media_uri =
+                library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
+            let current = CurrentMedia {
+                stream: None,
+                id: CurrentMediaId {
+                    run: Some(RunId::new(run)),
+                    media_uri,
+                },
+                row: Arc::new(QueueRow {
+                    occurrence_id: None,
+                    position: 0,
+                    provenance: QueueProvenance::Manual,
+                    track: {
+                        let reference = TrackReference {
+                            media_uri: library::source_entity_uri(
+                                &library::SourceId::new("source"),
+                                "track",
+                                "track",
+                            ),
+                            artwork_binding: None,
+                            metadata: library::TrackMetadata {
+                                audio_properties: Default::default(),
+                                title: "Track".to_string(),
+                                artist: "Artist".to_string(),
+                                album: album.to_string(),
+                                album_display_artist: Some("Album Artist".to_string()),
+                                duration_millis: 42_500,
+                                disc_number: 1,
+                                track_number: 1,
+                                year: Some(2026),
+                                release_date: None,
+                                source_format: None,
+                                musicbrainz_recording_id: Some("recording-id".to_string()),
+                                musicbrainz_release_track_id: Some("track-id".to_string()),
+                                musicbrainz_album_id: Some("album-id".to_string()),
+                                musicbrainz_release_group_id: Some("release-group-id".to_string()),
+                                primary_artist_musicbrainz_id: Some("artist-id".to_string()),
+                                ..Default::default()
+                            },
+                        };
+                        library::TrackView {
+                            track_key: library::TrackKey::from_raw(1),
+                            source_key: None,
+                            source_id: None,
+                            object_id: None,
+                            media_uri: reference.media_uri,
+                            metadata: reference.metadata,
+                            artwork_binding: reference.artwork_binding,
+                            state: Default::default(),
+                            access: Default::default(),
+                            links: Default::default(),
+                        }
+                    },
+                }),
+            };
+            PlaybackView {
+                queue_loading: false,
+                queue_window: Vec::new(),
+                queue: QueueSummaryView {
+                    revision: run,
+                    total: 1,
+                    current_index: Some(0),
+                    next_index: None,
+                    can_next: false,
+                },
+                transport: TransportView {
+                    current: Some(current),
+                    state,
+                    desired_playing: matches!(
+                        state,
+                        TransportStatus::Resolving
+                            | TransportStatus::Buffering
+                            | TransportStatus::Playing
+                    ),
+                    position_millis,
+                    position_observed_at_millis: 0,
+                    playback_rate: 1.0,
+                    duration_millis: 42_500,
+                    can_seek: true,
+                    buffering_percent: None,
+                    error: None,
+                },
+                controls: ControlsView {
+                    repeat_mode: QueueRepeatMode::Off,
+                    shuffle_enabled: false,
+                    auto_dj_enabled: false,
+                    volume: 1.0,
+                    muted: false,
+                    audio_output: None,
+                    playback_output: playback::PlaybackOutput::Local,
+                },
+            }
+        }
 
         #[test]
         fn mpris_run_paths_distinguish_duplicate_tracks_and_guard_set_position() {
@@ -498,7 +600,11 @@ mod freedesktop {
 
         #[test]
         fn mpris_exact_repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(repeat_mode_from_mpris(mpris_loop_status(repeat)), repeat);
             }
         }
@@ -552,7 +658,7 @@ mod windows {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode, TransportStatus};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode, TransportStatus};
     use tracing::warn;
     use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
     use windows::Media::Playback::MediaPlayer;
@@ -662,7 +768,7 @@ mod windows {
         position_millis: u64,
         art_url: Option<String>,
         playback: WindowsPlaybackState,
-        repeat: RepeatMode,
+        repeat: QueueRepeatMode,
         shuffle: bool,
         can_play: bool,
         can_pause: bool,
@@ -715,7 +821,7 @@ mod windows {
         Previous,
         Stop,
         SetPosition(u64),
-        SetRepeat(RepeatMode),
+        SetRepeat(QueueRepeatMode),
         SetShuffle(bool),
     }
 
@@ -1007,30 +1113,38 @@ mod windows {
         milliseconds.min(i64::MAX as u64 / 10_000) as i64 * 10_000
     }
 
-    const fn repeat_mode_to_windows(repeat: RepeatMode) -> MediaPlaybackAutoRepeatMode {
+    const fn repeat_mode_to_windows(repeat: QueueRepeatMode) -> MediaPlaybackAutoRepeatMode {
         match repeat {
-            RepeatMode::Off => MediaPlaybackAutoRepeatMode::None,
-            RepeatMode::One => MediaPlaybackAutoRepeatMode::Track,
-            RepeatMode::All => MediaPlaybackAutoRepeatMode::List,
+            QueueRepeatMode::Off => MediaPlaybackAutoRepeatMode::None,
+            QueueRepeatMode::One => MediaPlaybackAutoRepeatMode::Track,
+            QueueRepeatMode::All => MediaPlaybackAutoRepeatMode::List,
         }
     }
 
-    const fn repeat_mode_from_windows(repeat: MediaPlaybackAutoRepeatMode) -> Option<RepeatMode> {
+    const fn repeat_mode_from_windows(
+        repeat: MediaPlaybackAutoRepeatMode,
+    ) -> Option<QueueRepeatMode> {
         match repeat {
-            MediaPlaybackAutoRepeatMode::None => Some(RepeatMode::Off),
-            MediaPlaybackAutoRepeatMode::Track => Some(RepeatMode::One),
-            MediaPlaybackAutoRepeatMode::List => Some(RepeatMode::All),
+            MediaPlaybackAutoRepeatMode::None => Some(QueueRepeatMode::Off),
+            MediaPlaybackAutoRepeatMode::Track => Some(QueueRepeatMode::One),
+            MediaPlaybackAutoRepeatMode::List => Some(QueueRepeatMode::All),
             _ => None,
         }
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{RepeatMode, repeat_mode_from_windows, repeat_mode_to_windows, windows_time};
+        use super::{
+            QueueRepeatMode, repeat_mode_from_windows, repeat_mode_to_windows, windows_time,
+        };
 
         #[test]
         fn repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(
                     repeat_mode_from_windows(repeat_mode_to_windows(repeat)),
                     Some(repeat)
@@ -1056,7 +1170,7 @@ mod macos {
         Artwork, CommandToken, HandlerStatus, NowPlayingInfo, NowPlayingInfoCenter,
         NowPlayingMediaType, PlaybackState, RemoteCommandCenter, RepeatType, ShuffleType,
     };
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode};
 
     pub struct MediaControls {
         center: NowPlayingInfoCenter,
@@ -1242,19 +1356,19 @@ mod macos {
         commands.change_shuffle_mode_command().set_enabled(false);
     }
 
-    const fn repeat_type(repeat: RepeatMode) -> RepeatType {
+    const fn repeat_type(repeat: QueueRepeatMode) -> RepeatType {
         match repeat {
-            RepeatMode::Off => RepeatType::Off,
-            RepeatMode::One => RepeatType::One,
-            RepeatMode::All => RepeatType::All,
+            QueueRepeatMode::Off => RepeatType::Off,
+            QueueRepeatMode::One => RepeatType::One,
+            QueueRepeatMode::All => RepeatType::All,
         }
     }
 
-    const fn repeat_mode(repeat: RepeatType) -> RepeatMode {
+    const fn repeat_mode(repeat: RepeatType) -> QueueRepeatMode {
         match repeat {
-            RepeatType::Off => RepeatMode::Off,
-            RepeatType::One => RepeatMode::One,
-            RepeatType::All => RepeatMode::All,
+            RepeatType::Off => QueueRepeatMode::Off,
+            RepeatType::One => QueueRepeatMode::One,
+            RepeatType::All => QueueRepeatMode::All,
         }
     }
 
@@ -1334,11 +1448,15 @@ mod macos {
 
     #[cfg(test)]
     mod tests {
-        use super::{RepeatMode, repeat_mode, repeat_type};
+        use super::{QueueRepeatMode, repeat_mode, repeat_type};
 
         #[test]
         fn repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(repeat_mode(repeat_type(repeat)), repeat);
             }
         }

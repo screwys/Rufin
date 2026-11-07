@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 #[derive(uniffi::Object)]
 pub struct AndroidMore {
-    database: Arc<library::Database>,
+    catalog: Arc<library::Catalog>,
     settings: rufin_core::SettingsHandle,
     artwork: artwork::Artwork,
     runtime: tokio::runtime::Handle,
@@ -12,7 +12,7 @@ pub struct AndroidMore {
 impl AndroidMore {
     pub fn new(products: &ProductHandles) -> Self {
         Self {
-            database: products.library.clone(),
+            catalog: products.library.clone(),
             settings: products.settings.clone(),
             artwork: products.artwork.clone(),
             runtime: products.runtime.clone(),
@@ -25,7 +25,7 @@ impl AndroidMore {
         &self,
     ) -> Result<Option<library::CalendarActivityPeriod>, AndroidError> {
         let today = glib::DateTime::now_local().map_err(error)?;
-        let settings = self.settings.load().application.activity_overview;
+        let settings = self.settings.load().application.activity_overview.clone();
         if settings.startup_periods(&today).iter().all(Option::is_none) {
             return Ok(None);
         }
@@ -41,8 +41,8 @@ impl AndroidMore {
         background: u32,
         accent: u32,
     ) -> Result<Vec<u8>, AndroidError> {
-        let database = self.database.clone();
-        let settings = self.settings.load().application.activity_overview;
+        let catalog = self.catalog.clone();
+        let settings = self.settings.load().application.activity_overview.clone();
         let artwork = self.artwork.clone();
         let rgb = |color: u32| [(color >> 16) as u8, (color >> 8) as u8, color as u8];
         let appearance = rufin_core::activity::ReportAppearance {
@@ -57,7 +57,7 @@ impl AndroidMore {
         };
         self.runtime
             .spawn(async move {
-                let report = database
+                let report = catalog
                     .activity_overview(period, 10, &library::ReadCancellation::new())
                     .await
                     .map_err(error)?;
@@ -70,9 +70,9 @@ impl AndroidMore {
     }
 
     pub async fn activity_months(&self) -> Result<Vec<String>, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
-            .spawn(async move { database.activity_months().await })
+            .spawn(async move { catalog.activity_months().await })
             .await
             .map_err(error)?
             .map_err(error)
@@ -83,13 +83,13 @@ impl AndroidMore {
         year: i32,
         month: Option<u8>,
     ) -> Result<library::ActivityOverview, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let period = month.map_or(library::CalendarActivityPeriod::Year(year), |month| {
             library::CalendarActivityPeriod::Month { year, month }
         });
         self.runtime
             .spawn(async move {
-                database
+                catalog
                     .activity_overview(period, 10, &library::ReadCancellation::new())
                     .await
             })

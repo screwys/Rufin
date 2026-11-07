@@ -185,6 +185,55 @@ pub fn library_list_title(value: LibraryListKey) -> &'static str {
     }
 }
 
+/// An album page's name for its release kind.
+pub fn album_release_title(value: library::AlbumReleaseClass) -> &'static str {
+    match value {
+        library::AlbumReleaseClass::Album => msgid("Album"),
+        library::AlbumReleaseClass::Ep => msgid("EP"),
+        library::AlbumReleaseClass::Single => msgid("Single"),
+        library::AlbumReleaseClass::Collection => msgid("Collection"),
+        library::AlbumReleaseClass::Other => msgid("Release"),
+    }
+}
+
+/// An artist page's release groups in their order: each release class, then Appears On.
+pub const ARTIST_RELEASE_TITLES: [&str; 6] = [
+    msgid("Albums"),
+    msgid("EPs"),
+    msgid("Singles"),
+    msgid("Collections"),
+    msgid("Other releases"),
+    msgid("Appears On"),
+];
+
+/// The title a list's sort choice shows for `field`.
+pub fn library_sort_title(key: LibraryListKey, field: LibraryField) -> &'static str {
+    if key == LibraryListKey::PlaylistTracks && field == LibraryField::RowIndex {
+        msgid("Playlist order")
+    } else {
+        library_field_title(field)
+    }
+}
+
+/// The title of the fields a layout shows.
+pub fn library_fields_title(layout: super::LibraryLayout) -> &'static str {
+    match layout {
+        super::LibraryLayout::Row => msgid("Columns"),
+        super::LibraryLayout::Grid => msgid("Grid labels"),
+        super::LibraryLayout::Detail => msgid("Detail track columns"),
+    }
+}
+
+/// A list column's header: the field's title, "Title" for the merged title, and none for
+/// the tools column.
+pub fn library_column_title(value: LibraryField) -> Option<&'static str> {
+    match value {
+        LibraryField::Tools => None,
+        LibraryField::TitleMerged => Some(msgid("Title")),
+        field => Some(library_field_title(field)),
+    }
+}
+
 pub fn library_field_title(value: LibraryField) -> &'static str {
     match value {
         LibraryField::RowIndex => "#",
@@ -219,7 +268,87 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
     }
 }
 
-use library::{TrackArtistLink, TrackView};
+use library::{
+    SmartPlaylistActivityPeriod, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
+    SmartPlaylistSort,
+};
+
+pub fn smart_rule_field_title(field: SmartPlaylistRuleField) -> &'static str {
+    match field {
+        SmartPlaylistRuleField::Title => msgid("Title"),
+        SmartPlaylistRuleField::Artist => msgid("Artist"),
+        SmartPlaylistRuleField::Album => msgid("Album"),
+        SmartPlaylistRuleField::Comment => msgid("Comment"),
+        SmartPlaylistRuleField::Genre => msgid("Genre"),
+        SmartPlaylistRuleField::Mood => msgid("Mood"),
+        SmartPlaylistRuleField::Bpm => msgid("BPM"),
+        SmartPlaylistRuleField::Rating => msgid("Rating"),
+        SmartPlaylistRuleField::Year => msgid("Year"),
+        SmartPlaylistRuleField::Favorite => msgid("Favorite"),
+        SmartPlaylistRuleField::Played => msgid("Ever played"),
+        SmartPlaylistRuleField::PlayCount => msgid("Play count"),
+        SmartPlaylistRuleField::SkipCount => msgid("Skip count"),
+        SmartPlaylistRuleField::LastPlayed => msgid("Last played"),
+        SmartPlaylistRuleField::DateAdded => msgid("Date added"),
+    }
+}
+
+pub fn smart_sort_title(field: SmartPlaylistSort) -> &'static str {
+    match field {
+        SmartPlaylistSort::Title => msgid("Title"),
+        SmartPlaylistSort::Artist => msgid("Artist"),
+        SmartPlaylistSort::Album => msgid("Album"),
+        SmartPlaylistSort::Year => msgid("Year"),
+        SmartPlaylistSort::DateAdded => msgid("Date added"),
+        SmartPlaylistSort::LastPlayed => msgid("Last played"),
+        SmartPlaylistSort::PlayCount => msgid("Play count"),
+        SmartPlaylistSort::SkipCount => msgid("Skip count"),
+        SmartPlaylistSort::Bpm => msgid("BPM"),
+        SmartPlaylistSort::Rating => msgid("Rating"),
+        SmartPlaylistSort::Duration => msgid("Duration"),
+    }
+}
+
+pub fn smart_operator_title(
+    field: SmartPlaylistRuleField,
+    operator: SmartPlaylistRuleOperator,
+) -> &'static str {
+    match (field, operator) {
+        (
+            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
+            SmartPlaylistRuleOperator::NotContains,
+        ) => msgid("excludes"),
+        (
+            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
+            SmartPlaylistRuleOperator::NotEquals,
+        ) => msgid("is not"),
+        (_, SmartPlaylistRuleOperator::Contains) => msgid("contains"),
+        (_, SmartPlaylistRuleOperator::NotContains) => msgid("does not contain"),
+        (_, SmartPlaylistRuleOperator::Equals) => msgid("equals"),
+        (_, SmartPlaylistRuleOperator::NotEquals) => msgid("does not equal"),
+        (_, SmartPlaylistRuleOperator::Above) => msgid("above"),
+        (_, SmartPlaylistRuleOperator::Below) => msgid("below"),
+        (_, SmartPlaylistRuleOperator::Between) => msgid("range"),
+        (_, SmartPlaylistRuleOperator::Is) => msgid("is"),
+        (_, SmartPlaylistRuleOperator::IsNot) => msgid("is not"),
+        (_, SmartPlaylistRuleOperator::Before) => msgid("before"),
+        (_, SmartPlaylistRuleOperator::After) => msgid("after"),
+        (_, SmartPlaylistRuleOperator::IsEmpty) => msgid("is empty"),
+        (_, SmartPlaylistRuleOperator::IsNotEmpty) => msgid("is not empty"),
+    }
+}
+
+pub fn smart_period_title(period: SmartPlaylistActivityPeriod) -> &'static str {
+    match period {
+        SmartPlaylistActivityPeriod::Weekly => msgid("Last 7 days"),
+        SmartPlaylistActivityPeriod::Monthly => msgid("Last 30 days"),
+        SmartPlaylistActivityPeriod::Yearly => msgid("Last 365 days"),
+        SmartPlaylistActivityPeriod::Lifetime => msgid("All time"),
+    }
+}
+
+use library::{TrackArtistLink, TrackRow, TrackView};
+use localization::{album_count_text, track_count_text};
 
 pub fn format_duration(seconds: u32) -> String {
     let minutes = seconds / 60;
@@ -240,43 +369,160 @@ pub fn format_duration_units(seconds: u32) -> String {
     format!("{seconds}s")
 }
 
+/// A track's text for one field, as its list row shows it.
 pub fn track_field(song: &TrackView, field: LibraryField) -> String {
-    let metadata = &song.metadata;
+    track_row_field(&library::TrackRow::from(song.clone()), field)
+}
+
+/// A list row's text for one field.
+pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => metadata.title.clone(),
-        LibraryField::Artist => metadata.artist.clone(),
-        LibraryField::Album => metadata.album.clone(),
-        LibraryField::AlbumArtist => joined_credits(&song.links.album_artists),
-        LibraryField::Year => optional_year(metadata.year),
-        LibraryField::ReleaseDate => metadata.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => metadata.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(song.state.last_played),
-        LibraryField::PlayCount => count(song.state.play_count),
-        LibraryField::UserRating => stored_rating(song.state.rating),
-        LibraryField::Bpm => metadata
-            .bpm
-            .map(|value| value.to_string())
+        LibraryField::Title | LibraryField::TitleMerged => row.title.clone(),
+        LibraryField::Artist => row.artist.clone(),
+        LibraryField::Album => row.album.clone(),
+        LibraryField::AlbumArtist => joined_credits(&row.links.album_artists),
+        LibraryField::Year => optional_year(row.year),
+        LibraryField::ReleaseDate => row.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => row
+            .date_added
+            .and_then(|seconds| glib::DateTime::from_unix_utc(seconds).ok())
+            .and_then(|date| date.format("%Y-%m-%d").ok())
+            .map(|date| date.to_string())
             .unwrap_or_default(),
+        LibraryField::LastPlayed => display_unix_date(row.state.last_played),
+        LibraryField::PlayCount => count(row.state.play_count),
+        LibraryField::UserRating => stored_rating(row.state.rating),
+        LibraryField::Bpm => row.bpm.map(|value| value.to_string()).unwrap_or_default(),
         LibraryField::Bitrate
         | LibraryField::SampleRate
         | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&metadata.audio_properties, field),
-        LibraryField::Format => metadata.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => song.access.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => song.access.source_name.clone(),
-        LibraryField::DiscNumber => metadata.disc_number.to_string(),
+        | LibraryField::Channels => audio_property_field(&row.audio, field),
+        LibraryField::Format => row.source_format.clone().unwrap_or_default(),
+        LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
+        LibraryField::Source => row.source_name.clone(),
+        LibraryField::DiscNumber => row.disc_number.to_string(),
         LibraryField::TrackNumber => {
-            optional_track_number(Some(metadata.disc_number), Some(metadata.track_number))
+            optional_track_number(Some(row.disc_number), Some(row.track_number))
         }
-        LibraryField::Genre => song
+        LibraryField::Genre => row
             .links
             .genres
             .iter()
             .map(|genre| genre.name.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        LibraryField::Duration => format_duration((metadata.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(song.state.favorite),
+        LibraryField::Duration => format_duration((row.duration_millis.max(0) / 1_000) as u32),
+        LibraryField::Favorite => favorite_text(row.state.favorite),
+        _ => String::new(),
+    }
+}
+
+/// A list row's text for one field: what its card label or column shows.
+pub fn row_field(row: &library::Row, field: LibraryField) -> String {
+    use library::{PlaylistListRow, Row};
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => track_row_field(track, field),
+        Row::Album(album) | Row::AlbumHeading(album) => album_field(album, field),
+        Row::Artist(artist) => artist_field(artist, field),
+        Row::Tag(tag) => tag_field(tag, field),
+        Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist_field(playlist, field),
+        Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
+            smart_playlist_field(playlist, field)
+        }
+        Row::Playlist(PlaylistListRow::Folder(folder)) => playlist_folder_field(folder, field),
+        Row::Folder(folder) => match field {
+            LibraryField::Title | LibraryField::TitleMerged => folder.name.clone(),
+            _ => String::new(),
+        },
+    }
+}
+
+pub fn album_field(album: &library::AlbumRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
+        LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
+        LibraryField::Year => optional_year(album.year),
+        LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
+        LibraryField::LastPlayed => display_unix_date(album.state.last_played),
+        LibraryField::PlayCount => count(album.state.play_count),
+        LibraryField::UserRating => stored_rating(album.state.rating),
+        LibraryField::Genre => album
+            .links
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        LibraryField::Favorite => favorite_text(album.state.favorite),
+        LibraryField::SongCount => track_count_text(album.summary.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration((album.summary.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn artist_field(artist: &library::ArtistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => artist.name.clone(),
+        LibraryField::LastPlayed => display_unix_date(artist.state.last_played),
+        LibraryField::PlayCount => count(artist.state.play_count),
+        LibraryField::UserRating => stored_rating(artist.state.rating),
+        LibraryField::Favorite => favorite_text(artist.state.favorite),
+        LibraryField::AlbumCount => album_count_text(artist.summary.album_count.max(0) as u64),
+        LibraryField::SongCount => track_count_text(artist.summary.track_count.max(0) as u64),
+        _ => String::new(),
+    }
+}
+
+pub fn tag_field(tag: &library::TagRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => tag.name.clone(),
+        LibraryField::AlbumCount if tag.kind == library::TagKind::Genre => {
+            album_count_text(tag.summary.album_count.max(0) as u64)
+        }
+        LibraryField::SongCount => track_count_text(tag.summary.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((tag.summary.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn playlist_field(playlist: &library::PlaylistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => playlist.name.clone(),
+        LibraryField::SongCount => track_count_text(playlist.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((playlist.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn smart_playlist_field(playlist: &library::SmartPlaylistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => {
+            crate::playlists::smart_playlist_display_name(&playlist.object_id, &playlist.name)
+        }
+        LibraryField::SongCount if playlist.track_count > 0 => {
+            track_count_text(playlist.track_count as u64)
+        }
+        LibraryField::Duration if playlist.duration_millis > 0 => {
+            format_duration_units((playlist.duration_millis / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn playlist_folder_field(folder: &library::PlaylistFolderRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => folder.name.clone(),
+        LibraryField::SongCount => track_count_text(folder.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((folder.duration_millis.max(0) / 1_000) as u32)
+        }
         _ => String::new(),
     }
 }
@@ -345,4 +591,31 @@ pub fn joined_credits(credits: &[TrackArtistLink]) -> String {
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn display_unix_date_shows_date_and_time() {
+        let dt = glib::DateTime::from_local(2026, 9, 22, 14, 30, 0.0).unwrap();
+        assert_eq!(
+            super::display_unix_date(Some(dt.to_unix())),
+            "2026-09-22 14:30"
+        );
+        assert_eq!(super::display_unix_date(None), "");
+    }
+
+    #[test]
+    fn formats_track_duration() {
+        assert_eq!(super::format_duration(0), "0:00");
+        assert_eq!(super::format_duration(185), "3:05");
+        assert_eq!(super::format_duration(3_661), "61:01");
+    }
+
+    #[test]
+    fn formats_duration_units() {
+        assert_eq!(super::format_duration_units(41), "41s");
+        assert_eq!(super::format_duration_units(743), "12m 23s");
+        assert_eq!(super::format_duration_units(4_421), "1h 13m 41s");
+    }
 }

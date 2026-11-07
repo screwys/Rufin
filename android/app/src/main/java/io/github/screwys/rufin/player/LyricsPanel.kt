@@ -108,9 +108,9 @@ internal fun LyricsActions(player: PlayerConnection) {
                 enabled = token != null && player.settings?.application?.privateMode != true,
                 leadingIcon = { RufinIcon("rufin-lyrics-search-symbolic", null) })
             DropdownMenuItem(text = { Text(translate("Edit Lyrics")) }, onClick = { menu = false; edit = true },
-                enabled = document != null && current?.writable == true,
+                enabled = document != null && current.writable,
                 leadingIcon = { RufinIcon("rufin-document-edit-symbolic", null) })
-            if (document != null && current != null) {
+            if (document != null) {
                 DropdownMenuItem(text = { Text(translate("Save Lyrics")) }, onClick = {
                     menu = false
                     val captured = token ?: return@DropdownMenuItem
@@ -161,10 +161,10 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
                 if (it.cueLines.isNotEmpty()) it.cueLines.forEachIndexed { cueIndex, cueLine ->
                     val color = if (document?.agents?.firstOrNull { voice -> voice.id == cueLine.agentId }?.role == LyricsAgentRole.BACKGROUND)
                         MaterialTheme.colorScheme.secondary else selected
-                    val cueHighlights = index?.let { highlights[it.toUInt()] }?.getOrNull(cueIndex)
+                    val cueHighlights = highlights[index.toUInt()]?.getOrNull(cueIndex)
                     LyricsText(cueLine.text, cueLine.reading, preferences,
                         FontFamily.Default, fontSize, normal, false, shadow, cueHighlights, color, cueRanges(cueLine), centered = false, maxLines = 1)
-                    if (karaoke && preferences?.showRomanization == true) {
+                    if (karaoke && preferences.showRomanization) {
                         cueLine.reading?.takeIf { reading -> reading.romanization.isNotBlank() }?.let { reading ->
                             HighlightedLyricsText(reading.romanization, romanizationRanges(reading), cueHighlights?.romanization.orEmpty(), color, maxLines = 1,
                                 fontSize = 12.sp, color = normal, style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow))
@@ -329,7 +329,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
                     voice?.name?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = normal) }
                     val cueHighlights = highlights[index.toUInt()]?.getOrNull(cueIndex)
                     LyricsText(cueLine.text, cueLine.reading, preferences, family, fontSize, color, lineActive, shadow, cueHighlights, voiceColor, cueRanges(cueLine))
-                    if (karaoke && preferences?.showRomanization == true) {
+                    if (karaoke && preferences.showRomanization) {
                         cueLine.reading?.takeIf { it.romanization.isNotBlank() }?.let { reading ->
                             HighlightedLyricsText(reading.romanization, romanizationRanges(reading), cueHighlights?.romanization.orEmpty(), voiceColor, Modifier.fillMaxWidth().padding(top = 6.dp),
                                 fontFamily = family, fontSize = (fontSize * .7f).sp, color = color, textAlign = TextAlign.Center,

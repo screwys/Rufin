@@ -24,15 +24,16 @@ mod metadata_lookup;
 mod query;
 pub use metadata::*;
 mod collections;
-pub use query::{
-    CatalogIdentity, CatalogKind, Collection, ListKind, ListRead, MemberRead, MemberRow, Page,
-    PlaylistScope,
+mod field;
+pub use field::LibraryField;
+pub use query::{CatalogKind, Collection, ListKind, ListRead, MemberRead, PlaylistScope};
+mod read;
+pub use read::{
+    AlbumRow, AlbumSpan, ArtistRow, Fetch, Fetched, FolderRead, FolderRow, Header, HeaderKey, Item,
+    Order, PlaylistEntry, Read, Row, TagRow, TrackRow,
 };
-pub mod connect;
-pub mod profile;
-pub use connect::connect_current_kind;
-mod connect_media;
 mod db;
+mod downloads;
 mod favorites;
 mod fingerprint;
 mod home;
@@ -43,18 +44,27 @@ mod lyrics;
 mod lyrics_search;
 mod lyrics_tokenizer;
 mod migration;
+mod mosaics;
 mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
-pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
-mod pins;
-mod playlists;
-pub use pins::{SidebarPin, SidebarPinRow};
-mod queue;
-mod waveform;
-pub use connect_media::{
-    CatalogFile, CatalogFileDependency, CatalogFileStamp, ConnectMediaFile, media_encoding_key,
+pub use playlist_folders::{
+    PlaylistFolderCopy, PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow,
 };
+mod local_access;
+mod pins;
+pub use local_access::{
+    DocumentLookup, LocalAccess, MappedFile, install_document_lookup, project_local_access_path,
+    reported_path_is_absolute,
+};
+mod playable;
+pub use playable::{Gains, Playable, PlayableDownload, PlayableFile, PlayableNames};
+mod playlists;
+pub use pins::{CollectionShown, SidebarPin};
+mod queue;
+pub mod rank;
+mod waveform;
+pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
 mod radio;
 mod scroll_sections;
@@ -64,34 +74,38 @@ mod search;
 mod selection;
 pub use selection::MemberSelection;
 mod smart_playlists;
+mod source_kind;
+pub use source_kind::SourceKind;
 mod storage;
 pub use storage::CacheUsage;
+mod tags;
+pub use tags::TagKind;
 mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityImportReport, ActivityRecord, CalendarActivityPeriod,
-    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityKey,
+    LegacyActivityRecord, ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
 pub use artwork::{
-    AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, PlaylistArtworkManifest,
-    RepresentativeArtworkScope, authored_playlist_artwork, automatic_playlist_artwork,
-    merge_playlist_artwork, normalize_artwork_binding,
+    AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
+    authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
-    AlbumObservation, ArtistObservation, CachedSource, Catalog, CatalogBatch, CatalogUpdate,
-    FolderObservation, Freshness, GenreObservation, LocalArtworkCandidate, MoodObservation,
-    PlaylistEntryObservation, PlaylistObservation, TrackObservation,
+    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, DownloadChange,
+    FileBatch, FolderObservation, Freshness, LocalArtworkCandidate, Observation,
+    PlaylistEntryObservation, PlaylistObservation, Scope, ShowsState, SourcePhase, StateChange,
+    StoredFile, TagObservation, TrackObservation, walk_key,
 };
 pub use collections::{
-    AlbumArtistLink, AlbumDetailIndex, AlbumDetailRow, AlbumGenreLink, AlbumLinks,
-    AlbumReleaseCandidate, AlbumReleaseClass, AlbumReleaseResult, AlbumView, ArtistView,
-    CollectionSummary, FolderChoice, FolderView, GenreChoice, GenreView, MoodView,
+    AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
+    AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice,
+    normalize_release_types,
 };
-pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
-pub use db::{Database, ReadCancellation};
-pub use favorites::{FavoriteTarget, NativeUserState, UserMediaStateWrite};
+pub use db::{Catalog, ReadCancellation};
+pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
+pub use fingerprint::FingerprintRow;
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
     HomeSectionKind, HomeSectionRows, HomeTrackRow,
@@ -105,46 +119,41 @@ pub use keys::{
     source_entity_uri, source_id_for_uri,
 };
 pub use local::{
-    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalAccessOrigin,
-    LocalAccessWrite, LocalFileKind, LocalFileRow, LocalFileState, LocalFileWrite,
-    LocalLocatorWrite, LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
+    Downloads, FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite, LocalLocatorWrite,
+    LocalMediaLocation, MappingTrackRow,
 };
-pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
+pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
+pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,
     playlist_host_path, playlist_locator,
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistAccess, PlaylistEditEntry, PlaylistEntryRemovals, PlaylistEntryView,
-    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow,
+    PlaylistAccess, PlaylistCopy, PlaylistEditEntry, PlaylistEntryCopy, PlaylistEntryWrite,
+    PlaylistGenreLink, PlaylistIdentity, PlaylistImage, PlaylistRow, SourceEntryEdit,
 };
 pub use queue::{
-    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueueOrderUpdate,
-    QueuePlacement, QueueProvenance, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
-    QueueTransferPage, QueueTransferRow, QueueUpdate, shuffle_order,
+    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,
+    QueueProvenance, QueueRank, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
+    QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRow, SmartPlaylistRule,
-    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistActivityPeriod, SmartPlaylistCopy, SmartPlaylistDefinition, SmartPlaylistRow,
+    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
     SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
     SmartPlaylistWrite,
 };
-pub use tracks::{
-    CatalogSort, TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView,
-};
-pub use waveform::WaveformCacheRow;
+pub use tracks::{TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView};
 
 use thiserror::Error;
 
 /// Failures at the Library persistence boundary.
 #[derive(Debug, Error)]
 pub enum LibraryError {
-    #[error("Connect catalog metadata is still arriving")]
-    ConnectPending,
     #[error("SQLite failed: {0}")]
     Sqlite(#[from] sqlx::Error),
     #[error("Library Store I/O failed: {0}")]
@@ -171,6 +180,8 @@ pub type LibraryResult<T> = Result<T, LibraryError>;
 pub struct RouteSeedWindow {
     relative: f64,
     position: Option<usize>,
+    /// Rows from and up to, read as they are in place of the aligned window.
+    rows: Option<(usize, usize)>,
 }
 
 impl RouteSeedWindow {
@@ -188,17 +199,28 @@ impl RouteSeedWindow {
                 0.0
             },
             position: None,
+            rows: None,
         }
     }
 
     pub fn position(position: usize) -> Self {
         Self {
-            relative: 0.0,
             position: Some(position),
+            ..Self::top()
+        }
+    }
+
+    pub fn rows(rows: std::ops::Range<usize>) -> Self {
+        Self {
+            rows: Some((rows.start, rows.end)),
+            ..Self::top()
         }
     }
 
     pub fn range(self, len: usize) -> std::ops::Range<usize> {
+        if let Some((start, end)) = self.rows {
+            return start.min(len)..end.min(len);
+        }
         let position = self
             .position
             .unwrap_or_else(|| ((len.saturating_sub(1)) as f64 * self.relative).round() as usize)

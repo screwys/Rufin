@@ -10,62 +10,8 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/queue/next", post(play_next))
         .route("/api/random", get(random_settings))
         .route("/api/queue/random", post(random))
-        .route("/api/media", get(metadata))
-        .route("/api/favorite", post(favorite))
+        .route("/api/favorite", get(selection_favorite).post(favorite))
         .route("/api/queue/radio", post(radio))
-}
-
-async fn metadata(
-    State(products): State<ProductHandles>,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    let uri = required(&parameters, "uri")?;
-    let cancel = library::ReadCancellation::new();
-    if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album") {
-        let row = products
-            .library
-            .album(uri, false, &cancel)
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Album unavailable"))?;
-        let artists = row.links.album_artists.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":true})).collect::<Vec<_>>();
-        return Ok(json_response(
-            StatusCode::OK,
-            json!({"favorite":row.state.favorite,"album":null,"artists":artists}),
-        ));
-    }
-    let row = products
-        .library
-        .track(uri, &cancel)
-        .await
-        .map_err(internal)?;
-    let mut album = None;
-    let mut artists = Vec::new();
-    let favorite = if let Some(row) = row {
-        if let (Some(uri), Some(id)) = (&row.links.album_media_uri, row.links.album_key) {
-            album = Some(
-                json!({"id":id,"uri":uri,"title":row.metadata.album,"source":library::source_entity_parts(uri).map(|(source,_,_)|source)}),
-            );
-        }
-        let album_artist = row.links.artists.is_empty();
-        let links = if album_artist {
-            row.links.album_artists
-        } else {
-            row.links.artists
-        };
-        artists = links.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":album_artist})).collect();
-        row.state.favorite
-    } else {
-        products
-            .library
-            .favorite(&library::FavoriteTarget::Track(uri.into()))
-            .await
-            .map_err(internal)?
-    };
-    Ok(json_response(
-        StatusCode::OK,
-        json!({"favorite":favorite,"album":album,"artists":artists}),
-    ))
 }
 
 pub(super) async fn favorite(
@@ -75,14 +21,33 @@ pub(super) async fn favorite(
     #[derive(Deserialize)]
     struct Input {
         kind: String,
-        uri: String,
+        uri: Option<String>,
         favorite: bool,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
+    if let (Some(page), Some(ranges)) = (input.page, input.ranges) {
+        for uri in selected_uris(&products, page, ranges).await? {
+            let target = library::FavoriteTarget::Track(uri);
+            let source = &products.source;
+            source
+                .set_favorite_with_result(target, input.favorite)
+                .await
+                .map_err(bad_request)?;
+        }
+        return Ok(json_response(
+            StatusCode::OK,
+            json!({"favorite":input.favorite}),
+        ));
+    }
+    let uri = input
+        .uri
+        .ok_or_else(|| bad_request("uri, or page and ranges, is required"))?;
     let target = match input.kind.as_str() {
-        "track" => library::FavoriteTarget::Track(input.uri),
-        "album" => library::FavoriteTarget::Album(input.uri),
-        "artist" => library::FavoriteTarget::Artist(input.uri),
+        "track" => library::FavoriteTarget::Track(uri),
+        "album" => library::FavoriteTarget::Album(uri),
+        "artist" => library::FavoriteTarget::Artist(uri),
         _ => return Err(bad_request("Unknown favorite type")),
     };
     let favorite = products
@@ -93,33 +58,51 @@ pub(super) async fn favorite(
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
 }
 
+/// The tracks of the rows at `ranges` of `page`, by URI.
+async fn selected_uris(
+    products: &ProductHandles,
+    page: page::PageToken,
+    ranges: Vec<std::ops::Range<usize>>,
+) -> Result<Vec<String>, Error> {
+    let Some(selection) = page::selection(products, page, Some(ranges)).await? else {
+        return Ok(Vec::new());
+    };
+    let cancel = library::ReadCancellation::new();
+    let uris = products
+        .library
+        .selected_track_uris(&selection, None, &cancel);
+    uris.await.map_err(internal)
+}
+
+/// Whether every track of the rows at `ranges` of `page` is a favorite.
+async fn selection_favorite(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let page = serde_json::from_str(required(&parameters, "page")?).map_err(bad_request)?;
+    let ranges = serde_json::from_str(required(&parameters, "ranges")?).map_err(bad_request)?;
+    let uris = selected_uris(&products, page, ranges).await?;
+    let states = products.library.user_states(Some(&uris)).await;
+    let states = states.map_err(internal)?;
+    let favorites: std::collections::HashSet<_> = (states.iter())
+        .filter_map(|(state, _)| (state.favorite == Some(true)).then_some(&state.media_uri))
+        .collect();
+    let favorite = uris.iter().all(|uri| favorites.contains(uri));
+    Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
+}
+
 async fn radio(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     #[derive(Deserialize)]
-    #[serde(tag = "kind", rename_all = "snake_case")]
-    enum Input {
-        Track { uri: String },
-        Album { id: library::AlbumKey },
-        Artist { id: library::ArtistKey },
-        AlbumArtist { id: library::ArtistKey },
-        Playlist { id: library::PlaylistKey },
-    }
-    #[derive(Deserialize)]
     struct RadioInput {
         #[serde(flatten)]
-        seed: Input,
+        seed: library::RadioSeed,
         mode: Option<String>,
     }
     let input: RadioInput = body(request).await?;
-    let seed = match input.seed {
-        Input::Track { uri } => library::RadioSeed::Track(uri),
-        Input::Album { id } => library::RadioSeed::Album(id),
-        Input::Artist { id } => library::RadioSeed::Artist(id),
-        Input::AlbumArtist { id } => library::RadioSeed::AlbumArtist(id),
-        Input::Playlist { id } => library::RadioSeed::Playlist(id),
-    };
+    let seed = input.seed;
     let request = match input.mode.as_deref().unwrap_or("replace") {
         "replace" => rufin_core::playback::RadioPlayRequest::now(seed),
         "next" => rufin_core::playback::RadioPlayRequest::next(seed),
@@ -130,69 +113,47 @@ async fn radio(
     Ok(accepted())
 }
 
+/// The source and music folder a Random Play request names, as a selection of its own.
+async fn random_library(
+    products: &ProductHandles,
+    source: &str,
+    folder: Option<&str>,
+) -> Result<rufin_core::runtime::SelectedLibrary, Error> {
+    page::scope(products, Some(&sources::SourceId::new(source)), folder)
+        .await?
+        .ok_or_else(|| bad_request("source is required"))
+}
+
 async fn random_settings(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let (source, folder) = catalog::scope(
+    let selected = random_library(
         &products,
         required(&parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let query = library::ListRead {
-        playlist_scope: Default::default(),
-        kind: library::ListKind::Genres,
-        source: Some(source),
-        sort: library::CatalogSort::Title,
-        folder: folder,
-        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
-        descending: false,
-        favorites_only: false,
-        downloaded_only: false,
-        activity: false,
-    };
-    let rows = query
-        .genres(
-            &products.library,
-            number(&parameters, "offset", 0)?,
-            64,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
+    let offset = number(&parameters, "offset", 0)?;
+    let (total, rows) = rufin_core::radio::random_genres(
+        &products.library,
+        &selected,
+        parameters.get("q").map(String::as_str).unwrap_or(""),
+        offset..offset.saturating_add(64),
+        &library::ReadCancellation::new(),
+    )
+    .await
+    .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
-    let mut selected_genre = None;
-    if let Some(object_id) = settings.selected_genre_id(
-        &sources::SourceId::new(required(&parameters, "source")?),
-        parameters.get("folder").map(String::as_str),
-    ) {
-        let cancel = library::ReadCancellation::new();
-        if let Some(key) = products
-            .library
-            .catalog_keys(
-                library::CatalogKind::Genre,
-                Some(source),
-                &[(object_id).to_string()],
-                &cancel,
-            )
+    let selected_genre =
+        rufin_core::radio::saved_random_genre(&products.library, &settings, &selected)
             .await
-            .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
             .map_err(internal)?
-        {
-            selected_genre = products
-                .library
-                .genres(&[key], folder, &cancel)
-                .await
-                .map_err(internal)?
-                .into_iter()
-                .next()
-                .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
-        }
-    }
+            .map(|row| json!({"id":row.key,"name":row.name}));
+    let total = boolean(&parameters, "total")?.then_some(total as i64);
     Ok(json_response(
         StatusCode::OK,
-        json!({"total":catalog::page_total(&products, &parameters, &query).await?,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.metadata.name})).collect::<Vec<_>>()}),
+        json!({"total":total,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
     ))
 }
 
@@ -213,8 +174,7 @@ async fn random(
         mode: String,
     }
     let input: Input = body(request).await?;
-    let (source, folder) =
-        catalog::scope(&products, &input.source, input.folder.as_deref()).await?;
+    let selected = random_library(&products, &input.source, input.folder.as_deref()).await?;
     let placement = match input.mode.as_str() {
         "replace" => rufin_core::playback::QueuePlacement::Now,
         "next" => rufin_core::playback::QueuePlacement::Next,
@@ -229,21 +189,15 @@ async fn random(
             max_year: input.max_year,
             genre: input.genre,
             played: input.played,
-            require_media: false,
             variation: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos() as i64),
         },
     };
-    let empty = rufin_core::radio::queue_random(
-        &products.library,
-        source,
-        folder,
-        request,
-        &products.playback,
-    )
-    .await
-    .map_err(bad_request)?;
+    let empty =
+        rufin_core::radio::queue_random(&products.library, &selected, request, &products.playback)
+            .await
+            .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"empty":empty})))
 }
 
@@ -257,9 +211,13 @@ pub(super) async fn play_next(
     }
     let input: Input = body(request).await?;
     let queue = products.playback.clone();
-    tokio::task::spawn_blocking(move || queue.move_after_current(input.position))
-        .await
-        .map_err(internal)?;
+    tokio::task::spawn_blocking(move || {
+        queue.move_selection_after_current(rufin_core::playback::QueueSelection::Positions(vec![
+            input.position,
+        ]))
+    })
+    .await
+    .map_err(internal)?;
     Ok(accepted())
 }
 
@@ -354,23 +312,21 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let (source, folder) = catalog::scope(
-            &products,
-            required(&parameters, "source")?,
-            parameters.get("folder").map(String::as_str),
-        )
-        .await?;
+        let (source, _) = catalog::scope(&products, required(&parameters, "source")?, None).await?;
         products
             .library
-            .genres(
-                &[key::<library::GenreKey>(&parameters, "genre")?],
-                folder,
+            .rows_of(
+                &[library::Item::Genre(key(&parameters, "genre")?)],
+                true,
                 &cancel,
             )
             .await
             .map_err(internal)?
             .into_iter()
-            .find(|row| row.source_key == source)
+            .find_map(|row| match row {
+                library::Row::Tag(row) if row.source_key == source => Some(row),
+                _ => None,
+            })
             .and_then(|row| {
                 row.artwork_binding
                     .as_ref()
@@ -399,16 +355,20 @@ async fn artwork(
     } else if parameters.contains_key("smart_playlist") {
         products
             .library
-            .smart_playlist_rows(
-                &[key(&parameters, "smart_playlist")?],
-                catalog::now(),
+            .rows_of(
+                &[library::Item::Smart(key(&parameters, "smart_playlist")?)],
+                true,
                 &cancel,
             )
             .await
             .map_err(internal)?
             .into_iter()
-            .next()
-            .and_then(|row| row.artwork_binding)
+            .find_map(|row| match row {
+                library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(row)) => {
+                    row.artwork_binding
+                }
+                _ => None,
+            })
     } else {
         let uri = required(&parameters, "uri")?;
         products
@@ -421,14 +381,7 @@ async fn artwork(
             .flatten()
     }
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
-    let external = {
-        let settings = products.settings.load();
-        artwork::ExternalPolicy::new(
-            settings.application.external_metadata_enabled,
-            settings.allows_external_metadata_lookup(),
-            settings.lastfm_api_key.clone(),
-        )
-    };
+    let external = products.settings.load().artwork_policy();
     let binding = artwork::ArtworkBinding::opaque(&binding);
     let size = parameters
         .get("size")

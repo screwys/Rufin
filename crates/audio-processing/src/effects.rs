@@ -302,13 +302,6 @@ pub fn effective_preamp_db(profile: &EqProfile, rate: u32) -> f64 {
     }
     -(maximum.max(0.0) * 10.0).ceil() / 10.0
 }
-/// Combined EQ and tone response, including the selected preamp.
-pub fn response_db(profile: &EqProfile, rate: u32, frequency: f64) -> f64 {
-    if rate == 0 {
-        return 0.0;
-    }
-    response(&coefficients(profile, rate), rate, frequency) + effective_preamp_db(profile, rate)
-}
 /// Evaluate a whole plot with one headroom search.
 pub fn response_curve_db(profile: &EqProfile, rate: u32, frequencies: &[f64]) -> Vec<f64> {
     if rate == 0 {

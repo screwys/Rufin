@@ -1,5 +1,5 @@
 use super::review::LookupProgress;
-use super::{EditDestination, EditSession, MetadataCandidate, MetadataEditor};
+use super::{EditSession, MetadataCandidate, MetadataEditor};
 use audio_processing::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 use library::ReadCancellation;
 use playback::{StreamQuality, StreamRequest};
@@ -22,7 +22,7 @@ impl MetadataEditor {
         mode: metadata_lookup::CacheMode,
     ) -> Arc<metadata_lookup::LookupCache> {
         Arc::new(metadata_lookup::LookupCache::new(
-            self.source.shared.database.as_ref().clone(),
+            self.source.shared.catalog.as_ref().clone(),
             self.source.shared.runtime.clone(),
             mode,
         ))
@@ -74,77 +74,80 @@ impl MetadataEditor {
         report: &LookupProgress,
         cached_only: bool,
     ) -> Result<Option<AudioFingerprint>, Error> {
-        let database = &self.source.shared.database;
+        let catalog = &self.source.shared.catalog;
         let uri = &session.media_uri;
-        database
+        catalog
             .remember_media_uris(std::slice::from_ref(uri))
             .await
             .map_err(scan_error)?;
-        let revision = match &session.destination {
-            EditDestination::Files(files) => files.audio_revision().await?,
-            EditDestination::Server { .. } => {
-                database.audio_analysis_key(uri).await.map_err(scan_error)?
-            }
-        };
-        let cached = if let Some(revision) = revision {
-            database
-                .fingerprint_cache(uri, &revision, FINGERPRINT_VERSION)
-                .await
-                .map_err(scan_error)?
-        } else {
-            None
-        };
-        let (fingerprint, duration) = if let Some(cached) = cached {
-            cached
-        } else {
-            if cached_only {
-                return Ok(None);
-            }
-            report(&localization::tr("Calculating fingerprint..."));
-            let local = self.source.shared.settings.local_configuration();
-            let owner = self.source.clone();
-            let stream = crate::playback::prepare_stream(
-                database,
-                StreamRequest::new(uri, StreamQuality::Original),
-                local.as_ref(),
-                None,
-                move |id| async move { owner.open_client(id).await },
-            )
+        let key = catalog
+            .track_keys(std::slice::from_ref(uri), &ReadCancellation::new())
             .await
-            .map_err(scan_error)?;
-            let duration = database
-                .track(uri, &ReadCancellation::new())
+            .map_err(scan_error)?
+            .pop()
+            .ok_or(Error::Unavailable)?;
+        let playable = crate::loudness::hashed_playable(catalog, key)
+            .await
+            .map_err(scan_error)?
+            .ok_or(Error::Unavailable)?;
+        let cached = match playable.audio_hash {
+            Some(hash) => catalog
+                .fingerprint(hash)
                 .await
                 .map_err(scan_error)?
-                .map_or(0, |row| row.metadata.duration_millis.max(0) as u64);
-            let fingerprint = self
-                .source
-                .shared
-                .runtime
-                .spawn_blocking(move || {
-                    fingerprint_audio(&stream, duration, || cancelled.load(Ordering::Acquire))
-                })
-                .await
-                .map_err(scan_error)?
-                .map_err(scan_error)?;
-            if let Some(revision) = revision {
-                database
-                    .write_fingerprint_cache(
-                        uri,
-                        &revision,
-                        FINGERPRINT_VERSION,
-                        &fingerprint.encoded,
-                        fingerprint.duration_seconds,
-                    )
-                    .await
-                    .map_err(scan_error)?;
-            }
-            (fingerprint.encoded, fingerprint.duration_seconds)
+                .filter(|row| row.version == FINGERPRINT_VERSION),
+            None => None,
         };
-        Ok(Some(AudioFingerprint {
-            encoded: fingerprint,
-            duration_seconds: duration,
-        }))
+        if let Some(row) = cached {
+            return Ok(Some(AudioFingerprint {
+                encoded: row.fingerprint,
+                duration_seconds: row.duration_seconds,
+            }));
+        }
+        if cached_only {
+            return Ok(None);
+        }
+        report(&localization::tr("Calculating fingerprint..."));
+        let local = self.source.shared.settings.local_configuration();
+        let owner = self.source.clone();
+        let stream = crate::playback::prepare_stream(
+            &playable,
+            StreamRequest::new(uri, StreamQuality::Original),
+            local.as_ref(),
+            Some(self.source.downloads()),
+            move |id| async move { owner.open_client(id).await },
+        )
+        .await
+        .map_err(scan_error)?;
+        let duration = catalog
+            .track(uri, &ReadCancellation::new())
+            .await
+            .map_err(scan_error)?
+            .map_or(0, |row| row.metadata.duration_millis.max(0) as u64);
+        let fingerprint = self
+            .source
+            .shared
+            .runtime
+            .spawn_blocking(move || {
+                fingerprint_audio(&stream, duration, || cancelled.load(Ordering::Acquire))
+            })
+            .await
+            .map_err(scan_error)?
+            .map_err(scan_error)?;
+        if let Some(hash) = playable.audio_hash {
+            catalog
+                .put_fingerprint(
+                    hash,
+                    &library::FingerprintRow {
+                        version: FINGERPRINT_VERSION.to_owned(),
+                        fingerprint: fingerprint.encoded.clone(),
+                        duration_seconds: fingerprint.duration_seconds,
+                    },
+                )
+                .await
+                .map_err(scan_error)?;
+        }
+        Ok(Some(fingerprint))
     }
 
     async fn scan_matches(

@@ -144,14 +144,22 @@ impl JellyfinEmbySource {
             Err(SourceError::NotFound) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let lines = items(&dto["TrackEvents"])
+        // Emby sends zero ticks for every line of untimed lyrics, and a zero end for an open one.
+        let events = items(&dto["TrackEvents"]);
+        let ticks =
+            |event: &Value, name: &str| field::<i64>(event, name).filter(|ticks| *ticks > 0);
+        let timed = events
+            .iter()
+            .any(|event| ticks(event, "StartPositionTicks").is_some());
+        let lines = events
             .iter()
             .filter_map(|event| {
                 let text: String = field(event, "Text")?;
                 (!text.trim().is_empty()).then(|| LyricsLine {
                     text,
-                    start_millis: ticks_to_millis(field(event, "StartPositionTicks")),
-                    end_millis: ticks_to_millis(field(event, "EndPositionTicks")),
+                    start_millis: ticks_to_millis(field(event, "StartPositionTicks"))
+                        .filter(|_| timed),
+                    end_millis: ticks_to_millis(ticks(event, "EndPositionTicks")),
                     cue_lines: Vec::new(),
                 })
             })
@@ -240,8 +248,7 @@ mod tests {
                 .provider_payload
                 .contains("use_jellyfin_instant_mix")
         );
-        assert!(configuration.playlist_tracks_can_repeat());
-        let identity = configuration.input_identity().unwrap();
+        assert!(configuration.is(library::SourceKind::playlist_tracks_can_repeat));
         let source = super::super::open(&configuration, credential, Some("device".into())).unwrap();
         let owner = crate::Source::new(
             crate::SourceId::new("source"),
@@ -251,7 +258,6 @@ mod tests {
             unreachable!()
         };
 
-        assert_eq!(configuration.input_identity().unwrap(), identity);
         let album = json!({"Id":"10","Type":"MusicAlbum","Name":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}]});
         let track = json!({"Id":"11","Type":"Audio","Name":"Song","AlbumId":"10","Album":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}],"UserData":{"LastPlayedDate":"2026-01-01T00:00:00Z","Rating":7},"ParentBackdropItemId":"10","ParentBackdropImageTags":["cover"]});
         for (kind, item) in [
@@ -292,30 +298,23 @@ mod tests {
             .await;
         Mock::given(path("/music/emby/Playlists/playlist/Items")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Items":[{"Id":"11","PlaylistItemId":"first"},{"Id":"11","PlaylistItemId":"second"}],"TotalRecordCount":2}))).mount(&server).await;
         let root = tempfile::tempdir().unwrap();
-        let database = library::Database::open(root.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
-        let track = database
+        let track = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await
             .unwrap()
@@ -323,31 +322,24 @@ mod tests {
         assert_eq!(track.object_id.as_deref(), Some("emby:track:11"));
         assert_eq!(track.state.rating, Some(7));
         assert!(track.state.last_played.is_some());
-        database
-            .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9))
+        catalog
+            .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9), false)
             .await
             .unwrap();
         source.set_rating("emby:track:11", Some(9)).await.unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let rated = database
+        let rated = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await
             .unwrap()
@@ -369,6 +361,70 @@ mod tests {
                     && v.contains("UserDataLastPlayedDate")
                     && !v.contains("NormalizationGain")))
         );
+    }
+
+    #[tokio::test]
+    async fn failed_artist_listings_still_list_albums_and_tracks() {
+        let server = MockServer::start().await;
+        let source = source(server.uri());
+        let album = json!({"Id":"10","Type":"MusicAlbum","Name":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}]});
+        let track = json!({"Id":"11","Type":"Audio","Name":"Song","AlbumId":"10","Album":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}]});
+        for (kind, item) in [("MusicAlbum", album), ("Audio", track)] {
+            Mock::given(path("/emby/Items"))
+                .and(query_param("IncludeItemTypes", kind))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"Items":[item],"TotalRecordCount":1})),
+                )
+                .mount(&server)
+                .await;
+        }
+        for route in ["Artists", "Artists/AlbumArtists"] {
+            Mock::given(path(format!("/emby/{route}")))
+                .respond_with(ResponseTemplate::new(500))
+                .mount(&server)
+                .await;
+        }
+        Mock::given(path("/emby/Users/listener/Views"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"Items":[]})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/emby/Users/listener/Items/artist"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"Id":"artist","Type":"MusicArtist","Name":"Artist"})),
+            )
+            .mount(&server)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "music", "Music")
+            .await
+            .unwrap();
+        let source_id = "source".to_string();
+        let mut observation = catalog.observe(&source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        source
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        for (entity, object) in [
+            ("album", "emby:album:10"),
+            ("track", "emby:track:11"),
+            ("artist", "emby:artist:artist"),
+        ] {
+            assert!(
+                catalog
+                    .source_contains_entity(&source_id, entity, object, true)
+                    .await
+                    .unwrap(),
+                "{object}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -487,14 +543,26 @@ mod tests {
             .await
             .unwrap();
         Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[null,{"Id":"without-lyrics"},{"Id":"media-source","DefaultSubtitleStreamIndex":"2","MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":{}},{"Type":"Subtitle","Index":1},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;
-        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Untimed"},{"Text":" "}]}))).mount(&server).await;
+        Mock::given(path("/emby/Users/listener/Items/12")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"12","MediaSources":[{"Id":"untimed","MediaStreams":[{"Type":"Subtitle","Index":0}]}]}))).mount(&server).await;
+        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Open","StartPositionTicks":3000000,"EndPositionTicks":0},{"Text":" "}]}))).mount(&server).await;
+        // Emby sends untimed lyrics with zero ticks on every line.
+        Mock::given(path("/emby/Items/12/untimed/Subtitles/0/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"First","StartPositionTicks":0,"EndPositionTicks":0},{"Text":"Second","StartPositionTicks":0,"EndPositionTicks":0}]}))).mount(&server).await;
         let lyrics = source.lyrics("emby:track:11").await.unwrap().unwrap();
         let document = &lyrics.documents()[0];
         assert_eq!(document.language.as_deref(), Some("eng"));
         assert_eq!(document.lines.len(), 2);
         assert_eq!(document.lines[0].start_millis, Some(125));
         assert_eq!(document.lines[0].end_millis, Some(225));
-        assert_eq!(document.lines[1].start_millis, None);
+        assert_eq!(document.lines[1].start_millis, Some(300));
+        assert_eq!(document.lines[1].end_millis, None);
+        let untimed = source.lyrics("emby:track:12").await.unwrap().unwrap();
+        let lines = &untimed.documents()[0].lines;
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.start_millis.is_none() && line.end_millis.is_none())
+        );
         server.verify().await;
     }
 }

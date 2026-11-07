@@ -157,7 +157,10 @@ internal fun SettingsReorderButtons(canMoveUp: Boolean, canMoveDown: Boolean, mo
     }
 }
 
-internal data class SettingsReorderItem(val id: String, val title: String, val enabled: Boolean, val reorderable: Boolean = true)
+/** A row of a reorderable list; `toggleable` is false where its switch cannot change, such as
+ * the last visible Home block. */
+internal data class SettingsReorderItem(val id: String, val title: String, val enabled: Boolean, val reorderable: Boolean = true,
+    val toggleable: Boolean = true)
 
 @Composable
 internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
@@ -227,7 +230,7 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
             }, trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SettingsReorderButtons(up, down, { move(id, true) }, { move(id, false) })
-                    Switch(item.enabled, { onToggle(id, it) }, Modifier.semantics { contentDescription = item.title })
+                    Switch(item.enabled, { onToggle(id, it) }, Modifier.semantics { contentDescription = item.title }, enabled = item.toggleable)
                 }
             })
         }

@@ -1,46 +1,52 @@
-use library::{CatalogSort, FavoriteTarget, ReadCancellation};
+use library::{Delivery, DeliveryKind, FavoriteTarget, LibraryField, ReadCancellation};
 
-use super::support::{connection, fixture};
+use super::support::{connection, fixture, items, tracks};
 
 #[tokio::test]
 async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
-    let fixture = fixture().await;
-    let database = &fixture.database;
-    let (_, authored) = database
+    let mut fixture = fixture().await;
+    let catalog = &fixture.catalog;
+    let (_, authored) = catalog
         .create_playlist(
-            Some(fixture.source),
             "Z saved",
             &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap()
         .unwrap();
-    database
+    catalog
         .create_playlist(
-            None,
             "Global",
             &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO playlists(source_key,owner,position,object_id,name,normalized_name,sort_text) VALUES(?1,'source',(SELECT COALESCE(max(position)+1,0) FROM playlists),'native','A native','a native','a native')")
+    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name) VALUES (?1,'source','native','A native')")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
-    let other: library::SourceKey = sqlx::query_scalar("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('emby','Emby','emby',zeroblob(32)) RETURNING source_key")
-        .fetch_one(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO playlists(source_key,owner,position,object_id,name,normalized_name,sort_text) VALUES(?1,'source',(SELECT COALESCE(max(position)+1,0) FROM playlists),'other','Other','other','other')")
+    let other: library::SourceKey = sqlx::query_scalar(
+        "INSERT INTO sources(object_id,display_name) VALUES ('emby','Emby') RETURNING source_key",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name) VALUES (?1,'source','other','Other')")
         .bind(other).execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     assert_eq!(
-        database
+        catalog
             .source_playlist_object_ids(fixture.source, &cancel)
             .await
             .unwrap(),
-        ["native".to_string(), authored]
+        // Rufin playlists hold tracks of every source, so no source owns them.
+        ["native".to_string()]
     );
+    assert!(!authored.is_empty());
     assert_eq!(
-        database
+        catalog
             .source_playlist_object_ids(other, &cancel)
             .await
             .unwrap(),
@@ -49,185 +55,493 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
 }
 
 #[tokio::test]
-async fn playlist_destinations_keep_global_rank_without_a_current_source() {
+async fn playlist_mosaics_pick_distinct_covers_and_keep_them() {
     let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    let other: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32)) RETURNING source_key",
-    ).fetch_one(&mut raw).await.expect("other configured source");
-    drop(raw);
-    let mut keys = Vec::new();
-    for (owner, name) in [
-        (None, "Global first"),
-        (Some(other), "Other"),
-        (Some(fixture.source), "Current"),
-        (None, "Global last"),
-    ] {
-        keys.push(
-            fixture
-                .database
-                .create_playlist(
-                    owner,
-                    name,
-                    &library::MemberSelection::Uris(((&[]).to_vec()).into()),
-                )
-                .await
-                .expect("create destination")
-                .expect("playlist")
-                .0,
-        );
-    }
-    let cancel = ReadCancellation::new();
-    let without_current = fixture
-        .database
-        .playlist_destinations(None, &cancel)
-        .await
-        .expect("global destinations");
-    assert_eq!(
-        without_current
-            .iter()
-            .map(|row| row.playlist_key)
-            .collect::<Vec<_>>(),
-        [keys[0], keys[3]]
-    );
-    let captured = fixture
-        .database
-        .playlist_destinations(Some(fixture.source), &cancel)
-        .await
-        .expect("captured destinations");
-    assert_eq!(
-        captured
-            .iter()
-            .map(|row| row.playlist_key)
-            .collect::<Vec<_>>(),
-        [keys[0], keys[2], keys[3]]
-    );
-    fixture
-        .database
-        .move_playlist(fixture.source, keys[3], keys[0])
-        .await
-        .expect("reorder visible subset");
-    let mut raw = connection(&fixture.path).await;
-    let order: Vec<library::PlaylistKey> =
-        sqlx::query_scalar("SELECT playlist_key FROM playlists ORDER BY position,playlist_key")
-            .fetch_all(&mut raw)
-            .await
-            .expect("global rank");
-    assert_eq!(order, [keys[3], keys[1], keys[0], keys[2]]);
-    drop(raw);
-    fixture
-        .database
-        .add_playlist_tracks(
+    let [first, second] = ["first-album", "second-album"].map(|item_id| {
+        serde_json::to_vec(&[library::ArtworkCandidate::new(
+            library::ArtworkImage::Native {
+                source_id: library::SourceId::new("source"),
+                item_id: item_id.into(),
+                tag: None,
+            },
             None,
-            keys[0],
-            &library::MemberSelection::Uris(
-                ((&["https://example.test/unavailable.flac".into()]).to_vec()).into(),
-            ),
-            false,
+        )])
+        .unwrap()
+    });
+    fixture
+        .catalog
+        .observe("source")
+        .await
+        .unwrap()
+        .set_source_artwork(
+            &[],
+            &[(
+                "album",
+                &[
+                    ("album-a".into(), Some(first.clone())),
+                    ("album-b".into(), Some(second.clone())),
+                ],
+            )],
         )
         .await
-        .expect("global URI edit without Current");
-    let rows = fixture
-        .database
-        .playlist_destinations(None, &cancel)
+        .unwrap();
+    let playlist = fixture
+        .catalog
+        .create_playlist(
+            "Positional covers",
+            &library::MemberSelection::Uris(
+                ((&[
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[2].clone(),
+                    fixture.track_uris[1].clone(),
+                    fixture.track_uris[3].clone(),
+                ])
+                    .to_vec())
+                .into(),
+            ),
+        )
         .await
-        .expect("refreshed global destinations");
+        .expect("create Playlist")
+        .expect("all Tracks exist")
+        .0;
+    let (incomplete, _) = fixture
+        .catalog
+        .pick_mosaics(&[library::MosaicOwner::Playlist(playlist)])
+        .await
+        .unwrap();
+    assert_eq!(incomplete, [library::MosaicOwner::Playlist(playlist)]);
+    let mosaic = || async {
+        let row = fixture
+            .catalog
+            .playlists(&[playlist], &ReadCancellation::new())
+            .await
+            .expect("Playlist cover samples")
+            .pop()
+            .expect("Playlist row");
+        library::automatic_playlist_artwork(&row.artwork_binding.unwrap()).unwrap()
+    };
+    let saved = mosaic().await.expect("mosaic");
+    let candidate = serde_json::from_slice::<Vec<library::ArtworkCandidate>>(&saved)
+        .unwrap()
+        .remove(0);
+    let library::ArtworkImage::Playlist {
+        mosaic: Some(picks),
+        ..
+    } = candidate.image
+    else {
+        panic!("mosaic playlist image")
+    };
+    assert_eq!(picks.len(), 2);
+    let actual = fixture
+        .catalog
+        .track_artwork_bindings(&picks, &ReadCancellation::new())
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(actual, [first, second].into_iter().collect());
+    fixture
+        .catalog
+        .update_playlist(
+            playlist,
+            None,
+            Some(Some((b"manual image", Some("image/png")))),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mosaic().await, Some(saved.clone()));
+    fixture
+        .catalog
+        .update_playlist(playlist, None, Some(None))
+        .await
+        .unwrap();
+    assert_eq!(mosaic().await, Some(saved));
+}
+
+#[tokio::test]
+async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() {
+    let fixture = fixture().await;
+    let playlist = fixture
+        .catalog
+        .create_playlist(
+            "Provider list",
+            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
+        )
+        .await
+        .expect("seed Playlist")
+        .expect("Playlist key")
+        .0;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE main.playlists SET object_id='provider:playlist' WHERE playlist_key=?1")
+        .bind(playlist)
+        .execute(&mut raw)
+        .await
+        .expect("make source-owned Playlist");
+    drop(raw);
     assert_eq!(
-        rows.iter()
-            .find(|row| row.playlist_key == keys[0])
-            .unwrap()
-            .track_count,
-        1
+        fixture
+            .catalog
+            .source_playlist_track_ids(
+                fixture.source,
+                Some(playlist),
+                &library::MemberSelection::Uris(
+                    ((&[
+                        fixture.track_uris[0].clone(),
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[1].clone(),
+                    ])
+                        .to_vec())
+                    .into()
+                ),
+                true
+            )
+            .await
+            .expect("provider payload")
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>(),
+        ["track-1", "track-1"]
     );
 }
 
 #[tokio::test]
-async fn playlist_order_is_title_ordered_and_folder_scoped() {
-    let fixture = fixture().await;
-    let zulu = fixture
-        .database
+async fn source_owned_playlist_additions_report_the_destination_without_partial_writes() {
+    let mut fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    let destination: library::SourceKey = sqlx::query_scalar(
+        "INSERT INTO sources(object_id,display_name) VALUES ('destination','Destination') RETURNING source_key",
+    ).fetch_one(&mut raw).await.unwrap();
+    let own_uri = "test:destination-track".to_string();
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,display_artist,display_album,sort_text,duration_millis,indexed) VALUES (?1,'destination-track',?2,COALESCE('Destination Track',''),COALESCE('',''),COALESCE('',''),COALESCE('destination track',''),COALESCE(1000,0),1)")
+        .bind(destination).bind(&own_uri).execute(&mut raw).await.unwrap();
+    drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
+    let cancel = ReadCancellation::new();
+    let playlist = catalog
         .create_playlist(
-            Some(fixture.source),
+            "Destination",
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    assert_eq!(
+        catalog
+            .source_playlist_track_ids(
+                destination,
+                Some(playlist),
+                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
+                false
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>(),
+        ["destination-track"]
+    );
+    assert_eq!(
+        catalog
+            .add_playlist_tracks(
+                playlist,
+                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
+                false
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    for selection in [
+        vec![fixture.track_uris[0].clone()],
+        vec![own_uri.clone(), fixture.track_uris[0].clone()],
+    ] {
+        let provider_error = catalog
+            .source_playlist_track_ids(
+                destination,
+                Some(playlist),
+                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(provider_error, library::LibraryError::PlaylistSourceMismatch(source)
+            if source.as_str() == "destination")
+        );
+    }
+    let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
+    assert!(matches!(
+        catalog
+            .source_playlist_track_ids(destination,Some(playlist),&library::MemberSelection::Uris(missing.clone().into()),false)
+            .await
+            .unwrap_err(),
+        library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
+    ));
+    assert_eq!(
+        catalog
+            .selected_track_uris(
+                &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
+                None,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        std::slice::from_ref(&own_uri)
+    );
+    let global = catalog
+        .create_playlist(
+            "Global",
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    let mixed = vec![own_uri, fixture.track_uris[0].clone()];
+    assert_eq!(
+        catalog
+            .add_playlist_tracks(
+                global,
+                &library::MemberSelection::Uris(((&mixed).to_vec()).into()),
+                false
+            )
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        catalog
+            .selected_track_uris(
+                &library::MemberRead::new(library::Collection::Playlist(global)).selection(),
+                None,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        mixed
+    );
+}
+
+#[tokio::test]
+async fn deliveries_wait_until_accepted_and_then_drop_rufins_copy() {
+    let mut fixture = fixture().await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let target = FavoriteTarget::Track(fixture.track_uris[0].clone());
+    let cancellation = ReadCancellation::new();
+    assert_eq!(
+        fixture
+            .catalog
+            .user_state(target.media_uri(), &cancellation)
+            .await
+            .unwrap(),
+        None
+    );
+    fixture
+        .catalog
+        .set_rating(&target, Some(8), false)
+        .await
+        .unwrap();
+    fixture
+        .catalog
+        .set_favorite(&target, true, false)
+        .await
+        .unwrap();
+    let row = fixture
+        .catalog
+        .tracks(&[fixture.tracks[0]], &cancellation)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(row.state.rating, Some(8));
+    assert!(row.state.favorite);
+    assert!(
+        fixture
+            .catalog
+            .due_deliveries(now + 60, 64)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // A favorite for a server waits in the outbox; Rufin shows it meanwhile.
+    fixture
+        .catalog
+        .set_favorite(&target, false, true)
+        .await
+        .unwrap();
+    let album = FavoriteTarget::Album(fixture.album_uris[0].clone());
+    fixture
+        .catalog
+        .set_favorite(&album, true, true)
+        .await
+        .unwrap();
+    let track_delivery = Delivery {
+        media_uri: target.media_uri().into(),
+        kind: DeliveryKind::Favorite,
+        value: Some(0),
+    };
+    let album_delivery = Delivery {
+        media_uri: album.media_uri().into(),
+        kind: DeliveryKind::Favorite,
+        value: Some(1),
+    };
+    let mut due = fixture.catalog.due_deliveries(now + 60, 64).await.unwrap();
+    due.sort_by(|a, b| a.media_uri.cmp(&b.media_uri));
+    let mut expected = vec![track_delivery.clone(), album_delivery.clone()];
+    expected.sort_by(|a, b| a.media_uri.cmp(&b.media_uri));
+    assert_eq!(due, expected);
+    assert!(!fixture.catalog.favorite(&target).await.unwrap());
+
+    // Accepted: the value becomes the source's and Rufin's copy goes.
+    assert!(
+        fixture
+            .catalog
+            .delivered(&album_delivery, false)
+            .await
+            .unwrap()
+    );
+    assert!(fixture.catalog.favorite(&album).await.unwrap());
+    assert_eq!(
+        fixture
+            .catalog
+            .user_state(album.media_uri(), &cancellation)
+            .await
+            .unwrap(),
+        None
+    );
+
+    // A deferred delivery waits for its time, across a restart.
+    fixture
+        .catalog
+        .defer_deliveries(
+            &library::source_entity_parts(&track_delivery.media_uri)
+                .unwrap()
+                .0,
+            now + 300,
+        )
+        .await
+        .unwrap();
+    fixture.catalog.clone().close().await.unwrap();
+    fixture.catalog = library::Catalog::open(&fixture.path).await.unwrap();
+    assert!(
+        fixture
+            .catalog
+            .due_deliveries(now + 60, 64)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        fixture.catalog.next_delivery_at().await.unwrap(),
+        Some(now + 300)
+    );
+
+    // A newer value replaces the waiting one; the older one's acceptance changes nothing.
+    fixture
+        .catalog
+        .set_favorite(&target, true, true)
+        .await
+        .unwrap();
+    assert!(
+        !fixture
+            .catalog
+            .delivered(&track_delivery, false)
+            .await
+            .unwrap()
+    );
+    let newer = Delivery {
+        value: Some(1),
+        ..track_delivery
+    };
+    assert_eq!(
+        fixture.catalog.due_deliveries(now + 60, 64).await.unwrap(),
+        std::slice::from_ref(&newer)
+    );
+
+    // Refused: the delivery and Rufin's copy go, so the source's own value shows.
+    assert!(fixture.catalog.drop_delivery(&newer, false).await.unwrap());
+    assert!(!fixture.catalog.favorite(&target).await.unwrap());
+    assert_eq!(
+        fixture
+            .catalog
+            .user_state(target.media_uri(), &cancellation)
+            .await
+            .unwrap(),
+        Some((None, Some(8)))
+    );
+    assert_eq!(fixture.catalog.next_delivery_at().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn playlist_order_is_title_ordered_and_folder_scoped() {
+    let mut fixture = fixture().await;
+    let zulu = fixture
+        .catalog
+        .create_playlist(
             "Zulu",
-            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
+            &library::MemberSelection::Uris(vec![fixture.track_uris[0].clone()].into()),
         )
         .await
         .expect("create Zulu Playlist")
         .expect("Track exists")
         .0;
     let alpha = fixture
-        .database
+        .catalog
         .create_playlist(
-            Some(fixture.source),
             "Alpha",
-            &library::MemberSelection::Uris(((&[fixture.track_uris[1].clone()]).to_vec()).into()),
+            &library::MemberSelection::Uris(vec![fixture.track_uris[1].clone()].into()),
         )
         .await
         .expect("create Alpha Playlist")
         .expect("Track exists")
         .0;
     let mut raw = connection(&fixture.path).await;
-    let folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'destination-folder',jsonb(json_object('name','Destination Folder','sort_text','destination folder')),'folder:'||COALESCE(?1,0)||':'||'destination-folder',lower(COALESCE(json_extract(jsonb(json_object('name','Destination Folder','sort_text','destination folder')),'$.name'),''))) RETURNING folder_key")
+    let folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,sort_text,media_uri) VALUES (?1,'destination-folder','Destination Folder','destination folder','folder:'||COALESCE(?1,0)||':'||'destination-folder') RETURNING folder_key")
         .bind(fixture.source)
         .fetch_one(&mut raw)
         .await
         .expect("insert destination folder");
-    sqlx::query("INSERT INTO track_folders(track_key,folder_key,position) VALUES (?1,?2,1)")
+    sqlx::query("INSERT INTO track_links(track_key,role,position,target) VALUES (?1,4,1,?2)")
         .bind(fixture.tracks[0])
         .bind(folder)
         .execute(&mut raw)
         .await
         .expect("scope Zulu Playlist Track");
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     let cancellation = ReadCancellation::new();
-    let all = library::ListRead {
-        playlist_scope: Default::default(),
-        kind: library::ListKind::Playlists,
-        source: Some(fixture.source),
-        sort: CatalogSort::Title,
-        folder: None,
-        filter: ("").into(),
-        descending: false,
-        favorites_only: false,
-        downloaded_only: false,
+    let playlists = |folder| library::ListRead {
+        folder,
         activity: true,
-    }
-    .playlists(&fixture.database, 0, 256, &cancellation)
-    .await
-    .map(|rows| {
-        rows.into_iter()
-            .map(|row| row.playlist_key)
-            .collect::<Vec<_>>()
-    })
-    .expect("all Playlists");
-    assert_eq!(all, [alpha, zulu]);
-    let scoped = library::ListRead {
-        playlist_scope: Default::default(),
-        kind: library::ListKind::Playlists,
-        source: Some(fixture.source),
-        sort: CatalogSort::Title,
-        folder: Some(folder),
-        filter: ("").into(),
-        descending: false,
-        favorites_only: false,
-        downloaded_only: false,
-        activity: true,
-    }
-    .playlists(&fixture.database, 0, 256, &cancellation)
-    .await
-    .map(|rows| {
-        rows.into_iter()
-            .map(|row| row.playlist_key)
-            .collect::<Vec<_>>()
-    })
-    .expect("folder-scoped Playlists");
-    assert_eq!(scoped, [zulu]);
+        ..library::ListRead::new(
+            library::ListKind::Playlists,
+            Some(fixture.source),
+            LibraryField::Title,
+        )
+    };
+    let expected = [
+        library::Item::Playlist(alpha),
+        library::Item::Playlist(zulu),
+    ];
+    assert_eq!(items(&fixture.catalog, playlists(None)).await, expected);
+    // A music folder scopes source playlists; Rufin playlists hold tracks of every source.
+    assert_eq!(
+        items(&fixture.catalog, playlists(Some(folder))).await,
+        expected
+    );
     let destinations = fixture
-        .database
-        .playlist_destinations(Some(fixture.source), &cancellation)
+        .catalog
+        .playlist_destinations(Some(fixture.source), "", 0..usize::MAX, &cancellation)
         .await
-        .unwrap();
+        .unwrap()
+        .1;
     assert_eq!(
         destinations
             .iter()
@@ -239,7 +553,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlists(&[zulu], &cancellation)
             .await
             .unwrap()[0]
@@ -250,77 +564,18 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
 }
 
 #[tokio::test]
-async fn playlist_reordering_keeps_one_rank_sequence() {
-    let fixture = fixture().await;
-    let mut playlists = Vec::new();
-    for name in ["One", "Two", "Three", "Four"] {
-        playlists.push(
-            fixture
-                .database
-                .create_playlist(
-                    Some(fixture.source),
-                    name,
-                    &library::MemberSelection::Uris(((&[]).to_vec()).into()),
-                )
-                .await
-                .expect("create Playlist")
-                .expect("Playlist key")
-                .0,
-        );
-    }
-    assert!(
-        fixture
-            .database
-            .move_playlist(fixture.source, playlists[1], playlists[0])
-            .await
-            .expect("move 2 to 1")
-    );
-    assert!(
-        fixture
-            .database
-            .move_playlist(fixture.source, playlists[3], playlists[2])
-            .await
-            .expect("move 4 to 3")
-    );
-    assert_eq!(
-        library::ListRead {
-            playlist_scope: Default::default(),
-            kind: library::ListKind::Playlists,
-            source: Some(fixture.source),
-            sort: CatalogSort::Position,
-            folder: None,
-            filter: ("").into(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: true
-        }
-        .playlists(&fixture.database, 0, 256, &ReadCancellation::new())
-        .await
-        .map(|rows| rows
-            .into_iter()
-            .map(|row| row.playlist_key)
-            .collect::<Vec<_>>())
-        .expect("Playlist order"),
-        [playlists[1], playlists[0], playlists[3], playlists[2]]
-    );
-}
-
-#[tokio::test]
 async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let fixture = fixture().await;
     let playlist = fixture
-        .database
+        .catalog
         .create_playlist(
-            Some(fixture.source),
             "Duplicates",
             &library::MemberSelection::Uris(
-                ((&[
+                vec![
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[1].clone(),
-                ])
-                    .to_vec())
+                ]
                 .into(),
             ),
         )
@@ -329,40 +584,43 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .expect("all Tracks exist")
         .0;
     let cancel = ReadCancellation::new();
-    let initial = fixture
-        .database
-        .playlist_edit_entries(
-            playlist,
-            &library::MemberRead {
-                collection: library::Collection::Playlist(playlist),
-                sort: Some(CatalogSort::Position),
-                ..library::MemberRead::new(library::Collection::Playlist(playlist))
-            }
-            .selection(),
-            &cancel,
-        )
-        .await
-        .map(|entries| {
-            entries
+    let by_position = library::MemberRead {
+        sort: Some(LibraryField::RowIndex),
+        ..library::MemberRead::new(library::Collection::Playlist(playlist))
+    };
+    let entry_keys = |read: library::MemberRead| {
+        let catalog = &fixture.catalog;
+        let cancel = &cancel;
+        async move {
+            catalog
+                .playlist_edit_entries(playlist, &read.selection(), cancel)
+                .await
+                .unwrap()
                 .into_iter()
                 .map(|entry| entry.playlist_entry_key)
                 .collect::<Vec<_>>()
-        })
-        .expect("initial Playlist order");
-    let rows = fixture
-        .database
-        .playlist_entries(&((&initial).to_vec()), &cancel)
-        .await
-        .expect("Playlist entry rows");
+        }
+    };
+    let initial = entry_keys(by_position.clone()).await;
+    let rows = tracks(&fixture.catalog, by_position.clone()).await;
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].track.media_uri, rows[1].track.media_uri);
-    assert_ne!(rows[0].playlist_entry_key, rows[1].playlist_entry_key);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.entry.as_ref().unwrap().key)
+            .collect::<Vec<_>>(),
+        initial
+    );
+    assert_eq!(rows[0].media_uri, rows[1].media_uri);
+    assert_ne!(
+        rows[0].entry.as_ref().unwrap().key,
+        rows[1].entry.as_ref().unwrap().key
+    );
     let edit_entries = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberSelection::Entries(
-                (initial.iter().rev().copied().collect::<Vec<_>>()).into(),
+                initial.iter().rev().copied().collect::<Vec<_>>().into(),
             ),
             &cancel,
         )
@@ -383,26 +641,8 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         [0, 1, 2]
     );
     assert_eq!(edit_entries[0].track_key, edit_entries[1].track_key);
-    assert!(
-        fixture
-            .database
-            .playlist_edit_entries(
-                playlist,
-                &library::MemberSelection::Keys {
-                    source: None,
-                    keys: (vec![edit_entries[0].track_key.raw()])
-                        .into_iter()
-                        .map(library::TrackKey::from_raw)
-                        .collect::<Vec<_>>()
-                        .into()
-                },
-                &cancel,
-            )
-            .await
-            .is_err()
-    );
     let selected = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberSelection::Members {
@@ -425,7 +665,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     assert_eq!(
         rows.iter()
-            .map(|row| row.track.media_uri.as_str())
+            .map(|row| row.media_uri.as_str())
             .collect::<Vec<_>>(),
         [
             fixture.track_uris[0].as_str(),
@@ -436,17 +676,15 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
 
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
-                Some(fixture.source),
                 playlist,
                 &library::MemberSelection::Uris(
-                    ((&[
+                    vec![
                         fixture.track_uris[0].clone(),
                         fixture.track_uris[2].clone(),
                         fixture.track_uris[2].clone(),
-                    ])
-                        .to_vec())
+                    ]
                     .into()
                 ),
                 true
@@ -455,58 +693,20 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .expect("add with duplicate policy"),
         2
     );
-    let added = fixture
-        .database
-        .playlist_edit_entries(
-            playlist,
-            &library::MemberRead {
-                collection: library::Collection::Playlist(playlist),
-                sort: Some(CatalogSort::Position),
-                ..library::MemberRead::new(library::Collection::Playlist(playlist))
-            }
-            .selection(),
-            &cancel,
-        )
-        .await
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| entry.playlist_entry_key)
-                .collect::<Vec<_>>()
-        })
-        .expect("added Playlist order");
+    let added = entry_keys(by_position.clone()).await;
     assert!(
         fixture
-            .database
-            .move_playlist_entry(Some(fixture.source), playlist, added[4], 0)
+            .catalog
+            .move_playlist_entry(playlist, added[4], 0)
             .await
             .expect("move entry")
     );
-    let moved = fixture
-        .database
-        .playlist_edit_entries(
-            playlist,
-            &library::MemberRead {
-                collection: library::Collection::Playlist(playlist),
-                sort: Some(CatalogSort::Position),
-                ..library::MemberRead::new(library::Collection::Playlist(playlist))
-            }
-            .selection(),
-            &cancel,
-        )
-        .await
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| entry.playlist_entry_key)
-                .collect::<Vec<_>>()
-        })
-        .expect("moved Playlist order");
+    let moved = entry_keys(by_position.clone()).await;
     assert_eq!(moved[0], added[4]);
     assert_eq!(
         fixture
-            .database
-            .remove_playlist_entries(Some(fixture.source), playlist, &moved[1..3])
+            .catalog
+            .remove_playlist_entries(playlist, &moved[1..3])
             .await
             .expect("remove entries"),
         2
@@ -515,63 +715,22 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let selection = vec![fixture.track_uris[3].clone(); 520];
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
-                Some(fixture.source),
                 playlist,
-                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
+                &library::MemberSelection::Uris(selection.into()),
                 false
             )
             .await
             .expect("add selected media"),
         520
     );
-    assert_eq!(
-        fixture
-            .database
-            .playlist_edit_entries(
-                playlist,
-                &library::MemberRead {
-                    collection: library::Collection::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                    ..library::MemberRead::new(library::Collection::Playlist(playlist))
-                }
-                .selection(),
-                &cancel
-            )
-            .await
-            .map(|entries| entries
-                .into_iter()
-                .map(|entry| entry.playlist_entry_key)
-                .collect::<Vec<_>>())
-            .expect("complete Playlist order")
-            .len(),
-        523
-    );
-    let entries = fixture
-        .database
-        .playlist_edit_entries(
-            playlist,
-            &library::MemberRead {
-                collection: library::Collection::Playlist(playlist),
-                sort: Some(CatalogSort::Position),
-                ..library::MemberRead::new(library::Collection::Playlist(playlist))
-            }
-            .selection(),
-            &cancel,
-        )
-        .await
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| entry.playlist_entry_key)
-                .collect::<Vec<_>>()
-        })
-        .unwrap();
+    let entries = entry_keys(by_position).await;
+    assert_eq!(entries.len(), 523);
     let state = super::support::resolve_queue(
-        &fixture.database,
+        &fixture.catalog,
         library::QueueLoad::Tracks(vec![(
-            library::MemberSelection::Entries((entries).into()),
+            library::MemberSelection::Entries(entries.into()),
             library::QueueProvenance::Context {
                 context_id: "playlist".into(),
                 context_title: None,
@@ -582,7 +741,6 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     )
     .await;
     assert_eq!(state.entries.len(), 523);
-    assert!(state.rows.len() <= 100);
     assert_eq!(state.rows[3].track.media_uri, fixture.track_uris[3]);
     assert_eq!(state.rows[95].track.media_uri, fixture.track_uris[3]);
     assert_ne!(state.rows[3].position, state.rows[95].position);
@@ -592,28 +750,25 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
 async fn global_playlist_adds_rufin_media_without_provider_admission() {
     let fixture = fixture().await;
     let (playlist, _) = fixture
-        .database
+        .catalog
         .create_playlist(
-            None,
             "Global",
-            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
+            &library::MemberSelection::Uris(vec![fixture.track_uris[0].clone()].into()),
         )
         .await
         .expect("create global Playlist")
         .expect("Playlist key");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
-                None,
                 playlist,
                 &library::MemberSelection::Uris(
-                    ((&[
+                    vec![
                         fixture.track_uris[1].clone(),
                         fixture.track_uris[1].clone(),
                         fixture.track_uris[2].clone(),
-                    ])
-                        .to_vec())
+                    ]
                     .into()
                 ),
                 false
@@ -623,7 +778,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         3
     );
     let order = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
             None,
@@ -648,37 +803,22 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .await
         .expect("remove source membership");
     drop(raw);
-    let entries = fixture
-        .database
-        .playlist_edit_entries(
-            playlist,
-            &library::MemberRead {
-                collection: library::Collection::Playlist(playlist),
-                sort: Some(CatalogSort::Position),
-                ..library::MemberRead::new(library::Collection::Playlist(playlist))
-            }
-            .selection(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| entry.playlist_entry_key)
-                .collect::<Vec<_>>()
-        })
-        .expect("unavailable entries");
-    let rows = fixture
-        .database
-        .playlist_entries(&((&entries).to_vec()), &ReadCancellation::new())
-        .await
-        .expect("unavailable Playlist rows");
-    assert_eq!(rows[1].track.metadata.title, "Beta");
-    assert_eq!(rows[1].track.media_uri, fixture.track_uris[1]);
+    let read = library::MemberRead {
+        sort: Some(LibraryField::RowIndex),
+        ..library::MemberRead::new(library::Collection::Playlist(playlist))
+    };
+    let rows = tracks(&fixture.catalog, read).await;
+    assert_eq!(rows[1].title, "Beta");
+    assert_eq!(rows[1].media_uri, fixture.track_uris[1]);
     let playback = super::support::resolve_queue(
-        &fixture.database,
+        &fixture.catalog,
         library::QueueLoad::Tracks(vec![(
-            library::MemberSelection::Entries((entries).into()),
+            library::MemberSelection::Entries(
+                rows.iter()
+                    .map(|row| row.entry.as_ref().unwrap().key)
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
             library::QueueProvenance::Context {
                 context_id: "unavailable".into(),
                 context_title: None,
@@ -693,7 +833,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
 
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_access(playlist, &ReadCancellation::new())
             .await
             .expect("read global Playlist owner")
@@ -702,523 +842,25 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     );
     assert!(
         fixture
-            .database
-            .update_playlist(None, playlist, Some("Renamed global"), None)
+            .catalog
+            .update_playlist(playlist, Some("Renamed global"), None)
             .await
             .expect("rename global Playlist")
     );
-    assert!(
+    assert_eq!(
         fixture
-            .database
-            .delete_playlist(None, playlist)
+            .catalog
+            .delete_playlists(&[playlist])
             .await
-            .expect("delete global Playlist")
+            .expect("delete global Playlist"),
+        1
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_access(playlist, &ReadCancellation::new())
             .await
             .expect("deleted Playlist owner"),
         None
-    );
-}
-
-#[tokio::test]
-async fn playlist_automatic_covers_keep_distinct_saved_choices() {
-    let fixture = fixture().await;
-    let [first, second] = ["first-album", "second-album"].map(|item_id| {
-        serde_json::to_vec(&[library::ArtworkCandidate::new(
-            library::ArtworkImage::Native {
-                source_id: library::SourceId::new("source"),
-                item_id: item_id.into(),
-                tag: None,
-            },
-            None,
-        )])
-        .unwrap()
-    });
-    fixture
-        .database
-        .catalog("source", None)
-        .await
-        .unwrap()
-        .set_source_artwork(
-            "album",
-            &[
-                ("album-a".into(), Some(first.clone())),
-                ("album-b".into(), Some(second.clone())),
-            ],
-        )
-        .await
-        .unwrap();
-    let playlist = fixture
-        .database
-        .create_playlist(
-            Some(fixture.source),
-            "Positional covers",
-            &library::MemberSelection::Uris(
-                ((&[
-                    fixture.track_uris[0].clone(),
-                    fixture.track_uris[0].clone(),
-                    fixture.track_uris[2].clone(),
-                    fixture.track_uris[1].clone(),
-                    fixture.track_uris[3].clone(),
-                ])
-                    .to_vec())
-                .into(),
-            ),
-        )
-        .await
-        .expect("create Playlist")
-        .expect("all Tracks exist")
-        .0;
-    let row = fixture
-        .database
-        .playlists(&[playlist], &ReadCancellation::new())
-        .await
-        .expect("Playlist cover samples")
-        .pop()
-        .expect("Playlist row");
-    let candidate =
-        serde_json::from_slice::<Vec<library::ArtworkCandidate>>(&row.artwork_binding.unwrap())
-            .unwrap()
-            .remove(0);
-    let candidate = fixture
-        .database
-        .resolve_playlist_artwork(candidate)
-        .await
-        .unwrap()
-        .unwrap();
-    let library::ArtworkImage::Playlist {
-        automatic: Some(manifest),
-        resolved: Some(recipes),
-        ..
-    } = candidate.image
-    else {
-        panic!("automatic playlist image")
-    };
-    assert_eq!(manifest.chosen.len(), 2);
-    assert_eq!(recipes.len(), 2);
-    let actual = recipes
-        .iter()
-        .map(|recipe| serde_json::to_vec(recipe).unwrap())
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(actual, [first, second].into_iter().collect());
-    let saved: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
-    fixture
-        .database
-        .update_playlist(
-            Some(fixture.source),
-            playlist,
-            None,
-            Some(Some((b"manual image", Some("image/png")))),
-        )
-        .await
-        .unwrap();
-    let replaced: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
-    assert!(
-        library::authored_playlist_artwork(&replaced)
-            .unwrap()
-            .is_some()
-    );
-    assert_eq!(
-        library::automatic_playlist_artwork(&replaced).unwrap(),
-        Some(saved.clone())
-    );
-    fixture
-        .database
-        .update_playlist(Some(fixture.source), playlist, None, Some(None))
-        .await
-        .unwrap();
-    let restored: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
-    assert_eq!(restored, saved);
-}
-
-#[tokio::test]
-async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() {
-    let fixture = fixture().await;
-    let playlist = fixture
-        .database
-        .create_playlist(
-            Some(fixture.source),
-            "Provider list",
-            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
-        )
-        .await
-        .expect("seed Playlist")
-        .expect("Playlist key")
-        .0;
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE main.playlists SET object_id='provider:playlist' WHERE playlist_key=?1")
-        .bind(playlist)
-        .execute(&mut raw)
-        .await
-        .expect("make source-owned Playlist");
-    drop(raw);
-    assert_eq!(
-        fixture
-            .database
-            .source_playlist_track_ids(
-                fixture.source,
-                Some(playlist),
-                &library::MemberSelection::Uris(
-                    ((&[
-                        fixture.track_uris[0].clone(),
-                        fixture.track_uris[1].clone(),
-                        fixture.track_uris[1].clone(),
-                    ])
-                        .to_vec())
-                    .into()
-                ),
-                true
-            )
-            .await
-            .expect("provider payload"),
-        ["track-1", "track-1"]
-    );
-}
-
-#[tokio::test]
-async fn source_owned_playlist_additions_report_the_destination_without_partial_writes() {
-    let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    let destination: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('destination','Destination','destination',zeroblob(32)) RETURNING source_key",
-    ).fetch_one(&mut raw).await.unwrap();
-    let own_uri = "test:destination-track".to_string();
-    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) VALUES (?1,'destination-track',?2,jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1)")
-        .bind(destination).bind(&own_uri).execute(&mut raw).await.unwrap();
-    drop(raw);
-    let database = &fixture.database;
-    let cancel = ReadCancellation::new();
-    let playlist = database
-        .create_playlist(
-            Some(destination),
-            "Destination",
-            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .0;
-    assert_eq!(
-        database
-            .source_playlist_track_ids(
-                destination,
-                Some(playlist),
-                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
-                false
-            )
-            .await
-            .unwrap(),
-        ["destination-track"]
-    );
-    assert_eq!(
-        database
-            .add_playlist_tracks(
-                Some(destination),
-                playlist,
-                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
-                false
-            )
-            .await
-            .unwrap(),
-        1
-    );
-    for selection in [
-        vec![fixture.track_uris[0].clone()],
-        vec![own_uri.clone(), fixture.track_uris[0].clone()],
-    ] {
-        let provider_error = database
-            .source_playlist_track_ids(
-                destination,
-                Some(playlist),
-                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
-                true,
-            )
-            .await
-            .unwrap_err();
-        let authored_error = database
-            .add_playlist_tracks(
-                Some(destination),
-                playlist,
-                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
-                false,
-            )
-            .await
-            .unwrap_err();
-        for error in [provider_error, authored_error] {
-            assert!(
-                matches!(error, library::LibraryError::PlaylistSourceMismatch(source)
-                if source.as_str() == "destination")
-            );
-        }
-    }
-    let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
-    assert!(matches!(
-        database
-            .source_playlist_track_ids(destination,Some(playlist),&library::MemberSelection::Uris(missing.clone().into()),false)
-            .await
-            .unwrap_err(),
-        library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
-    ));
-    assert_eq!(
-        database
-            .add_playlist_tracks(
-                Some(destination),
-                playlist,
-                &library::MemberSelection::Uris(((&missing).to_vec()).into()),
-                false
-            )
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        database
-            .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
-                None,
-                &cancel
-            )
-            .await
-            .unwrap(),
-        std::slice::from_ref(&own_uri)
-    );
-    let global = database
-        .create_playlist(
-            None,
-            "Global",
-            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .0;
-    let mixed = vec![own_uri, fixture.track_uris[0].clone()];
-    assert_eq!(
-        database
-            .add_playlist_tracks(
-                None,
-                global,
-                &library::MemberSelection::Uris(((&mixed).to_vec()).into()),
-                false
-            )
-            .await
-            .unwrap(),
-        2
-    );
-    assert_eq!(
-        database
-            .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Playlist(global)).selection(),
-                None,
-                &cancel
-            )
-            .await
-            .unwrap(),
-        mixed
-    );
-}
-
-#[tokio::test]
-async fn rating_favorite_and_delivery_are_uri_owned() {
-    let mut fixture = fixture().await;
-    let cancellation = ReadCancellation::new();
-    let target = FavoriteTarget::Track(fixture.track_uris[0].clone());
-    assert_eq!(
-        fixture
-            .database
-            .user_media_state(target.media_uri(), &ReadCancellation::new())
-            .await
-            .expect("read absent user state"),
-        None
-    );
-    assert!(
-        fixture
-            .database
-            .set_rating(&target, Some(8))
-            .await
-            .expect("set Rating")
-    );
-    assert!(
-        fixture
-            .database
-            .set_favorite(&target, true)
-            .await
-            .expect("set Favorite")
-    );
-    let row = fixture
-        .database
-        .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
-        .await
-        .expect("read Track")
-        .remove(0);
-    assert_eq!(row.state.rating, Some(8));
-    assert!(row.state.favorite);
-    assert_eq!(
-        fixture
-            .database
-            .user_media_state(target.media_uri(), &ReadCancellation::new())
-            .await
-            .expect("read URI-owned user state"),
-        Some((Some(true), Some(8)))
-    );
-
-    assert!(
-        fixture
-            .database
-            .queue_remote_favorite(&target, false, 100)
-            .await
-            .expect("queue delivery")
-    );
-    assert!(
-        fixture
-            .database
-            .due_remote_favorites(99, 64, &cancellation)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    let album = FavoriteTarget::Album(fixture.album_uris[0].clone());
-    fixture
-        .database
-        .queue_remote_favorite(&album, true, 100)
-        .await
-        .unwrap();
-    assert_eq!(
-        fixture
-            .database
-            .due_remote_favorites(100, 1, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), false)]
-    );
-    assert_eq!(
-        fixture
-            .database
-            .due_remote_favorites(100, 64, &cancellation)
-            .await
-            .unwrap(),
-        [
-            (target.media_uri().to_string(), false),
-            (album.media_uri().to_string(), true)
-        ]
-    );
-    assert!(
-        fixture
-            .database
-            .acknowledge_remote_favorite(&album, true)
-            .await
-            .unwrap()
-    );
-    assert!(fixture.database.favorite(&album).await.unwrap());
-    assert!(
-        fixture
-            .database
-            .defer_remote_favorite(&target, false, 200)
-            .await
-            .expect("defer delivery")
-    );
-    fixture.database.clone().close().await.unwrap();
-    fixture.database = library::Database::open(&fixture.path).await.unwrap();
-    assert!(!fixture.database.favorite(&target).await.unwrap());
-    assert!(
-        fixture
-            .database
-            .due_remote_favorites(199, 64, &cancellation)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        fixture
-            .database
-            .due_remote_favorites(200, 64, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), false)]
-    );
-    fixture
-        .database
-        .queue_remote_favorite(&target, true, 201)
-        .await
-        .unwrap();
-    assert!(
-        !fixture
-            .database
-            .acknowledge_remote_favorite(&target, false)
-            .await
-            .unwrap()
-    );
-    assert!(
-        !fixture
-            .database
-            .defer_remote_favorite(&target, false, 300)
-            .await
-            .unwrap()
-    );
-    assert_eq!(
-        fixture
-            .database
-            .reject_remote_favorite(&target, false)
-            .await
-            .unwrap(),
-        None
-    );
-    assert!(fixture.database.favorite(&target).await.unwrap());
-    assert_eq!(
-        fixture
-            .database
-            .due_remote_favorites(201, 64, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), true)]
-    );
-    fixture
-        .database
-        .queue_remote_favorite(&target, false, 202)
-        .await
-        .unwrap();
-    assert_eq!(
-        fixture
-            .database
-            .reject_remote_favorite(&target, false)
-            .await
-            .expect("reject delivery"),
-        Some(true)
-    );
-    assert!(
-        fixture
-            .database
-            .due_remote_favorites(300, 64, &cancellation)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        fixture
-            .database
-            .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
-            .await
-            .expect("restored Track")[0]
-            .state
-            .favorite
     );
 }

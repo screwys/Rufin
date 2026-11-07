@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -11,11 +12,11 @@ import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
 import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
-import io.github.screwys.rufin.core.AndroidBrowseItem
-import io.github.screwys.rufin.shared.library.DownloadItem
-import io.github.screwys.rufin.shared.library.DownloadStatus
-import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
+import io.github.screwys.rufin.shared.library.RadioSeed
 import io.github.screwys.rufin.shared.library.MemberSelection
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
+import io.github.screwys.rufin.shared.rufin_core.sourceHalfStarsEnabled
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -26,6 +27,7 @@ import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.player.PlayerConnection
+import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,6 +72,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.core.AndroidBrowseRow
 import io.github.screwys.rufin.core.AndroidLibrary
+import io.github.screwys.rufin.core.AndroidOpened
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -83,30 +86,12 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
 
-internal val AndroidBrowseRow.downloadItem: DownloadItem?
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> DownloadItem.Track(item.row.mediaUri)
-        is AndroidBrowseItem.PlaylistEntry -> DownloadItem.Track(item.row.track.mediaUri)
-        is AndroidBrowseItem.Album -> DownloadItem.Album(item.row.mediaUri)
-        is AndroidBrowseItem.Artist -> DownloadItem.Artist(item.row.mediaUri, item.albumArtist)
-        is AndroidBrowseItem.Genre -> DownloadItem.Genre(item.row.genreKey)
-        is AndroidBrowseItem.Mood -> DownloadItem.Mood(item.row.moodKey)
-        is AndroidBrowseItem.Playlist -> DownloadItem.Playlist(item.row.playlistKey)
-        is AndroidBrowseItem.SmartPlaylist -> DownloadItem.SmartPlaylist(item.row.smartPlaylistKey)
-        is AndroidBrowseItem.Recent -> when (item.row.kind) {
-            RecentSearchKind.TRACK -> DownloadItem.Track(item.row.mediaUri)
-            RecentSearchKind.ALBUM -> DownloadItem.Album(item.row.mediaUri)
-            RecentSearchKind.ARTIST -> DownloadItem.Artist(item.row.mediaUri, false)
-        }
-        else -> null
-    }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, page: BrowsePage? = browse.visiblePage) {
     val options = page?.options
     val selected = options?.sort ?: page?.sortSelection?.sortKey
-    val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options?.descending ?: false
+    val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options.descending
     val tabs = if (page?.supportsFavoriteFilter == true || page?.supportsDownloadedFilter == true)
         listOf("Filter", "Sort", "Display") else listOf("Sort", "Display")
     val pager = rememberPagerState { tabs.size }
@@ -169,6 +154,18 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
                             }) }) { spacing ->
                                 page?.chooseDisplay(display.layout, display.size, spacing)
                             }
+                            if (display.fieldChoices.isNotEmpty()) {
+                                Text(display.fieldsTitle, Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall)
+                                display.fieldChoices.forEach { field ->
+                                    ListItem(headlineContent = { Text(field.title) },
+                                        leadingContent = { Checkbox(field.shown, null, enabled = field.canToggle) },
+                                        trailingContent = { Row {
+                                            PlayerIconButton("rufin-go-up-symbolic", "Move up", { page?.moveField(field.id, true) }, enabled = field.shown)
+                                            PlayerIconButton("rufin-go-down-symbolic", "Move down", { page?.moveField(field.id, false) }, enabled = field.shown)
+                                        } },
+                                        modifier = Modifier.toggleable(field.shown, field.canToggle, Role.Checkbox) { page?.showField(field.id, it) })
+                                }
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -192,68 +189,30 @@ private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, tit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BrowseMenuSheet(
-    model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection,
+    model: RufinConnection, browse: BrowseConnection, listed: BrowseItem, player: PlayerConnection,
     onDismiss: () -> Unit, onPlaylist: () -> Unit, onMetadata: () -> Unit, onRemove: (() -> Unit)? = null,
     onNavigate: (Route, String, String?) -> Unit,
     onPlayNow: ((Boolean) -> Unit)? = null,
 ) {
-    val projected = favoriteItem(model, item)
+    // The menu offers and labels what the row shows now, with the changes committed since.
+    val item = favoriteItem(model, listed)
     val playingUri by remember(player) { derivedStateOf { player.playback?.transport?.current?.id?.mediaUri } }
     val playbackControls by remember(player) { derivedStateOf {
         Triple(player.playback?.controls?.shuffleEnabled == true, player.playback?.controls?.autoDjEnabled == true, player.playback?.controls?.repeatMode)
     } }
-    var pinned by remember(item.row.pin, browse.library) { mutableStateOf<Boolean?>(null) }
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var random by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
-    val playlistFolder = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.PlaylistFolder)?.row
-    val smartPlaylist = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.SmartPlaylist)?.row
+    val playlistFolder = item.row.playlistFolder
+    val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
-    var memberFolder by remember(item.row.key) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(folderMember, browse.library) {
-        if (folderMember != null) {
-            try { memberFolder = browse.library?.playlistMemberFolder(folderMember) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { model.runAction { throw failure } }
-        }
-    }
+    // What the menu offers, as GTK's menus do, under the saved menu settings.
+    val menu = remember(item.row, browse.library) { browse.library?.menu(item.row) }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
-    val canRate = item.row.kind in setOf("track", "album", "album_header", "artist")
-    var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
-    var ratingVisible by remember { mutableStateOf(false) }
-    val halfStars = model.sources?.sources?.firstOrNull { it.id == (item.row.sourceId ?: model.sources?.selectedSourceId) }?.halfStarsEnabled == true
-    LaunchedEffect(item.row.item, browse.library) {
-        if (canRate) ratingVisible = withContext(Dispatchers.IO) {
-            model.connectedService().runtime.value!!.getOrThrow().settings().use { it.applicationPreferences().contextMenu.ratingVisible }
-        }
-        if (item.row.item is io.github.screwys.rufin.core.AndroidBrowseItem.Recent) {
-            try { rating = browse.library?.rating(favoriteTarget(item.row.kind, item.row.mediaUri)) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.runAction { throw error } }
-        }
-    }
-    val downloadItem = item.row.downloadItem
-    val downloadFolder = (item.row.item as? AndroidBrowseItem.Folder)?.route as? Route.Folders
-    var downloaded by remember(downloadItem, downloadFolder, browse.library) { mutableStateOf<DownloadStatus?>(null) }
-    LaunchedEffect(downloadItem, downloadFolder, browse.library, model.downloads.state?.revision) {
-        try {
-            downloaded = when {
-                downloadItem != null -> browse.library?.itemDownloadStatus(downloadItem)
-                downloadFolder != null -> browse.library?.folderDownloadStatus(downloadFolder.path)
-                else -> null
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { model.runAction { throw error } }
-    }
-    LaunchedEffect(item.row.pin, browse.library) {
-        item.row.pin?.let { pin ->
-            try { pinned = browse.library?.isPinned(pin) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.runAction { throw error } }
-        }
-    }
+    var rating by remember(item.row.row) { mutableStateOf(item.row.rating) }
+    val halfStars = model.sources?.let { sourceHalfStarsEnabled(it, item.row.mediaUri, item.row.sourceId) } == true
     if (details) {
         MediaDetailsDialog(model, browse, item, player) { details = false }
         return
@@ -264,7 +223,7 @@ internal fun BrowseMenuSheet(
         MediaMenuBackdrop(item.row.artworkIdentity, player) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
-            if (item.row.kind == "track" && item.row.mediaUri == playingUri) {
+            if (item.row.isTrack && item.row.mediaUri == playingUri) {
                 val (shuffle, autoDj, repeat) = playbackControls
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     BrowsePrimaryAction("rufin-shuffle-symbolic",
@@ -278,105 +237,105 @@ internal fun BrowseMenuSheet(
                 }
                 MediaMenuDivider()
             }
-            BrowseMenuHeader(projected, player,
-                onFavorite = if (item.row.kind in setOf("track", "album", "album_header", "artist")) ({ browse.favorite(projected) }) else null,
-                onDetails = if (canRate) ({ details = true }) else null)
-            val playable = item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "mood", "playlist", "smart_playlist", "folder")
-            if (playable) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            val offered = menu
+            BrowseMenuHeader(item, player,
+                onFavorite = if (offered?.favorite == true) ({ browse.favorite(item) }) else null,
+                onDetails = if (item.row.target != null) ({ details = true }) else null)
+            if (offered != null) {
+                val plays = listOfNotNull(
+                    Triple("rufin-media-playback-start-symbolic", "Play", null as QueuePlacement?).takeIf { offered.play },
+                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent).takeIf { offered.playNext },
+                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End).takeIf { offered.playLater })
+                if (plays.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BrowsePrimaryAction("rufin-media-playback-start-symbolic", "Play", Modifier.weight(1f),
-                        shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, "now", true); onDismiss() }) {
-                            onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
-                        }
-                    BrowsePrimaryAction("rufin-mail-forward-symbolic", "Play Next", Modifier.weight(1f),
-                        shuffle = { browse.play(item, "next", true); onDismiss() }) { browse.play(item, "next"); onDismiss() }
-                    BrowsePrimaryAction("rufin-go-last-symbolic", "Play Later", Modifier.weight(1f),
-                        shuffle = { browse.play(item, "append", true); onDismiss() }) { browse.play(item, "append"); onDismiss() }
+                    plays.forEach { (icon, title, placement) ->
+                        if (placement == null) BrowsePrimaryAction(icon, title, Modifier.weight(1f),
+                            shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, QueuePlacement.Replace(0UL), true); onDismiss() }) {
+                                onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
+                            }
+                        else BrowsePrimaryAction(icon, title, Modifier.weight(1f),
+                            shuffle = { browse.play(item, placement, true); onDismiss() }) { browse.play(item, placement); onDismiss() }
+                    }
                 }
-                val radioLabel = when (item.row.kind) {
-                    "track" -> "Track radio"
-                    "album", "album_header" -> "Album radio"
-                    "artist" -> "Artist radio"
-                    "genre" -> "Genre radio"
-                    "playlist" -> "Playlist radio"
-                    else -> null
-                }
-                radioLabel?.let { label ->
+                offered.radio?.let { seed ->
+                    val label = when (seed) {
+                        is RadioSeed.Track -> "Track radio"
+                        is RadioSeed.Album -> "Album radio"
+                        is RadioSeed.Artist, is RadioSeed.AlbumArtist -> "Artist radio"
+                        is RadioSeed.Genre -> "Genre radio"
+                        is RadioSeed.Playlist -> "Playlist radio"
+                    }
                     ListItem(headlineContent = { Text(translate(label)) },
                         leadingContent = { RufinIcon("rufin-audio-only-symbolic", null, Modifier.size(24.dp)) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         trailingContent = {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf("now" to "Play", "next" to "Play Next", "append" to "Play Later").forEach { (placement, title) ->
+                        listOf(Triple(QueuePlacement.Replace(0UL), "Play", "rufin-media-playback-start-symbolic"), Triple(QueuePlacement.AfterCurrent, "Play Next", "rufin-mail-forward-symbolic"),
+                            Triple(QueuePlacement.End, "Play Later", "rufin-go-last-symbolic")).forEach { (placement, title, icon) ->
                             OutlinedIconButton({ browse.radio(item, placement); onDismiss() }, Modifier.size(40.dp), shape = RoundedCornerShape(8.dp)) {
-                                RufinIcon(when (placement) { "now" -> "rufin-media-playback-start-symbolic"; "next" -> "rufin-mail-forward-symbolic"; else -> "rufin-go-last-symbolic" },
-                                    translate(title), Modifier.size(20.dp))
+                                RufinIcon(icon, translate(title), Modifier.size(20.dp))
                             }
                         }
                         }
                     })
                 }
-                BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
-                if (folderMember != null) {
+                if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
+                offered.folder?.let { inFolder ->
                     BrowseMenuAction("rufin-folders-symbolic", "Add to folder") { folderPicker = true }
-                    if (memberFolder != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
+                    if (inFolder && folderMember != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
                         val source = model.sourceOwner ?: return@runAction
                         movePlaylistToFolder(source, folderMember, null)
-                        browse.refresh()
                         onDismiss()
                     } }
                 }
-                downloaded?.let { status ->
-                    if (status.downloaded == 0UL || status.downloaded < status.total)
-                        BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
-                    if (status.downloaded > 0UL)
-                        BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
-                }
-            }
-            if (item.row.kind in setOf("track", "album", "album_header", "artist")) {
-                BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
-            }
-            pinned?.let { isPinned -> BrowseMenuAction("rufin-bookmark-symbolic",
-                if (isPinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !isPinned); onDismiss() } }
-            onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
-            if (playlistFolder != null) {
-                BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
-            }
-            if (smartPlaylist != null) {
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
-            }
-            if ((item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.Playlist)?.row?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
-                MediaMenuDivider()
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
-            }
-            if (canRate && ratingVisible) {
-                MediaMenuDivider()
-                MenuRating(rating, halfStars) { value -> model.runAction {
-                    withContext(Dispatchers.IO) { model.sourceOwner?.setRating(favoriteTarget(item.row.kind, item.row.mediaUri), value) }
+                if (offered.removeUnavailable) BrowseMenuAction("rufin-user-trash-symbolic", "Remove unavailable tracks") { model.runAction {
+                    browse.library?.removeUnavailableTracks(item.row.playlist!!.playlistKey)
                     onDismiss()
                 } }
+                if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
+                if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
+                if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
+                if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
+                if (offered.pin != null) BrowseMenuAction("rufin-bookmark-symbolic",
+                    if (offered.pinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !offered.pinned); onDismiss() }
+                onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
+                if (playlistFolder != null) {
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
+                }
+                if (smartPlaylist != null) {
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
+                }
+                if (item.row.playlist != null && (offered.edit || offered.delete)) {
+                    MediaMenuDivider()
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
+                }
+                if (offered.rating) {
+                    MediaMenuDivider()
+                    MenuRating(rating, halfStars) { value -> model.runAction {
+                        withContext(Dispatchers.IO) { item.row.target?.let { model.sourceOwner?.setRating(it, value) } }
+                        onDismiss()
+                    } }
+                }
             }
         }
         }
     }
     if (navigation) MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri }, player, { route, title, source ->
         navigation = false; onDismiss(); onNavigate(route, title, source)
-    }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.detailRoute)
+    }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
     if (random) RandomPlaySheet(model, browse) { random = false; onDismiss() }
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
         folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
     if (rename) {
-        if (playlistFolder != null) PlaylistFolderNameDialog(model, browse, playlistFolder.smart,
+        if (playlistFolder != null) PlaylistFolderNameDialog(model, playlistFolder.smart,
             { rename = false; onDismiss() }, playlistFolder)
         else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
         else browse.library?.let { library ->
-            PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
-                onChanged = browse::refresh, onDismiss = { rename = false; onDismiss() })
+            PlaylistEditor(model, library, player, (item.row.route as Route.PlaylistDetail).v1, item.row.title,
+                onDismiss = { rename = false; onDismiss() })
         }
     }
     if (delete) AlertDialog(onDismissRequest = { delete = false },
@@ -388,9 +347,8 @@ internal fun BrowseMenuSheet(
                 if ((browse.current?.route as? Route.PlaylistFolder)?.key == playlistFolder.folderKey) browse.back()
             } else if (smartPlaylist != null) browse.library?.deleteSmartPlaylist(smartPlaylist.smartPlaylistKey)
             else model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
-                deletePlaylist(source, (item.row.detailRoute as Route.PlaylistDetail).v1)
+                deletePlaylist(source, (item.row.route as Route.PlaylistDetail).v1)
             }
-            browse.refresh()
             delete = false
             onDismiss()
         } }) { Text(translate("Delete")) } },
@@ -399,7 +357,7 @@ internal fun BrowseMenuSheet(
 
 @Composable
 internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavorite: (() -> Unit)? = null, onDetails: (() -> Unit)? = null) {
-    val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.kind == "track" || it != item.row.title }.orEmpty())
+    val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.isTrack || it != item.row.title }.orEmpty())
         .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
     CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, item.row.favorite, player, onFavorite, onDetails) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
@@ -534,7 +492,7 @@ internal fun PlaylistPickerSheet(
     val library = browse.library
     val pages = remember(library, filter, folderKind) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind, model.downloads) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (pages.loadState.refresh as? LoadState.Error)?.error ?: (pages.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
@@ -558,7 +516,7 @@ internal fun PlaylistPickerSheet(
                 else {
                     val playlist = choice.row
                     val artwork = rememberArtwork(playlist.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
-                    ListItem(headlineContent = { BrowseTitle(choice, player = player) },
+                    ListItem(headlineContent = { BrowseTitle(favoriteItem(model, choice), player = player) },
                         supportingContent = { Text(playlist.subtitle, maxLines = 1) },
                         leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
                         modifier = Modifier.clickable {
@@ -566,8 +524,8 @@ internal fun PlaylistPickerSheet(
                             if (folderKind != null) {
                                 val source = model.sourceOwner ?: return@runAction
                                 movePlaylistToFolder(source, item.row.playlistFolderMember!!,
-                                    (playlist.item as AndroidBrowseItem.PlaylistFolder).row.folderKey)
-                            } else playlist.detailRoute?.let { destination ->
+                                    playlist.playlistFolder!!.folderKey)
+                            } else playlist.route?.let { destination ->
                                 browse.library?.let { library ->
                                     playlistSelection(library, item).use { selection ->
                                         model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
@@ -576,7 +534,6 @@ internal fun PlaylistPickerSheet(
                                     }
                                 }
                             }
-                            browse.refresh()
                             onDismiss()
                         }
                     })
@@ -590,7 +547,7 @@ internal fun PlaylistPickerSheet(
             } }
         }
     }
-    if (create && folderKind != null) PlaylistFolderNameDialog(model, browse, folderKind, {
+    if (create && folderKind != null) PlaylistFolderNameDialog(model, folderKind, {
         create = false
         pages.refresh()
     })
@@ -598,30 +555,31 @@ internal fun PlaylistPickerSheet(
         browse.library?.let { library ->
             playlistSelection(library, item).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
-                    createPlaylist(source, sourceId, name, selection, public, null)?.settingsError?.let { error(it) }
+                    createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) }
                 }
             }
         }
-        browse.refresh()
         create = false
         onDismiss()
     }
 }
 
 private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): MemberSelection =
-    if (item.row.kind == "track") MemberSelection.fromUris(listOf(item.row.mediaUri))
-    else library.targetQuery(item.row.detailRoute!!).use { it.selection() }
+    if (item.row.isTrack) MemberSelection.fromUris(listOf(item.row.mediaUri))
+    else library.routeSelection(item.row.route!!)
 
 @Composable
 internal fun PlaylistCreateSheet(
     model: RufinConnection,
     onDismiss: () -> Unit,
-    initialCurrentSource: Boolean = true,
+    // Name, owning source and public.
     save: suspend (String, String?, Boolean?) -> Unit,
 ) {
+    // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
+        ?.takeIf { it.ownsPlaylists }
     var name by remember { mutableStateOf("") }
-    var currentSource by remember(source?.id) { mutableStateOf(initialCurrentSource && source != null) }
+    var currentSource by remember(source?.id) { mutableStateOf(source != null) }
     var public by remember { mutableStateOf(false) }
     val supportsPublic = currentSource && source?.supportsPlaylistPublic == true
     AlertDialog(onDismissRequest = onDismiss,
@@ -629,15 +587,15 @@ internal fun PlaylistCreateSheet(
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text(translate("Playlist name")) }, singleLine = true,
                 colors = settingsTextFieldColors(),
-                modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                    IconToggleButton(currentSource, { currentSource = it }, enabled = source != null,
+                modifier = Modifier.fillMaxWidth(), trailingIcon = if (source == null) null else ({
+                    IconToggleButton(currentSource, { currentSource = it },
                         modifier = Modifier.semantics {
-                            contentDescription = if (currentSource) source?.name.orEmpty() else "Rufin"
+                            contentDescription = if (currentSource) source.name else "Rufin"
                         }) {
-                        if (currentSource && source != null) SourceIcon(source.kind)
+                        if (currentSource) SourceIcon(source.kind)
                         else Image(painterResource(R.drawable.app_icon), null, Modifier.size(24.dp))
                     }
-                })
+                }))
             if (supportsPublic) Row(Modifier.fillMaxWidth().toggleable(public, role = Role.Switch) { public = it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -654,14 +612,15 @@ internal fun PlaylistCreateSheet(
 internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
     private val folderKind: Boolean? = null,
-    private val downloads: io.github.screwys.rufin.downloads.DownloadsConnection,
 ) : PagingSource<Int, BrowseItem>() {
+    /** The page it lists, opened once for the filter it reads. */
+    private var opened: AndroidOpened? = null
+    init { registerInvalidatedCallback { opened?.view?.destroy() } }
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
-            val downloadRevision = downloads.state?.revision
             fun items(rows: List<AndroidBrowseRow>) = rows.mapIndexed { index, row ->
-                BrowseItem(row, (offset + index).toULong(), null, downloadRevision = downloadRevision)
+                BrowseItem(row, (offset + index).toULong(), null)
             }
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
@@ -674,21 +633,13 @@ internal class BrowseChoiceSource(
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
                 }
-                val tracks = when (route) {
-                    is Route.ArtistDetail -> Route.ArtistTracks(route.v1)
-                    is Route.AlbumArtistDetail -> Route.AlbumArtistTracks(route.v1)
-                    is Route.ArtistDiscography -> Route.ArtistTracks(route.v1)
-                    is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
-                    else -> route
-                }
-                val query = library.browse(tracks, "tracks", filter, LibraryField.TITLE, false, false, false)
-                try {
-                    val count = query.count().toInt()
-                    val rows = query.page(offset.toULong(), params.loadSize.toUInt())
-                    LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-                        if (offset + rows.size >= count) null else offset + rows.size,
-                        itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
-                } finally { query.destroy() }
+                val page = opened ?: library.open(route, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false,
+                    null, null, true).also { opened = it }
+                val count = page.count.toInt()
+                val rows = page.view.rows(offset.toULong(), params.loadSize.toUInt(), false).rows
+                LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                    if (offset + rows.size >= count) null else offset + rows.size,
+                    itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
             }
         }
     } catch (cancelled: CancellationException) { throw cancelled }

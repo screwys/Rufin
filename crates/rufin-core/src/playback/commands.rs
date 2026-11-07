@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-pub use library::{QueuePlacement as Placement, QueueReorderTarget};
+pub use library::{QueuePlacement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
-use playback::{Provenance, TrackReference};
-
-pub type QueuePlacement = Placement;
+use playback::{QueueProvenance, TrackReference};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayRequest {
@@ -25,7 +23,7 @@ impl PlayRequest {
             library::QueueLoad::items(
                 items
                     .into_iter()
-                    .map(|item| (item, Provenance::Manual))
+                    .map(|item| (item, QueueProvenance::Manual))
                     .collect(),
             ),
             placement,
@@ -33,7 +31,7 @@ impl PlayRequest {
     }
     pub fn uris(uris: Vec<String>, placement: QueuePlacement) -> Self {
         Self::from_input(
-            library::QueueLoad::media_uris(uris, Provenance::Manual),
+            library::QueueLoad::media_uris(uris, QueueProvenance::Manual),
             placement,
         )
     }
@@ -61,6 +59,21 @@ impl PlayRequest {
         };
         request
     }
+    /// One track, queued by `placement` with no context.
+    pub fn track(key: library::TrackKey, placement: QueuePlacement) -> Self {
+        Self::tracks(
+            library::MemberSelection::Keys {
+                source: None,
+                keys: vec![key].into(),
+            },
+            placement,
+        )
+    }
+    /// What playing a selection of tracks queues: them in their order, from the first, with no
+    /// context.
+    pub fn tracks(selection: library::MemberSelection, placement: QueuePlacement) -> Self {
+        Self::ordered(selection, 0, placement, false)
+    }
     pub fn captured(
         selection: library::MemberSelection,
         anchor_index: usize,
@@ -71,44 +84,11 @@ impl PlayRequest {
         request.reactivate = true;
         request
     }
-    pub fn group(requests: Vec<Self>, placement: QueuePlacement) -> Self {
-        let mut groups = Vec::new();
-        for request in requests {
-            if let library::QueueLoad::Tracks(selections) = request.input {
-                groups.extend(selections);
-            }
-        }
-        Self::from_input(library::QueueLoad::Tracks(groups), placement)
-    }
-    pub fn selection(&self) -> Option<library::MemberSelection> {
-        let library::QueueLoad::Tracks(groups) = &self.input else {
-            return None;
-        };
-        if groups.len() == 1 {
-            Some(groups[0].0.clone())
-        } else {
-            Some(library::MemberSelection::Concat(
-                groups
-                    .iter()
-                    .map(|(selection, _)| selection.clone())
-                    .collect(),
-            ))
-        }
-    }
-    pub fn context(&self) -> Option<&str> {
-        let library::QueueLoad::Tracks(groups) = &self.input else {
-            return None;
-        };
-        let (_, Provenance::Context { context_id, .. }) = groups.first()? else {
-            return None;
-        };
-        Some(context_id)
-    }
     pub fn with_context(mut self, context: Arc<str>) -> Self {
         match &mut self.input {
             library::QueueLoad::Tracks(groups) => {
                 for (_, provenance) in groups {
-                    *provenance = Provenance::Context {
+                    *provenance = QueueProvenance::Context {
                         context_id: context.clone(),
                         context_title: None,
                         source_rank: 0,
@@ -117,7 +97,7 @@ impl PlayRequest {
             }
             library::QueueLoad::Items(items) => {
                 for (index, (_, provenance)) in items.iter_mut().enumerate() {
-                    *provenance = Provenance::Context {
+                    *provenance = QueueProvenance::Context {
                         context_id: context.clone(),
                         context_title: None,
                         source_rank: index,
@@ -125,7 +105,7 @@ impl PlayRequest {
                 }
             }
             library::QueueLoad::Uris(_, provenance) => {
-                *provenance = Provenance::Context {
+                *provenance = QueueProvenance::Context {
                     context_id: context,
                     context_title: None,
                     source_rank: 0,
@@ -149,7 +129,7 @@ impl PlayRequest {
     }
     pub fn activation_context(&self, shuffled: bool) -> Option<(String, library::TrackKey, usize)> {
         if !self.reactivate
-            || !matches!(self.placement, Placement::Replace { .. })
+            || !matches!(self.placement, QueuePlacement::Replace { .. })
             || self.start == QueueStart::Shuffled
             || (self.start == QueueStart::RandomIfShuffled && shuffled)
         {
@@ -160,7 +140,7 @@ impl PlayRequest {
         };
         let (
             selection,
-            Provenance::Context {
+            QueueProvenance::Context {
                 context_id,
                 source_rank,
                 ..
@@ -170,7 +150,7 @@ impl PlayRequest {
             return None;
         };
         let anchor_index = match self.placement {
-            Placement::Replace { anchor_index } => anchor_index,
+            QueuePlacement::Replace { anchor_index } => anchor_index,
             _ => 0,
         };
         let key = self
@@ -193,8 +173,8 @@ impl PlayRequest {
         self
     }
     pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
-        let set = |provenance: &mut Provenance| {
-            if let Provenance::Context { context_title, .. } = provenance {
+        let set = |provenance: &mut QueueProvenance| {
+            if let QueueProvenance::Context { context_title, .. } = provenance {
                 *context_title = title.clone();
             }
         };
@@ -210,28 +190,40 @@ impl PlayRequest {
     }
     pub(crate) async fn prepare(
         self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         shuffled: bool,
         seed: u64,
-    ) -> library::LibraryResult<QueueBatch> {
-        let replacing = matches!(self.placement, Placement::Replace { .. });
+    ) -> Result<QueueBatch, String> {
+        let replacing = matches!(self.placement, QueuePlacement::Replace { .. });
         let random_start = replacing && shuffled && self.start == QueueStart::RandomIfShuffled;
         let selected = if random_start { None } else { self.anchor };
-        let mut batch = database.queue_entries(self.input, selected).await?;
+        let mut batch = catalog
+            .queue_entries(self.input, selected)
+            .await
+            .map_err(crate::string_error)?;
+        // A play that finds no tracks plays nothing and leaves the queue as it is.
+        if batch.entries.is_empty() {
+            return Err(localization::tr("Nothing to play here"));
+        }
         let fallback = match self.placement {
-            Placement::Replace { anchor_index } => anchor_index,
+            QueuePlacement::Replace { anchor_index } => anchor_index,
             _ => 0,
         };
         let selected = if self.start == QueueStart::Shuffled {
             library::shuffle_order(&mut batch.entries, seed);
             0
-        } else if random_start && !batch.entries.is_empty() {
+        } else if random_start {
             seed as usize % batch.entries.len()
         } else {
-            batch
-                .anchor_index
-                .unwrap_or(fallback)
-                .min(batch.entries.len().saturating_sub(1))
+            // A play anchored to an entry that is gone plays nothing rather than its neighbour.
+            let index = match (selected, batch.anchor_index) {
+                (_, Some(index)) => index,
+                (Some(_), None) => {
+                    return Err(localization::tr("The anchored track is gone"));
+                }
+                (None, None) => fallback,
+            };
+            index.min(batch.entries.len() - 1)
         };
         let shuffle = (replacing && shuffled).then_some(if random_start {
             QueueShuffle::FromSelected(seed)
@@ -245,9 +237,10 @@ impl PlayRequest {
             .map(|entry| (selected, entry))
             .into_iter()
             .collect::<Vec<_>>();
-        let rows = database
+        let rows = catalog
             .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
-            .await?;
+            .await
+            .map_err(crate::string_error)?;
         Ok(QueueBatch {
             entries: batch.entries,
             rows,

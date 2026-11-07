@@ -1,7 +1,7 @@
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
-use library::{Database, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
+use library::{Catalog, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
 use url::Url;
 
 use super::{FileSource, input::FileInput};
@@ -10,7 +10,7 @@ use crate::{SourceError, SourceResult};
 impl FileSource {
     pub(crate) async fn import_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         target: Option<PlaylistKey>,
     ) -> SourceResult<PlaylistImportReport> {
@@ -36,14 +36,14 @@ impl FileSource {
         playlist.entries.reserve(entries.len());
         for mut entry in entries {
             if let Some(location) = self.playlist_location(path, &entry.locator).await? {
-                if database
+                if catalog
                     .file_path_is_rejected(&self.source_id, &location)
                     .await?
                 {
                     skipped += 1;
                     continue;
                 }
-                entry.locator = database
+                entry.locator = catalog
                     .media_uri_for_file_path(self.source_id.as_str(), &location)
                     .await?
                     .unwrap_or_else(|| {
@@ -59,7 +59,7 @@ impl FileSource {
             }
             playlist.entries.push(entry);
         }
-        let mut report = database
+        let mut report = catalog
             .import_playlist_document(playlist, Path::new(path), target, |_| None)
             .await?;
         report.skipped += skipped;
@@ -68,7 +68,7 @@ impl FileSource {
 
     pub(crate) async fn save_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         file: tempfile::TempPath,
         mode: PlaylistPathMode,
@@ -114,10 +114,11 @@ impl FileSource {
             let uri = &entry.locator;
             if library::source_entity_parts(uri)
                 .is_some_and(|(source, kind, _)| source == self.source_id && kind == "track")
-                && let Some(observation) = database.observed_media_file(uri).await?
-                && observation.cue_start_millis.is_none()
+                && let Some(playable) = catalog.playable_by_uri(uri).await?
+                && playable.cue_path.is_none()
+                && let Some(file) = &playable.file
             {
-                let file = self.relative(&observation.path)?;
+                let file = self.relative(&file.path)?;
                 let file = if self.document_access().is_some() {
                     crate::file::documents::display_path(&file)
                 } else {
@@ -234,7 +235,7 @@ impl FileSource {
         self.location(to)?;
         let input = self.input().await?;
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));
@@ -270,7 +271,7 @@ impl FileSource {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));
@@ -343,14 +344,14 @@ mod tests {
                 .unwrap();
             let source = FileSource::open(&config, None).unwrap();
             let directory = tempfile::tempdir().unwrap();
-            let database = Database::open(directory.path().join("library.db"))
+            let catalog = Catalog::open(directory.path().join("library.db"))
                 .await
                 .unwrap();
             let mut output = tempfile::NamedTempFile::new().unwrap();
             writeln!(output, "#EXTM3U\nhttps://example.test/song").unwrap();
             let failure = source
                 .save_playlist_file(
-                    &database,
+                    &catalog,
                     "mix.m3u8",
                     output.into_temp_path(),
                     PlaylistPathMode::Automatic,

@@ -12,7 +12,7 @@ use item::{
     primary_image_ref, track_from_item,
 };
 use lyrics::{LyricsBundle, LyricsDocument, LyricsLine, LyricsOrigin, LyricsRole};
-use playback::{RepeatMode, SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{QueueRepeatMode, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use serde_json::Value;

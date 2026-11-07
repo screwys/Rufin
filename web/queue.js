@@ -1,7 +1,7 @@
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { setFavorite, goToMedia } from "./library.js";
+import { setFavorite, openLinks } from "./library.js";
 
 import { playlistMenu, radioMenu, showMenu, goToMenu } from "./menus.js";
 
@@ -111,7 +111,7 @@ function showQueue(value) {
     const metadata = el("div", "queue-track");
     const artist = button(
       row.track.artist || tr("Unknown artist"),
-      () => goToMedia(row.track, "artists", artist),
+      () => openLinks(row.track, "artist", artist),
       null,
       "metadata-link queue-artist",
     );
@@ -135,7 +135,7 @@ function showQueue(value) {
       open.click();
       run(() => showActions(li, event));
     });
-    const menu = button(tr("More actions"), () => showActions(menu), "more");
+    const menu = button(tr("More actions"), () => showActions(menu), "rufin-view-more-symbolic");
     menu.setAttribute("aria-haspopup", "menu");
     li.append(
       el(
@@ -178,44 +178,23 @@ function showQueue(value) {
   }
 }
 
-async function showQueueMenu(row, anchor, event) {
-  const metadata = await api(
-    `/media?${new URLSearchParams({ uri: row.track.uri })}`,
-  );
-  const track = { ...row.track, favorite: metadata.favorite };
-  const destination = await goToMenu(track, "track", metadata);
-  showMenu(
-    [
-      [tr("Play"), () => api("/queue/activate", "POST", { position: row.position })],
-      [tr("Play Next"), () => api("/queue/next", "POST", { position: row.position })],
-      [
-        tr("Play Later"),
-        () =>
-          api("/queue/reorder", "POST", { positions: [row.position], before: null }),
-      ],
-      radioMenu(track),
-      null,
-      playlistMenu({ uris: [track.uri] }),
-      [
-        track.favorite
-          ? tr("Remove from Favorites")
-          : tr("Add to Favorites"),
-        () => setFavorite([track]),
-      ],
-
-      [
-        tr("Remove from Queue"),
-        () =>
-          api(
-            `/queue/item?${new URLSearchParams({ position: row.position })}`,
-            "DELETE",
-          ),
-      ],
-      ...(destination ? [null, destination] : []),
-    ],
-    anchor,
-    event,
-  );
+// A queue entry's menu: core's track menu, with its plays moving the entry.
+function showQueueMenu(row, anchor, event) {
+  const track = row.track, menu = track.menu, actions = [];
+  const position = { position: row.position };
+  if (menu.play) actions.push([tr("Play"), () => api("/queue/activate", "POST", position)]);
+  if (menu.play_next) actions.push([tr("Play Next"), () => api("/queue/next", "POST", position)]);
+  if (menu.play_later)
+    actions.push([tr("Play Later"), () => api("/queue/reorder", "POST", { positions: [row.position], before: null })]);
+  if (menu.radio) actions.push(radioMenu(menu.radio));
+  actions.push(null);
+  if (menu.add_to_playlist) actions.push(playlistMenu({ uris: [track.uri] }));
+  if (menu.favorite)
+    actions.push([track.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"), () => setFavorite(track)]);
+  actions.push([tr("Remove from Queue"), () => api(`/queue/item?${new URLSearchParams(position)}`, "DELETE")]);
+  const destination = menu.go_to && goToMenu(track);
+  if (destination) actions.push(null, destination);
+  showMenu(actions, anchor, event);
 }
 
 function init() {

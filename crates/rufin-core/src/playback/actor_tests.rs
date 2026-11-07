@@ -3,34 +3,38 @@ use super::super::{
     state::tests::{IdleBackend, seeded},
 };
 use super::*;
-use crate::playback::{Placement, PlayRequest, RadioPlayRequest};
+use crate::playback::{PlayRequest, QueuePlacement, RadioPlayRequest};
 use playback::{
-    BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, Provenance, TrackReference,
+    BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, QueueProvenance,
+    TrackReference,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn canceled_queue_preparation_publishes_loading_completion() {
-    let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) =
+    let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "queue-preparation",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "queue-preparation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     let mut updates = owner.updates.subscribe();
     assert!(!updates.recv().await.unwrap().unwrap().view.queue_loading);
-    for placement in [Placement::Now, Placement::End] {
+    for placement in [QueuePlacement::Now, QueuePlacement::End] {
         let (cancel, cancellation) = std::sync::mpsc::channel();
         playback.downgrade().post(move |player, sample| {
             player
@@ -54,25 +58,75 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn repeated_operation_failures_publish_notices_without_a_current_track() {
-    let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) =
+async fn worker_starts_the_backend_on_the_runtime() {
+    let (_directory, _catalog, sequence, owner, _commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "failed-operation",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "backend-start",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            None,
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
+    let mut updates = owner.updates.subscribe();
+    playback
+        .downgrade()
+        .post(|player, _| player.start_backend());
+    playback
+        .command(Command::OperationFailed("after start".into()))
+        .unwrap();
+    loop {
+        let projection = tokio::time::timeout(Duration::from_secs(5), updates.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if !projection.notices.is_empty() {
+            assert_eq!(
+                projection.notices,
+                [PlaybackNotice::OperationFailed("after start".into())]
+            );
+            break;
+        }
+    }
+    playback.shutdown().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repeated_operation_failures_publish_notices_without_a_current_track() {
+    let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
+        seeded(Vec::new()).await;
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "failed-operation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     let mut updates = owner.updates.subscribe();
     for _ in 0..2 {
         playback
@@ -91,7 +145,7 @@ async fn repeated_operation_failures_publish_notices_without_a_current_track() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
     for backend_failure in [false, true] {
-        let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) = seeded(vec![(
+        let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) = seeded(vec![(
             TrackReference::direct(
                 "https://example.test/track",
                 "Track",
@@ -99,25 +153,28 @@ async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
                 "Album",
                 180_000,
             ),
-            Provenance::Manual,
+            QueueProvenance::Manual,
         )])
         .await;
-        let (playback, _) = Playback::start(
-            sequence,
-            "failure-feedback",
-            PlaybackSettings::default(),
-            false,
-            1,
-            PlaybackOutput::Local,
-            Box::new(IdleBackend(commands)),
-            Arc::new(|| ClockSample {
-                monotonic_millis: 0,
-                unix_seconds: 0,
-                local_period: "1970-01".into(),
-            }),
-            Arc::downgrade(&owner),
-        )
-        .unwrap();
+        let (playback, receiver) = super::channel();
+        playback
+            .run(
+                receiver,
+                sequence,
+                "failure-feedback",
+                PlaybackSettings::default(),
+                false,
+                1,
+                PlaybackOutput::Local,
+                Some(Box::new(IdleBackend(commands))),
+                Arc::new(|| ClockSample {
+                    monotonic_millis: 0,
+                    unix_seconds: 0,
+                    local_period: "1970-01".into(),
+                }),
+                Arc::downgrade(&owner),
+            )
+            .unwrap();
         playback.command(Command::Play).unwrap();
         let message = if backend_failure {
             "Resource not found."
@@ -175,7 +232,7 @@ async fn published_queue_snapshot(
         tokio::task::spawn_blocking(move || done.recv().unwrap())
             .await
             .unwrap();
-        return owner.database.restore_queue().await.unwrap();
+        return owner.catalog.restore_queue(false).await.unwrap();
     }
 }
 
@@ -192,36 +249,39 @@ fn replace_queue(owner: &PlaybackOwner, prefix: &str, count: usize) {
                             "Album",
                             180_000,
                         ),
-                        Provenance::Manual,
+                        QueueProvenance::Manual,
                     )
                 })
                 .collect(),
         ),
         crate::playback::QueuePlacement::Now,
     ));
-    owner.snapshot().unwrap();
+    owner.active().unwrap().page_entries(0, 0).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
-    let (_directory, database, sequence, owner, commands, _mailbox, _inbox) =
+    let (_directory, catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "persistence-test",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "persistence-test",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     *owner.active.lock().unwrap() = Some(playback.clone());
     let (started, blocked) = mpsc::sync_channel(1);
     let (release, resume) = mpsc::sync_channel(1);
@@ -246,11 +306,12 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     replace_queue(&owner, "first", 150);
     let restored = published_queue_snapshot(&mut updates, &owner).await;
     assert_eq!(restored.entries.len(), 150);
-    assert_eq!(restored.rows.len(), library::QUEUE_CONTEXT_LIMIT);
+    // A restore reads now playing; the shown window is read when playback shows it.
+    assert_eq!(restored.rows.len(), 1);
 
     replace_queue(&owner, "replacement", 3);
     let restored = published_queue_snapshot(&mut updates, &owner).await;
-    assert_eq!(restored.rows.len(), 3);
+    assert_eq!(restored.entries.len(), 3);
     assert!(
         restored
             .rows
@@ -259,12 +320,12 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     );
     assert_eq!(restored.current_index, Some(0));
 
-    owner.remove(restored.rows[2].position);
+    owner.remove(2);
     playback.projection().unwrap();
     assert_eq!(
         published_queue_snapshot(&mut updates, &owner)
             .await
-            .rows
+            .entries
             .len(),
         2
     );
@@ -278,7 +339,7 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     playback.projection().unwrap();
     let projection = updates.recv().await.unwrap().unwrap();
     assert_eq!(projection.view.controls.volume, 0.137);
-    let after_volume = database.restore_queue().await.unwrap();
+    let after_volume = catalog.restore_queue(false).await.unwrap();
     assert_eq!(after_volume.entries, before_volume.entries);
     assert_eq!(after_volume.order, before_volume.order);
     assert_eq!(after_volume.current_index, before_volume.current_index);

@@ -1,0 +1,698 @@
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use adw::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
+use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
+
+use crate::downloads::DownloadsState;
+use crate::widgets::artwork::{ArtworkTile, ArtworkTileWeak};
+use rufin_core::route::Route;
+
+use crate::widgets::detail_links::DetailLinkBinding;
+use crate::widgets::lyrics_snippet::LyricsSnippetView;
+use rufin_core::route::detail_links::DetailLinks;
+
+pub const ROW_ACTIONS_WIDTH: i32 = 44;
+
+crate::composite_box!(
+    pub RowActions,
+    row_actions_imp,
+    "RufinRowActions",
+    "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
+    { menu: gtk::Button }
+);
+
+impl RowActions {
+    pub fn menu_only() -> Self {
+        Self::new()
+    }
+
+    pub fn menu(&self) -> gtk::Button {
+        self.imp().menu.get()
+    }
+}
+
+pub fn row_action_cell(field: rufin_core::settings::LibraryField, label: &str) -> gtk::Widget {
+    if field == rufin_core::settings::LibraryField::Favorite {
+        crate::favorites::row_favorite_icon_button(label).upcast()
+    } else {
+        RowActions::menu_only().upcast()
+    }
+}
+
+pub fn row_action_column(
+    field: rufin_core::settings::LibraryField,
+    factory: &gtk::SignalListItemFactory,
+) -> gtk::ColumnViewColumn {
+    if field == rufin_core::settings::LibraryField::Favorite {
+        let column = crate::widgets::localization::localized_column(
+            rufin_core::settings::presentation::library_field_title(field),
+            factory,
+        );
+        column.set_fixed_width(crate::favorites::FAVORITE_COLUMN_WIDTH);
+        column
+    } else {
+        row_actions_column(factory)
+    }
+}
+
+pub fn row_actions_column(factory: &gtk::SignalListItemFactory) -> gtk::ColumnViewColumn {
+    let column = gtk::ColumnViewColumn::new(None, Some(factory.clone()));
+    column.set_fixed_width(ROW_ACTIONS_WIDTH);
+    column
+}
+
+pub fn row_favorite_button(item: &gtk::ListItem) -> Option<gtk::Button> {
+    list_cell::<gtk::Button>(item)
+}
+
+pub fn list_cell<T: IsA<gtk::Widget>>(item: &gtk::ListItem) -> Option<T> {
+    item.child()?.downcast().ok()
+}
+
+pub mod artwork_imp {
+    use super::*;
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_artwork_cell.ui")]
+    pub struct RecycledArtworkCell {
+        #[template_child]
+        area: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        image: TemplateChild<gtk::Picture>,
+        pub(super) artwork: RefCell<Option<ArtworkTileWeak>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for RecycledArtworkCell {
+        const NAME: &'static str = "RufinRecycledArtworkCell";
+        type Type = super::RecycledArtworkCell;
+        type ParentType = gtk::Widget;
+
+        fn class_init(class: &mut Self::Class) {
+            class.bind_template();
+        }
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
+    }
+
+    impl ObjectImpl for RecycledArtworkCell {
+        fn constructed(&self) {
+            self.parent_constructed();
+            self.artwork.replace(Some(
+                ArtworkTile::from_widgets(self.area.get(), self.image.get(), 48).downgrade(),
+            ));
+        }
+
+        fn dispose(&self) {
+            self.artwork.take();
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for RecycledArtworkCell {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            self.area.request_mode()
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            self.area.measure(orientation, for_size)
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            self.area.allocate(width, height, baseline, None);
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            self.obj().snapshot_child(&*self.area, snapshot);
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct RecycledArtworkCell(ObjectSubclass<artwork_imp::RecycledArtworkCell>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl RecycledArtworkCell {
+    pub fn new(size: i32) -> Self {
+        let cell: Self = glib::Object::new();
+        cell.artwork().set_square_size(size);
+        cell
+    }
+
+    pub fn artwork(&self) -> ArtworkTile {
+        self.imp()
+            .artwork
+            .borrow()
+            .as_ref()
+            .expect("recycled artwork cell is initialized")
+            .upgrade()
+            .expect("recycled artwork cell widgets are alive")
+    }
+}
+
+pub mod text_imp {
+    use super::*;
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui")]
+    pub struct RecycledTextCell {
+        #[template_child]
+        pub(super) label: TemplateChild<gtk::Label>,
+        pub(super) links: RefCell<Option<DetailLinkBinding>>,
+        pub(super) lyrics: OnceCell<LyricsSnippetView>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for RecycledTextCell {
+        const NAME: &'static str = "RufinRecycledTextCell";
+        type Type = super::RecycledTextCell;
+        type ParentType = gtk::Box;
+
+        fn class_init(class: &mut Self::Class) {
+            class.bind_template();
+        }
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
+    }
+
+    impl ObjectImpl for RecycledTextCell {
+        fn dispose(&self) {
+            self.links.take();
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for RecycledTextCell {}
+    impl BoxImpl for RecycledTextCell {}
+}
+
+glib::wrapper! {
+    pub struct RecycledTextCell(ObjectSubclass<text_imp::RecycledTextCell>)
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl RecycledTextCell {
+    pub fn new() -> Self {
+        glib::Object::new()
+    }
+
+    pub fn label(&self) -> gtk::Label {
+        self.imp().label.get()
+    }
+
+    pub fn lyrics(&self) -> &LyricsSnippetView {
+        self.imp().lyrics.get_or_init(|| {
+            let snippet = LyricsSnippetView::new();
+            self.set_orientation(gtk::Orientation::Vertical);
+            self.append(&snippet);
+            snippet
+        })
+    }
+
+    pub fn enable_links(&self, navigate: Rc<dyn Fn(Route)>) {
+        self.imp()
+            .links
+            .replace(Some(DetailLinkBinding::new(&self.imp().label, navigate)));
+    }
+
+    pub fn bind_links(&self, links: DetailLinks) {
+        if let Some(binding) = self.imp().links.borrow().as_ref() {
+            binding.bind(links);
+        }
+    }
+
+    pub fn clear(&self) {
+        if let Some(lyrics) = self.imp().lyrics.get() {
+            lyrics.bind(None);
+        }
+        if let Some(binding) = self.imp().links.borrow().as_ref() {
+            binding.clear();
+        } else {
+            self.imp().label.set_text("");
+        }
+    }
+}
+
+crate::composite_box!(
+    pub RecycledBadgedTextCell,
+    badged_text_imp,
+    "RufinRecycledBadgedTextCell",
+    "/io/github/screwys/Rufin/ui/routes/recycled_badged_text_cell.ui",
+    {
+        label: gtk::Label,
+        folder_icon: gtk::Image,
+        downloaded: gtk::Image,
+    }
+);
+
+impl RecycledBadgedTextCell {
+    pub fn set_folder(&self, folder: bool) {
+        self.imp().folder_icon.set_visible(folder);
+    }
+    pub fn with_downloads(downloads: &Rc<DownloadsState>) -> Self {
+        let cell = Self::new();
+        downloads.register_download_badge(&cell.imp().downloaded);
+        cell
+    }
+
+    pub fn label(&self) -> gtk::Label {
+        self.imp().label.get()
+    }
+
+    pub fn downloaded(&self) -> gtk::Image {
+        self.imp().downloaded.get()
+    }
+
+    pub fn clear(&self) {
+        self.imp().label.set_text("");
+        self.imp().folder_icon.set_visible(false);
+        self.imp().downloaded.set_visible(false);
+    }
+}
+
+pub mod merged_imp {
+    use super::*;
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_merged_cell.ui")]
+    pub struct RecycledMergedCell {
+        #[template_child]
+        pub(super) cover: TemplateChild<RecycledArtworkCell>,
+        #[template_child]
+        pub(super) labels: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) title_row: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) title: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) subtitle: TemplateChild<gtk::Label>,
+        pub(super) links: RefCell<Option<DetailLinkBinding>>,
+        pub(super) lyrics: OnceCell<LyricsSnippetView>,
+        pub(super) downloaded: RefCell<Option<gtk::Image>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for RecycledMergedCell {
+        const NAME: &'static str = "RufinRecycledMergedCell";
+        type Type = super::RecycledMergedCell;
+        type ParentType = gtk::Box;
+
+        fn class_init(class: &mut Self::Class) {
+            RecycledArtworkCell::ensure_type();
+            class.bind_template();
+        }
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
+    }
+
+    impl ObjectImpl for RecycledMergedCell {
+        fn dispose(&self) {
+            self.links.take();
+            self.downloaded.take();
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for RecycledMergedCell {}
+    impl BoxImpl for RecycledMergedCell {}
+}
+
+glib::wrapper! {
+    pub struct RecycledMergedCell(ObjectSubclass<merged_imp::RecycledMergedCell>)
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl RecycledMergedCell {
+    pub fn new(
+        navigate: Rc<dyn Fn(Route)>,
+        downloads: &Rc<DownloadsState>,
+        cover_size: i32,
+        downloaded: bool,
+    ) -> Self {
+        let cell: Self = glib::Object::new();
+        let imp = cell.imp();
+        imp.cover.artwork().set_square_size(cover_size);
+        imp.links
+            .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
+        if downloaded {
+            let badge = downloads.download_badge(false);
+            imp.title_row.append(&badge);
+            imp.downloaded.replace(Some(badge));
+        }
+        cell
+    }
+
+    pub fn without_downloads(navigate: Rc<dyn Fn(Route)>, cover_size: i32) -> Self {
+        let cell: Self = glib::Object::new();
+        let imp = cell.imp();
+        imp.cover.artwork().set_square_size(cover_size);
+        imp.links
+            .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
+        cell
+    }
+
+    pub fn lyrics(&self) -> &LyricsSnippetView {
+        self.imp().lyrics.get_or_init(|| {
+            let snippet = LyricsSnippetView::new();
+            self.imp().labels.append(&snippet);
+            snippet
+        })
+    }
+
+    pub fn cover(&self) -> ArtworkTile {
+        self.imp().cover.artwork()
+    }
+
+    pub fn title(&self) -> gtk::Label {
+        self.imp().title.get()
+    }
+
+    pub fn subtitle(&self) -> gtk::Label {
+        self.imp().subtitle.get()
+    }
+
+    pub fn downloaded(&self) -> Option<gtk::Image> {
+        self.imp().downloaded.borrow().clone()
+    }
+
+    pub fn bind_subtitle(&self, links: DetailLinks) {
+        if let Some(binding) = self.imp().links.borrow().as_ref() {
+            binding.bind(links);
+        }
+    }
+
+    pub fn clear_subtitle(&self) {
+        if let Some(binding) = self.imp().links.borrow().as_ref() {
+            binding.clear();
+        }
+        self.imp().subtitle.set_visible(false);
+    }
+}
+
+pub mod folder_imp {
+    use super::*;
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_folder_cell.ui")]
+    pub struct RecycledFolderCell {
+        #[template_child]
+        pub(super) icon: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub(super) cover: TemplateChild<RecycledArtworkCell>,
+        #[template_child]
+        pub(super) label: TemplateChild<gtk::Label>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for RecycledFolderCell {
+        const NAME: &'static str = "RufinRecycledFolderCell";
+        type Type = super::RecycledFolderCell;
+        type ParentType = gtk::Box;
+
+        fn class_init(class: &mut Self::Class) {
+            RecycledArtworkCell::ensure_type();
+            class.bind_template();
+        }
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
+    }
+
+    impl ObjectImpl for RecycledFolderCell {
+        fn dispose(&self) {
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for RecycledFolderCell {}
+    impl BoxImpl for RecycledFolderCell {}
+}
+
+glib::wrapper! {
+    pub struct RecycledFolderCell(ObjectSubclass<folder_imp::RecycledFolderCell>)
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl RecycledFolderCell {
+    pub fn new() -> Self {
+        let cell: Self = glib::Object::new();
+        cell.imp().cover.artwork().set_square_size(48);
+        cell
+    }
+
+    pub fn icon(&self) -> gtk::Image {
+        self.imp().icon.get()
+    }
+
+    pub fn cover(&self) -> ArtworkTile {
+        self.imp().cover.artwork()
+    }
+
+    pub fn set_cover_visible(&self, visible: bool) {
+        self.imp().cover.set_visible(visible);
+    }
+
+    pub fn label(&self) -> gtk::Label {
+        self.imp().label.get()
+    }
+}
+
+pub fn track_row_index_cell(text: &str, activate: impl Fn(&gtk::Button) + 'static) -> gtk::Overlay {
+    let resource = "routes/track_row_index.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { cell: gtk::Overlay, number: gtk::Label, play: gtk::Button });
+    let focus_cell = cell.downgrade();
+    play.connect_state_flags_changed(move |play, _| {
+        if let Some(cell) = focus_cell.upgrade() {
+            if play
+                .state_flags()
+                .contains(gtk::StateFlags::FOCUSED | gtk::StateFlags::FOCUS_VISIBLE)
+            {
+                cell.add_css_class("track-row-keyboard-focus");
+            } else {
+                cell.remove_css_class("track-row-keyboard-focus");
+            }
+        }
+    });
+    let click_cell = cell.downgrade();
+    install_index_playing_indicator(&cell);
+    play.connect_clicked(move |button| {
+        if click_cell
+            .upgrade()
+            .is_some_and(|cell| cell.has_css_class("track-row-playing"))
+        {
+            let _ = button.activate_action("win.play-pause", None);
+        } else {
+            activate(button);
+        }
+    });
+    let number_play = play.downgrade();
+    number.connect_label_notify(move |number| {
+        if let Some(play) = number_play.upgrade() {
+            play.set_visible(!number.text().is_empty());
+        }
+    });
+    let weak_play = play.downgrade();
+    cell.connect_css_classes_notify(move |cell| {
+        let Some(play) = weak_play.upgrade() else {
+            return;
+        };
+        let playing =
+            cell.has_css_class("track-row-playing") && !cell.has_css_class("track-row-paused");
+        play.set_icon_name(if playing {
+            "rufin-media-playback-pause-symbolic"
+        } else {
+            "rufin-media-playback-start-symbolic"
+        });
+        crate::widgets::localization::bind_widget_tooltip(
+            &play,
+            if playing { "Pause" } else { "Play track" },
+        );
+    });
+    number.set_text(text);
+    play.set_visible(!text.is_empty());
+    cell
+}
+
+pub fn track_list_row_index_cell(item: &gtk::ListItem) -> gtk::Overlay {
+    let item = item.downgrade();
+    track_row_index_cell("", move |button| {
+        if let Some(item) = item.upgrade()
+            && item.is_activatable()
+        {
+            let _ =
+                button.activate_action("list.activate-item", Some(&item.position().to_variant()));
+        }
+    })
+}
+
+pub fn set_track_playing(title: &gtk::Widget, playing: bool, paused: bool) {
+    let mut classes = [
+        ("track-row-playing", playing),
+        ("track-row-paused", playing && paused),
+    ];
+    // Set paused first so a newly bound paused title never starts an indicator.
+    if playing && paused {
+        classes.swap(0, 1);
+    }
+    for (class, active) in classes {
+        if active {
+            title.add_css_class(class);
+        } else {
+            title.remove_css_class(class);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TrackRowPlayingIndicator {
+    inner: Rc<TrackRowPlayingIndicatorInner>,
+}
+
+struct TrackRowPlayingIndicatorInner {
+    position: Cell<u32>,
+    media_uri: RefCell<Option<String>>,
+    paused: Cell<bool>,
+    cells: RefCell<HashMap<usize, (glib::WeakRef<gtk::Widget>, u32, String)>>,
+}
+
+impl TrackRowPlayingIndicator {
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(TrackRowPlayingIndicatorInner {
+                position: Cell::new(gtk::INVALID_LIST_POSITION),
+                media_uri: RefCell::new(None),
+                paused: Cell::new(false),
+                cells: RefCell::new(HashMap::new()),
+            }),
+        }
+    }
+
+    fn matches(&self, position: u32, media_uri: &str) -> bool {
+        self.inner.media_uri.borrow().as_deref() == Some(media_uri)
+            && (self.inner.position.get() == gtk::INVALID_LIST_POSITION
+                || self.inner.position.get() == position)
+    }
+
+    pub fn bind(&self, widget: &gtk::Widget, position: u32, media_uri: &str) {
+        set_track_playing(
+            widget,
+            self.matches(position, media_uri),
+            self.inner.paused.get(),
+        );
+        self.inner
+            .cells
+            .borrow_mut()
+            .entry(widget.as_ptr() as usize)
+            .and_modify(|(bound_widget, bound_position, uri)| {
+                *bound_widget = widget.downgrade();
+                *bound_position = position;
+                if uri != media_uri {
+                    media_uri.clone_into(uri);
+                }
+            })
+            .or_insert_with(|| (widget.downgrade(), position, media_uri.to_owned()));
+    }
+
+    pub fn unbind(&self, widget: &gtk::Widget) {
+        set_track_playing(widget, false, false);
+        self.inner
+            .cells
+            .borrow_mut()
+            .remove(&(widget.as_ptr() as usize));
+    }
+
+    pub fn set_current(&self, media_uri: Option<&str>, position: u32) {
+        if self.inner.position.get() == position
+            && self.inner.media_uri.borrow().as_deref() == media_uri
+        {
+            return;
+        }
+        self.inner.media_uri.replace(media_uri.map(str::to_owned));
+        self.inner.position.set(position);
+        self.refresh();
+    }
+
+    fn refresh(&self) {
+        self.inner
+            .cells
+            .borrow_mut()
+            .retain(|_, (widget, bound_position, uri)| {
+                let Some(widget) = widget.upgrade() else {
+                    return false;
+                };
+                set_track_playing(
+                    &widget,
+                    self.matches(*bound_position, uri),
+                    self.inner.paused.get(),
+                );
+                true
+            });
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        if self.inner.paused.replace(paused) != paused {
+            self.refresh();
+        }
+    }
+}
+
+pub fn install_playing_indicator(title: &gtk::Label, title_row: &impl IsA<gtk::Box>) {
+    let title_row = title_row.as_ref().downgrade();
+    let indicator = RefCell::new(None::<crate::widgets::playing_indicator::PlayingIndicator>);
+    title.connect_css_classes_notify(move |title| {
+        let Some(title_row) = title_row.upgrade() else {
+            return;
+        };
+        let playing =
+            title.has_css_class("track-row-playing") && !title.has_css_class("track-row-paused");
+        if playing && indicator.borrow().is_none() {
+            let widget = crate::widgets::playing_indicator::PlayingIndicator::new();
+            title_row.prepend(&widget);
+            indicator.replace(Some(widget));
+        } else if !playing && let Some(widget) = indicator.take() {
+            title_row.remove(&widget);
+        }
+    });
+}
+
+pub fn install_index_playing_indicator(cell: &gtk::Overlay) {
+    let indicator = RefCell::new(None::<crate::widgets::playing_indicator::PlayingIndicator>);
+    cell.connect_css_classes_notify(move |cell| {
+        let playing =
+            cell.has_css_class("track-row-playing") && !cell.has_css_class("track-row-paused");
+        if playing && indicator.borrow().is_none() {
+            let widget = crate::widgets::playing_indicator::PlayingIndicator::new();
+            widget.set_halign(gtk::Align::Center);
+            cell.add_overlay(&widget);
+            indicator.replace(Some(widget));
+        } else if !playing && let Some(widget) = indicator.take() {
+            cell.remove_overlay(&widget);
+        }
+    });
+}
+
+pub fn set_track_row_index_text(cell: &gtk::Overlay, text: &str) {
+    let Some(label) = cell
+        .child()
+        .and_then(|child| child.downcast::<gtk::Label>().ok())
+    else {
+        return;
+    };
+    label.set_text(text);
+}

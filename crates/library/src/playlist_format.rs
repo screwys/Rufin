@@ -2,10 +2,11 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use futures_util::TryStreamExt;
-use sqlx::{Connection, FromRow, Row};
+use sqlx::{FromRow, Row};
 
 use crate::{
-    Database, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
+    Catalog, LibraryError, LibraryResult, LocalMediaLocation, PlaylistEntryWrite, PlaylistIdentity,
+    PlaylistKey,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -276,7 +277,7 @@ impl PlaylistFileEntry {
             .preserved
             .clone()
             .unwrap_or_else(|| PlaylistEntryWrite {
-                object_id: format!("playlist:{position}"),
+                object_id: String::new(),
                 position,
                 track: crate::TrackReference {
                     media_uri: self.locator.clone(),
@@ -315,7 +316,7 @@ pub struct PlaylistImportReport {
     pub changed: bool,
 }
 
-impl Database {
+impl Catalog {
     pub async fn import_playlist_file(
         &self,
         input: impl BufRead,
@@ -335,11 +336,9 @@ impl Database {
         target: Option<PlaylistKey>,
         recognize: impl Fn(&str) -> Option<String>,
     ) -> LibraryResult<PlaylistImportReport> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let report = import_playlist_on(&mut transaction, parsed, file, target, recognize).await?;
-        transaction.commit().await?;
+        let mut write = self.write().await?;
+        let report = import_playlist_on(&mut write, parsed, file, target, recognize).await?;
+        write.commit().await?;
         Ok(report)
     }
 
@@ -351,7 +350,15 @@ impl Database {
         output: impl Write,
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
-        export_playlist_on(&mut connection, playlist, file, mode, output).await
+        export_playlist_on(
+            &mut connection,
+            playlist,
+            file,
+            mode,
+            output,
+            |source, path, size| self.mapped_file(source, path, size),
+        )
+        .await
     }
 
     pub async fn export_playlist_file_as(
@@ -363,12 +370,21 @@ impl Database {
         output: impl Write,
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
-        export_playlist_as_on(&mut connection, playlist, file, format, mode, output).await
+        export_playlist_as_on(
+            &mut connection,
+            playlist,
+            file,
+            format,
+            mode,
+            output,
+            |source, path, size| self.mapped_file(source, path, size),
+        )
+        .await
     }
 }
 
 pub(crate) async fn import_playlist_on(
-    connection: &mut sqlx::SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     parsed: PlaylistFile,
     file: &Path,
     target: Option<PlaylistKey>,
@@ -376,7 +392,7 @@ pub(crate) async fn import_playlist_on(
 ) -> LibraryResult<PlaylistImportReport> {
     let object_id: String =
         sqlx::query_scalar("SELECT 'rufin:playlist:' || lower(hex(randomblob(16)))")
-            .fetch_one(&mut *connection)
+            .fetch_one(write.connection().await?)
             .await?;
     let mut identity = PlaylistIdentity {
         source_owned: false,
@@ -390,6 +406,8 @@ pub(crate) async fn import_playlist_on(
         ),
         position: 0,
     };
+    // Preserved entry ids belong to the playlist the file names.
+    let mut foreign = true;
     if let Some(value) = parsed.identity {
         if !value.source_owned
             && value.name.is_some()
@@ -397,9 +415,10 @@ pub(crate) async fn import_playlist_on(
             && value.position >= 0
         {
             let native = sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM playlists playlist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND playlist.object_id=?2 AND playlist.owner='source')")
-                .bind(&value.source_id).bind(&value.object_id).fetch_one(&mut *connection).await?;
+                .bind(&value.source_id).bind(&value.object_id).fetch_one(write.connection().await?).await?;
             if !native {
                 identity = value;
+                foreign = false;
             }
         }
     }
@@ -408,21 +427,30 @@ pub(crate) async fn import_playlist_on(
     }
     let mut changed = true;
     let key = if let Some(key) = target {
-        let name = sqlx::query_scalar::<_, String>(
-            "SELECT name FROM playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL",
+        let (name, object) = sqlx::query_as::<_, (String, String)>(
+            "SELECT name,object_id FROM playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL",
         )
         .bind(key)
-        .fetch_optional(&mut *connection)
+        .fetch_optional(write.connection().await?)
         .await?
         .ok_or_else(|| invalid("Playlist is not editable"))?;
         changed = Some(&name) != identity.name.as_ref();
+        foreign = object != identity.object_id;
         if changed {
-            sqlx::query("UPDATE main.playlists SET name=?2, normalized_name=lower(?2), sort_text=lower(?2) WHERE playlist_key=?1")
-                .bind(key).bind(&identity.name).execute(&mut *connection).await?;
+            let row: crate::catalog::write::PlaylistRow =
+                sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "UPDATE main.playlists SET name=?2 WHERE playlist_key=?1 RETURNING {}",
+                    crate::catalog::write::PLAYLIST_COLUMNS
+                )))
+                .bind(key)
+                .bind(&identity.name)
+                .fetch_one(write.connection().await?)
+                .await?;
+            write.put_playlist(row);
         }
         key
     } else {
-        crate::playlists::write_playlist_identity(connection, &identity).await?
+        crate::playlists::write_playlist_identity(write, &identity).await?
     };
     let mut entries = Vec::with_capacity(parsed.entries.len());
     let mut skipped = parsed.skipped;
@@ -439,84 +467,28 @@ pub(crate) async fn import_playlist_on(
         }
         let mut entry = item.to_entry(entries.len() as i64);
         entry.track.media_uri = uri;
-        if entry.object_id.is_empty() {
-            entry.object_id = format!("playlist:{}", entries.len());
-        }
+        entry.object_id.retain(|_| !foreign);
         entries.push(entry);
     }
     let imported = entries.len() as u64;
     let before = sqlx::query_scalar::<_, i64>("SELECT total_changes()")
-        .fetch_one(&mut *connection)
+        .fetch_one(write.connection().await?)
         .await?;
-    let mut tracks = Vec::with_capacity(entries.len());
-    for entry in &entries {
-        tracks.push(crate::playlists::remember_playlist_track(connection, entry).await?);
-    }
+    let references = entries
+        .iter()
+        .map(|entry| entry.track.clone())
+        .collect::<Vec<_>>();
+    let tracks = write.put_references(&references).await?;
     changed |= sqlx::query_scalar::<_, i64>("SELECT total_changes()")
-        .fetch_one(&mut *connection)
+        .fetch_one(write.connection().await?)
         .await?
         != before;
-    let entries_changed = if target.is_some() {
-        let mut rows = sqlx::query_scalar::<_, crate::TrackKey>(
-            "SELECT track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY position",
-        )
-        .bind(key)
-        .fetch(&mut *connection);
-        let mut changed = false;
-        for track in &tracks {
-            if rows.try_next().await?.as_ref() != Some(track) {
-                changed = true;
-                break;
-            }
-        }
-        changed || rows.try_next().await?.is_some()
-    } else {
-        true
-    };
-    let mut removed = Vec::<String>::new();
-    if entries_changed {
-        removed=sqlx::query_scalar("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.playlist_key=?1")
-            .bind(key).fetch_all(&mut *connection).await?;
-        changed = true;
-        sqlx::query("DELETE FROM main.playlist_entries WHERE playlist_key=?1")
-            .bind(key)
-            .execute(&mut *connection)
-            .await?;
-        for (mut entry, track) in entries.into_iter().zip(tracks) {
-            if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.playlist_entries WHERE playlist_key=?1 AND object_id=?2)").bind(key).bind(&entry.object_id).fetch_one(&mut *connection).await? {
-            entry.object_id = sqlx::query_scalar("SELECT 'playlist:' || lower(hex(randomblob(16)))").fetch_one(&mut *connection).await?;
-        }
-            sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(?1,?2,?3,?4)")
-                .bind(key).bind(&entry.object_id).bind(track).bind(entry.position)
-                .execute(&mut *connection).await?;
-        }
-    }
-    if changed {
-        let mut records = if entries_changed {
-            crate::playlists::playlist_entry_records_on(connection, key, 0, i64::MAX).await?
-        } else {
-            Vec::new()
-        };
-        let present = records
-            .iter()
-            .filter(|record| record.kind == "entry")
-            .map(|record| record.key.as_str())
-            .collect::<std::collections::HashSet<_>>();
-        let tombstones = removed
-            .into_iter()
-            .filter(|key| !present.contains(key.as_str()))
-            .map(|key| crate::ConnectRecord {
-                kind: "entry".into(),
-                key,
-                value: None,
-            })
-            .collect::<Vec<_>>();
-        records.extend(tombstones);
-        let identity:String=sqlx::query_scalar("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id) FROM playlists playlist WHERE playlist_key=?1")
-            .bind(key).fetch_one(&mut *connection).await?;
-        records.push(Database::connect_record_on(connection, "playlist", &identity).await?);
-        crate::profile::write_local_on(connection, &records).await?;
-    }
+    let wanted = entries
+        .into_iter()
+        .zip(tracks)
+        .map(|(entry, track)| (entry.object_id, track))
+        .collect::<Vec<_>>();
+    changed |= crate::playlists::write_entries(write, key.raw(), &wanted, true).await?;
     Ok(PlaylistImportReport {
         playlist: key,
         imported,
@@ -531,10 +503,11 @@ pub(crate) async fn export_playlist_on(
     file: &Path,
     mode: PlaylistPathMode,
     output: impl Write,
+    mapped: impl Fn(&str, &str, Option<u64>) -> Option<crate::MappedFile>,
 ) -> LibraryResult<u64> {
     let format =
         PlaylistFormat::from_path(file).ok_or_else(|| invalid("Unsupported playlist format"))?;
-    export_playlist_as_on(connection, playlist, file, format, mode, output).await
+    export_playlist_as_on(connection, playlist, file, format, mode, output, mapped).await
 }
 
 async fn export_playlist_as_on(
@@ -544,10 +517,11 @@ async fn export_playlist_as_on(
     format: PlaylistFormat,
     mode: PlaylistPathMode,
     output: impl Write,
+    mapped: impl Fn(&str, &str, Option<u64>) -> Option<crate::MappedFile>,
 ) -> LibraryResult<u64> {
     let identity = sqlx::query_as::<_, PlaylistIdentity>(
         "SELECT playlist.owner='source' source_owned,source.object_id source_id,
-                playlist.object_id,playlist.name,playlist.position
+                playlist.object_id,playlist.name,0 position
          FROM playlists playlist LEFT JOIN sources source USING(source_key)
          WHERE playlist.playlist_key=?1",
     )
@@ -562,25 +536,48 @@ async fn export_playlist_as_on(
         identity.name.as_deref(),
         Some(&identity),
     )?;
-    let mut entries = sqlx::query(
-        "SELECT entry.object_id,track.media_uri,json(track.metadata) metadata,entry.position,
+    let mut entries = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT entry.object_id,track.media_uri,{} metadata,row_number() OVER(ORDER BY entry.rank,entry.playlist_entry_key)-1 position,
                 CASE WHEN ?2 THEN coalesce((
                     SELECT access_uri FROM local_locators
-                    WHERE media_uri=track.media_uri AND origin<>'download' AND access_uri LIKE 'content:%'
-                    ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1
-                ),track.source_path) END document_locator
+                    WHERE media_uri=track.media_uri AND access_uri LIKE 'content:%'
+                    ORDER BY local_access_file_key LIMIT 1
+                ),details.source_path) END document_locator,
+                source.object_id mapping_source,details.source_path mapping_path,
+                json_extract(details.metadata,'$.audio_properties.size_bytes') mapping_size
          FROM playlist_entries entry JOIN tracks track USING(track_key)
-         LEFT JOIN albums album USING(album_key)
-         WHERE entry.playlist_key=?1 ORDER BY entry.position",
-    ).bind(playlist).bind(file.to_str().is_some_and(|file| file.starts_with("content:"))).fetch(&mut *connection);
+         LEFT JOIN track_details details USING(track_key) LEFT JOIN sources source ON source.source_key=track.source_key
+         WHERE entry.playlist_key=?1 ORDER BY entry.rank,entry.playlist_entry_key",
+        crate::track_metadata_sql("track", "details")
+    ))).bind(playlist).bind(file.to_str().is_some_and(|file| file.starts_with("content:"))).fetch(&mut *connection);
     while let Some(row) = entries.try_next().await? {
         let entry = PlaylistEntryWrite::from_row(&row)?;
         let locator: Option<String> = row.try_get("document_locator")?;
         let locator = locator.filter(|_| crate::cue_media_parts(&entry.track.media_uri).is_none());
-        let locator = locator.and_then(|locator| {
-            crate::document_access_uri(&locator)
-                .or_else(|| locator.starts_with("content:").then_some(locator))
+        let direct = locator.as_deref().and_then(|locator| {
+            crate::document_access_uri(locator)
+                .or_else(|| locator.starts_with("content:").then(|| locator.to_owned()))
         });
+        // A mapped document: the server's path under the mapped document tree.
+        let mapped = locator.filter(|_| direct.is_none()).and_then(|path| {
+            let source: Option<String> = row.try_get("mapping_source").ok()?;
+            let size: Option<i64> = row.try_get("mapping_size").ok()?;
+            mapped(
+                &source?,
+                &path,
+                size.and_then(|size| u64::try_from(size).ok()),
+            )
+        });
+        let locator = match mapped {
+            Some(mapped) => tokio::task::spawn_blocking(move || mapped.locate())
+                .await
+                .map_err(|error| invalid(error.to_string()))?
+                .and_then(|location| match location {
+                    LocalMediaLocation::Document(uri) => Some(uri),
+                    LocalMediaLocation::File(_) => None,
+                }),
+            None => direct,
+        };
         writer.entry_with_locator(&entry, locator.as_deref().unwrap_or(&entry.track.media_uri))?;
     }
     writer.finish()
@@ -986,22 +983,22 @@ mod tests {
     #[tokio::test]
     async fn targeted_refresh_keeps_unchanged_occurrences_and_applies_file_edits() {
         let directory = tempfile::tempdir().unwrap();
-        let database = crate::Database::open(directory.path().join("store.sqlite"))
+        let catalog = crate::Catalog::open(directory.path().join("store.sqlite"))
             .await
             .unwrap();
         let file = directory.path().join("music.m3u8");
         let content = "#EXTM3U\n#PLAYLIST:Music\nmissing.flac\nother.flac\nmissing.flac\n";
-        let first = database
+        let first = catalog
             .import_playlist_file(std::io::Cursor::new(content), &file, None, |_| None)
             .await
             .unwrap();
         assert!(first.changed);
-        let keys = database
+        let keys = catalog
             .playlist_edit_entries(
                 first.playlist,
                 &crate::MemberRead {
                     collection: crate::Collection::Playlist(first.playlist),
-                    sort: Some(crate::CatalogSort::Position),
+                    sort: Some(crate::LibraryField::RowIndex),
                     ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                 }
                 .selection(),
@@ -1015,7 +1012,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .unwrap();
-        let same = database
+        let same = catalog
             .import_playlist_file(
                 std::io::Cursor::new(content),
                 &file,
@@ -1027,12 +1024,12 @@ mod tests {
         assert!(!same.changed);
         assert_eq!(same.imported, 3);
         assert_eq!(
-            database
+            catalog
                 .playlist_edit_entries(
                     first.playlist,
                     &crate::MemberRead {
                         collection: crate::Collection::Playlist(first.playlist),
-                        sort: Some(crate::CatalogSort::Position),
+                        sort: Some(crate::LibraryField::RowIndex),
                         ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
@@ -1047,7 +1044,7 @@ mod tests {
             keys
         );
         let renamed = content.replace("#PLAYLIST:Music", "#PLAYLIST:Renamed");
-        let rename = database
+        let rename = catalog
             .import_playlist_file(
                 std::io::Cursor::new(&renamed),
                 &file,
@@ -1058,12 +1055,12 @@ mod tests {
             .unwrap();
         assert!(rename.changed);
         assert_eq!(
-            database
+            catalog
                 .playlist_edit_entries(
                     first.playlist,
                     &crate::MemberRead {
                         collection: crate::Collection::Playlist(first.playlist),
-                        sort: Some(crate::CatalogSort::Position),
+                        sort: Some(crate::LibraryField::RowIndex),
                         ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
@@ -1078,7 +1075,7 @@ mod tests {
             keys
         );
         let reordered = "#EXTM3U\n#PLAYLIST:Renamed\nmissing.flac\nmissing.flac\nother.flac\n";
-        let reorder = database
+        let reorder = catalog
             .import_playlist_file(
                 std::io::Cursor::new(reordered),
                 &file,
@@ -1090,7 +1087,7 @@ mod tests {
         assert!(reorder.changed);
         assert_eq!(reorder.imported, 3);
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 first.playlist,
                 &file,
@@ -1110,12 +1107,12 @@ mod tests {
         );
         let snapshot = roundtrip.entries[0].preserved.as_mut().unwrap();
         snapshot.object_id = "external-occurrence".into();
-        let private_only = database
+        let private_only = catalog
             .import_playlist_document(roundtrip, &file, Some(first.playlist), |_| None)
             .await
             .unwrap();
         assert!(!private_only.changed);
-        let unchanged = database
+        let unchanged = catalog
             .import_playlist_file(
                 std::io::Cursor::new(reordered),
                 &file,
@@ -1125,7 +1122,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!unchanged.changed);
-        let empty = database
+        let empty = catalog
             .import_playlist_file(
                 std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Renamed\n"),
                 &file,
@@ -1136,18 +1133,18 @@ mod tests {
             .unwrap();
         assert!(empty.changed);
         assert_eq!(empty.imported, 0);
-        database.close().await.unwrap();
+        catalog.close().await.unwrap();
     }
     use super::*;
 
     #[tokio::test]
     async fn malformed_m3u_lines_leave_valid_entries_and_clear_pending_metadata() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u");
-        let report = database
+        let report = catalog
             .import_playlist_file(
                 std::io::Cursor::new(
                     b"#EXTM3U\nfirst.flac\n#EXTINF:12,Wrong title\nbad\xff.flac\nlast.flac\n",
@@ -1160,7 +1157,7 @@ mod tests {
             .unwrap();
         assert_eq!((report.imported, report.skipped), (2, 1));
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 report.playlist,
                 &file,
@@ -1178,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn formats_preserve_order_duplicates_identities_and_relative_siblings() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("lists/mix.m3u8");
@@ -1186,14 +1183,14 @@ mod tests {
         let uri = url::Url::from_file_path(&song).unwrap().to_string();
         let provider = crate::source_entity_uri(&crate::SourceId::new("source"), "track", "one");
         let cue = crate::cue_media_uri("disc:1", &uri, 1000, 2000);
-        let original = database.import_playlist_file(std::io::Cursor::new(format!(
+        let original = catalog.import_playlist_file(std::io::Cursor::new(format!(
             "#EXTM3U\n#PLAYLIST:Mix & café\n#EXTINF:12.5,Track\n#EXTART:Earth - Wind\n../Artist/100% #1 & café.flac\n../Artist/100% #1 & café.flac\n{provider}\n{cue}\nhttps://example.test/stream\n"
         )), &file, None, |_| None).await.unwrap();
         for extension in ["m3u8", "pls", "xspf"] {
             let export = file.with_extension(extension);
             let mut output = Vec::new();
             assert_eq!(
-                database
+                catalog
                     .export_playlist_file(
                         original.playlist,
                         &export,
@@ -1214,18 +1211,18 @@ mod tests {
                 parsed.entries[0].to_entry(0).track.metadata.artist,
                 "Earth - Wind"
             );
-            let imported = database
+            let imported = catalog
                 .import_playlist_file(std::io::Cursor::new(output), &export, None, |_| None)
                 .await
                 .unwrap();
             assert_eq!(imported.playlist, original.playlist);
             assert_eq!(imported.imported, 5);
-            let (_permit, mut connection) = database
-                .acquire_general(&crate::ReadCancellation::new())
+            let mut connection = catalog
+                .acquire_cancellable(&crate::ReadCancellation::new())
                 .await
                 .unwrap();
             let actual: Vec<String> = sqlx::query_scalar(
-                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_key=?1 ORDER BY position",
+                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key",
             )
             .bind(imported.playlist)
             .fetch_all(&mut *connection)
@@ -1244,7 +1241,7 @@ mod tests {
         }
         let destination = Path::new("content://documents.example/document/71");
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file_as(
                 original.playlist,
                 destination,
@@ -1262,11 +1259,8 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.entries[0].locator, uri);
         let local_document = "content://documents.example/document/22";
-        for (origin, access_uri) in [
-            ("download", "content://documents.example/document/download"),
-            ("import", local_document),
-        ] {
-            database
+        for (origin, access_uri) in [("import", local_document)] {
+            catalog
                 .upsert_local_locator(&crate::LocalLocatorWrite {
                     source_id: None,
                     media_uri: uri.clone(),
@@ -1285,31 +1279,18 @@ mod tests {
             crate::document_locator_fragment("native-track", provider_document)
         );
         {
-            let mut writer = database.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
-            sqlx::query("UPDATE tracks SET source_path=?1 WHERE media_uri=?2")
+            let mut writer = catalog.writer().await.unwrap();
+            sqlx::query("INSERT INTO track_details(track_key,source_path) SELECT track_key,?1 FROM tracks WHERE media_uri=?2 ON CONFLICT(track_key) DO UPDATE SET source_path=excluded.source_path")
                 .bind(&source_path)
                 .bind(&provider)
-                .execute(&mut *connection)
+                .execute(&mut *writer)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO local_files(source_key,path,root,root_id,relative_path,kind,mtime_ns,state) SELECT source_key,source_path,'root','root-id','Artist/one.flac','media',0,'accepted' FROM tracks WHERE media_uri=?1")
-                .bind(&provider).execute(&mut *connection).await.unwrap();
-            sqlx::query("INSERT INTO local_file_access_roots(source_key,root,root_id) SELECT source_key,root,root_id FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *connection).await.unwrap();
-            sqlx::query("INSERT INTO local_file_observations(local_file_key,path,root,relative_path,mtime_ns,native_id,state) SELECT local_file_key,path,root,relative_path,mtime_ns,'native-track',state FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *connection).await.unwrap();
+            sqlx::query("INSERT INTO files(source_key,path,root,relative_path,kind,mtime_ns,native_id,state) SELECT track.source_key,details.source_path,'root','Artist/one.flac','media',0,'native-track','accepted' FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=?1")
+                .bind(&provider).execute(&mut *writer).await.unwrap();
         }
         assert_eq!(
-            database
-                .connect_track_reference(&provider)
-                .await
-                .unwrap()
-                .unwrap()["backing_id"],
-            crate::document_media_uri("native-track")
-        );
-        assert_eq!(
-            database
+            catalog
                 .media_uris_for_document_ids(&[
                     "native-track".into(),
                     "missing".into(),
@@ -1326,7 +1307,7 @@ mod tests {
         ] {
             let mut output = Vec::new();
             assert_eq!(
-                database
+                catalog
                     .export_playlist_file_as(
                         original.playlist,
                         destination,
@@ -1373,100 +1354,6 @@ mod tests {
                 provider
             );
         }
-    }
-
-    #[tokio::test]
-    async fn standard_edits_override_snapshots_and_target_overrides_file_identity() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
-            .await
-            .unwrap();
-        let file = directory.path().join("mix.m3u8");
-        let first = database
-            .import_playlist_file(
-                std::io::Cursor::new(
-                    "#EXTM3U\n#PLAYLIST:Old\n#EXTINF:12,Artist - Old track\nold.flac\n",
-                ),
-                &file,
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
-        let second = database
-            .import_playlist_file(
-                std::io::Cursor::new("#EXTM3U\nother.flac\n"),
-                &file,
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
-        let mut output = Vec::new();
-        database
-            .export_playlist_file(
-                first.playlist,
-                &file,
-                PlaylistPathMode::Automatic,
-                &mut output,
-            )
-            .await
-            .unwrap();
-        let text = String::from_utf8(output)
-            .unwrap()
-            .replace("#PLAYLIST:Old", "#PLAYLIST:New")
-            .replace("#EXTINF:12,Artist - Old track", "#EXTINF:30,New track")
-            .replace("\nold.flac\n", "\nnew.flac\n");
-        let updated = database
-            .import_playlist_file(
-                std::io::Cursor::new(text),
-                &file,
-                Some(second.playlist),
-                |_| None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(updated.playlist, second.playlist);
-        let mut output = Vec::new();
-        database
-            .export_playlist_file(
-                second.playlist,
-                &file,
-                PlaylistPathMode::Automatic,
-                &mut output,
-            )
-            .await
-            .unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains("#PLAYLIST:New\n"));
-        assert!(text.contains("#EXTINF:30,New track\nnew.flac\n"));
-        assert!(
-            database
-                .import_playlist_file(
-                    std::io::Cursor::new("binary\0data"),
-                    &file,
-                    Some(second.playlist),
-                    |_| None
-                )
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            (&crate::MemberRead {
-                collection: crate::Collection::Playlist(second.playlist),
-                sort: Some(crate::CatalogSort::Position),
-                ..crate::MemberRead::new(crate::Collection::Playlist(second.playlist))
-            })
-                .rows(&database, 0, 128, &crate::ReadCancellation::new())
-                .await
-                .map(|rows| rows
-                    .into_iter()
-                    .filter_map(crate::MemberRow::into_entry)
-                    .collect::<Vec<_>>())
-                .unwrap()
-                .len(),
-            1
-        );
     }
 
     #[test]
@@ -1619,24 +1506,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standard_edits_override_snapshots_and_target_overrides_file_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let file = directory.path().join("mix.m3u8");
+        let first = catalog
+            .import_playlist_file(
+                std::io::Cursor::new(
+                    "#EXTM3U\n#PLAYLIST:Old\n#EXTINF:12,Artist - Old track\nold.flac\n",
+                ),
+                &file,
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        let second = catalog
+            .import_playlist_file(
+                std::io::Cursor::new("#EXTM3U\nother.flac\n"),
+                &file,
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        let mut output = Vec::new();
+        catalog
+            .export_playlist_file(
+                first.playlist,
+                &file,
+                PlaylistPathMode::Automatic,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        let text = String::from_utf8(output)
+            .unwrap()
+            .replace("#PLAYLIST:Old", "#PLAYLIST:New")
+            .replace("#EXTINF:12,Artist - Old track", "#EXTINF:30,New track")
+            .replace("\nold.flac\n", "\nnew.flac\n");
+        let updated = catalog
+            .import_playlist_file(
+                std::io::Cursor::new(text),
+                &file,
+                Some(second.playlist),
+                |_| None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.playlist, second.playlist);
+        let mut output = Vec::new();
+        catalog
+            .export_playlist_file(
+                second.playlist,
+                &file,
+                PlaylistPathMode::Automatic,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("#PLAYLIST:New\n"));
+        assert!(text.contains("#EXTINF:30,New track\nnew.flac\n"));
+        assert!(
+            catalog
+                .import_playlist_file(
+                    std::io::Cursor::new("binary\0data"),
+                    &file,
+                    Some(second.playlist),
+                    |_| None
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(playlist_rows(&catalog, second.playlist).await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn smart_export_streams_large_direct_http_results_without_current() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("large.m3u8");
         {
-            let mut writer = database.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');\n                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)\n                INSERT INTO tracks(source_key,object_id,media_uri,indexed,metadata) SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,jsonb(json_object('title',COALESCE('Song '||i,''),'sort_text',COALESCE('song '||i,''),'duration_millis',COALESCE(12000,0))) FROM n;")
-                .execute(writer.as_mut().unwrap()).await.unwrap();
+            let mut writer = catalog.writer().await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');\n                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)\n                INSERT INTO tracks(source_key,object_id,media_uri,indexed,title,sort_text,duration_millis) SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,'Song '||i,'song '||i,12000 FROM n;")
+                .execute(&mut *writer).await.unwrap();
         }
-        let key = database
-            .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default())
+        // The next Write loads the rows written past the Catalog.
+        catalog.require_reload();
+        let key = catalog
+            .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default(), None)
             .await
             .unwrap();
         let mut output = tempfile::tempfile().unwrap();
         assert_eq!(
-            database
+            catalog
                 .export_smart_playlist_file(key, 0, &file, PlaylistPathMode::Automatic, &mut output)
                 .await
                 .unwrap(),
@@ -1647,18 +1615,19 @@ mod tests {
     #[tokio::test]
     async fn native_export_imports_as_an_authored_copy_without_combining_entries() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         {
-            let mut writer = database.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);\n              INSERT INTO tracks(track_key,media_uri,metadata) VALUES (1,'https://example.test/song',jsonb(json_object('title',COALESCE('Song',''))));\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
-              .execute(connection).await.unwrap();
+            let mut writer = catalog.writer().await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (5,'source','Source');\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name) VALUES(8,5,'source','native','Native');\n              INSERT INTO tracks(track_key,media_uri,title) VALUES (1,'https://example.test/song','Song');\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) VALUES(8,'one',1,X'8000'),(8,'two',1,X'8001');")
+              .execute(&mut *writer).await.unwrap();
         }
+        // The rows were written behind the Catalog, so it loads them before the next write.
+        catalog.require_reload();
         let file = directory.path().join("native.m3u8");
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 PlaylistKey::from_raw(8),
                 &file,
@@ -1667,13 +1636,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let copy = database
+        let copy = catalog
             .import_playlist_file(std::io::Cursor::new(output), &file, None, |_| None)
             .await
             .unwrap();
         assert_eq!(copy.imported, 2);
         assert_eq!(
-            database
+            catalog
                 .playlist_access(copy.playlist, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
@@ -1682,7 +1651,7 @@ mod tests {
         );
         let mut copied = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     copy.playlist,
                     &file,
@@ -1702,7 +1671,7 @@ mod tests {
         );
         let mut native = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     PlaylistKey::from_raw(8),
                     &file,
@@ -1718,13 +1687,13 @@ mod tests {
     #[tokio::test]
     async fn local_paths_import_without_a_configured_source() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let path = directory.path().join("café %.flac");
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
         let input = format!("#EXTM3U\ncafé %.flac\n{}\n{uri}\n", path.display());
-        let report = database
+        let report = catalog
             .import_playlist_file(
                 std::io::Cursor::new(input),
                 &directory.path().join("mix.m3u8"),
@@ -1734,22 +1703,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.imported, 3);
-        let entries = (&crate::MemberRead {
-            collection: crate::Collection::Playlist(report.playlist),
-            sort: Some(crate::CatalogSort::Position),
-            ..crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
-        })
-            .rows(&database, 0, 128, &crate::ReadCancellation::new())
-            .await
-            .map(|rows| {
-                rows.into_iter()
-                    .filter_map(crate::MemberRow::into_entry)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let entries = playlist_rows(&catalog, report.playlist).await;
         assert_eq!(entries.len(), 3);
         for entry in entries {
-            let actual = entry.track.media_uri;
+            let actual = entry.media_uri;
             assert_eq!(actual, uri);
             assert_eq!(crate::file_media_path(&actual).unwrap(), path);
         }
@@ -1758,15 +1715,15 @@ mod tests {
     #[tokio::test]
     async fn ordinary_m3u_preserves_unicode_duplicates_missing_paths_and_exact_reimport() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u8");
-        let report = database.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
+        let report = catalog.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
         assert_eq!((report.imported, report.skipped), (6, 1));
         let mut output = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     report.playlist,
                     &file,
@@ -1788,13 +1745,13 @@ mod tests {
                 .count(),
             2
         );
-        let again = database
+        let again = catalog
             .import_playlist_file(std::io::Cursor::new(output), &file, None, |_| None)
             .await
             .unwrap();
         assert_eq!(again.playlist, report.playlist);
         assert_eq!(again.imported, 6);
-        let queued = database
+        let queued = catalog
             .queue_entries(
                 crate::QueueLoad::tracks(
                     crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
@@ -1805,7 +1762,7 @@ mod tests {
             .await
             .unwrap();
         let requested = queued.entries.into_iter().enumerate().collect::<Vec<_>>();
-        let rows = database
+        let rows = catalog
             .queue_rows_for_entries(&requested, &crate::ReadCancellation::new())
             .await
             .unwrap();
@@ -1819,5 +1776,33 @@ mod tests {
             "https://example.test/song?token=secret&signature=abc%2Bdef&token=other"
         );
         assert_eq!(rows[4].track.media_uri, rows[5].track.media_uri);
+    }
+
+    /// A playlist's entry rows in playlist order.
+    async fn playlist_rows(
+        catalog: &Catalog,
+        playlist: crate::PlaylistKey,
+    ) -> Vec<crate::TrackRow> {
+        let cancel = crate::ReadCancellation::new();
+        let order = catalog
+            .order(
+                &crate::Read::Members(crate::MemberRead {
+                    sort: Some(crate::LibraryField::RowIndex),
+                    ..crate::MemberRead::new(crate::Collection::Playlist(playlist))
+                }),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        catalog
+            .rows(&order, 0..order.len(), false, &cancel)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::Row::Track(track) if track.entry.is_some() => Some(track),
+                _ => None,
+            })
+            .collect()
     }
 }

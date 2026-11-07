@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::media_session::AndroidPlaybackSubscription;
 use gstreamer::{self as gst, prelude::*};
-use jni::{Env, objects::JObject};
+use jni::{Env, JavaVM, objects::JObject};
 use rufin_core::{
     app,
     diagnostics::{Diagnostics, StderrGuard},
@@ -71,7 +71,18 @@ fn initialize<'local>(
     crate::discovery::initialize(env, &context)?;
     crate::documents::initialize(env, &documents)?;
     crate::network::initialize(env, &context)?;
-    rustls_platform_verifier::android::init_with_env(env, context)
+    let process = env.new_global_ref(&context)?;
+    rustls_platform_verifier::android::init_with_env(env, context)?;
+    // netdev, which lists network interfaces for Connect, reads the context through ndk-context.
+    #[allow(unsafe_code)]
+    // SAFETY: Kotlin initializes once per process, and the global reference stays alive.
+    unsafe {
+        ndk_context::initialize_android_context(
+            JavaVM::singleton()?.get_raw().cast(),
+            process.into_raw().cast(),
+        );
+    }
+    Ok(())
 }
 
 #[uniffi::export]
@@ -105,13 +116,6 @@ fn android_paths(files_dir: String, cache_dir: String) -> Paths {
         state: files.join("state"),
         cache: cache_dir.into(),
     }
-}
-
-#[uniffi::export]
-pub fn reset_database(files_dir: String, cache_dir: String) -> Result<(), AndroidError> {
-    rufin_core::settings::StorageResetRequest::Database
-        .apply(&android_paths(files_dir, cache_dir))
-        .map_err(error)
 }
 
 /// The Android service retains this object independently of screen navigation.
@@ -151,14 +155,8 @@ impl AndroidRuntime {
                 false,
                 settings,
                 paths.clone(),
-                |processing| {
-                    playback_gstreamer::GStreamerPlaybackBackend::new(processing)
-                        .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                        .map_err(|error| error.to_string())
-                },
+                playback_gstreamer::start_backend,
                 playback_gstreamer::available_audio_outputs,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
             ))
             .map_err(error)?;
         let player = Arc::new(crate::player::AndroidPlayer::new(
@@ -189,10 +187,6 @@ impl AndroidRuntime {
             runtime: Mutex::new(Some(runtime)),
             paths,
         }))
-    }
-
-    pub fn application_name(&self) -> String {
-        app_identity::DISPLAY_NAME.to_string()
     }
 
     pub fn debug_logging(&self) -> bool {
@@ -244,7 +238,7 @@ impl AndroidRuntime {
         Arc::new(crate::storage::AndroidStorage::new(self))
     }
 
-    pub fn downloads(&self) -> Arc<downloads::Downloads> {
+    pub fn downloads(&self) -> Arc<rufin_core::downloads::Downloads> {
         Arc::new(self.products.downloads.clone())
     }
 
@@ -256,7 +250,21 @@ impl AndroidRuntime {
             .map_err(error)
     }
 
-    pub fn backups(&self) -> rufin_core::runtime::BackupHandle {
+    /// Whether a setting still uses the document tree `uri`: a document root, a download
+    /// directory or the backup destination. Its grant goes only when none does.
+    pub fn uses_document(&self, uri: String) -> Result<bool, AndroidError> {
+        let settings = self.products.settings.load();
+        Ok(self.has_document_root(uri.clone())?
+            || settings.downloads.iter().any(|downloads| {
+                matches!(
+                    &downloads.directory,
+                    Some(rufin_core::downloads::DownloadDirectory::Document { uri: used }) if *used == uri
+                )
+            })
+            || settings.application.backup.destination_uri.as_deref() == Some(uri.as_str()))
+    }
+
+    pub fn backups(&self) -> std::sync::Arc<rufin_core::backup::BackupOwner> {
         self.products.backup.clone()
     }
 
@@ -278,10 +286,7 @@ impl AndroidRuntime {
     }
 
     pub fn subscribe_playback(&self) -> Arc<AndroidPlaybackSubscription> {
-        Arc::new(AndroidPlaybackSubscription::new(
-            &self.products,
-            self.library_events.intents(),
-        ))
+        Arc::new(AndroidPlaybackSubscription::new(&self.products))
     }
 
     pub fn subscribe_network(&self) -> Arc<crate::network::AndroidNetworkSubscription> {
@@ -292,14 +297,14 @@ impl AndroidRuntime {
 
     pub async fn open_uris(&self, uris: Vec<String>) -> Result<(), AndroidError> {
         let queue = self.products.playback.clone();
-        let database = self.products.library.clone();
+        let catalog = self.products.library.clone();
         let local = self.products.settings.local_configuration();
         self.products
             .runtime
             .spawn(async move {
                 rufin_core::open::arguments(
                     queue,
-                    &database,
+                    &catalog,
                     local.as_ref(),
                     uris.into_iter().map(Into::into).collect(),
                 )
@@ -340,15 +345,13 @@ impl AndroidRuntime {
     ) -> Result<(), AndroidError> {
         let request = self.products.prepare_storage_reset(kind).map_err(error)?;
         self.controller_owner.stop();
-        self.products.playback.shutdown();
-        self.products.scrobbling.shutdown();
         let runtime = self
             .runtime
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .take()
             .ok_or_else(|| error("Rufin is shutting down"))?;
-        let closed = runtime.block_on(self.products.close_storage());
+        let closed = self.products.shutdown(true);
         // File workers must finish before the reset can remove their output.
         drop(runtime);
         closed.map_err(error)?;
@@ -362,9 +365,7 @@ impl AndroidRuntime {
 impl Drop for AndroidRuntime {
     fn drop(&mut self) {
         self.controller_owner.stop();
-        self.products.playback.shutdown();
-        self.products.scrobbling.shutdown();
-        if let Err(error) = self.products.settings.flush() {
+        if let Err(error) = self.products.shutdown(false) {
             tracing::warn!(%error, "could not finish saving settings");
         }
         if let Some(runtime) = self

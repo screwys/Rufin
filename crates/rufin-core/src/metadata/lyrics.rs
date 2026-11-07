@@ -59,20 +59,30 @@ impl MetadataEditor {
                     .map_err(|error| Error::Write(error.to_string()))?,
                 EditDestination::Server { .. } => {
                     if let Some(source) = session.source.clone() {
-                        let database = self.source.shared.database.clone();
+                        let catalog = self.source.shared.catalog.clone();
                         let uri = session.media_uri.clone();
                         self.source
                             .shared
                             .runtime
-                            .spawn(async move { source.lyrics_storage(&database, &uri).await })
+                            .spawn(async move {
+                                let key = catalog
+                                    .track_keys(&[uri], &library::ReadCancellation::new())
+                                    .await
+                                    .ok()?
+                                    .pop()?;
+                                let playable = catalog.playable(key).await.ok()??;
+                                Some(source.lyrics_storage(&playable))
+                            })
                             .await
                             .map_err(|error| Error::Write(error.to_string()))?
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     }
                 }
             };
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             let preferred = if settings.lyrics.preferences.save_lyrics_as_sidecar {
                 LyricsStorage::Sidecar
             } else {
@@ -113,7 +123,8 @@ impl MetadataEditor {
     ) -> Result<Vec<::lyrics::LyricsSearchResult>, Error> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             if !settings
                 .lyrics
                 .preferences
@@ -124,7 +135,11 @@ impl MetadataEditor {
             if artist.trim().is_empty() && title.trim().is_empty() {
                 return Ok(Vec::new());
             }
-            let providers = settings.lyrics.preferences.external_lyrics_providers;
+            let providers = settings
+                .lyrics
+                .preferences
+                .external_lyrics_providers
+                .clone();
             self.source
                 .shared
                 .runtime
@@ -144,7 +159,8 @@ impl MetadataEditor {
     ) -> Result<Option<String>, Error> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             if !settings
                 .lyrics
                 .preferences
@@ -199,7 +215,7 @@ impl EditSession {
             EditDestination::Files(files) => {
                 files
                     .save_lyrics(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         &text,
                         edit.storage == LyricsStorage::Sidecar,
                     )
@@ -209,19 +225,17 @@ impl EditSession {
                 let source = self.source.as_ref().ok_or(Error::Unavailable)?;
                 source
                     .write_lyrics(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         &self.media_uri,
                         &text,
                         edit.storage == LyricsStorage::Sidecar,
                     )
                     .await?;
-                source.refresh_written_lyrics(&owner.shared.database);
+                source.refresh_written_lyrics(&owner.shared.catalog);
                 None
             }
         };
-        if let Ok(playback) = owner.shared.playback() {
-            playback.lyrics.accept_edited(&self.media_uri, &text).await;
-        }
+        owner.lyrics_edited(&self.media_uri, &text);
         Ok(revision)
     }
 }

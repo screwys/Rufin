@@ -5,7 +5,7 @@ use crate::{
     library::AndroidLibrary,
 };
 use library::{PlaylistKey, PlaylistPathMode, SourceId};
-use rufin_core::{playlist_files, playlists};
+use rufin_core::{playlist_files, playlists, settings::presentation};
 
 #[derive(uniffi::Record)]
 pub struct AndroidPlaylistChoices {
@@ -15,6 +15,8 @@ pub struct AndroidPlaylistChoices {
 
 #[uniffi::export]
 impl AndroidLibrary {
+    /// The playlists Add to Playlist offers, or with `folder_kind` the playlist folders of that
+    /// kind Add to folder offers, as GTK lists them, whose names hold `filter`.
     pub async fn playlist_choices(
         &self,
         filter: String,
@@ -22,41 +24,46 @@ impl AndroidLibrary {
         offset: u64,
         limit: u32,
     ) -> Result<AndroidPlaylistChoices, AndroidError> {
-        let selected = self.source.selected_library();
-        let mut read = library::ListRead::new(
-            if folder_kind == Some(true) {
-                library::ListKind::SmartPlaylists {
-                    now: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(error)?
-                        .as_secs() as i64,
-                }
-            } else {
-                library::ListKind::Playlists
-            },
-            selected.as_ref().map(|selected| selected.source_key),
-            library::CatalogSort::Title,
-        );
-        read.folder = selected.and_then(|selected| selected.music_folder_key);
-        read.filter = filter;
-        read.playlist_scope = if folder_kind.is_some() {
-            library::PlaylistScope::Folders
-        } else {
-            library::PlaylistScope::All
-        };
-        let database = self.database.clone();
+        let source = self
+            .source
+            .selected_library()
+            .map(|selected| selected.source_key);
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
-                let count = read.count(&database, &cancel).await.map_err(error)? as u64;
-                let rows = read
-                    .playlist_items(&database, offset as usize, limit as usize, &cancel)
-                    .await
-                    .map_err(error)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
-                Ok(AndroidPlaylistChoices { count, rows })
+                let offset = usize::try_from(offset).map_err(error)?;
+                let window = offset..offset.saturating_add(limit as usize);
+                let (count, rows) = match folder_kind {
+                    Some(smart) => {
+                        let folders = catalog
+                            .playlist_folder_choices(smart, &filter)
+                            .into_iter()
+                            .map(|(key, _)| library::Item::PlaylistFolder(key))
+                            .collect::<Vec<_>>();
+                        let shown = &folders
+                            [window.start.min(folders.len())..window.end.min(folders.len())];
+                        let rows = catalog.rows_of(shown, true, &cancel).await.map_err(error)?;
+                        (folders.len(), rows)
+                    }
+                    None => {
+                        let (count, playlists) = catalog
+                            .playlist_destinations(source, &filter, window, &cancel)
+                            .await
+                            .map_err(error)?;
+                        let rows = playlists
+                            .into_iter()
+                            .map(|row| {
+                                library::Row::Playlist(library::PlaylistListRow::Playlist(row))
+                            })
+                            .collect();
+                        (count, rows)
+                    }
+                };
+                Ok(AndroidPlaylistChoices {
+                    count: count as u64,
+                    rows: rows.into_iter().map(Into::into).collect(),
+                })
             })
             .await
             .map_err(error)?
@@ -95,20 +102,24 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
-    pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                database
-                    .playlists(&[playlist], &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                    .pop()
-                    .map(|row| row.name)
-                    .ok_or_else(|| error("Playlist no longer exists"))
-            })
+    /// Removes the playlist's tracks that are no longer available; returns how many went.
+    pub async fn remove_unavailable_tracks(
+        &self,
+        playlist: PlaylistKey,
+    ) -> Result<u64, AndroidError> {
+        playlists::remove_unavailable_tracks(&self.source, playlist)
+            .recv()
             .await
             .map_err(error)?
+            .map(|removed| removed as u64)
+            .map_err(error)
+    }
+
+    pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
+        self.catalog
+            .playlist_name(playlist)
+            .await
+            .ok_or_else(|| error("Playlist no longer exists"))
     }
 
     pub fn playlist_artwork_limit(&self) -> u64 {
@@ -140,25 +151,15 @@ impl AndroidLibrary {
     pub async fn update_playlist_file_options(
         &self,
         playlist: PlaylistKey,
-        name: String,
         auto_refresh: bool,
         auto_save: Option<bool>,
         path_mode: PlaylistPathMode,
-        artwork: Option<sources::ArtworkChange>,
     ) -> Result<(), AndroidError> {
-        playlist_files::update(
-            &self.source,
-            playlist,
-            name,
-            auto_refresh,
-            auto_save,
-            path_mode,
-            artwork,
-        )
-        .recv()
-        .await
-        .map_err(error)?
-        .map_err(error)
+        playlist_files::update(&self.source, playlist, auto_refresh, auto_save, path_mode)
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
     }
 
     pub async fn link_playlist_file(
@@ -234,22 +235,6 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub async fn playlist_member_folder(
-        &self,
-        member: library::PlaylistFolderMember,
-    ) -> Result<Option<library::PlaylistFolderKey>, AndroidError> {
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                database
-                    .playlist_member_folder(&member, &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)?
-    }
-
     pub async fn save_smart_playlist(
         &self,
         key: Option<library::SmartPlaylistKey>,
@@ -257,56 +242,33 @@ impl AndroidLibrary {
         definition: library::SmartPlaylistDefinition,
         folder: Option<library::PlaylistFolderKey>,
     ) -> Result<library::SmartPlaylistKey, AndroidError> {
-        let source = self.source.clone();
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                let key = if let Some(key) = key {
-                    if !database
-                        .update_smart_playlist(key, &name, &definition, None)
-                        .await
-                        .map_err(error)?
-                    {
-                        return Err(error("Playlist no longer exists"));
-                    }
-                    key
-                } else {
-                    database
-                        .create_smart_playlist(&name, &definition)
-                        .await
-                        .map_err(error)?
-                };
-                if let Some(folder) = folder {
-                    playlists::move_playlist_to_folder(
-                        &source,
-                        library::PlaylistFolderMember::SmartPlaylist { key },
-                        Some(folder),
-                    )
-                    .await
-                    .map_err(error)?;
-                } else {
-                    playlists::playlist_folders_changed(&source).await;
-                }
-                Ok(key)
-            })
+        let change = match key {
+            Some(key) => playlists::SmartPlaylistChange::Update {
+                key,
+                name,
+                definition,
+                artwork: None,
+            },
+            None => playlists::SmartPlaylistChange::Create { name, definition },
+        };
+        playlists::apply_smart_playlist_change(&self.source, change, folder)
             .await
             .map_err(error)?
+            .ok_or_else(|| error("Playlist no longer exists"))
     }
 
     pub async fn delete_smart_playlist(
         &self,
         key: library::SmartPlaylistKey,
     ) -> Result<(), AndroidError> {
-        let source = self.source.clone();
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                database.delete_smart_playlist(key).await.map_err(error)?;
-                playlists::playlist_folders_changed(&source).await;
-                Ok(())
-            })
-            .await
-            .map_err(error)?
+        playlists::apply_smart_playlist_change(
+            &self.source,
+            playlists::SmartPlaylistChange::Delete(key),
+            None,
+        )
+        .await
+        .map_err(error)?;
+        Ok(())
     }
 
     pub fn smart_playlist_default_definition(&self) -> library::SmartPlaylistDefinition {
@@ -332,4 +294,27 @@ impl AndroidLibrary {
             value: field.default_value(operator),
         }
     }
+}
+
+#[uniffi::export]
+pub fn smart_rule_field_title(field: library::SmartPlaylistRuleField) -> String {
+    localization::tr(presentation::smart_rule_field_title(field))
+}
+
+#[uniffi::export]
+pub fn smart_operator_title(
+    field: library::SmartPlaylistRuleField,
+    operator: library::SmartPlaylistRuleOperator,
+) -> String {
+    localization::tr(presentation::smart_operator_title(field, operator))
+}
+
+#[uniffi::export]
+pub fn smart_sort_title(field: library::SmartPlaylistSort) -> String {
+    localization::tr(presentation::smart_sort_title(field))
+}
+
+#[uniffi::export]
+pub fn smart_period_title(period: library::SmartPlaylistActivityPeriod) -> String {
+    localization::tr(presentation::smart_period_title(period))
 }

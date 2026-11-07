@@ -240,21 +240,16 @@ impl PlexSource {
     }
     pub(crate) async fn acquire_collection(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         collection: &crate::SourceCollection,
         header: Option<&serde_json::Value>,
         complete_membership: bool,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
-
-        let stamp = if complete_membership && stamp.is_none() {
-            Some(catalog.start_observation().await?)
-        } else {
-            stamp
-        };
+        let source_id = observation.source_id;
+        if complete_membership && !observation.is_walk() {
+            observation.start_observation().await?;
+        }
         let object = match collection {
             crate::SourceCollection::Album(id) | crate::SourceCollection::Artist(id) => id,
         };
@@ -277,7 +272,7 @@ impl PlexSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
             }
         }
         let (object, suffix) = match collection {
@@ -297,7 +292,7 @@ impl PlexSource {
                 .await?;
             let entries = items(&response["MediaContainer"]["Metadata"]);
             let finished = super::catalog::page_finished(&response, offset, entries.len())?;
-            self.acquire_metadata_page(catalog, entries, None, cancelled)
+            self.acquire_metadata_page(observation, entries, None, cancelled)
                 .await?;
 
             offset += entries.len();
@@ -308,8 +303,8 @@ impl PlexSource {
         if complete_membership && let crate::SourceCollection::Album(id) = collection {
             let mut after = None;
             loop {
-                let missing = database
-                    .omitted_album_track_page(source_id, id, stamp.unwrap(), after.as_deref(), 100)
+                let missing = observation
+                    .omitted_album_track_page(id, after.as_deref(), 100)
                     .await?;
                 if missing.is_empty() {
                     break;
@@ -319,14 +314,12 @@ impl PlexSource {
                     .iter()
                     .map(|id| raw_item_id(id).to_owned())
                     .collect();
-                Box::pin(self.acquire_items(catalog, ids, Vec::new(), cancelled)).await?;
+                Box::pin(self.acquire_items(observation, ids, Vec::new(), cancelled)).await?;
             }
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog
-                .complete_album_observation(&id, stamp.unwrap())
-                .await?;
+            observation.complete_album_observation(&id).await?;
         }
         Ok(())
     }
@@ -335,17 +328,15 @@ impl PlexSource {
         source_id: &str,
         query: &str,
         limit: usize,
+        section: Option<&str>,
     ) -> SourceResult<library::CatalogBatch> {
-        let response = self
-            .get(
-                "/hubs/search",
-                &[
-                    ("query", query.into()),
-                    ("limit", limit.clamp(1, 100).to_string()),
-                    ("includeCollections", "0".into()),
-                ],
-            )
-            .await?;
+        let mut parameters = vec![
+            ("query", query.into()),
+            ("limit", limit.clamp(1, 100).to_string()),
+            ("includeCollections", "0".into()),
+        ];
+        parameters.extend(section.map(|section| ("sectionId", raw_item_id(section).into())));
+        let response = self.get("/hubs/search", &parameters).await?;
         let native = items(&response["MediaContainer"]["Hub"])
             .iter()
             .flat_map(|hub| items(&hub["Metadata"]).iter().take(limit.clamp(1, 100)))
@@ -360,10 +351,12 @@ impl PlexSource {
         folder: Option<&str>,
         section: Option<&str>,
     ) -> SourceResult<crate::LiveFolderPage> {
-        let path = folder
-            .map(|id| format!("/library/metadata/{}/children", raw_item_id(id)))
-            .or_else(|| section.map(|id| format!("/library/sections/{}/folder", raw_item_id(id))))
-            .unwrap_or_else(|| "/library/sections".into());
+        // A folder is the path Plex lists it at; a top-level one is a section.
+        let path = match folder.or(section).map(raw_item_id) {
+            Some(key) if key.starts_with('/') => key.to_owned(),
+            Some(section) => format!("/library/sections/{section}/folder"),
+            None => "/library/sections".into(),
+        };
         let response = self.get(&path, &[]).await?;
         let container = &response["MediaContainer"];
         let mut page = crate::LiveFolderPage::default();
@@ -371,10 +364,11 @@ impl PlexSource {
             .iter()
             .chain(items(&container["Metadata"]))
         {
-            let Some(raw) = id(&entry["ratingKey"]).or_else(|| id(&entry["key"])) else {
+            let track = entry["type"] == "track";
+            let Some(raw) = id(&entry[if track { "ratingKey" } else { "key" }]) else {
                 continue;
             };
-            if entry["type"] == "track" {
+            if track {
                 page.tracks.push(plex_id("track", &raw));
             } else {
                 page.folders.push(crate::LiveFolder {

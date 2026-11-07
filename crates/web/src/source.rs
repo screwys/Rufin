@@ -8,6 +8,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             "/api/sources",
             get(list).post(add).patch(update).delete(forget),
         )
+        .route("/api/downloads", post(download))
         .route("/api/downloads/quality", post(download_quality))
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
@@ -45,21 +46,70 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/integrations/files/edit", get(edit_file_integration))
 }
 
-async fn download_quality(
+async fn download(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     #[derive(Deserialize)]
     struct Input {
-        source: sources::SourceId,
-        quality: sources::DownloadQuality,
+        uris: Vec<String>,
     }
     let input: Input = body(request).await?;
     products
-        .settings
-        .set_download_quality(input.source, input.quality)
-        .map_err(bad_request)?;
+        .source
+        .download_selection(library::MemberSelection::Uris(input.uris.into()))
+        .recv()
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
     Ok(accepted())
+}
+
+/// A download quality as its control shows it: the quality and which of its parts it offers.
+fn quality_view(quality: sources::DownloadQuality) -> Value {
+    json!({"value":quality,"bitrate":rufin_core::downloads::download_quality_shows_bitrate(quality),"channels":rufin_core::downloads::download_quality_shows_channels(quality)})
+}
+
+async fn download_quality(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    /// A whole quality, or one change to the saved one, so edits sent one after another hold.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Edit {
+        Quality(sources::DownloadQuality),
+        Codec(Option<library::AudioCodec>),
+        BitrateKbps(u32),
+        Channels(library::AudioChannels),
+    }
+    #[derive(Deserialize)]
+    struct Input {
+        source: sources::SourceId,
+        edit: Edit,
+    }
+    let input: Input = body(request).await?;
+    use rufin_core::downloads::{
+        download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
+    };
+    let mut quality = sources::DownloadQuality::Original;
+    let edit = |ui: &mut rufin_core::settings::Settings| {
+        let saved = ui.download_settings(&input.source).quality;
+        quality = match input.edit {
+            Edit::Quality(quality) => quality,
+            Edit::Codec(codec) => download_quality_with_codec(saved, codec),
+            Edit::BitrateKbps(kbps) => download_quality_with_bitrate(saved, kbps),
+            Edit::Channels(channels) => download_quality_with_channels(saved, channels),
+        };
+        ui.set_download_quality(input.source.clone(), quality);
+        Ok(())
+    };
+    let settings = &products.settings;
+    settings.update_preferences(edit).map_err(bad_request)?;
+    Ok(json_response(
+        StatusCode::ACCEPTED,
+        json!({"accepted":true,"quality":quality,"download_quality":quality_view(quality)}),
+    ))
 }
 
 async fn file_integrations(
@@ -119,11 +169,29 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         json!({
             "selected": configured.selected_source_id,
             "library": selected.as_ref().and_then(|source|source.music_folder_object_id.clone()),
-            "new_playlist_current": products.settings.load().application.new_playlist_current,
             "libraries": selected.as_ref().map(|source|source.music_folders.iter().map(|folder|json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>()).unwrap_or_default(),
-            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality})).collect::<Vec<_>>()
+            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"owns_playlists":s.owns_playlists,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality,"download_quality":quality_view(products.settings.download_settings(s.id.clone()).quality)})).collect::<Vec<_>>()
         }),
     ))
+}
+
+/// Selects the source unless it is the selected one already.
+pub(super) async fn ensure_selected(
+    products: &ProductHandles,
+    source: sources::SourceId,
+) -> Result<sources::SourceId, Error> {
+    match products
+        .source
+        .selected_library()
+        .filter(|selected| selected.source_id == source)
+    {
+        Some(selected) => Ok(selected.source_id),
+        None => products
+            .source
+            .select_source(source)
+            .await
+            .map_err(bad_request),
+    }
 }
 
 pub(super) async fn select_library(
@@ -136,18 +204,7 @@ pub(super) async fn select_library(
         library: Option<String>,
     }
     let input: Input = body(request).await?;
-    let selected = match products
-        .source
-        .selected_library()
-        .filter(|selected| selected.source_id == input.source)
-    {
-        Some(selected) => selected.source_id,
-        None => products
-            .source
-            .select_source(input.source)
-            .await
-            .map_err(bad_request)?,
-    };
+    let selected = ensure_selected(&products, input.source).await?;
     completion(products.source.set_music_folder(selected, input.library)).await?;
     Ok(accepted())
 }
@@ -281,6 +338,7 @@ async fn cache_settings(
     struct Input {
         artwork: bool,
         lyrics: bool,
+        sort_tags: bool,
     }
     if request.method() == hyper::Method::POST {
         let input: Input = body(request).await?;
@@ -289,6 +347,7 @@ async fn cache_settings(
             .update_preferences(|settings| {
                 settings.application.download_artwork_automatically = input.artwork;
                 settings.application.download_lyrics_automatically = input.lyrics;
+                settings.application.use_sort_tags = input.sort_tags;
                 Ok(())
             })
             .map_err(bad_request)?;
@@ -299,6 +358,7 @@ async fn cache_settings(
         json!({
             "artwork": settings.application.download_artwork_automatically,
             "lyrics": settings.application.download_lyrics_automatically,
+            "sort_tags": settings.application.use_sort_tags,
         }),
     ))
 }

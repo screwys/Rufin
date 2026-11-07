@@ -14,21 +14,12 @@ readme = "README.md"
 publish = false
 
 [workspace.dependencies]
-uniffi = "=0.32.1"
+uniffi = "0.32"
 # Rufin crates
 app-identity = { path = "crates/app-identity" }
 artwork = { path = "crates/artwork" }
 audio-processing = { path = "crates/audio-processing" }
-backup = { path = "crates/backup" }
 desktop-integration = { path = "crates/desktop-integration" }
-downloads = { path = "crates/downloads" }
-gtk-editors = { path = "crates/gtk-editors" }
-gtk-library = { path = "crates/gtk-library" }
-gtk-media-menus = { path = "crates/gtk-media-menus" }
-gtk-player = { path = "crates/gtk-player" }
-gtk-preferences = { path = "crates/gtk-preferences" }
-gtk-shell = { path = "crates/gtk-shell" }
-gtk-widgets = { path = "crates/gtk-widgets" }
 library = { path = "crates/library" }
 localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
@@ -37,13 +28,12 @@ playback = { path = "crates/playback" }
 playback-cast = { path = "crates/playback-cast" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
 process-memory = { path = "crates/process-memory" }
-presence = { path = "crates/presence" }
 rufin-connect = { path = "crates/rufin-connect" }
 rufin-controller = { path = "crates/rufin-controller" }
 rufin-core = { path = "crates/rufin-core" }
-scrobbling = { path = "crates/scrobbling" }
 secrets = { path = "crates/secrets" }
 sources = { path = "crates/sources" }
+ui = { path = "crates/ui" }
 windows-updater = { path = "crates/windows-updater" }
 web = { path = "crates/web" }
 
@@ -75,6 +65,7 @@ hyper-util = { version = "0.1", features = ["tokio", "service"] }
 directories = "6.0.0"
 ebur128 = "0.1.10"
 fcast-sender-sdk = { version = "0.3.0", default-features = false, features = ["chromecast"] }
+futures-executor = "0.3.33"
 futures-util = "0.3.32"
 getrandom = "0.4.0"
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
@@ -126,7 +117,7 @@ serde_json = "1.0.150"
 serde_path_to_error = "0.1.20"
 sha2 = "0.10"
 socket2 = { version = "0.6.5", features = ["all"] }
-sqlx = { version = "=0.9.0", default-features = false, features = ["derive", "runtime-tokio", "sqlite", "regexp"] }
+sqlx = { version = "=0.9.0", default-features = false, features = ["derive", "runtime-tokio", "sqlite"] }
 sqlx-core = { version = "=0.9.0", default-features = false }
 libsqlite3-sys = "=0.37.0"
 regex = "1.13.1"
@@ -175,7 +166,6 @@ panic = "abort"
 
 [profile.dev]
 debug = "line-tables-only"
-opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2

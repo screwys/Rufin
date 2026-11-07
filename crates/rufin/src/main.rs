@@ -5,7 +5,6 @@ use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::process::{Command, ExitCode};
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::{
     fs,
@@ -16,7 +15,7 @@ use tracing::info;
 const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
 
 fn main() -> ExitCode {
-    rufin_controller::configure_allocator();
+    process_memory::configure_allocator();
     let headless = env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless"));
     #[cfg(target_os = "windows")]
     if headless {
@@ -60,45 +59,28 @@ fn main() -> ExitCode {
 
     let initial_settings = settings.load().ui.clone();
     let bootstrap = move || async move {
-        let discord = Arc::new(desktop_integration::Discord::new());
-        let presence = Arc::clone(&discord);
         app::runtime_inputs(
             diagnostics,
             !updated_restart,
             settings,
             paths::roots(),
-            |processing| {
-                playback_gstreamer::GStreamerPlaybackBackend::new(processing)
-                    .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                    .map_err(|error| error.to_string())
-            },
+            playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
-            Arc::new(move |projection| presence.observe(projection)),
-            Arc::new(move |settings, projection| {
-                discord.update(
-                    settings.rich_presence.clone(),
-                    !settings.application.private_mode,
-                    &settings.lastfm_api_key,
-                    projection,
-                )
-            }),
         )
         .await
     };
     let runtime = match app::worker_runtime() {
         Ok(runtime) => runtime,
         Err(error) => {
-            return finish_storage_reset(gtk_shell::run_startup_error_application(
-                error.to_string(),
-            ));
+            return finish_storage_reset(ui::run_startup_error_application(error.to_string()));
         }
     };
     let result = {
         let _guard = runtime.enter();
         if updated_restart {
-            gtk_shell::run_application_after_update(initial_settings, bootstrap, || {})
+            ui::run_application_after_update(initial_settings, bootstrap, || {})
         } else {
-            gtk_shell::run_application(initial_settings, bootstrap)
+            ui::run_application(initial_settings, bootstrap)
         }
     };
     if result.storage_reset.is_some() {
@@ -111,7 +93,7 @@ fn main() -> ExitCode {
     result.code
 }
 
-fn finish_storage_reset(mut result: gtk_shell::ApplicationExit) -> ExitCode {
+fn finish_storage_reset(mut result: ui::ApplicationExit) -> ExitCode {
     loop {
         let Some(reset) = result.storage_reset else {
             return result.code;
@@ -121,7 +103,7 @@ fn finish_storage_reset(mut result: gtk_shell::ApplicationExit) -> ExitCode {
             .and_then(|()| restart_after_storage_reset().map_err(|error| error.to_string()));
         match reset {
             Ok(code) => return code,
-            Err(error) => result = gtk_shell::run_startup_error_application(error),
+            Err(error) => result = ui::run_startup_error_application(error),
         }
     }
 }

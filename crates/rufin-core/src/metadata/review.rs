@@ -177,7 +177,7 @@ impl MetadataLookupReview {
             let cached = self
                 .source()
                 .shared
-                .database
+                .catalog
                 .cached_fingerprint_lookups(&uris, metadata_lookup::cache_time())
                 .await;
             let cached = match cached {
@@ -673,10 +673,9 @@ impl MetadataLookupReview {
         let rows = editor
             .source
             .shared
-            .database
+            .catalog
             .file_edit_rows(
                 &editor.session.as_ref().ok_or(Error::Unavailable)?.media_uri,
-                None,
                 &library::ReadCancellation::new(),
             )
             .await

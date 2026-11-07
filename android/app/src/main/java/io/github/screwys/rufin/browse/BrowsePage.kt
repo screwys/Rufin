@@ -1,11 +1,15 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.CatalogRevision
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.library.LibraryField
+import io.github.screwys.rufin.shared.rufin_core.Changed
+import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
-
+import io.github.screwys.rufin.shared.rufin_core.Refresh
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.routeRequiresSelectedSource
+import io.github.screwys.rufin.shared.library.SearchMode
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -15,18 +19,24 @@ import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+/** A Home section: its title, rows, and the block its refresh reads again. */
+internal data class HomeSectionItems(val index: ULong, val title: String, val kind: AndroidHomeSectionKind,
+    val refresh: io.github.screwys.rufin.shared.library.HomeBlockKind?, val items: List<BrowseItem>)
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class BrowsePage(
     private val connection: RufinConnection,
     private val browse: BrowseConnection,
-    private val location: BrowseLocation,
+    val location: BrowseLocation,
     val options: BrowseOptions,
     scope: CoroutineScope,
     private val pins: Boolean = false,
-    private val parent: BrowsePage? = null,
-) {
+) : ShownRows(browse, scope) {
     var active by mutableStateOf(false)
-    var favoritesPage by mutableStateOf<BrowsePage?>(null)
+    /** An artist page's favorite tracks: how many, the fields and display they show. */
+    var favoriteCount by mutableStateOf(0UL)
+        private set
+    var favoriteFields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
     var releaseGroups by mutableStateOf<List<AndroidArtistReleaseGroup>>(emptyList())
         private set
@@ -34,7 +44,7 @@ internal class BrowsePage(
         private set
     var supportsDownloadedFilter by mutableStateOf(false)
         private set
-    var homeRows by mutableStateOf<List<BrowseItem>>(emptyList())
+    var homeSections by mutableStateOf<List<HomeSectionItems>>(emptyList())
         private set
     var scrollSections by mutableStateOf<List<AndroidScrollSection>>(emptyList())
         private set
@@ -47,26 +57,32 @@ internal class BrowsePage(
         private set
     var musicFolders by mutableStateOf<AndroidMusicFolderState?>(null)
         private set
-    private val artistAlbums get() =
-        ((location.kind in listOf("artist", "ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography") ||
-            summary?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) && options.category == "albums")
+    private val artistAlbums get() = location.route.showsReleases && options.category == CollectionCategory.ALBUMS
     var summary by mutableStateOf<AndroidDetailSummary?>(null)
         private set
-    var detailTrackFields by mutableStateOf<List<AndroidSortField>>(emptyList())
+    override val header get() = summary?.row
+    override val pageView get() = currentView
+    override fun showHeader(row: AndroidBrowseRow) { summary = summary?.copy(row = row) }
+    /** The fields the page's rows show, in its layout. */
+    var fields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
     var loading by mutableStateOf(true)
         private set
     private var revision by mutableIntStateOf(0)
-    private var currentQuery by mutableStateOf<AndroidBrowseQuery?>(null)
-    private var preparedPage by mutableStateOf<AndroidBrowsePage?>(null)
+    /** Committed library changes this page's view said it shows. */
+    private var changes by mutableIntStateOf(0)
+    private var currentView by mutableStateOf<AndroidView?>(null)
+    private var openedPage by mutableStateOf<AndroidOpened?>(null)
     private var preparedContext by mutableStateOf<PageContext?>(null)
-    var downloadRevision by mutableStateOf<ULong?>(null)
-        private set
     private var capturedLabelsVersion = browse.labelsVersion
+    /** The favorite, rating and download changes committed while the page was not shown, which its
+     * rows show once it is. */
+    private var unshown: Changed? = null
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
+    private val favoriteData = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
+    val favoritePages: Flow<PagingData<BrowseItem>> = favoriteData.cachedIn(scope)
 
-    private val routeId get() = browse.routes.firstOrNull { it.route == location.route }?.id
     val covers get() = displaySettings?.layout == LibraryLayout.GRID
     val hasActiveFilters get() = options.filter.isNotBlank() ||
         (supportsFavoriteFilter && options.favoritesOnly) || (supportsDownloadedFilter && options.downloadedOnly)
@@ -77,12 +93,12 @@ internal class BrowsePage(
             options.downloadedOnly = false
         }
     }
-    private val embedded get() = parent != null
-    val supportsLetterIndex get() = !embedded && sortSelection?.sortKey in listOf(LibraryField.TITLE, LibraryField.ARTIST, LibraryField.ALBUM_ARTIST, LibraryField.ALBUM, LibraryField.GENRE)
+    var supportsLetterIndex by mutableStateOf(false)
+        private set
     suspend fun letterPosition(letter: String): ULong? {
-        val query = currentQuery ?: return null
-        val sections = if (scrollSections.isEmpty()) query.sectionPositions() else scrollSections
-        if (currentQuery !== query) return null
+        val view = currentView ?: return null
+        val sections = if (scrollSections.isEmpty()) view.sections() else scrollSections
+        if (currentView !== view) return null
         scrollSections = sections
         return sections.firstOrNull { it.title == letter }?.index
             ?: sections.filter { it.title <= letter }.maxByOrNull { it.title }?.index
@@ -90,23 +106,31 @@ internal class BrowsePage(
     }
 
     private data class PageContext(
-        val library: AndroidLibrary?, val sourceId: String?, val catalog: CatalogRevision?,
-        val route: Route, val category: String, val filter: String, val sort: LibraryField?,
-        val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
+        val library: AndroidLibrary?, val opens: Boolean, val changes: Int,
+        val route: Route, val category: CollectionCategory, val historySource: String?, val filter: String,
+        val sort: LibraryField?, val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
-        val downloadsRevision: ULong?,
-        val homeBlocks: String?,
-        val parentPage: AndroidBrowsePage?,
     )
 
+    /** Handles a committed change: shows it in the rows and header, and reads the page again
+     * when its View says so. Runs on the main thread. */
+    private fun handle(changed: Changed) {
+        if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) {
+            if (active) showChanges(changed)
+            else unshown = unshown?.let { it.copy(items = it.items + changed.items, downloads = it.downloads.ifEmpty { changed.downloads }) } ?: changed
+        }
+        val refresh = if (pins) browse.library?.pinsRefresh(changed) == true
+            else currentView?.refresh(changed)?.let { it != Refresh.NOTHING } == true
+        if (refresh) changes++
+    }
+
     fun refresh() { loading = true; revision++ }
-    suspend fun sourceUri(): String? = currentQuery?.detailSourceUri()
+    suspend fun sourceUri(): String? = currentView?.folderUri()
     fun chooseSort(field: LibraryField, direction: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { browse.library?.setBrowseSort(location.route, options.category, field, direction) }
-        if (artistAlbums) {
-            options.sort = null
-            browse.artistAlbumsChanged(orderChanged = true)
-        } else {
+        // An artist's releases read their saved order again as the settings commit.
+        if (artistAlbums) options.sort = null
+        else {
             options.sort = field
             options.descending = direction
         }
@@ -116,49 +140,90 @@ internal class BrowsePage(
         val display = withContext(Dispatchers.IO) {
             browse.library?.setBrowseDisplay(location.route, options.category, layout, size, spacing)
         } ?: return@runAction
+        showDisplay(display, previous != display.layout)
+    }
+    fun showField(field: LibraryField, shown: Boolean) = connection.runAction {
+        val display = withContext(Dispatchers.IO) {
+            browse.library?.showBrowseField(location.route, options.category, field, shown)
+        } ?: return@runAction
+        showDisplay(display, true)
+    }
+    fun moveField(field: LibraryField, up: Boolean) = connection.runAction {
+        val display = withContext(Dispatchers.IO) {
+            browse.library?.moveBrowseField(location.route, options.category, field, up)
+        } ?: return@runAction
+        showDisplay(display, true)
+    }
+    /** Shows `display`; rows read again when the fields they show changed. */
+    private fun showDisplay(display: AndroidBrowseDisplay, fieldsChanged: Boolean) {
         if (artistAlbums) {
             options.displaySettings = null
-            browse.artistAlbumsChanged(display)
-        } else if ((previous == LibraryLayout.DETAIL) != (display.layout == LibraryLayout.DETAIL)) { options.displaySettings = null; refresh() }
+            browse.artistAlbumsChanged(display, fieldsChanged)
+        } else if (fieldsChanged) { options.displaySettings = null; refresh() }
         else options.displaySettings = display
     }
 
-    fun playSection(id: String, shuffled: Boolean = false) = connection.runAction {
-        val query = homeRows.firstOrNull { it.row.sectionId == id }?.query ?: return@runAction
-        connection.connectedService().playRequest { query.playSection(id, "now", shuffled,
-            homeRows.firstOrNull { it.row.sectionId == id }?.row?.section) }
+    fun play(placement: QueuePlacement, shuffled: Boolean, title: String) = connection.runAction {
+        val view = currentView ?: return@runAction
+        connection.connectedService().playRequest { view.playAll(placement, shuffled, title) }
     }
+
+    fun playSection(section: HomeSectionItems, shuffled: Boolean = false) = connection.runAction {
+        val view = currentView ?: return@runAction
+        connection.connectedService().playRequest { view.playSection(section.index, shuffled, section.title) }
+    }
+
+    private fun homeSections(view: AndroidView, sections: List<AndroidHomeSection>, display: AndroidBrowseDisplay?,
+        revision: Int) =
+        sections.mapIndexed { section, home ->
+            HomeSectionItems(section.toULong(), home.title, home.kind, home.refresh, home.rows.mapIndexed { index, row ->
+                BrowseItem(row, index.toULong(), view, display, contextTitle = home.title,
+                    downloads = revision)
+            })
+        }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun observe(): Unit = withContext(Dispatchers.IO) { coroutineScope {
-        val lifetime = coroutineContext
         fun sameContext(previous: PageContext?, current: PageContext?): Boolean =
-            previous != null && current != null && previous.copy(catalog = current.catalog) == current &&
-                previous.catalog?.catalog == current.catalog?.catalog &&
-                ((if (pins) browse.library?.pinsUseActivity() == false else currentQuery?.activitySensitive() == false) ||
-                    previous.catalog?.activity == current.catalog?.activity)
-        var favoriteJob: Job? = null
+            previous != null && previous == current
         launch {
-            snapshotFlow { Triple(parent?.active ?: active, browse.labelsVersion, currentQuery) }
-                .collectLatest { (active, labelsVersion, query) ->
-                    if (!active || query == null || labelsVersion == capturedLabelsVersion) return@collectLatest
+            connection.changes.collect { changed -> withContext(Dispatchers.Main) { handle(changed) } }
+        }
+        launch(Dispatchers.Main) {
+            snapshotFlow { active }.collect { shown ->
+                if (shown) unshown?.let { unshown = null; showChanges(it) }
+            }
+        }
+        launch {
+            // Committed settings read the page again as its View says; the Pins page, when its pins changed.
+            snapshotFlow { connection.preferences?.let { if (pins) it.pins else it } }.filterNotNull()
+                .distinctUntilChanged().drop(if (pins) 1 else 0).collect {
+                    withContext(Dispatchers.Main) { if (pins || currentView?.settingsReread() == true) refresh() }
+                }
+        }
+        launch {
+            snapshotFlow { Triple(active, browse.labelsVersion, currentView) }
+                .collectLatest { (active, labelsVersion, view) ->
+                    if (!active || view == null || labelsVersion == capturedLabelsVersion) return@collectLatest
                     try {
-                    val fields = query.sortFields()
-                    val display = query.displaySettings()
-                    val trackFields = query.detailTrackFields()
-                    val homeTitles = homeRows.map { it.row.sectionId }.distinct().associateWith(query::homeSectionTitle)
-                    if (currentQuery !== query) return@collectLatest
+                    val sorts = view.sortFields()
+                    val display = view.displaySettings()
+                    val shownFields = view.fields()
+                    val favoriteShown = view.favoriteFields()
+                    val homeTitles = view.homeTitles()
+                    if (currentView !== view) return@collectLatest
                     Snapshot.withMutableSnapshot {
                         capturedLabelsVersion = labelsVersion
-                        sortFields = fields
+                        sortFields = sorts
                         capturedDisplay = display
-                        detailTrackFields = trackFields
-                        summary = preparedPage?.summary?.let { detail ->
-                            detail.copy(label = translate(detail.label), links = detail.links.map { it.copy(title = translate(it.title)) })
+                        fields = shownFields
+                        favoriteFields = favoriteShown
+                        summary = openedPage?.summary?.let { detail ->
+                            detail.copy(links = detail.links.map { it.copy(title = translate(it.title)) })
                         }
-                        releaseGroups = preparedPage?.groups.orEmpty().map { it.copy(title = translate(it.title)) }
-                        homeRows = homeRows.map { item ->
-                            homeTitles[item.row.sectionId]?.let { title -> item.copy(row = item.row.copy(section = title)) } ?: item
+                        releaseGroups = openedPage?.groups.orEmpty().map { it.copy(title = translate(it.title)) }
+                        homeSections = homeSections.mapIndexed { index, section ->
+                            homeTitles.getOrNull(index)?.let { title -> section.copy(title = title) } ?: section
                         }
                     }
                     } catch (cancelled: CancellationException) { throw cancelled }
@@ -166,136 +231,137 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library, connection.sources?.selectedSourceId,
-                if (parent != null) parent.preparedContext?.catalog else connection.catalogRevision,
-                location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
-                revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,
-                if (options.downloadedOnly) connection.downloads.state?.revision ?: 0UL else null,
-                if (location.kind == "Home") browse.homeBlocksFingerprint else null, parent?.preparedPage)
+            // A page that lists a source opens once one is selected; selecting another source or
+            // music folder reaches it through `changes`.
+            val needsSource = !pins && routeRequiresSelectedSource(location.route, SearchMode.TITLE)
+            if (!active) null else PageContext(browse.library,
+                !needsSource || connection.sources?.selectedSourceId != null, changes,
+                location.route, options.category, options.historySource, options.filter, options.sort, options.descending,
+                options.favoritesOnly, options.downloadedOnly,
+                revision, if (artistAlbums) browse.artistAlbumsRevision else 0)
         }.distinctUntilChanged(::sameContext).mapLatest { context ->
             val library = context?.library ?: return@mapLatest null
             if (sameContext(preparedContext, context)) return@mapLatest null
             loading = true
             try {
                 val labelsVersion = browse.labelsVersion
-                val kind = if (pins) "Pins" else context.route.kind
-                if (!pins && context.sourceId == null && kind !in listOf("Playlists", "PlaylistDetail", "SmartPlaylists", "SmartPlaylistDetail", "PlaylistFolder") &&
-                    !(kind == "History" && context.category != "current")) return@mapLatest null
-                if (pins) library.importPlaylistPins()
-                val query = if (pins) null else library.browse(context.route, context.category, context.filter, context.sort, context.descending, context.favoritesOnly, context.downloadedOnly)
-                val favoriteFilter = query?.supportsFavoriteFilter() == true
-                val downloadedFilter = query?.supportsDownloadedFilter() == true
-                val favoriteSeed = context.parentPage?.takeIf {
-                    context.filter == parent?.preparedContext?.filter && !context.favoritesOnly && !context.downloadedOnly
-                }
-                val downloadRevision = if (favoriteSeed != null) parent?.downloadRevision else connection.downloads.state?.revision
-                val prepared = if (favoriteSeed != null) null else query?.initialPage(embedded)
-                val count = favoriteSeed?.summary?.favoriteTotal?.toInt() ?: prepared?.count?.toInt()
-                val seedRows = if (context.sort == null) favoriteSeed?.favoriteRows ?: prepared?.rows else prepared?.rows
-                val fields = query?.sortFields().orEmpty()
-                val display = query?.displaySettings()
-                val detail = prepared?.summary
-                val trackFields = query?.detailTrackFields().orEmpty()
-                val crumbs = if (embedded) emptyList() else query?.breadcrumbs().orEmpty()
-                val folders = if (kind == "Folders") library.musicFolders() else null
-                val isHome = !pins && routeId == "Home"
-                val home = if (isHome && query != null) {
-                    val rows = mutableListOf<BrowseItem>()
-                    rows += prepared?.rows.orEmpty().mapIndexed { index, row -> BrowseItem(row, index.toULong(), query, display, contextTitle = row.section, downloadRevision = downloadRevision) }
-                    var offset = rows.size.toULong()
-                    while (offset < (count ?: 0).toULong()) {
-                        val pageDownloadRevision = connection.downloads.state?.revision
-                        val page = query.page(offset, 64u)
-                        if (page.isEmpty()) break
-                        rows += page.mapIndexed { index, row -> BrowseItem(row, offset + index.toULong(), query, display, contextTitle = row.section, downloadRevision = pageDownloadRevision) }
-                        offset += page.size.toULong()
+                val route = context.route
+                if (!context.opens) return@mapLatest null
+                // The rows it reads show the changes heard so far; later ones reach them as patches.
+                val opening = downloads
+                val opened = if (pins) null else library.open(route, context.category, context.filter, context.sort,
+                    context.descending, context.favoritesOnly, context.downloadedOnly, context.historySource,
+                    currentView, false)
+                val view = opened?.view
+                val display = view?.displaySettings()
+                val favoriteDisplay = view?.favoriteDisplay()
+                fun seeds(rows: List<AndroidBrowseRow>?, display: AndroidBrowseDisplay?, favorite: Boolean = false) =
+                    rows?.mapIndexed { index, row ->
+                        BrowseItem(row, index.toULong(), view, display, contextTitle = location.playbackTitle,
+                            downloads = opening, favorite = favorite)
                     }
-                    rows
-                } else emptyList()
-                val favoriteRoute = detail?.favoriteRoute?.takeIf {
-                    detail.showsReleases && detail.mode.kind in listOf("ArtistDetail", "AlbumArtistDetail")
-                }
-                val favorite = if (favoritesPage?.location?.route == favoriteRoute) favoritesPage else {
-                    favoriteJob?.cancel()
-                    favoriteJob = null
-                    favoriteRoute?.let { route ->
-                        val childJob = Job(lifetime[Job])
-                        val childScope = CoroutineScope(lifetime + childJob)
-                        val childOptions = BrowseOptions().also { it.filter = context.filter }
-                        val childLocation = BrowseLocation(route, "Favorite tracks", "ArtistFavoriteTracks", childOptions, location.playbackTitle)
-                        BrowsePage(connection, browse, childLocation, childOptions, childScope, parent = this@BrowsePage).also { page ->
-                            favoriteJob = childJob
-                            childScope.launch { page.observe() }
-                        }
+                val seeds = seeds(opened?.rows, display)
+                val favoriteSeeds = seeds(opened?.favoriteRows, favoriteDisplay, favorite = true)
+                val detail = opened?.summary ?: summary.takeIf { opened?.keepsSummary == true }
+                val home = if (view != null && route is Route.Home) homeSections(view, opened.home, display, opening) else emptyList()
+                val sorts = view?.sortFields().orEmpty()
+                val shownFields = view?.fields().orEmpty()
+                val favoriteShown = view?.favoriteFields().orEmpty()
+                val crumbs = view?.breadcrumbs().orEmpty()
+                val folders = if (route is Route.Folders) library.musicFolders() else null
+                withContext(Dispatchers.Main) {
+                    Snapshot.withMutableSnapshot {
+                        capturedLabelsVersion = labelsVersion
+                        currentView = view
+                        openedPage = opened?.copy(summary = detail)
+                        preparedContext = if (home.isNotEmpty() || route is Route.Home) context else null
+                        scrollSections = emptyList()
+                        supportsLetterIndex = view?.hasLetterSections() == true
+                        supportsFavoriteFilter = view?.supportsFavoriteFilter() == true
+                        supportsDownloadedFilter = view?.supportsDownloadedFilter() == true
+                        sortFields = sorts
+                        capturedDisplay = display
+                        summary = detail
+                        fields = shownFields
+                        favoriteFields = favoriteShown
+                        favoriteCount = opened?.favoriteCount ?: 0UL
+                        breadcrumbs = crumbs
+                        musicFolders = folders
+                        homeSections = home
+                        releaseGroups = opened?.groups.orEmpty()
                     }
+                    // What committed while it read reaches what it shows as any other change.
+                    hold(seeds.orEmpty() + favoriteSeeds.orEmpty() + home.flatMap { it.items })
+                    opened?.reading?.missed()?.let(::handle)
                 }
-                Snapshot.withMutableSnapshot {
-                    capturedLabelsVersion = labelsVersion
-                    this@BrowsePage.downloadRevision = downloadRevision
-                    currentQuery = query
-                    preparedPage = prepared
-                    preparedContext = if (isHome) context else null
-                    scrollSections = emptyList()
-                    supportsFavoriteFilter = favoriteFilter
-                    supportsDownloadedFilter = downloadedFilter
-                    sortFields = fields
-                    capturedDisplay = display
-                    summary = detail
-                    detailTrackFields = trackFields
-                    breadcrumbs = crumbs
-                    musicFolders = folders
-                    homeRows = home
-                    favorite?.let { page ->
-                        if (page.options.filter != context.filter) page.loading = true
-                        page.options.filter = context.filter
-                    }
-                    favoritesPage = favorite
-                    releaseGroups = prepared?.groups.orEmpty()
-                }
-                if (isHome) return@mapLatest null
-                context to Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-                    maxSize = 192, enablePlaceholders = !pins,
-                    jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
-                    BrowsePagingSource(library, query, count, pins, display, location.playbackTitle, seedRows, downloadRevision, connection.downloads)
-                }.flow
+                if (route is Route.Home && !pins) return@mapLatest null
+                fun pager(count: Int?, display: AndroidBrowseDisplay?, seeds: List<BrowseItem>?, favorites: Boolean = false) =
+                    Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
+                        maxSize = 192, enablePlaceholders = !pins,
+                        jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
+                        BrowsePagingSource(library, view, count, pins, favorites, display, location.playbackTitle, seeds, ::hold,
+                            { missed -> withContext(Dispatchers.Main) { handle(missed) } }) { downloads }
+                    }.flow
+                Triple(context, pager(opened?.count?.toInt(), display, seeds),
+                    opened?.takeIf { it.favoriteCount > 0UL }?.let { pager(it.favoriteCount.toInt(), favoriteDisplay, favoriteSeeds, true) })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { connection.runAction { throw error }; null }
             finally { loading = false }
-        }.filterNotNull().collectLatest { (context, pages) ->
+        }.filterNotNull().collectLatest { (context, pages, favorites) ->
             preparedContext = context
-            pages.collect { data.value = it }
+            if (favorites == null) favoriteData.value = PagingData.empty()
+            coroutineScope {
+                favorites?.let { launch { it.collect { favoriteData.value = it } } }
+                pages.collect { data.value = it }
+            }
         }
     } }
 }
 
 private class BrowsePagingSource(
     private val library: AndroidLibrary,
-    private val query: AndroidBrowseQuery?,
+    private val view: AndroidView?,
     private val count: Int?,
     private val pins: Boolean,
+    /** Whether it lists an artist page's favorite tracks. */
+    private val favorites: Boolean,
     private val display: AndroidBrowseDisplay?,
     private val contextTitle: String,
-    private val firstRows: List<AndroidBrowseRow>?,
-    private val firstDownloadRevision: ULong?,
-    private val downloads: io.github.screwys.rufin.downloads.DownloadsConnection,
+    /** The first rows, which the page read as it opened. */
+    private val seeds: List<BrowseItem>?,
+    /** Holds the rows it reads on the page, which patches them. */
+    private val hold: (List<BrowseItem>) -> Unit,
+    /** Handles what committed while it read, once it holds the rows, as the page does any change. */
+    private val missed: suspend (Changed) -> Unit,
+    /** The page's download changes so far, which the rows it reads show. */
+    private val downloads: () -> Int,
 ) : PagingSource<Int, BrowseItem>() {
     override val jumpingSupported = true
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
-            val downloadRevision = if (offset == 0 && firstRows != null) firstDownloadRevision else downloads.state?.revision
+            val revision = downloads()
             val pinPage = if (pins) library.pins(offset.toULong(), params.loadSize.toUInt()) else null
             val total = pinPage?.total?.toInt() ?: count ?: 0
-            val rows = pinPage?.rows ?: if (offset == 0 && firstRows != null) {
-                val ready = firstRows.take(params.loadSize)
+            val item = { index: Int, row: AndroidBrowseRow ->
+                BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision,
+                    favorite = favorites)
+            }
+            var reading: AndroidReading? = null
+            suspend fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt(), favorites).also { reading = it.reading }.rows
+            val items = pinPage?.rows?.mapIndexed(item) ?: if (offset == 0 && seeds != null) {
+                val ready = seeds.take(params.loadSize)
                 if (ready.size >= params.loadSize || ready.size >= total) ready
-                else ready + query!!.page(ready.size.toULong(), (params.loadSize - ready.size).toUInt())
-            } else query!!.page(offset.toULong(), params.loadSize.toUInt())
-            LoadResult.Page(rows.mapIndexed { index, row -> BrowseItem(row, (offset + index).toULong(), query, display, fromPins = pins, contextTitle = contextTitle, downloadRevision = downloadRevision) },
+                else ready + window(ready.size, params.loadSize - ready.size)
+                    .mapIndexed { index, row -> item(ready.size + index, row) }
+            } else window(offset, params.loadSize).mapIndexed(item)
+            hold(items)
+            reading?.missed()?.let { missed(it) }
+            LoadResult.Page(items,
                 if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-                if (pins) pinPage?.nextOffset?.toInt() else if (offset + rows.size >= total) null else offset + rows.size,
+                if (pins) pinPage?.nextOffset?.toInt() else if (offset + items.size >= total) null else offset + items.size,
                 itemsBefore = if (pins) LoadResult.Page.COUNT_UNDEFINED else offset,
-                itemsAfter = if (pins) LoadResult.Page.COUNT_UNDEFINED else (total - offset - rows.size).coerceAtLeast(0))
+                itemsAfter = if (pins) LoadResult.Page.COUNT_UNDEFINED else (total - offset - items.size).coerceAtLeast(0))
         }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (error: Exception) { LoadResult.Error(error) }
@@ -304,6 +370,7 @@ private class BrowsePagingSource(
         (it - state.config.initialLoadSize / 2).coerceAtLeast(0)
     }
 }
+
 
 internal val AndroidBrowseDisplay.layout get() = settings.layout
 internal val AndroidBrowseDisplay.size get() = settings.display.size

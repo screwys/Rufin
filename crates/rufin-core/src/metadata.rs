@@ -5,8 +5,9 @@ mod editor;
 mod lyrics;
 mod review;
 mod scan;
-use crate::runtime::CatalogChange;
-use crate::source::{SourceOwner, string_error};
+use crate::source::SourceOwner;
+use crate::source::feed::Notice;
+use crate::string_error;
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
 pub use details::{
@@ -17,7 +18,7 @@ pub use editor::{
     MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, MetadataSaveSummary,
     mixed_field_label,
 };
-use library::Database;
+use library::Catalog;
 pub use lyrics::MetadataLyricsSettings;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 pub use metadata_lookup::{MetadataCandidate, MetadataMatchKind};
@@ -27,6 +28,7 @@ pub use review::{
 pub use sources::MetadataDraft;
 use sources::{Implementation, Source, SourceEntityKind, SourceMetadataError};
 use std::sync::Arc;
+use tokio::time::Instant;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
 struct RuntimeFuture<F> {
@@ -86,7 +88,7 @@ impl EditSession {
         owner: &SourceOwner,
         item: &MetadataItemId,
     ) -> Result<(Arc<Self>, MetadataDraft), SourceMetadataError> {
-        let database = &owner.shared.database;
+        let catalog = &owner.shared.catalog;
         let cancel = library::ReadCancellation::new();
         let source_id = owner
             .media_source_id(item.media_uri())
@@ -113,12 +115,12 @@ impl EditSession {
                 |error: library::LibraryError| SourceMetadataError::Write(error.to_string());
             let (object, mut draft, binding) = match item.kind() {
                 SourceEntityKind::Track => {
-                    let row = database
+                    let row = catalog
                         .track(item.media_uri(), &cancel)
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = track_artwork_binding(database, &row).await?;
+                    let binding = track_artwork_binding(catalog, &row).await?;
                     let object = row
                         .object_id
                         .clone()
@@ -133,13 +135,13 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Album => {
-                    let row = database
+                    let row = catalog
                         .album(item.media_uri(), false, &cancel)
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = row.artwork_binding.clone();
-                    let object = row.object_id.clone();
+                    let binding = row.row.artwork_binding.clone();
+                    let object = row.row.object_id.clone();
                     let draft = match &source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider.read_album_metadata(row).await?
@@ -150,13 +152,13 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Artist => {
-                    let row = database
+                    let row = catalog
                         .artist(item.media_uri(), false, false, &cancel)
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = row.artwork_binding.clone();
-                    let object = row.object_id.clone();
+                    let binding = row.row.artwork_binding.clone();
+                    let object = row.row.object_id.clone();
                     let draft = match &source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider.read_artist_metadata(row).await?
@@ -180,7 +182,7 @@ impl EditSession {
         } else {
             let (target, draft) = sources::FileEditSession::open(
                 source.clone(),
-                database,
+                catalog,
                 item.media_uri().into(),
                 item.kind(),
             )
@@ -197,34 +199,28 @@ impl EditSession {
             draft,
         ))
     }
-    async fn invalidate_artwork(
+    /// Drops the cached image of a binding a save replaces. A save does this before its
+    /// catalog Write, so that the Write's own Changed rereads the new image.
+    pub(super) async fn invalidate_artwork(
         owner: &SourceOwner,
-        source: Option<&Arc<Source>>,
-        binding: Option<&[u8]>,
-        result: &Result<(), SourceMetadataError>,
-    ) -> Result<(), SourceMetadataError> {
-        if matches!(
-            result,
-            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
-        ) {
-            if let Some(binding) = binding {
-                let artwork = owner.shared.artwork.clone();
-                let binding = binding.to_vec();
-                let invalidated = tokio::task::spawn_blocking(move || {
-                    artwork.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
-                })
-                .await
-                .map_err(string_error)
-                .and_then(|result| result.map_err(string_error))
-                .map_err(SourceMetadataError::SavedRefreshFailed)?;
-                if invalidated && let Some(source) = source {
-                    owner
-                        .artwork_invalidated(source.source_id(), CatalogChange::Broad)
-                        .await;
-                }
-            }
+        binding: &[u8],
+    ) -> Result<bool, String> {
+        let artwork = owner.shared.artwork.clone();
+        let binding = artwork::ArtworkBinding::opaque(binding);
+        tokio::task::spawn_blocking(move || artwork.invalidate_image(&binding))
+            .await
+            .map_err(string_error)?
+            .map_err(string_error)
+    }
+
+    /// The source's pages read the invalidated image again, unless the save's Write already
+    /// made them read after `since`.
+    pub(super) fn artwork_saved(owner: &SourceOwner, source: Option<&Arc<Source>>, since: Instant) {
+        if let Some(source) =
+            source.and_then(|source| owner.shared.catalog.source_key(source.source_id()))
+        {
+            owner.notice(Notice::Source(source, since));
         }
-        Ok(())
     }
 
     async fn save(
@@ -237,10 +233,22 @@ impl EditSession {
             return Ok(());
         }
         let metadata_changed = !edit.changes.is_empty() || edit.artwork.is_some();
-        let artwork_changed = edit.artwork.is_some();
+        let previous_artwork = self
+            .previous_artwork
+            .as_deref()
+            .filter(|_| edit.artwork.is_some());
+        let since = Instant::now();
+        let mut invalidated = false;
         let result = async {
             match &self.destination {
-                EditDestination::Files(target) => target.save(&owner.shared.database, edit).await,
+                EditDestination::Files(target) => {
+                    if let Some(previous) = previous_artwork {
+                        invalidated = Self::invalidate_artwork(owner, previous)
+                            .await
+                            .map_err(SourceMetadataError::Write)?;
+                    }
+                    target.save(&owner.shared.catalog, edit).await
+                }
                 EditDestination::Server { object, revision } => {
                     let source = self
                         .source
@@ -267,43 +275,29 @@ impl EditSession {
                         }
                         _ => unreachable!(),
                     };
+                    let invalidation = match previous_artwork.filter(|_| artwork.is_ok()) {
+                        Some(previous) => Self::invalidate_artwork(owner, previous)
+                            .await
+                            .map(|done| invalidated = done),
+                        None => Ok(()),
+                    };
                     let refresh = source
-                        .apply_items(&owner.shared.database, vec![object], Vec::new())
+                        .apply_items(&owner.shared.catalog, vec![object], Vec::new())
                         .await
-                        .map_err(|error| {
-                            SourceMetadataError::SavedRefreshFailed(error.to_string())
-                        });
+                        .map_err(|error| error.to_string())
+                        .and(invalidation)
+                        .map_err(SourceMetadataError::SavedRefreshFailed);
                     sources::finish_metadata_save(artwork, refresh, saved)
                 }
             }
         }
         .await;
-        if artwork_changed {
-            Self::invalidate_artwork(
-                owner,
-                self.source.as_ref(),
-                self.previous_artwork.as_deref(),
-                &result,
-            )
-            .await?;
-        }
-        if self.source.is_none()
-            && matches!(
-                &result,
-                Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
-            )
-            && let EditDestination::Files(target) = &self.destination
-            && owner
-                .shared
-                .database
-                .track_source_by_uri(target.media_uri(), &library::ReadCancellation::new())
-                .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
-                .is_none()
-        {
-            owner
-                .publish_current_catalog(None, CatalogChange::Broad)
-                .await;
+        let saved = matches!(
+            &result,
+            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
+        );
+        if saved && invalidated {
+            Self::artwork_saved(owner, self.source.as_ref(), since);
         }
         result?;
         if let Some(lyrics) = lyrics {
@@ -400,11 +394,7 @@ pub fn current_artwork(
         let stored = owner.shared.settings.load();
         let request =
             artwork::ArtworkRequest::original(artwork::ArtworkBinding::opaque(&binding), 512)
-                .with_external(artwork::ExternalPolicy::new(
-                    stored.ui.application.external_metadata_enabled,
-                    stored.ui.allows_external_metadata_lookup(),
-                    stored.ui.lastfm_api_key,
-                ));
+                .with_external(stored.ui.artwork_policy());
         let bytes = owner.shared.artwork.image_bytes(request).await?;
         tokio::task::spawn_blocking(move || bytes.map(checked_artwork).transpose())
             .await
@@ -425,7 +415,7 @@ fn checked_artwork(bytes: Vec<u8>) -> Result<Arc<sources::ImageBytes>, String> {
 }
 
 async fn track_artwork_binding(
-    database: &Database,
+    catalog: &Catalog,
     track: &library::TrackView,
 ) -> Result<Option<Vec<u8>>, SourceMetadataError> {
     if track.artwork_binding.is_some() {
@@ -434,9 +424,9 @@ async fn track_artwork_binding(
     let Some(uri) = &track.links.album_media_uri else {
         return Ok(None);
     };
-    Ok(database
+    Ok(catalog
         .album(uri, false, &library::ReadCancellation::new())
         .await
         .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-        .and_then(|album| album.artwork_binding))
+        .and_then(|album| album.row.artwork_binding))
 }

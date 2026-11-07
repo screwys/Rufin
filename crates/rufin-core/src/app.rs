@@ -1,9 +1,10 @@
 //! Constructs Rufin's product owners and connects their concrete event lanes.
 
+use crate::string_error;
 use std::sync::Arc;
 
 use crate::runtime::{DiagnosticsHandle, ProductHandles, ProductReceivers, RuntimeInputs};
-use ::scrobbling::Scrobbler;
+use crate::scrobbling::Scrobbler;
 use async_channel::{bounded, unbounded};
 use playback::PlaybackBackend;
 use secrets::SwitchableSecretStore;
@@ -13,7 +14,7 @@ use crate::paths::Paths;
 use crate::playback::PlaybackOwner;
 use crate::release_update::ReleaseUpdateOwner;
 use crate::scrobbling::ScrobblingOwner;
-use crate::settings::{SettingsFile, SettingsOwner, platform_secret_store};
+use crate::settings::{ApplicationPreferences, SettingsFile, SettingsOwner, platform_secret_store};
 use crate::source::{SourceOutputs, SourceOwner};
 use crate::waveform::WaveformOwner;
 
@@ -43,10 +44,6 @@ pub async fn runtime_inputs<StartBackend>(
     paths: Paths,
     start_backend: StartBackend,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
-    observe_playback: Arc<dyn Fn(Option<&playback::PlaybackProjection>) + Send + Sync>,
-    observe_settings: Arc<
-        dyn Fn(&crate::settings::Settings, Option<&playback::PlaybackProjection>) + Send + Sync,
-    >,
 ) -> Result<RuntimeInputs, String>
 where
     StartBackend: Fn(
@@ -60,23 +57,24 @@ where
     let secret_storage_fallbacks = settings.secret_storage_fallbacks.1.clone();
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&settings)));
-    let configured_source_ids = stored
-        .sources
-        .configured
-        .iter()
-        .map(|source| source.configuration.source_id.clone())
-        .collect::<Vec<_>>();
+    // Source credentials saved before they were sealed are sealed once; the keyring may wait.
+    let (legacy_settings, legacy_secrets) = (settings.clone(), Arc::clone(&secrets));
+    runtime.spawn_blocking(move || {
+        if let Err(error) =
+            crate::settings::migrate_source_credentials(&legacy_settings, legacy_secrets.as_ref())
+        {
+            warn!(%error, "could not migrate saved source credentials");
+        }
+    });
     let store_path = paths.store_file();
-    let (database, temporary_store) = match library::Database::open_installation(
+    let (catalog, temporary_store) = match library::Catalog::open_installation(
         &store_path,
-        &paths.legacy_store_file(),
+        &paths.released_store_file(),
         &paths.catalog_file(),
-        &configured_source_ids,
-        stored.sources.selected_source_id.as_ref(),
     )
     .await
     {
-        Ok(database) => (database, false),
+        Ok(catalog) => (catalog, false),
         Err(error) if error.is_store_unavailable() => {
             warn!(%error, path=%store_path.display(), "could not access the durable Store; startup will continue with temporary storage");
             let directory = tempfile::Builder::new()
@@ -85,7 +83,7 @@ where
                 .map_err(string_error)?
                 .keep();
             (
-                library::Database::open(directory.join("store.sqlite"))
+                library::Catalog::open(directory.join("store.sqlite"))
                     .await
                     .map_err(string_error)?,
                 true,
@@ -93,51 +91,37 @@ where
         }
         Err(error) => return Err(string_error(error)),
     };
-    let library = Arc::new(database);
-    library
-        .set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers)
-        .await
-        .map_err(string_error)?;
-    let scrobbling_library = library.as_ref().clone();
-    let scrobbling_runtime = runtime.clone();
-    let scrobbling_settings = stored.scrobbling_runtime_settings();
-    let private_mode = stored.ui.application.private_mode;
-    let scrobbler = Arc::new(
-        runtime
-            .spawn_blocking(move || {
-                Scrobbler::new(
-                    scrobbling_library,
-                    scrobbling_runtime,
-                    scrobbling_settings,
-                    private_mode,
-                )
-            })
-            .await
-            .map_err(string_error)??,
+    let library = Arc::new(catalog);
+    // The Catalog shows rows by these switches; it cannot read the settings itself.
+    let display = |library: &library::Catalog, application: &ApplicationPreferences| {
+        library.set_distinct_track_covers(application.prefer_distinct_track_covers);
+        library.set_cover_lookup(application.external_metadata_enabled);
+        library.set_use_sort_tags(application.use_sort_tags);
+    };
+    display(&library, &stored.ui.application);
+    crate::settings::follow(
+        &runtime,
+        &settings,
+        Arc::downgrade(&library),
+        move |library, previous, current| {
+            if previous.ui.application != current.ui.application {
+                display(&library, &current.ui.application);
+            }
+            std::future::ready(())
+        },
     );
+    let scrobbler = Arc::new(Scrobbler::new(
+        library.as_ref().clone(),
+        runtime.clone(),
+        settings.clone(),
+    ));
 
     let (source_events, source_receiver) = unbounded();
     let (visualizer_events, visualizer_receiver) = bounded(1);
     let (download_events, download_receiver) = unbounded();
-    let (discovery_events, discovery_receiver) = unbounded();
     let (waveform_events, waveform_receiver) = unbounded();
     let (lyrics_events, lyrics_receiver) = unbounded();
     let (release_update_events, release_update_receiver) = unbounded();
-    let artwork = match artwork::Artwork::new(paths.artwork_dir(), runtime.clone()) {
-        Ok(artwork) => artwork,
-        Err(error) => {
-            warn!(%error, "could not use the artwork cache; startup will continue with a temporary cache");
-            artwork::Artwork::new(temporary_artwork_dir(), runtime.clone()).map_err(string_error)?
-        }
-    };
-    let downloads = downloads::Downloads::new(
-        artwork.clone(),
-        paths.downloads_dir(),
-        library.as_ref().clone(),
-        runtime.clone(),
-        download_events,
-        stored.ui.downloads.clone(),
-    );
     let release_updates = ReleaseUpdateOwner::new(
         settings.clone(),
         runtime.clone(),
@@ -148,66 +132,63 @@ where
     let release_history = release_updates.initial_history();
 
     let source = SourceOwner::open_dormant(
-        artwork.clone(),
+        paths.artwork_dir(),
         library.clone(),
-        downloads.clone(),
+        paths.downloads_dir(),
         settings.clone(),
         Arc::clone(&secrets),
         runtime.clone(),
         SourceOutputs {
             events: source_events.clone(),
-            discovery: discovery_events,
+            downloads: download_events,
         },
-    );
-    if let Err(error) = artwork.install_database(Arc::clone(&library)).await {
-        warn!(%error, "could not import cached artwork previews");
-    }
+    )?;
+    let artwork = source.artwork().clone();
+    // Recent search results show the pictures their rows have once the Catalog is loaded.
     if !stored.ui.recent_search_results.is_empty() {
-        let uris = stored
-            .ui
-            .recent_search_results
-            .iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>();
-        match library
-            .artwork_bindings(&uris, &library::ReadCancellation::new())
-            .await
-        {
-            Ok(bindings) => {
-                if let Err(error) = settings.update(|stored| {
-                    for (recent, binding) in
-                        stored.ui.recent_search_results.iter_mut().zip(bindings)
-                    {
-                        if binding.is_some() {
-                            recent.artwork_binding = binding;
+        let (library, settings) = (Arc::clone(&library), settings.clone());
+        runtime.spawn(async move {
+            library.loaded().await;
+            let uris = settings
+                .load()
+                .ui
+                .recent_search_results
+                .iter()
+                .map(|row| row.media_uri.clone())
+                .collect::<Vec<_>>();
+            match library
+                .artwork_bindings(&uris, &library::ReadCancellation::new())
+                .await
+            {
+                Ok(bindings) => {
+                    if let Err(error) = settings.update(|stored| {
+                        for (recent, binding) in
+                            stored.ui.recent_search_results.iter_mut().zip(bindings)
+                        {
+                            if binding.is_some() {
+                                recent.artwork_binding = binding;
+                            }
                         }
+                        Ok(())
+                    }) {
+                        warn!(%error, "could not update recent search artwork");
                     }
-                    Ok(())
-                }) {
-                    warn!(%error, "could not update recent search artwork");
                 }
+                Err(error) => warn!(%error, "could not read recent search artwork"),
             }
-            Err(error) => warn!(%error, "could not read recent search artwork"),
-        }
+        });
     }
-    let artwork_source = Arc::downgrade(&source);
-    artwork.install_source_resolver(move |source_id| {
-        artwork_source
-            .upgrade()
-            .and_then(|owner| owner.client(source_id).ok())
-    });
     let waveform = WaveformOwner::new(
         runtime.clone(),
         waveform_events,
-        paths.playback_dir(),
-        stored.ui.player_display.seekbar_waveform_enabled,
+        &paths.playback_dir(),
+        &settings,
     );
     let lyrics = crate::lyrics::LyricsService::new(
         library.as_ref().clone(),
         Arc::clone(&source),
         runtime.clone(),
-        stored.ui.lyrics.clone(),
-        stored.ui.application.private_mode,
+        &settings,
         lyrics_events,
         paths.data_dir().join("japanese-readings"),
     );
@@ -217,151 +198,74 @@ where
         runtime.clone(),
         visualizer_events,
         visualizer_receiver.clone(),
-        artwork.clone(),
         Arc::clone(&waveform),
         Arc::clone(&lyrics),
-        observe_playback,
         audio_outputs,
         Arc::clone(&scrobbler),
+        Arc::clone(&source),
         start_backend,
     );
-    let observed_playback = Arc::clone(&playback);
-    let settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync> =
-        Arc::new(move |settings| {
-            observe_settings(settings, observed_playback.current_projection().as_ref())
-        });
-    settings_committed(&stored.ui);
-    playback.install_source_owner(&source);
-    playback.start().await?;
+    playback.start();
+    crate::presence::follow(&runtime, &settings, &playback);
     let scrobbling = ScrobblingOwner::new(
         settings.clone(),
         Arc::clone(&secrets),
         runtime.clone(),
-        scrobbler,
-        Arc::clone(&settings_committed),
+        Arc::clone(&scrobbler),
     );
     scrobbling.start();
 
-    source.attach_playback(&playback);
+    let mut features = source.features();
+    features.push(Arc::new(crate::loudness::Normalization(Arc::downgrade(
+        &playback,
+    ))));
+    features.push(Arc::new(crate::scrobbling::Listens(Arc::downgrade(
+        &scrobbler,
+    ))));
+    crate::features::run(&runtime, &settings, &library, features);
 
-    let settings_playback = Arc::clone(&playback);
-    let settings_lyrics = Arc::clone(&lyrics);
-    let settings_downloads = downloads.clone();
-    let settings_source = Arc::clone(&source);
-    let settings_scrobbling = Arc::clone(&scrobbling);
-    let settings_library = Arc::clone(&library);
-    let settings_runtime = runtime.clone();
-    let settings_handle = SettingsOwner::new(
-        settings.clone(),
-        Arc::clone(&secrets),
-        move |previous, current, credentials_changed| {
-            if previous.ui.application.prefer_distinct_track_covers
-                != current.ui.application.prefer_distinct_track_covers
-            {
-                let library = Arc::clone(&settings_library);
-                let enabled = current.ui.application.prefer_distinct_track_covers;
-                settings_runtime.spawn(async move {
-                    if let Err(error) = library.set_distinct_track_covers(enabled).await {
-                        warn!(%error, "could not update artwork preference");
-                    }
-                });
-            }
-            if previous.ui.rich_presence != current.ui.rich_presence
-                || previous.ui.application.private_mode != current.ui.application.private_mode
-                || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
-            {
-                settings_committed(&current.ui);
-            }
-            if previous.ui.player_display.seekbar_waveform_enabled
-                != current.ui.player_display.seekbar_waveform_enabled
-            {
-                settings_playback
-                    .waveform_setting_changed(current.ui.player_display.seekbar_waveform_enabled);
-            }
-            if previous.ui.playback != current.ui.playback {
-                settings_playback.playback_settings_changed(current.ui.playback.clone());
-            }
-            if previous.ui.application.cast_proxy_enabled
-                != current.ui.application.cast_proxy_enabled
-            {
-                settings_playback
-                    .cast_proxy_setting_changed(current.ui.application.cast_proxy_enabled);
-            }
-            if previous.ui.cast_network_interface != current.ui.cast_network_interface {
-                settings_playback
-                    .cast_network_setting_changed(current.ui.cast_network_interface.clone());
-            }
-            if previous.ui.application.auto_dj_refill_threshold
-                != current.ui.application.auto_dj_refill_threshold
-            {
-                settings_playback.auto_dj_threshold_changed(
-                    current.ui.auto_dj_enabled,
-                    current.ui.application.auto_dj_refill_threshold,
-                );
-            }
-            if previous.ui.application.private_mode != current.ui.application.private_mode
-                || previous.scrobbling != current.scrobbling
-                || credentials_changed
-            {
-                settings_scrobbling.settings_changed(credentials_changed);
-            }
-            if previous.ui.lyrics != current.ui.lyrics
-                || previous.ui.application.private_mode != current.ui.application.private_mode
-            {
-                settings_lyrics.settings_changed(
-                    current.ui.lyrics.clone(),
-                    current.ui.application.private_mode,
-                );
-            }
-            if (!previous.ui.application.download_artwork_automatically
-                && current.ui.application.download_artwork_automatically)
-                || (!previous.ui.application.download_lyrics_automatically
-                    && current.ui.application.download_lyrics_automatically)
-            {
-                settings_source.request_asset_downloads();
-            }
-            if previous.ui.downloads != current.ui.downloads {
-                settings_downloads.settings_changed(current.ui.downloads.clone());
-            }
-        },
-    );
-
+    let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
     let backup = crate::backup::BackupOwner::new(
         Arc::clone(&library),
-        settings.clone(),
         settings_handle.as_ref().clone(),
-        Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
         runtime.clone(),
         paths.data_dir().join("backups"),
     );
     backup.start();
-    let stored = settings.load();
 
-    for configured in &stored.sources.configured {
-        if let Err(error) = library
-            .reconcile_source(
-                &configured.configuration.source_id,
-                &configured.configuration.kind,
-                &configured.configuration.name,
-            )
-            .await
-        {
-            warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+    // Source rows follow the settings once the Catalog is loaded; the first screen does not
+    // wait for it.
+    let reconciled = Arc::clone(&library);
+    let configured = stored.sources.configured.clone();
+    runtime.spawn(async move {
+        for configured in &configured {
+            if let Err(error) = reconciled
+                .reconcile_source(
+                    &configured.configuration.source_id,
+                    &configured.configuration.kind,
+                    &configured.configuration.name,
+                )
+                .await
+            {
+                warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+            }
         }
-    }
+    });
     let connect = crate::connect::ConnectOwner::new(
         paths.connect_dir(),
         Arc::clone(&library),
         settings_handle.as_ref().clone(),
-        Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
+        lyrics.handle(),
         runtime.clone(),
     );
+    source.install_connect(&connect);
     connect.start();
 
+    let changes = source.changes();
     source.start()?;
     let source_handle: crate::runtime::SourceHandle = source.clone();
 
@@ -380,26 +284,23 @@ where
             connect,
             library,
             runtime,
+            downloads: source.downloads().clone(),
             source: source_handle,
-            downloads,
             playback,
             artwork,
             lyrics: lyrics.handle(),
             release_updates,
             scrobbling,
         },
-        settings: settings_handle,
         receivers: ProductReceivers {
             source: source_receiver,
-            source_discovery: discovery_receiver,
+            changes,
             downloads: download_receiver,
             visualizer: visualizer_receiver,
             waveform: waveform_receiver,
             lyrics: lyrics_receiver,
             release_updates: release_update_receiver,
         },
-        configured_sources: source.list_sources(),
-        source_operation: source.operation().borrow().clone(),
         release_history,
     })
 }
@@ -412,15 +313,4 @@ pub fn startup_settings(paths: &Paths) -> SettingsFile {
         warn!(%error, "could not use saved settings; startup will continue with defaults");
         SettingsFile::memory_at(paths.config_dir())
     })
-}
-
-fn string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
-}
-
-fn temporary_artwork_dir() -> std::path::PathBuf {
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!("rufin-artwork-{}-{started}", std::process::id()))
 }

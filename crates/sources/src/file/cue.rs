@@ -5,9 +5,17 @@ use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CueSheet {
-    pub album_title: Option<String>,
-    pub album_performer: Option<String>,
+    pub album: CueAlbum,
     pub files: Vec<CueFile>,
+}
+
+/// What a sheet says about its whole album.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct CueAlbum {
+    pub title: Option<String>,
+    pub performer: Option<String>,
+    /// `REM DATE`, as written.
+    pub date: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,8 +42,7 @@ struct OpenTrack {
 
 pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
     let mut sheet = CueSheet {
-        album_title: None,
-        album_performer: None,
+        album: CueAlbum::default(),
         files: Vec::new(),
     };
     let mut current_file: Option<CueFile> = None;
@@ -48,7 +55,14 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
             continue;
         };
         match command.to_ascii_uppercase().as_str() {
-            "REM" => {}
+            "REM" => {
+                if fields
+                    .next_word()
+                    .is_some_and(|field| field.eq_ignore_ascii_case("DATE"))
+                {
+                    sheet.album.date = fields.next_value();
+                }
+            }
             "TITLE" => {
                 let Some(value) = fields.next_value() else {
                     continue;
@@ -56,7 +70,7 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
                 if let Some(track) = current_track.as_mut() {
                     track.title = Some(value);
                 } else {
-                    sheet.album_title = Some(value);
+                    sheet.album.title = Some(value);
                 }
             }
             "PERFORMER" => {
@@ -66,7 +80,7 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
                 if let Some(track) = current_track.as_mut() {
                     track.performer = Some(value);
                 } else {
-                    sheet.album_performer = Some(value);
+                    sheet.album.performer = Some(value);
                 }
             }
             "FILE" => {
@@ -259,8 +273,8 @@ FILE "album.flac" WAVE
         )
         .expect("cue sheet");
 
-        assert_eq!(sheet.album_title.as_deref(), Some("Album Title"));
-        assert_eq!(sheet.album_performer.as_deref(), Some("Album Artist"));
+        assert_eq!(sheet.album.title.as_deref(), Some("Album Title"));
+        assert_eq!(sheet.album.performer.as_deref(), Some("Album Artist"));
         assert_eq!(sheet.files.len(), 1);
         assert_eq!(sheet.files[0].path, "album.flac");
         assert_eq!(sheet.files[0].tracks.len(), 2);
@@ -269,17 +283,32 @@ FILE "album.flac" WAVE
     }
 }
 
+/// Each track of one CUE file with where it ends in its backing media; `None` when a track
+/// starts at or after its end, or ends past the media.
+pub(crate) fn cue_segments(file: &CueFile, duration_millis: u64) -> Option<Vec<(&CueTrack, u64)>> {
+    file.tracks
+        .iter()
+        .enumerate()
+        .map(|(position, cue)| {
+            let end = file
+                .tracks
+                .get(position + 1)
+                .map_or(duration_millis, |next| next.index_start_ms);
+            (cue.index_start_ms < end && end <= duration_millis).then_some((cue, end))
+        })
+        .collect()
+}
+
 pub(crate) fn cue_track(
     cue_path: &Path,
-    album_title: Option<&str>,
-    album_performer: Option<&str>,
+    album: &CueAlbum,
     cue: &CueTrack,
     end_millis: u64,
     backing: &ScannedTrack,
 ) -> ScannedTrack {
     let mut scanned = backing.clone();
     let track = &mut scanned.track;
-    let album_artist = album_performer.map(ToString::to_string).unwrap_or_else(|| {
+    let album_artist = album.performer.clone().unwrap_or_else(|| {
         track
             .metadata
             .album_display_artist
@@ -287,7 +316,11 @@ pub(crate) fn cue_track(
             .unwrap_or_default()
     });
     track.object_id = media::cue_track_id(cue_path, cue.number);
-    if let Some(title) = album_title {
+    if let Some(date) = crate::policy::normalized_date(album.date.clone()) {
+        track.metadata.year = crate::policy::date_year(&date).map(i64::from);
+        track.metadata.release_date = Some(date);
+    }
+    if let Some(title) = &album.title {
         track.metadata.album = title.to_owned();
         track.metadata.album_tags.get_or_insert_default().sort_text = title.to_lowercase();
     }

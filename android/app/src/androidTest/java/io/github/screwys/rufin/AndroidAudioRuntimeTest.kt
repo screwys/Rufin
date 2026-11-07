@@ -39,7 +39,7 @@ class AndroidAudioRuntimeTest {
         val noBackup = File(root, "no-backup").apply { check(mkdirs()) }
         val config = File(files, "config").apply { check(mkdirs()) }
         File(config, "settings.json").writeText(
-            """{"playback":{"volume":0.0},"external_metadata_enabled":false}"""
+            """{"playback":{"volume":0.0},"external_metadata_enabled":false,"secret_storage_mode":"config-file"}"""
         )
         val media = File(root, "tone.flac")
         InstrumentationRegistry.getInstrumentation().context.assets.open("tone.flac").use { input ->

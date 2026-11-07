@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.LibraryField
+import io.github.screwys.rufin.shared.library.LyricsSnippet
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -54,8 +55,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
@@ -73,20 +73,23 @@ import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
 import io.github.screwys.rufin.core.AndroidSortField
-import io.github.screwys.rufin.core.AndroidBrowseItem
+import io.github.screwys.rufin.core.AndroidHomeSectionKind
+import io.github.screwys.rufin.shared.library.HomeBlockKind
+import io.github.screwys.rufin.shared.library.Row as LibraryRow
+import io.github.screwys.rufin.shared.rufin_core.playsContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
 
 @Composable
 internal fun BrowseContent(
-    items: LazyPagingItems<BrowseItem>, homeRows: List<BrowseItem>, player: PlayerConnection,
+    items: LazyPagingItems<BrowseItem>, homeSections: List<HomeSectionItems>, player: PlayerConnection,
     home: Boolean, detail: Boolean, covers: Boolean, onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    onSectionPlay: (String, Boolean) -> Unit, onRefreshSection: (String) -> Unit,
+    onSectionPlay: (HomeSectionItems, Boolean) -> Unit, onRefreshSection: (HomeBlockKind) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onAddToPlaylist: (BrowseItem) -> Unit,
     onScrolled: (Boolean) -> Unit, scrollSections: List<AndroidScrollSection> = emptyList(),
     displaySize: DisplaySize = DisplaySize.DEFAULT, gridSpacing: DisplaySize = DisplaySize.DEFAULT, onPlayItem: (BrowseItem, Boolean) -> Unit = { item, _ -> onActivate(item) },
-    detailFields: List<AndroidSortField> = emptyList(),
+    fields: List<AndroidSortField> = emptyList(),
     letterIndex: Boolean = false,
     onLetterPosition: suspend (String) -> ULong? = { null },
     letterDescending: Boolean = false,
@@ -98,7 +101,7 @@ internal fun BrowseContent(
     val coverWidth = when (displaySize) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
     val spacing = when (gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
     if (home) {
-        HomeContent(homeRows, player, onActivate, onMenu, onSectionPlay, onRefreshSection, onFavorite, onScrolled, onRadio)
+        HomeContent(homeSections, player, onActivate, onMenu, onSectionPlay, onRefreshSection, onFavorite, onScrolled, onRadio)
     } else {
         val scope = rememberCoroutineScope()
         val refresh = if (loading && items.itemCount == 0) LoadState.Loading else items.loadState.refresh
@@ -155,18 +158,21 @@ internal fun BrowseContent(
             }
             Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(end = indexInset)) {
-                if (detailFields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.kind == "track" && it.displaySettings?.showHeader != false })
-                    DetailTrackHeader(detailFields, displaySize)
+                if (fields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.fields.isNotEmpty() && it.displaySettings?.showHeader != false })
+                    FieldHeader(fields, displaySize)
             LazyColumn(Modifier.fillMaxWidth().weight(1f), state = state, contentPadding = PaddingValues(bottom = 8.dp + LocalPlayerBottomPadding.current)) {
                 items(items.itemCount, key = items.itemKey(::browseItemKey)) { index ->
                     val item = items[index]
                     if (item == null) Spacer(Modifier.fillMaxWidth().height(60.dp))
-                    else if (item.row.kind == "album_header") HomeShowcase(item, player, onActivate, onMenu, onFavorite,
-                        { _, shuffled -> onPlayItem(item, shuffled) }, onRadio)
-                    else if (detailFields.isNotEmpty() && item.row.kind == "track")
-                        DetailTrackRow(item.copy(displaySettings = item.displaySettings?.let { it.copy(settings = it.settings.copy(display = it.settings.display.copy(size = displaySize))) }), player,
-                            detailFields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, detailFields,
+                    else if (item.row.row is LibraryRow.AlbumHeading) HomeShowcase(item, player, onActivate, onMenu, onFavorite,
+                        { shuffled -> onPlayItem(item, shuffled) }, onRadio)
+                    else if (item.row.fields.isNotEmpty()) {
+                        // A list without a header (search) shows each row's own fields.
+                        val columns = fields.ifEmpty { item.row.fields.map { AndroidSortField(it.id, "") } }
+                        FieldRow(item.copy(displaySettings = item.displaySettings?.let { it.copy(settings = it.settings.copy(display = it.settings.display.copy(size = displaySize))) }), player,
+                            columns.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, columns,
                             onActivate, onMenu, onFavorite, onAddToPlaylist)
+                    }
                     else BrowseTrackRow(item, player, onActivate, onMenu, onFavorite, onAddToPlaylist, displaySize)
                 }
                 if (append is LoadState.Loading || append is LoadState.Error) item { BrowseLoadFooter(append, items::retry) }
@@ -270,14 +276,14 @@ private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScroll
                     }
                 } finally { touched = null }
             }
-        }
-        .clearAndSetSemantics {
-            contentDescription = letters.joinToString(" · ")
-            customActions = letters.map { letter -> CustomAccessibilityAction(letter) { release(letter); true } }
         }) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             letters.forEachIndexed { index, letter ->
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // Each letter is its own accessibility node: a widget takes at most 32 custom actions.
+                Box(Modifier.weight(1f).fillMaxWidth().clearAndSetSemantics {
+                    contentDescription = letter
+                    onClick { release(letter); true }
+                }, contentAlignment = Alignment.Center) {
                     Text(letter, style = fittedStyle, maxLines = 1,
                         fontWeight = if (index == active) FontWeight.Bold else FontWeight.Normal,
                         color = if (index == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -293,8 +299,8 @@ private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScroll
 
 @Composable
 private fun HomeContent(
-    rows: List<BrowseItem>, player: PlayerConnection, onActivate: (BrowseItem) -> Unit,
-    onMenu: (BrowseItem) -> Unit, onPlay: (String, Boolean) -> Unit, onRefresh: (String) -> Unit,
+    sections: List<HomeSectionItems>, player: PlayerConnection, onActivate: (BrowseItem) -> Unit,
+    onMenu: (BrowseItem) -> Unit, onPlay: (HomeSectionItems, Boolean) -> Unit, onRefresh: (HomeBlockKind) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onScrolled: (Boolean) -> Unit,
     onRadio: (BrowseItem) -> Unit,
 ) {
@@ -309,28 +315,28 @@ private fun HomeContent(
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }
             .distinctUntilChanged().collect(onScrolled)
     }
-    val sections = remember(rows) { rows.groupBy { it.row.sectionId }.values.toList() }
     LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(sections, key = { it.first().row.sectionId }) { section ->
-            val header = section.first().row
-            if (header.sectionKind == "showcase") {
-                section.forEach { item -> HomeShowcase(item, player, onActivate, onMenu, onFavorite, onPlay, onRadio) }
+        items(sections, key = { it.index.toString() + it.title }) { section ->
+            if (section.kind == AndroidHomeSectionKind.SHOWCASE) {
+                section.items.forEach { item ->
+                    HomeShowcase(item, player, onActivate, onMenu, onFavorite, { shuffled -> onPlay(section, shuffled) }, onRadio, section.title)
+                }
             } else {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Text(header.section, Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            Text(section.title, Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            if (header.sectionRefreshable) PlayerIconButton("rufin-view-refresh-symbolic", "Refresh", { onRefresh(header.sectionId) }, glyph = true)
+                            section.refresh?.let { block -> PlayerIconButton("rufin-view-refresh-symbolic", "Refresh", { onRefresh(block) }, glyph = true) }
                         }
-                        ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(header.sectionId, true) })
-                        ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(header.sectionId, false) }, { onPlay(header.sectionId, true) })
+                        ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
+                        ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(section, false) }, { onPlay(section, true) })
                     }
                     LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
                         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(section, key = ::browseItemKey) { item ->
-                            if (header.sectionKind == "genres") {
+                        items(section.items, key = ::browseItemKey) { item ->
+                            if (section.kind == AndroidHomeSectionKind.GENRES) {
                                 AssistChip(onClick = { onActivate(item) }, label = { Text(item.row.title) },
                                     leadingIcon = { RufinIcon("rufin-audio-x-generic-symbolic", null, Modifier.size(20.dp)) })
                             } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true)
@@ -355,19 +361,10 @@ internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shu
 
 private fun browseItemKey(item: BrowseItem): String = "${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
 
+/** The item showing the favorites, ratings and downloads committed since it was read. */
 @Composable
-internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem {
-    val kind = if (item.row.kind == "album_header") "album" else item.row.kind
-    if (kind !in setOf("track", "album", "artist")) return item
-    var effective by remember(kind, item.row.mediaUri) { mutableStateOf(item.row.favorite) }
-    LaunchedEffect(item.row.favorite) { effective = item.row.favorite }
-    LaunchedEffect(model, kind, item.row.mediaUri) {
-        model.favoriteSettlements.collect { settlement ->
-            if (settlement.kind == kind && settlement.mediaUri == item.row.mediaUri) effective = settlement.effective
-        }
-    }
-    return item.copy(row = item.row.withFavorite(model.projectedFavorite(kind, item.row.mediaUri, effective)))
-}
+internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem =
+    model.browse.shown(item)
 
 @Composable
 internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
@@ -375,21 +372,21 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true,
     title: String = item.row.title) {
     val row = item.row
-    val occurrence = row.item is AndroidBrowseItem.PlaylistEntry
-    val queryContext = remember(item.query, occurrence) { if (occurrence) item.query?.contextId() else null }
-    val playing by remember(row.kind, row.mediaUri, row.playbackContextId, occurrence, item.index, queryContext, player) { derivedStateOf {
+    val occurrence = row.track?.entry != null
+    val track = row.isTrack
+    val playing by remember(track, row.mediaUri, row.contextId, occurrence, item.index, item.view, player) { derivedStateOf {
         player != null && player.playingMediaUri != null &&
-            if (row.kind == "track") {
+            if (track) {
                 player.playingMediaUri == row.mediaUri && (!occurrence ||
-                    queryContext != null && queryContext == player.currentContextId && item.index == player.currentSourceRank)
+                    player.currentRow?.let { item.view?.playingPosition(it) } == item.index)
             } else {
-                val target = row.playbackContextId
+                val target = row.contextId
                 val context = player.currentContextId
-                target != null && context != null && (context == target || context.startsWith("$target|query="))
+                target != null && context != null && playsContext(target, context)
             }
     } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (row.item is AndroidBrowseItem.PlaylistFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
+        if (row.playlistFolder != null) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
         if (playing) PlayingIndicator()
         Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,
@@ -458,7 +455,7 @@ private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, si
 private fun BrowseCover(item: BrowseItem, artwork: PlayerArtwork?, modifier: Modifier) {
     Box(modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         if (artwork != null) Artwork(artwork, Modifier.fillMaxSize())
-        else if (item.row.kind == "folder") RufinIcon("rufin-folders-symbolic", null, Modifier.size(24.dp))
+        else if (item.row.isFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(24.dp))
         else FallbackCover(Modifier.fillMaxSize())
     }
 }
@@ -469,27 +466,27 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     marquee: Boolean = false,
 ) {
+    val shown = favoriteItem(player.model, item)
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !marquee) {
-        Column(Modifier.fillMaxWidth().playlistFolderDrag(item, player.model).combinedClickable(onClick = { onActivate(item) },
-            onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null),
+        Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).combinedClickable(onClick = { onActivate(item) },
+            onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                BrowseTitle(item, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
+                BrowseTitle(shown, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
                     style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
-                if (item.row.playlistFolderMember != null) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
-                    PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(32.dp), iconSize = 18.dp)
-                }
+                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
-            val subtitle = listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
-                .filter(String::isNotBlank).joinToString(" · ")
-            if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (marquee) 1 else 2,
-                overflow = TextOverflow.Ellipsis)
+            // The labels under the title: the list's grid fields, one per line.
+            shown.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
+                Text(line, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
         }
         }
     }
@@ -506,14 +503,14 @@ private fun CoverPlaceholder() {
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate: (BrowseItem) -> Unit,
-    onMenu: (BrowseItem) -> Unit, onFavorite: (BrowseItem) -> Unit, onPlay: (String, Boolean) -> Unit,
-    onRadio: (BrowseItem) -> Unit,
+    onMenu: (BrowseItem) -> Unit, onFavorite: (BrowseItem) -> Unit, onPlay: (Boolean) -> Unit,
+    onRadio: (BrowseItem) -> Unit, section: String = "",
 ) {
     val projected = favoriteItem(player.model, item)
     BoxWithConstraints(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
         val coverSize = ((maxWidth - 20.dp) * .35f).coerceIn(96.dp, 180.dp)
         val artwork = rememberBrowseArtwork(item, player, coverSize)
-        Surface(Modifier.fillMaxWidth().then(showcasePaint(item.row.key)).combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }), shape = RoundedCornerShape(8.dp),
+        Surface(Modifier.fillMaxWidth().then(showcasePaint(item.row.key)).combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(projected) }), shape = RoundedCornerShape(8.dp),
             color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -521,21 +518,21 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                     ambientColor = Color.Black.copy(alpha = .18f), spotColor = Color.Black.copy(alpha = .18f)).clip(RoundedCornerShape(12.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (item.row.section.isNotBlank()) Text(item.row.section.uppercase(), color = MaterialTheme.colorScheme.primary,
+                        if (section.isNotBlank()) Text(section.uppercase(), color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
                             PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                         }
                     }
-                    BrowseTitle(item, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
+                    BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
                     Text(item.row.subtitle, Modifier.rufinMarquee(), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }
                         SummaryFact("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount))
-                        SummaryFact("rufin-preferences-system-time-symbolic", "Duration", browseDuration(item.row.durationMillis))
+                        SummaryFact("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
                     }
                     FlowRow {
-                        ShowcaseAction("rufin-media-playback-start-symbolic", "Play album", { onPlay(item.row.sectionId, false) }, { onPlay(item.row.sectionId, true) })
+                        ShowcaseAction("rufin-media-playback-start-symbolic", "Play album", { onPlay(false) }, { onPlay(true) })
                         ShowcaseAction(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                             "Favorite", { onFavorite(projected) }, tint = if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
 
@@ -567,36 +564,35 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     val artwork = rememberBrowseArtwork(item, player, imageSize)
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (displaySize == DisplaySize.COMPACT) 48.dp else 64.dp)
-        .playlistFolderDrag(item, player.model)
-        .combinedClickable(onClick = { onActivate(item) }, onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
+        .playlistFolderDrop(item, player.model)
+        .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             BrowseTitle(item, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            item.row.lyricsSnippet?.let { snippet ->
-                val accent = MaterialTheme.colorScheme.primary
-                Text(buildAnnotatedString {
-                    snippet.parts.forEach { part ->
-                        if (part.highlighted) withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) { append(part.text) }
-                        else append(part.text)
-                    }
-                }, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.row.kind == "track" && item.row.durationMillis > 0UL) Text(browseDuration(item.row.durationMillis),
+                if (item.row.isTrack && item.row.durationMillis > 0UL) Text(item.row.durationText,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })
+                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
+                    ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })
         }
     }
     }
 }
 
-internal fun browseDuration(millis: ULong): String {
-    val seconds = millis / 1000UL
-    return if (seconds >= 3600UL) "${seconds / 3600UL}:${((seconds / 60UL) % 60UL).toString().padStart(2, '0')}:${(seconds % 60UL).toString().padStart(2, '0')}"
-    else "${seconds / 60UL}:${(seconds % 60UL).toString().padStart(2, '0')}"
+/** The lyrics lines a search by lyrics matched, the match highlighted. */
+@Composable
+internal fun LyricsSnippetText(snippet: LyricsSnippet) {
+    val accent = MaterialTheme.colorScheme.primary
+    Text(buildAnnotatedString {
+        snippet.parts.forEach { part ->
+            if (part.highlighted) withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) { append(part.text) }
+            else append(part.text)
+        }
+    }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

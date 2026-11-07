@@ -3,18 +3,18 @@ mod player;
 mod preferences;
 pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPreferences};
 pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
+pub use preferences::{CommittedPreferences, PreferenceSubscription};
 pub mod app;
-mod connect;
 pub mod context_menu;
 pub mod layout;
 mod library_lists;
-mod pins;
 pub mod presentation;
 pub mod right_panel;
 mod storage_reset;
+pub(crate) use storage_reset::device_secrets;
 pub use storage_reset::{StorageReset, StorageResetRequest};
 mod secret_storage;
-pub use secret_storage::KeyringSecretStore;
+pub use secret_storage::{KeyringSecretStore, SecretStorageMode};
 pub mod sidebar;
 pub mod visualizer;
 mod web_controller;
@@ -25,8 +25,6 @@ pub use app::{
     RandomPlaySettings, Settings, SettingsHandle, default_home_blocks,
 };
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
-pub use downloads::DownloadRule;
-pub use downloads::{DownloadRules, SourceDownloadSettings};
 pub use layout::{
     AccentPreference, DEFAULT_LEFT_SIDEBAR_WIDTH, DEFAULT_RIGHT_SIDEBAR_WIDTH,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, LayoutProfile, LayoutSettings, LeftSidebarMode,
@@ -38,19 +36,20 @@ pub use layout::{
     available_grid_fields, available_row_fields, available_sort_fields,
     default_library_list_settings, sanitized_window_size,
 };
-pub use sidebar::{SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings};
+pub use sidebar::{
+    HomeBlockRow, SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings,
+};
 
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
+use crate::scrobbling::Settings as ScrobblingSettings;
 use app::Settings as UiSettings;
 use playback::StreamQuality;
-use scrobbling::Settings as ScrobblingSettings;
 use secrets::{
-    CachedSecretStore, ConfigSecretStore, SecretKey, SecretStorageMode, SecretStore,
-    SwitchableSecretStore,
+    CachedSecretStore, ConfigSecretStore, SecretKey, SecretStore, SwitchableSecretStore,
 };
 use serde::{Deserialize, Serialize};
 use sources::{SourceConfiguration, SourceId};
@@ -135,40 +134,6 @@ impl SourceSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) enum LegacyTrackSortKey {
-    TrackNumber,
-    #[default]
-    Title,
-    Artist,
-    Album,
-    Year,
-    Duration,
-    Favorite,
-}
-
-impl LegacyTrackSortKey {
-    fn library_field(self) -> LibraryField {
-        match self {
-            Self::TrackNumber => LibraryField::TrackNumber,
-            Self::Title => LibraryField::Title,
-            Self::Artist => LibraryField::Artist,
-            Self::Album => LibraryField::Album,
-            Self::Year => LibraryField::Year,
-            Self::Duration => LibraryField::Duration,
-            Self::Favorite => LibraryField::Favorite,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct LegacyTrackTableSettings {
-    #[serde(default)]
-    sort_key: LegacyTrackSortKey,
-    #[serde(default)]
-    descending: bool,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StoredSettings {
     #[serde(flatten)]
@@ -177,12 +142,10 @@ pub struct StoredSettings {
     pub(crate) equalizer: crate::playback::EqualizerPreferences,
     #[serde(default)]
     pub(crate) scrobbling: ScrobblingSettings,
-    #[serde(default = "legacy_scrobbling_secrets_present")]
+    #[serde(default)]
     pub(crate) scrobbling_secrets_present: bool,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(crate) scrobbling_credentials: std::collections::BTreeMap<String, Credential>,
-    #[serde(default)]
-    pub(crate) shared_settings: connect::SharedSettings,
     #[serde(default)]
     pub(crate) sources: SourceSettings,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -191,10 +154,14 @@ pub struct StoredSettings {
     pub(crate) jellyfin_device_id: String,
     #[serde(default)]
     visualizer_preset_bar_counts_updated: bool,
-    #[serde(default, rename = "home_sections", skip_serializing)]
-    pub(crate) legacy_home_sections: Option<Vec<HomeSectionKind>>,
-    #[serde(default, rename = "track_table", skip_serializing)]
-    pub(crate) legacy_track_table: Option<LegacyTrackTableSettings>,
+    /// Rises when a restore replaces the credentials kept outside the settings, so the feed
+    /// tells it.
+    #[serde(skip)]
+    pub secrets_revision: u64,
+    /// Rises when the web controller's token is replaced or the secret store switches, so the
+    /// controller starts again with its token.
+    #[serde(skip)]
+    pub web_controller_token_revision: u64,
 }
 
 impl Default for StoredSettings {
@@ -205,33 +172,45 @@ impl Default for StoredSettings {
             scrobbling: ScrobblingSettings::default(),
             scrobbling_secrets_present: false,
             scrobbling_credentials: Default::default(),
-            shared_settings: Default::default(),
             sources: SourceSettings::default(),
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
             visualizer_preset_bar_counts_updated: true,
-            legacy_home_sections: None,
-            legacy_track_table: None,
+            secrets_revision: 0,
+            web_controller_token_revision: 0,
         }
     }
 }
 
 impl StoredSettings {
+    /// Whether artwork and lyrics download automatically.
+    pub(crate) fn cache_downloads(&self) -> (bool, bool) {
+        (
+            self.ui.application.download_artwork_automatically,
+            self.ui.application.download_lyrics_automatically,
+        )
+    }
+
     pub(crate) fn migrate_defaults(&mut self) {
-        if self.ui.lastfm_api_key.trim().is_empty() && !self.scrobbling.lastfm.api_key.is_empty() {
-            self.ui.lastfm_api_key = self.scrobbling.lastfm.api_key.clone();
-        }
-        self.scrobbling.lastfm.api_key.clear();
         self.scrobbling.sanitize();
         if !self.visualizer_preset_bar_counts_updated {
             self.ui.visualizer.migrate_preset_bar_counts();
             self.visualizer_preset_bar_counts_updated = true;
         }
         self.ui.visualizer.migrate_named_presets();
-        self.migrate_home_blocks();
-        self.migrate_legacy_track_table();
         app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
+    }
+
+    /// Whether `other` names the same scrobbling accounts and secrets; the switches may
+    /// differ.
+    pub(crate) fn same_scrobbling_accounts(&self, other: &Self) -> bool {
+        self.scrobbling.same_accounts(&other.scrobbling)
+            && other.scrobbling_credentials == self.scrobbling_credentials
+            && other.scrobbling_secrets_present == self.scrobbling_secrets_present
+            && other.ui.lastfm_api_key == self.ui.lastfm_api_key
+            && other.secret_scope_id == self.secret_scope_id
+            && other.secrets_revision == self.secrets_revision
     }
 
     pub(crate) fn scrobbling_runtime_settings(&self) -> ScrobblingSettings {
@@ -239,83 +218,46 @@ impl StoredSettings {
         settings.lastfm.api_key = self.ui.lastfm_api_key.clone();
         settings
     }
-
-    fn migrate_home_blocks(&mut self) {
-        if self.ui.application.home_blocks.is_empty() {
-            let home_sections = self
-                .legacy_home_sections
-                .take()
-                .filter(|sections| !sections.is_empty())
-                .unwrap_or_else(default_home_sections);
-            self.ui.application.home_blocks = Vec::with_capacity(home_sections.len() + 2);
-            self.ui
-                .application
-                .home_blocks
-                .push(HomeBlockKind::Showcase);
-            for section in home_sections {
-                self.ui.application.home_blocks.push(match section {
-                    HomeSectionKind::Explore => HomeBlockKind::Explore,
-                    HomeSectionKind::MostPlayed => HomeBlockKind::MostPlayed,
-                    HomeSectionKind::NewlyAdded => HomeBlockKind::NewlyAdded,
-                    HomeSectionKind::RecentlyPlayed => HomeBlockKind::RecentlyPlayed,
-                    HomeSectionKind::RecentlyReleased => HomeBlockKind::RecentlyReleased,
-                });
-            }
-            if !self
-                .ui
-                .application
-                .home_blocks
-                .contains(&HomeBlockKind::Genres)
-            {
-                self.ui.application.home_blocks.push(HomeBlockKind::Genres);
-            }
-        } else {
-            self.legacy_home_sections.take();
-        }
-    }
-
-    fn migrate_legacy_track_table(&mut self) {
-        let Some(legacy) = self.legacy_track_table.take() else {
-            return;
-        };
-        if self
-            .ui
-            .library_lists
-            .iter()
-            .any(|entry| entry.key == LibraryListKey::Tracks)
-        {
-            return;
-        }
-
-        let mut settings = LibraryListSettings::for_key(LibraryListKey::Tracks);
-        settings.sort_key = legacy.sort_key.library_field();
-        settings.descending = legacy.descending;
-        self.ui.library_lists.push(LibraryListSettingsEntry {
-            key: LibraryListKey::Tracks,
-            settings,
-        });
-    }
 }
 
-fn default_home_sections() -> Vec<HomeSectionKind> {
-    vec![
-        HomeSectionKind::Explore,
-        HomeSectionKind::MostPlayed,
-        HomeSectionKind::NewlyAdded,
-        HomeSectionKind::RecentlyPlayed,
-        HomeSectionKind::RecentlyReleased,
-    ]
+/// Runs `pass` with the previous and the committed settings on every change while its owner
+/// lives, as `features::follow` does for the Catalog's changes.
+pub(crate) fn follow<T, Pass, Done>(
+    runtime: &tokio::runtime::Handle,
+    settings: &SettingsFile,
+    owner: std::sync::Weak<T>,
+    mut pass: Pass,
+) -> tokio::task::AbortHandle
+where
+    T: Send + Sync + 'static,
+    Pass: FnMut(Arc<T>, &StoredSettings, &StoredSettings) -> Done + Send + 'static,
+    Done: std::future::Future<Output = ()> + Send,
+{
+    let mut committed = settings.changes();
+    runtime
+        .spawn(async move {
+            let mut previous = Arc::clone(&committed.borrow_and_update());
+            while committed.changed().await.is_ok() {
+                let current = Arc::clone(&committed.borrow_and_update());
+                let Some(owner) = owner.upgrade() else {
+                    return;
+                };
+                pass(owner, &previous, &current).await;
+                previous = current;
+            }
+        })
+        .abort_handle()
 }
 
 #[derive(Clone)]
 pub struct SettingsFile {
-    shared: tokio::sync::watch::Sender<u64>,
-    sidebar: tokio::sync::watch::Sender<SidebarSettings>,
-    appearance: tokio::sync::watch::Sender<AppearancePreferences>,
-    web_controller: tokio::sync::watch::Sender<crate::settings::ControllerSettings>,
+    /// The committed settings and every change, whichever writer made it: the one settings
+    /// feed.
+    committed: tokio::sync::watch::Sender<Arc<StoredSettings>>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
-    value: Arc<Mutex<StoredSettings>>,
+    /// Held while a writer turns the committed settings into the next.
+    writing: Arc<Mutex<()>>,
     persistence: Arc<Mutex<StoredSettings>>,
     edits: Arc<OnceLock<Result<mpsc::SyncSender<Self>, String>>>,
     persistence_error: tokio::sync::watch::Sender<Option<String>>,
@@ -326,8 +268,9 @@ pub struct SettingsFile {
 }
 
 impl SettingsFile {
-    pub(crate) fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
-        self.sidebar.subscribe()
+    /// The committed settings, now and after every change.
+    pub(crate) fn changes(&self) -> tokio::sync::watch::Receiver<Arc<StoredSettings>> {
+        self.committed.subscribe()
     }
 
     pub(crate) fn config_dir(&self) -> &Path {
@@ -361,16 +304,13 @@ impl SettingsFile {
             }
         }
         Ok(Self {
-            shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
-            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
-            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
+            committed: tokio::sync::watch::channel(Arc::new(value.clone())).0,
             config_dir: path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
             path: Some(path),
-            value: Arc::new(Mutex::new(value.clone())),
+            writing: Arc::default(),
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
@@ -389,12 +329,9 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
-            shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
-            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
-            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
+            committed: tokio::sync::watch::channel(Arc::new(value.clone())).0,
             config_dir,
-            value: Arc::new(Mutex::new(value.clone())),
+            writing: Arc::default(),
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
@@ -402,20 +339,22 @@ impl SettingsFile {
         }
     }
 
-    pub fn load(&self) -> StoredSettings {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+    /// The committed settings.
+    pub fn load(&self) -> Arc<StoredSettings> {
+        self.committed.borrow().clone()
+    }
+
+    /// The committed settings as a reader holds them, without a copy.
+    pub(crate) fn committed(&self) -> Committed {
+        Committed(self.load())
     }
 
     pub(crate) fn equalizer_preset(
         &self,
         id: &str,
     ) -> Option<crate::playback::equalizer::SavedPreset> {
-        self.value
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        self.committed
+            .borrow()
             .equalizer
             .presets
             .iter()
@@ -423,39 +362,13 @@ impl SettingsFile {
             .cloned()
     }
 
-    pub(crate) fn cache_downloads(&self) -> (bool, bool) {
-        let stored = self.value.lock().unwrap_or_else(|p| p.into_inner());
-        (
-            stored.ui.application.download_artwork_automatically,
-            stored.ui.application.download_lyrics_automatically,
-        )
-    }
-
-    pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .sources
-            .configured
-            .iter()
-            .find(|source| &source.configuration.source_id == source_id)
-            .map(|source| source.configuration.name.clone())
-            .unwrap_or_default()
-    }
-
     pub(crate) fn playback_stream_quality(&self) -> StreamQuality {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .ui
-            .playback
-            .stream_quality
+        self.committed.borrow().ui.playback.stream_quality
     }
 
     pub(crate) fn local_configuration(&self) -> Option<SourceConfiguration> {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.committed
+            .borrow()
             .sources
             .configured
             .iter()
@@ -491,11 +404,14 @@ impl SettingsFile {
         } else {
             None
         };
-        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
-        let mut next = current.clone();
+        let _writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+        let current = self.load();
+        let mut next = StoredSettings::clone(&current);
         let output = operation(&mut next)?;
         next.prepare()?;
         if next != *current {
+            // The writer saves what is committed, so it hears of the edit after it.
+            self.committed.send_replace(Arc::new(next));
             if let Some(writer) = writer {
                 match writer.try_send(self.clone()) {
                     Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
@@ -504,51 +420,41 @@ impl SettingsFile {
                     }
                 }
             }
-            *current = next;
-            self.publish_changes(&current);
         }
         Ok(output)
     }
 
+    /// Commits an edit once it is saved, or returns the error. The edit sees the committed
+    /// settings and nothing commits between it and its publication.
     pub(crate) fn update<T>(
         &self,
         operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
-        let previous = self.load();
-        let mut next = previous.clone();
+        let _writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+        let current = self.load();
+        let mut next = StoredSettings::clone(&current);
         let output = operation(&mut next)?;
         next.prepare()?;
-        connect::stamp_changes(&saved, &mut next)?;
-        if next != *saved {
-            self.persist(&next)?;
+        {
+            let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
+            if next != *saved {
+                self.persist(&next)?;
+                *saved = next.clone();
+            }
         }
-        *saved = next.clone();
-        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
-        // Preference edits can arrive while a background transaction writes to disk.
-        // Keep those newer edits when publishing the committed source or configuration.
-        merge_preference_edits(&mut next.ui, &previous.ui, &current.ui)?;
-        merge_preference_edits(
-            &mut next.scrobbling,
-            &previous.scrobbling,
-            &current.scrobbling,
-        )?;
-        *current = next;
-        self.publish_changes(&current);
+        if next != *current {
+            self.committed.send_replace(Arc::new(next));
+        }
         Ok(output)
     }
 
     pub(crate) fn flush(&self) -> Result<(), String> {
         let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
         let result = (|| {
-            let mut next = self.load();
-            connect::stamp_changes(&saved, &mut next)?;
-            if next != *saved {
+            let next = self.load();
+            if *next != *saved {
                 self.persist(&next)?;
-                let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
-                current.shared_settings = next.shared_settings.clone();
-                *saved = next;
-                self.publish_changes(&current);
+                *saved = StoredSettings::clone(&next);
             }
             Ok(())
         })();
@@ -564,29 +470,16 @@ impl SettingsFile {
     }
 }
 
-fn merge_preference_edits<T: Serialize + serde::de::DeserializeOwned + PartialEq>(
-    next: &mut T,
-    previous: &T,
-    current: &T,
-) -> Result<(), String> {
-    if previous != current {
-        let mut merged = serde_json::to_value(&*next).map_err(|e| e.to_string())?;
-        let previous = serde_json::to_value(previous).map_err(|e| e.to_string())?;
-        let current = serde_json::to_value(current).map_err(|e| e.to_string())?;
-        merge_settings(&mut merged, &previous, &current);
-        *next = serde_json::from_value(merged).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 impl StoredSettings {
     fn prepare(&mut self) -> Result<(), String> {
         self.ui.sanitize();
         let backup = &mut self.ui.application.backup;
-        if backup.enabled && backup.schedule.frequency == backup::BackupFrequency::Off {
-            backup.schedule.frequency = backup::BackupFrequency::Daily;
+        if backup.enabled
+            && backup.schedule.frequency == crate::backup::format::BackupFrequency::Off
+        {
+            backup.schedule.frequency = crate::backup::format::BackupFrequency::Daily;
         }
-        if backup.schedule.frequency != backup::BackupFrequency::Off
+        if backup.schedule.frequency != crate::backup::format::BackupFrequency::Off
             && backup.schedule.schedule_id.is_empty()
         {
             backup.schedule.schedule_id = random_identity("schedule-")?;
@@ -603,7 +496,6 @@ impl StoredSettings {
 pub struct SettingsOwner {
     file: SettingsFile,
     secrets: Arc<SwitchableSecretStore>,
-    on_change: Arc<dyn Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync>,
 }
 
 impl SettingsOwner {
@@ -611,73 +503,46 @@ impl SettingsOwner {
         self.file.local_configuration()
     }
 
-    pub(crate) fn new(
-        file: SettingsFile,
-        secrets: Arc<SwitchableSecretStore>,
-        on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            file,
-            secrets,
-            on_change: Arc::new(on_change),
-        })
+    pub(crate) fn new(file: SettingsFile, secrets: Arc<SwitchableSecretStore>) -> Arc<Self> {
+        Arc::new(Self { file, secrets })
     }
 
+    pub(crate) fn file(&self) -> &SettingsFile {
+        &self.file
+    }
+
+    pub(crate) fn secrets(&self) -> &Arc<SwitchableSecretStore> {
+        &self.secrets
+    }
+
+    /// Writes restored settings. `credentials_changed` says the secrets they name were
+    /// replaced, which the feed tells by a new `secrets_revision`. The revisions count on
+    /// whatever the restore puts in their place.
     pub(crate) fn restore(
         &self,
         restore: impl FnOnce(&mut StoredSettings) -> Result<(), String>,
         credentials_changed: bool,
     ) -> Result<(), String> {
-        let previous = self.file.load();
-        self.file.update(restore)?;
-        (self.on_change)(&previous, &self.file.load(), credentials_changed);
-        Ok(())
+        self.file.update(|stored| {
+            let revisions = (
+                stored.secrets_revision,
+                stored.web_controller_token_revision,
+            );
+            restore(stored)?;
+            stored.secrets_revision = revisions.0 + u64::from(credentials_changed);
+            stored.web_controller_token_revision = revisions.1;
+            Ok(())
+        })
     }
 }
 
 impl SettingsFile {
-    fn publish_changes(&self, stored: &StoredSettings) {
-        self.shared.send_if_modified(|revision| {
-            let next = stored.shared_settings.revision();
-            if *revision == next {
-                return false;
-            }
-            *revision = next;
-            true
-        });
-        self.appearance.send_if_modified(|current| {
-            if *current == stored.ui.appearance {
-                return false;
-            }
-            *current = stored.ui.appearance.clone();
-            true
-        });
-        self.sidebar.send_if_modified(|current| {
-            if *current == stored.ui.sidebar {
-                return false;
-            }
-            *current = stored.ui.sidebar.clone();
-            true
-        });
-        let next = stored.ui.web_controller.clone();
-        self.web_controller.send_if_modified(|current| {
-            if *current == next {
-                return false;
-            }
-            *current = next;
-            true
-        });
-    }
-
-    pub(crate) fn web_controller_changes(
-        &self,
-    ) -> tokio::sync::watch::Receiver<crate::settings::ControllerSettings> {
-        self.web_controller.subscribe()
-    }
-
-    pub(crate) fn web_controller_credentials_changed(&self) {
-        self.web_controller
-            .send_replace(self.load().ui.web_controller);
+    /// Tells the feed that the web controller's token was replaced.
+    pub(crate) fn web_controller_token_replaced(&self) -> Result<(), String> {
+        self.edit(|stored| {
+            stored.web_controller_token_revision += 1;
+            Ok(())
+        })
     }
 }
 
@@ -691,33 +556,22 @@ impl SettingsOwner {
         self.file.flush()
     }
 
-    pub fn appearance_changes(&self) -> tokio::sync::watch::Receiver<AppearancePreferences> {
-        self.file.appearance.subscribe()
+    /// The committed settings, now and after every change, whichever writer made it.
+    pub fn changes(&self) -> tokio::sync::watch::Receiver<Arc<StoredSettings>> {
+        self.file.changes()
     }
 
-    pub fn load(&self) -> UiSettings {
-        self.file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .ui
-            .clone()
+    /// The committed settings, shared rather than copied.
+    pub fn load(&self) -> Committed {
+        self.file.committed()
     }
 
     pub fn visualizer_render_settings(&self) -> (u32, visualizer::VisualizerAppearance) {
-        let stored = self
-            .file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stored = self.file.load();
         (
             stored.ui.visualizer.fps_limit,
             stored.ui.visualizer.appearance.clone(),
         )
-    }
-
-    pub fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
-        self.file.sidebar_changes()
     }
 
     pub fn set_pinned(&self, pin: SidebarPin, pinned: bool) -> Result<bool, String> {
@@ -780,10 +634,65 @@ impl SettingsOwner {
         &self,
         edit: impl FnOnce(&mut UiSettings) -> Result<(), String>,
     ) -> Result<(), String> {
-        let previous = self.file.load();
-        self.file.edit(move |stored| edit(&mut stored.ui))?;
-        (self.on_change)(&previous, &self.file.load(), false);
-        Ok(())
+        self.file.edit(move |stored| edit(&mut stored.ui))
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    /// The Home blocks as the block editor lists them.
+    pub fn home_block_rows(&self) -> Vec<sidebar::HomeBlockRow> {
+        sidebar::home_block_rows(&self.file.load().ui.application.home_blocks)
+    }
+
+    pub fn set_home_block_visible(
+        &self,
+        block: library::HomeBlockKind,
+        visible: bool,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::set_home_block_visible(
+                    &mut stored.ui.application.home_blocks,
+                    block,
+                    visible,
+                ))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn move_home_block(
+        &self,
+        block: library::HomeBlockKind,
+        delta: i32,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::move_home_block(
+                    &mut stored.ui.application.home_blocks,
+                    block,
+                    delta as isize,
+                ))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn reorder_home_block(
+        &self,
+        source: library::HomeBlockKind,
+        target: library::HomeBlockKind,
+        after: bool,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::reorder_home_block(
+                    &mut stored.ui.application.home_blocks,
+                    source,
+                    target,
+                    after,
+                ))
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -792,7 +701,7 @@ impl SettingsOwner {
     pub fn set_download_location(
         &self,
         source_id: SourceId,
-        location: Option<downloads::DownloadDirectory>,
+        location: Option<crate::downloads::DownloadDirectory>,
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_location(source_id, location);
@@ -806,24 +715,6 @@ impl SettingsOwner {}
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn set_download_rule(
-        &self,
-        source_id: SourceId,
-        rule: DownloadRule,
-        enabled: bool,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            let mut rules = ui.download_rules(&source_id);
-            rules.set(rule, enabled);
-            ui.set_download_rules(source_id, rules);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl SettingsOwner {
     pub fn set_download_quality(
         &self,
         source_id: SourceId,
@@ -831,17 +722,6 @@ impl SettingsOwner {
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_quality(source_id, quality);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl SettingsOwner {
-    pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.set_download_rules(source_id, DownloadRules::default());
             Ok(())
         })
         .map_err(Into::into)
@@ -978,16 +858,12 @@ pub(crate) fn load_provider_secret(
 }
 
 fn scrobbling_secrets_present(settings: &ScrobblingSettings) -> bool {
-    scrobbling::secret_descriptors()
+    crate::scrobbling::secret_descriptors()
         .iter()
         .any(|descriptor| !descriptor.value(settings).trim().is_empty())
 }
 
-fn legacy_scrobbling_secrets_present() -> bool {
-    true
-}
-
-pub(crate) fn scrobbling_secret_key(descriptor: scrobbling::SecretDescriptor) -> SecretKey {
+pub(crate) fn scrobbling_secret_key(descriptor: crate::scrobbling::SecretDescriptor) -> SecretKey {
     SecretKey::namespaced(
         descriptor.namespace(),
         descriptor.kind(),
@@ -1000,7 +876,7 @@ pub(crate) fn read_scrobbling(
     secrets: &dyn SecretStore,
 ) -> Result<ScrobblingSettings, String> {
     let mut settings = stored.scrobbling_runtime_settings();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         if let Some(credential) = stored.scrobbling_credentials.get(descriptor.kind()) {
             *descriptor.value_mut(&mut settings) =
                 load_provider_secret(secrets, credential)?.unwrap_or_default();
@@ -1022,7 +898,7 @@ pub(crate) fn store_scrobbling(
 ) -> Result<(), String> {
     let mut input = input.clone();
     input.sanitize();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         let value = descriptor.value(&input);
         if value.is_empty() {
             stored.scrobbling_credentials.remove(descriptor.kind());
@@ -1054,37 +930,31 @@ pub(crate) fn persist_scrobbling_settings(
     secrets: &Arc<SwitchableSecretStore>,
     input: &ScrobblingSettings,
     scope: &str,
-) -> Result<ScrobblingSettings, String> {
-    let mut prepared = file.load();
+) -> Result<(), String> {
+    let mut prepared = StoredSettings::clone(&file.load());
     store_scrobbling(&mut prepared, secrets.as_ref(), input)?;
-    let mut committed = input.clone();
     file.update(|stored| {
         if stored.secret_scope_id != scope {
             return Err("credential storage was reset".into());
         }
-        prepared.scrobbling.lastfm.enabled = stored.scrobbling.lastfm.enabled;
-        prepared.scrobbling.lastfm.now_playing_enabled =
-            stored.scrobbling.lastfm.now_playing_enabled;
-        prepared.scrobbling.librefm.enabled = stored.scrobbling.librefm.enabled;
-        prepared.scrobbling.librefm.now_playing_enabled =
-            stored.scrobbling.librefm.now_playing_enabled;
-        prepared.scrobbling.listenbrainz.enabled = stored.scrobbling.listenbrainz.enabled;
-        prepared.scrobbling.listenbrainz.now_playing_enabled =
-            stored.scrobbling.listenbrainz.now_playing_enabled;
-        stored.scrobbling = prepared.scrobbling;
+        // Switches commit through their own edit, which may have landed meanwhile.
+        let mut scrobbling = prepared.scrobbling;
+        let kept = &stored.scrobbling;
+        for (account, kept) in [
+            (&mut scrobbling.lastfm, &kept.lastfm),
+            (&mut scrobbling.librefm, &kept.librefm),
+        ] {
+            account.enabled = kept.enabled;
+            account.now_playing_enabled = kept.now_playing_enabled;
+        }
+        scrobbling.listenbrainz.enabled = kept.listenbrainz.enabled;
+        scrobbling.listenbrainz.now_playing_enabled = kept.listenbrainz.now_playing_enabled;
+        stored.scrobbling = scrobbling;
         stored.scrobbling_credentials = prepared.scrobbling_credentials;
         stored.scrobbling_secrets_present = false;
         stored.ui.lastfm_api_key = prepared.ui.lastfm_api_key;
-        committed.lastfm.enabled = stored.scrobbling.lastfm.enabled;
-        committed.lastfm.now_playing_enabled = stored.scrobbling.lastfm.now_playing_enabled;
-        committed.librefm.enabled = stored.scrobbling.librefm.enabled;
-        committed.librefm.now_playing_enabled = stored.scrobbling.librefm.now_playing_enabled;
-        committed.listenbrainz.enabled = stored.scrobbling.listenbrainz.enabled;
-        committed.listenbrainz.now_playing_enabled =
-            stored.scrobbling.listenbrainz.now_playing_enabled;
         Ok(())
-    })?;
-    Ok(committed)
+    })
 }
 
 pub(crate) fn load_scrobbling_settings(
@@ -1096,7 +966,7 @@ pub(crate) fn load_scrobbling_settings(
         Ok(settings) => {
             if current.scrobbling_secrets_present || scrobbling_secrets_present(&current.scrobbling)
             {
-                let mut migrated = current.clone();
+                let mut migrated = StoredSettings::clone(&current);
                 if let Err(error) = store_scrobbling(&mut migrated, secrets.as_ref(), &settings)
                     .and_then(|()| {
                         file.update(|stored| {
@@ -1123,17 +993,8 @@ pub(crate) fn load_scrobbling_settings(
     }
 }
 
-pub(crate) fn startup_scrobbling_settings(
-    file: &SettingsFile,
-    secrets: &Arc<SwitchableSecretStore>,
-) -> ScrobblingSettings {
-    if let Err(error) = migrate_source_credentials(file, secrets.as_ref()) {
-        warn!(%error, "could not migrate saved source credentials");
-    }
-    load_scrobbling_settings(file, secrets)
-}
-
-fn migrate_source_credentials(
+/// Seals source credentials saved before they were sealed.
+pub(crate) fn migrate_source_credentials(
     file: &SettingsFile,
     secrets: &dyn SecretStore,
 ) -> Result<(), String> {
@@ -1175,7 +1036,7 @@ fn migrate_source_credentials(
     Ok(())
 }
 
-fn random_identity(prefix: &str) -> Result<String, String> {
+pub(crate) fn random_identity(prefix: &str) -> Result<String, String> {
     use std::fmt::Write as _;
 
     let mut bytes = [0_u8; 16];
@@ -1254,11 +1115,6 @@ pub(crate) fn decode_settings(
     let fields = raw.as_object().ok_or("settings must be a JSON object")?;
     let mut accepted =
         serde_json::to_value(StoredSettings::default()).map_err(|error| error.to_string())?;
-    // Missing legacy markers still need their deserializer defaults.
-    accepted
-        .as_object_mut()
-        .unwrap()
-        .remove("scrobbling_secrets_present");
     let mut unsupported = Vec::new();
     for (key, value) in fields {
         recover_setting(&mut accepted, vec![key.clone()], value, &mut unsupported);
@@ -1328,7 +1184,6 @@ fn persistent_settings(value: &StoredSettings) -> StoredSettings {
     persistent
         .scrobbling_credentials
         .retain(|_, credential| !credential.session());
-    persistent.shared_settings.remove_session_credentials();
     persistent
 }
 
@@ -1340,15 +1195,6 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
         Some(mut saved) => {
             let (mut previous, unsupported) = decode_settings(&saved)?;
             let mut before = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
-            // These decoded legacy fields are consumed by migration and never serialized.
-            for (key, present) in [
-                ("home_sections", previous.legacy_home_sections.is_some()),
-                ("track_table", previous.legacy_track_table.is_some()),
-            ] {
-                if present {
-                    before[key] = saved[key].clone();
-                }
-            }
             if !unsupported.is_empty() {
                 previous.migrate_defaults();
                 let defaults =
@@ -1415,7 +1261,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn pending_settings_update_leaves_committed_values_readable_and_serializes_saves() {
+    fn pending_settings_update_leaves_committed_values_readable_and_serializes_writers() {
         use std::sync::mpsc;
         use std::time::Duration;
 
@@ -1442,6 +1288,7 @@ mod tests {
         let reader_file = file.clone();
         let reader = std::thread::spawn(move || read.send(reader_file.load()).unwrap());
         let observed = result.recv_timeout(Duration::from_secs(5));
+        // A writer that starts meanwhile sees the pending one's result; so does an edit.
         let next_file = file.clone();
         let next_writer = std::thread::spawn(move || {
             next_file.update(|stored| {
@@ -1450,19 +1297,21 @@ mod tests {
                 Ok(previous_shuffle)
             })
         });
-        // Editing preferences must not wait for a background save to finish.
-        file.edit(|stored| {
-            stored.ui.window_width = Some(1234);
-            stored.ui.window_height = Some(800);
-            Ok(())
-        })
-        .unwrap();
-        let edited_width = file.load().ui.window_width;
+        let edit_file = file.clone();
+        let editor = std::thread::spawn(move || {
+            edit_file.edit(|stored| {
+                stored.ui.window_width = Some(1234);
+                stored.ui.window_height = Some(800);
+                Ok(stored.ui.shuffle_enabled)
+            })
+        });
         // Always release the writer, including when a blocked reader times out.
         release.send(()).unwrap();
         writer.join().unwrap().unwrap();
         reader.join().unwrap();
         assert!(next_writer.join().unwrap().unwrap());
+        assert!(editor.join().unwrap().unwrap());
+        let edited_width = file.load().ui.window_width;
         assert_eq!(observed.unwrap(), initial);
         assert_eq!(edited_width, Some(1234));
         let committed = file.load();
@@ -1470,7 +1319,7 @@ mod tests {
         assert!(committed.ui.application.private_mode);
         assert_eq!(committed.ui.window_width, Some(1234));
         file.flush().unwrap();
-        assert_eq!(read_startup_settings(&path).unwrap().0, file.load());
+        assert_eq!(read_startup_settings(&path).unwrap().0, *file.load());
     }
 
     #[test]
@@ -1484,7 +1333,7 @@ mod tests {
             ..SettingsFile::memory_at(directory.path().to_path_buf())
         };
         let initial = file.load();
-        let changes = file.web_controller_changes();
+        let changes = file.changes();
         assert!(
             file.update(|stored| {
                 stored.ui.web_controller.enabled = !stored.ui.web_controller.enabled;
@@ -1504,8 +1353,8 @@ mod tests {
         let committed = file.load();
         assert_ne!(committed.ui.web_controller, initial.ui.web_controller);
         assert!(changes.has_changed().unwrap());
-        assert_eq!(*changes.borrow(), committed.ui.web_controller);
-        assert_eq!(read_startup_settings(&path).unwrap().0, committed);
+        assert_eq!(*changes.borrow(), committed);
+        assert_eq!(read_startup_settings(&path).unwrap().0, *committed);
     }
 
     #[derive(Default)]
@@ -1548,11 +1397,19 @@ mod tests {
         };
         assert!(!file.load().ui.application.backup.enabled);
         file.update(|stored| {
-            stored.ui.application.backup.schedule.frequency = backup::BackupFrequency::Daily;
+            stored.ui.application.backup.schedule.frequency =
+                crate::backup::format::BackupFrequency::Daily;
             Ok(())
         })
         .unwrap();
-        let identity = file.load().ui.application.backup.schedule.schedule_id;
+        let identity = file
+            .load()
+            .ui
+            .application
+            .backup
+            .schedule
+            .schedule_id
+            .clone();
         assert!(!identity.is_empty());
         file.update(|stored| {
             stored.ui.application.backup.contents.saved_logins = true;
@@ -1591,23 +1448,6 @@ mod tests {
     }
 
     #[test]
-    fn fresh_settings_persist_empty_secret_storage_while_legacy_settings_probe_once() {
-        let fresh = StoredSettings::default();
-        let serialized = serde_json::to_value(&fresh).expect("serialize fresh settings");
-        let mut legacy_json = serialized.clone();
-        legacy_json
-            .as_object_mut()
-            .expect("settings object")
-            .remove("scrobbling_secrets_present");
-        let legacy: StoredSettings =
-            serde_json::from_value(legacy_json).expect("deserialize old settings");
-
-        assert_eq!(serialized["scrobbling_secrets_present"], false);
-        assert!(!fresh.scrobbling_secrets_present);
-        assert!(legacy.scrobbling_secrets_present);
-    }
-
-    #[test]
     fn fresh_scrobbling_settings_do_not_open_secret_storage() {
         let file = SettingsFile::memory();
         let (store, secrets) = counting_secrets();
@@ -1629,14 +1469,12 @@ mod tests {
         let mut settings = load_scrobbling_settings(&file, &secrets);
         settings.listenbrainz.user_token = "token".to_string();
 
-        let committed =
-            persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
-                .expect("persist first scrobbling secret");
+        persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
+            .expect("persist first scrobbling secret");
 
         assert_eq!(store.loads.load(Ordering::Relaxed), 2);
         assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
         assert_eq!(store.saves.load(Ordering::Relaxed), 1);
-        assert_eq!(committed.listenbrainz.user_token, "token");
         assert!(!file.load().scrobbling_secrets_present);
         assert!(
             file.load()
@@ -1660,7 +1498,7 @@ mod tests {
 
         assert_eq!(
             store.loads.load(Ordering::Relaxed),
-            scrobbling::secret_descriptors().len()
+            crate::scrobbling::secret_descriptors().len()
         );
         assert!(!file.load().scrobbling_secrets_present);
     }
@@ -1700,7 +1538,10 @@ mod tests {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn download_settings(&self, source_id: SourceId) -> downloads::SourceDownloadSettings {
+    pub fn download_settings(
+        &self,
+        source_id: SourceId,
+    ) -> crate::downloads::SourceDownloadSettings {
         self.load().download_settings(&source_id)
     }
 }
@@ -1725,5 +1566,17 @@ impl SettingsOwner {
             Ok(())
         })
         .map_err(Into::into)
+    }
+}
+
+/// The committed settings a reader holds: the shared value, read as the UI settings.
+#[derive(Clone)]
+pub struct Committed(Arc<StoredSettings>);
+
+impl std::ops::Deref for Committed {
+    type Target = UiSettings;
+
+    fn deref(&self) -> &UiSettings {
+        &self.0.ui
     }
 }

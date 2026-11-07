@@ -13,18 +13,20 @@ use futures_util::{
 };
 use iroh::{
     EndpointId,
-    address_lookup::{
-        AddressLookup, EndpointData, EndpointInfo, Error, Item, memory::MemoryLookup,
-    },
+    address_lookup::{AddressLookup, EndpointData, EndpointInfo, Error, Item},
 };
 use swarm_discovery::{Discoverer, DropGuard, IpClass, Peer};
 use tokio::sync::{broadcast, mpsc};
 
+use crate::network::Routes;
+
 pub(crate) enum Discovery {
+    /// A device seen for the first time since it expired, or at new addresses.
     Found(EndpointInfo),
     Expired(EndpointId),
 }
 
+/// The nearby address lookup. Multicast discovery runs while the endpoint does.
 pub(crate) struct Nearby {
     discovery: DropGuard,
     interfaces: Mutex<BTreeSet<Ipv4Addr>>,
@@ -40,13 +42,15 @@ impl fmt::Debug for Nearby {
 impl Nearby {
     pub(crate) fn new(
         id: EndpointId,
-        addresses: MemoryLookup,
-    ) -> Result<(Self, mpsc::Receiver<Discovery>)> {
-        let (sender, receiver) = mpsc::channel(64);
+        routes: Routes,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<Discovery>)> {
+        let (found, receiver) = mpsc::unbounded_channel();
         let (changes, _) = broadcast::channel(64);
         let discovered = changes.clone();
         let interfaces = multicast_interfaces();
-        let discovery = Discoverer::new_interactive(
+        // Each device answers every query; only what changed is news.
+        let mut seen = HashMap::<EndpointId, EndpointData>::new();
+        let discovery = Discoverer::new(
             "rufin-connect".into(),
             data_encoding::BASE32_NOPAD
                 .encode(id.as_bytes())
@@ -62,6 +66,7 @@ impl Nearby {
                 return;
             }
             let event = if peer.is_expiry() {
+                seen.remove(&peer_id);
                 Discovery::Expired(peer_id)
             } else {
                 let mut data = EndpointData::from(
@@ -80,15 +85,16 @@ impl Nearby {
                         .flatten()
                         .and_then(|name| name.parse().ok()),
                 );
+                if seen.get(&peer_id) == Some(&data) {
+                    return;
+                }
+                seen.insert(peer_id, data.clone());
                 let info = EndpointInfo::from_parts(peer_id, data);
-                addresses.add_endpoint_info(info.clone());
+                routes.take(info.to_endpoint_addr());
                 let _ = discovered.send(info.clone());
                 Discovery::Found(info)
             };
-            let sender = sender.clone();
-            tokio::spawn(async move {
-                let _ = sender.send(event).await;
-            });
+            let _ = found.send(event);
         })
         .spawn(&tokio::runtime::Handle::current())?;
         Ok((
@@ -104,7 +110,7 @@ impl Nearby {
 
 impl AddressLookup for Nearby {
     fn resolve(&self, id: EndpointId) -> Option<BoxStream<'static, Result<Item, Error>>> {
-        // MemoryLookup supplies known addresses. Keep receiving new routes while connecting.
+        // Routes supply known addresses. Keep receiving new routes while connecting.
         let changes = stream::unfold(self.changes.subscribe(), |mut receiver| async {
             loop {
                 match receiver.recv().await {
@@ -136,29 +142,32 @@ impl AddressLookup for Nearby {
             self.discovery.add_interface_v4(*ip);
         }
         *previous = interfaces;
+        advertise(&self.discovery, data);
+    }
+}
 
-        let mut addresses = HashMap::<u16, Vec<IpAddr>>::new();
-        for address in data.ip_addrs() {
-            addresses
-                .entry(address.port())
-                .or_default()
-                .push(address.ip());
-        }
-        self.discovery.remove_all();
-        for (port, ips) in addresses {
-            self.discovery.add(port, ips);
-        }
-        for (key, value) in [
-            ("relay", data.relay_urls().next().map(ToString::to_string)),
-            ("user-data", data.user_data().map(ToString::to_string)),
-        ] {
-            if let Some(value) = value {
-                if let Err(error) = self.discovery.set_txt_attribute(key.into(), Some(value)) {
-                    tracing::warn!(%error, key, "Could not publish nearby device attribute");
-                }
-            } else {
-                self.discovery.remove_txt_attribute(key.into());
+fn advertise(discovery: &DropGuard, data: &EndpointData) {
+    let mut addresses = HashMap::<u16, Vec<IpAddr>>::new();
+    for address in data.ip_addrs() {
+        addresses
+            .entry(address.port())
+            .or_default()
+            .push(address.ip());
+    }
+    discovery.remove_all();
+    for (port, ips) in addresses {
+        discovery.add(port, ips);
+    }
+    for (key, value) in [
+        ("relay", data.relay_urls().next().map(ToString::to_string)),
+        ("user-data", data.user_data().map(ToString::to_string)),
+    ] {
+        if let Some(value) = value {
+            if let Err(error) = discovery.set_txt_attribute(key.into(), Some(value)) {
+                tracing::warn!(%error, key, "Could not publish nearby device attribute");
             }
+        } else {
+            discovery.remove_txt_attribute(key.into());
         }
     }
 }

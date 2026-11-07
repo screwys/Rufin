@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use sources::{ImageSize, SourceError, SourceImageRequest};
 use tokio::runtime::Handle;
@@ -14,40 +14,27 @@ pub(crate) enum FetchOutcome {
 
 #[derive(Clone)]
 pub(crate) struct FetchContext {
-    source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
-    database: Arc<Mutex<Option<Arc<library::Database>>>>,
+    source_resolver: Arc<SourceResolver>,
+    catalog: Arc<library::Catalog>,
 }
 
 impl FetchContext {
-    pub(crate) fn new(source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>) -> Self {
+    pub(crate) fn new(
+        source_resolver: Arc<SourceResolver>,
+        catalog: Arc<library::Catalog>,
+    ) -> Self {
         Self {
             source_resolver,
-            database: Arc::new(Mutex::new(None)),
+            catalog,
         }
     }
 
-    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
-        *self
-            .database
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(database);
-    }
-
-    pub(crate) fn database(&self) -> Option<Arc<library::Database>> {
-        self.database
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+    pub(crate) fn catalog(&self) -> &library::Catalog {
+        &self.catalog
     }
 
     fn source(&self, source_id: &sources::SourceId) -> Result<Arc<sources::Source>, String> {
-        let resolver = self
-            .source_resolver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
-            .ok_or_else(|| "artwork source is unavailable".to_string())?;
-        resolver(source_id).ok_or_else(|| "artwork source is unavailable".to_string())
+        (self.source_resolver)(source_id).ok_or_else(|| "artwork source is unavailable".to_string())
     }
 
     pub(crate) fn fetch(
@@ -58,19 +45,14 @@ impl FetchContext {
         policy: &ExternalPolicy,
     ) -> Result<FetchOutcome, String> {
         match &candidate.image {
-            library::ArtworkImage::Playlist { .. } => {
-                let database = self
-                    .database()
-                    .ok_or_else(|| "Playlist artwork storage is unavailable".to_string())?;
-                runtime
-                    .block_on(database.playlist_image(&candidate.image))
-                    .map(|bytes| {
-                        bytes
-                            .map(FetchOutcome::Ready)
-                            .unwrap_or(FetchOutcome::Missing)
-                    })
-                    .map_err(|error| error.to_string())
-            }
+            library::ArtworkImage::Playlist { .. } => runtime
+                .block_on(self.catalog.playlist_image(&candidate.image))
+                .map(|bytes| {
+                    bytes
+                        .map(FetchOutcome::Ready)
+                        .unwrap_or(FetchOutcome::Missing)
+                })
+                .map_err(|error| error.to_string()),
             library::ArtworkImage::Artist {
                 name,
                 musicbrainz_id,

@@ -1,49 +1,19 @@
 use super::*;
-use library::{CatalogSort, PlaylistEntryKey, PlaylistKey};
+use library::{PlaylistEntryKey, PlaylistKey};
 
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum MediaSelection {
-    Album {
-        id: library::AlbumKey,
-    },
-    Artist {
-        id: library::ArtistKey,
-        #[serde(default)]
-        album_artists: bool,
-    },
-    Playlist {
-        id: PlaylistKey,
-    },
-    Genre {
-        id: library::GenreKey,
-    },
-    SmartPlaylist {
-        id: library::SmartPlaylistKey,
-    },
-}
-
-fn playlist_selection(
+/// The tracks a playlist add takes: `uris`, or the selected rows of a page or all it lists, as
+/// a queue of that page takes them.
+async fn playlist_selection(
+    products: &ProductHandles,
     uris: Vec<String>,
-    selection: Option<MediaSelection>,
-) -> library::MemberSelection {
-    let Some(selection) = selection else {
-        return library::MemberSelection::Uris(uris.into());
+    page: Option<page::PageToken>,
+    ranges: Option<Vec<std::ops::Range<usize>>>,
+) -> Result<library::MemberSelection, Error> {
+    let Some(page) = page else {
+        return Ok(library::MemberSelection::Uris(uris.into()));
     };
-    let scope = match selection {
-        MediaSelection::Album { id } => library::Collection::Album(id),
-        MediaSelection::Artist { id, album_artists } => library::Collection::Artist {
-            key: id,
-            album_artist: album_artists,
-        },
-        MediaSelection::Playlist { id } => library::Collection::Playlist(id),
-        MediaSelection::Genre { id } => library::Collection::Genre(id),
-        MediaSelection::SmartPlaylist { id } => library::Collection::Smart {
-            key: id,
-            now: catalog::now(),
-        },
-    };
-    library::MemberRead::new(scope).selection()
+    let selection = page::selection(products, page, ranges).await?;
+    selection.ok_or_else(|| bad_request("Nothing to add here"))
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -59,21 +29,44 @@ pub(super) fn routes() -> Router<ProductHandles> {
             post(remove_unavailable),
         )
         .route("/api/playlists/public", get(public))
-        .route(
-            "/api/playlists",
-            get(list).post(create).patch(rename).delete(delete),
-        )
+        .route("/api/playlists/destinations", get(destinations))
         .route(
             "/api/playlists/file",
             get(file_settings).post(file_action).patch(file_update),
         )
-        .route(
-            "/api/playlists/entries",
-            get(entries)
-                .post(add_entries)
-                .delete(remove_entries)
-                .patch(move_entry),
+}
+
+/// The playlists tracks can be added to whose names hold `q`, as the playlist list orders
+/// them: `source`'s and Rufin's own. `limit` of them from `offset`, and how many there are.
+async fn destinations(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let source = match parameters.get("source").filter(|source| !source.is_empty()) {
+        Some(source) => Some(catalog::scope(&products, source, None).await?.0),
+        None => None,
+    };
+    let offset = number(&parameters, "offset", 0)?;
+    let limit = number(&parameters, "limit", 100)?;
+    let filter = parameters.get("q").map_or("", String::as_str);
+    let (count, rows) = products
+        .library
+        .playlist_destinations(
+            source,
+            filter,
+            offset..offset.saturating_add(limit),
+            &library::ReadCancellation::new(),
         )
+        .await
+        .map_err(internal)?;
+    let playlists = rows
+        .iter()
+        .map(|row| json!({"id":row.playlist_key,"name":row.name}))
+        .collect::<Vec<_>>();
+    Ok(json_response(
+        StatusCode::OK,
+        json!({"count":count,"playlists":playlists}),
+    ))
 }
 
 async fn remove_unavailable(
@@ -165,13 +158,20 @@ async fn file_update(
     completion(rufin_core::playlist_files::update(
         &products.source,
         input.id,
-        input.name,
         input.auto_refresh,
         input.auto_save,
         input.path_mode,
-        None,
     ))
     .await?;
+    rufin_core::playlists::update_playlist(
+        &products.source,
+        input.id,
+        Some(input.name),
+        None,
+        None,
+    )
+    .await
+    .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"changed":true})))
 }
 
@@ -289,134 +289,29 @@ async fn export_file(
     Ok(json_response(StatusCode::OK, json!({"saved":true})))
 }
 
-async fn list(
-    State(products): State<ProductHandles>,
-    headers: hyper::HeaderMap,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    browser::page(
-        &headers,
-        &parameters,
-        list_data(&products, &parameters).await?,
-    )
-}
-
-pub(super) async fn list_data(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-) -> Result<Value, Error> {
-    let cancellation = library::ReadCancellation::new();
-    let (source, folder) = if parameters.contains_key("source") {
-        let (source, folder) = catalog::scope(
-            products,
-            required(parameters, "source")?,
-            parameters.get("folder").map(String::as_str),
-        )
-        .await?;
-        (Some(source), folder)
-    } else {
-        (None, None)
-    };
-    let sort = match parameters
-        .get("sort")
-        .map(String::as_str)
-        .unwrap_or("position")
-    {
-        "position" => CatalogSort::Position,
-        "title" => CatalogSort::Title,
-        "track_count" => CatalogSort::TrackCount,
-        "duration" => CatalogSort::Duration,
-        _ => return Err(bad_request("Unknown playlist sort")),
-    };
-    let offset = number(parameters, "offset", 0)?;
-    let limit = number(parameters, "limit", 100)?.min(128);
-    let query = library::ListRead {
-        playlist_scope: Default::default(),
-        kind: library::ListKind::Playlists,
-        source: (source).into(),
-        sort: sort,
-        folder: folder,
-        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
-        descending: boolean(parameters, "descending")?,
-        favorites_only: false,
-        downloaded_only: false,
-        activity: false,
-    };
-    let rows = query
-        .playlists(&products.library, offset, limit, &cancellation)
-        .await
-        .map_err(internal)?;
-    let total = catalog::page_total(products, parameters, &query).await?;
-    Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})).collect::<Vec<_>>()}),
-    )
-}
-
-async fn entries(
-    State(products): State<ProductHandles>,
-    headers: hyper::HeaderMap,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    browser::page(
-        &headers,
-        &parameters,
-        entries_data(&products, &parameters).await?,
-    )
-}
-
-pub(super) async fn entries_data(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-) -> Result<Value, Error> {
-    let query = catalog::track_query(products, parameters, "entries").await?;
-    let offset = number(parameters, "offset", 0)?;
-    let limit = number(parameters, "limit", 100)?.min(256);
-    let rows = (&query)
-        .rows(
-            &products.library,
-            offset,
-            limit,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .filter_map(library::MemberRow::into_entry)
-                .collect::<Vec<_>>()
-        })
-        .map_err(internal)?;
-    let total = catalog::track_total(products, parameters, &query).await?;
-    Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.track.media_uri,"title":row.track.metadata.title,"artist":row.track.metadata.artist,"album":row.track.metadata.album,"favorite":row.track.state.favorite,"duration_ms":row.track.metadata.duration_millis})).collect::<Vec<_>>()}),
-    )
-}
-
-async fn create(
+pub(super) async fn create(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
-    let cancellation = library::ReadCancellation::new();
     #[derive(Deserialize)]
     struct Input {
         source: Option<sources::SourceId>,
-        current: Option<bool>,
         public: Option<bool>,
         name: String,
         #[serde(default)]
         uris: Vec<String>,
-        selection: Option<MediaSelection>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
-    let source = input.source.clone();
-    let selection = playlist_selection(input.uris, input.selection);
+    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
     let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
         input.name,
         selection.into(),
         input.public,
-        input.current,
     )
     .await
     .map_err(bad_request)?;
@@ -424,22 +319,14 @@ async fn create(
         .as_ref()
         .and_then(|created| created.settings_error.as_ref());
     let object_id = created.as_ref().map(|created| created.object_id.as_str());
-    let id = if let Some(object) = object_id {
-        products
-            .library
-            .playlist_key_by_identity(source.as_ref(), object, &cancellation)
-            .await
-            .map_err(internal)?
-    } else {
-        None
-    };
+    let id = created.as_ref().and_then(|created| created.playlist_key);
     Ok(json_response(
         StatusCode::OK,
         json!({"id":id,"object_id":object_id,"settings_error":settings_error}),
     ))
 }
 
-async fn rename(
+pub(super) async fn rename(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -464,7 +351,7 @@ async fn rename(
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
-async fn delete(
+pub(super) async fn delete(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
@@ -477,7 +364,7 @@ async fn delete(
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
-async fn add_entries(
+pub(super) async fn add_entries(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -488,12 +375,13 @@ async fn add_entries(
         id: PlaylistKey,
         #[serde(default)]
         uris: Vec<String>,
-        selection: Option<MediaSelection>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
         #[serde(default)]
         skip_duplicates: bool,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(input.uris, input.selection);
+    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
     let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,
@@ -505,7 +393,7 @@ async fn add_entries(
     Ok(json_response(StatusCode::OK, json!({"added":added})))
 }
 
-async fn remove_entries(
+pub(super) async fn remove_entries(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -514,13 +402,21 @@ async fn remove_entries(
     #[derive(Deserialize)]
     struct Input {
         id: PlaylistKey,
+        #[serde(default)]
         entries: Vec<PlaylistEntryKey>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
+    let selection = match input.page {
+        Some(page) => page::selection(products, page, input.ranges).await?,
+        None => Some(library::MemberSelection::Entries(input.entries.into())),
+    };
+    let selection = selection.ok_or_else(|| bad_request("Nothing to remove here"))?;
     let changed = completion(rufin_core::playlists::remove_playlist_entries(
         &products.source,
         input.id,
-        library::MemberSelection::Entries(((input.entries).to_vec()).into()),
+        selection,
     ))
     .await?;
     Ok(json_response(
@@ -529,7 +425,7 @@ async fn remove_entries(
     ))
 }
 
-async fn move_entry(
+pub(super) async fn move_entry(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {

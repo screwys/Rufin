@@ -71,9 +71,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `app-identity` | single-file crate to separate development builds |
 | `artwork` | artwork selection, loading, and caching |
 | `audio-processing` | waveform, loudness, transcoding and spectrum analysis |
-| `backup` | backup archives, encryption, staging and scheduling rules |
 | `desktop-integration` | desktop media controls, notifications, the tray, and Discord IPC |
-| `downloads` | server track downloads and download management |
 | `library` | music items, listening activity, and the database |
 | `localization` | translation tooling and locales |
 | `lyrics` | lyrics documents, parsing, lookup and reading aids |
@@ -81,21 +79,13 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback` | playback behavior and the queue |
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
-| `presence` | shared Discord preferences, playback activity and payload construction |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
 | `rufin-core` | shared application runtime, operations, settings and sources |
 | `rufin-connect` | Connect networking, pairing, and profile synchronization|
 | `rufin-controller` | headless executable with optional HTTP access |
-| `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `gtk-shell` | desktop window composition, navigation admission and native actions |
-| `gtk-library` | browsing pages, bounded projections, models and page selection |
-| `gtk-widgets` | shared GTK controls, field selection, artwork presentation and resources |
-| `gtk-player` | persistent playback, queue, lyrics, and visualizer presentation |
-| `gtk-preferences` | preferences, source setup, and appearance |
-| `gtk-editors` | metadata and smart playlist editors |
-| `gtk-media-menus` | media context menus and playlist picking |
+| `ui` | the GTK desktop client: window composition, pages, player, menus, editors, preferences and resources |
 | `web` | HTTP routes, server lifetime and embedded browser presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |

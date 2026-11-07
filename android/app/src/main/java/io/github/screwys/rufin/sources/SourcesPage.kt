@@ -94,7 +94,8 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         }, editingConnection, connectionsOnly = true)
     }
     remove?.let { (id, name) ->
-        AlertDialog(onDismissRequest = { remove = null }, title = { Text(translate("Forget Source")) }, text = { Text(name) },
+        AlertDialog(onDismissRequest = { remove = null }, title = { Text(translate("Forget Source")) },
+            text = { Text(translate("Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?").replace("{name}", name)) },
             confirmButton = { TextButton({
                 remove = null
                 model.runAction { (bridge ?: error(translate("Source setup is unavailable"))).forgetSource(id) }

@@ -39,14 +39,14 @@ class RufinPlayerTest {
                 albumTags = null, sourceLoudness = null, albumLoudness = null,
             ),
             state = TrackState(false, null, null, 0L, 0L),
-            access = TrackAccess(null, "", null, null, null, false, ByteArray(32)),
+            access = TrackAccess(null, "", null, null, null, false),
             links = TrackLinks(null, null, emptyList(), emptyList(), emptyList()),
         )
     }
     private val playing = AndroidPlaybackUpdate(
         queueLoading = false,
         queue = QueueSummaryView(1UL, 1UL, 0UL, null, true),
-        notices = emptyList(), favorite = false, artworkRevision = 0UL, sourceLabels = listOf("WAV", "44.1 kHz"),
+        notices = emptyList(), favorite = false, sourceLabels = listOf("WAV", "44.1 kHz"),
         transport = TransportView(
             current = CurrentMedia(null, CurrentMediaId(1UL, "file:///test/track.wav"), row),
             state = TransportStatus.PLAYING, desiredPlaying = true,

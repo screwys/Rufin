@@ -137,7 +137,7 @@
   background: var(--hover);
 }
 
-#source-menu .menu-item .icon[data-icon="check"] {
+#source-menu .menu-item .icon[data-icon="rufin-object-select-symbolic"] {
   margin-left: auto;
 }
 

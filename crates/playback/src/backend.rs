@@ -16,6 +16,9 @@ pub struct StreamRequest {
     pub quality: StreamQuality,
     #[serde(default)]
     pub session_identifier: Option<String>,
+    /// A local copy that failed to open or decode; the stream comes from the next candidate.
+    #[serde(skip)]
+    pub failed_local: Option<String>,
 }
 
 impl StreamRequest {
@@ -28,6 +31,7 @@ impl StreamRequest {
             media_uri: media_uri.into(),
             quality,
             session_identifier: None,
+            failed_local: None,
         }
     }
 }
@@ -78,7 +82,6 @@ pub struct PreparedStream {
     pub loudness: Option<TrackLoudness>,
     pub row: Option<std::sync::Arc<crate::QueueRow>>,
     pub artwork_path: Option<Arc<PathBuf>>,
-    pub allows_preloading: bool,
 }
 
 impl PreparedStream {
@@ -88,13 +91,7 @@ impl PreparedStream {
             loudness,
             row: None,
             artwork_path: None,
-            allows_preloading: true,
         }
-    }
-
-    pub fn without_preloading(mut self) -> Self {
-        self.allows_preloading = false;
-        self
     }
 
     pub fn with_row(
@@ -249,10 +246,6 @@ pub enum BackendCommand {
         muted: bool,
     },
     ConfigureAudio(BackendAudioSettings),
-    UpdateLoudness {
-        run: RunId,
-        loudness: TrackLoudness,
-    },
     SetPlaybackRate(f64),
     SetVisualizerEnabled(bool),
 }
@@ -264,8 +257,7 @@ impl BackendCommand {
             | Self::Play { run }
             | Self::Pause { run }
             | Self::Stop { run }
-            | Self::Seek { run, .. }
-            | Self::UpdateLoudness { run, .. } => Some(*run),
+            | Self::Seek { run, .. } => Some(*run),
             Self::PrepareNext { current_run, .. } => Some(*current_run),
             Self::SetOutputVolume { .. }
             | Self::ConfigureAudio(_)

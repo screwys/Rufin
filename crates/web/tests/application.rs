@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use playback::{BackendCommand, BackendError, BackendEvent, PlaybackBackend};
@@ -35,8 +34,6 @@ fn controller_http_api_and_browser_share_application_operations() {
                 paths.clone(),
                 |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                 Vec::new,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
             )))
             .unwrap()
             .unwrap();
@@ -59,7 +56,7 @@ fn controller_http_api_and_browser_share_application_operations() {
         runtime.block_on(exercise_desktop_controller(&inputs));
         runtime.block_on(exercise_http_api(
             inputs.products.clone(),
-            inputs.settings.clone(),
+            inputs.products.settings.clone(),
             directory.path(),
         ));
         inputs.receivers.visualizer.close();
@@ -74,17 +71,21 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     inputs
         .products
         .source
-        .change_secret_storage(secrets::SecretStorageMode::ConfigFile)
+        .change_secret_storage(rufin_core::settings::SecretStorageMode::ConfigFile)
         .await
         .unwrap();
     let controller = Controller::new(inputs.products.clone());
     let mut status = controller.status();
     assert!(status.borrow().address.is_none());
-    let settings = inputs.settings.load().web_controller;
+    let settings = inputs.products.settings.load().web_controller.clone();
     assert!(!settings.enabled);
     assert_eq!(settings.port, 1717);
-    inputs.settings.set_controller_port(0).unwrap();
-    inputs.settings.set_controller_enabled(true).unwrap();
+    inputs.products.settings.set_controller_port(0).unwrap();
+    inputs
+        .products
+        .settings
+        .set_controller_enabled(true)
+        .unwrap();
     let started = controller_status(&mut status, |state| state.address.is_some()).await;
     assert_eq!(started.token.len(), 64);
     let address = started.address.unwrap();
@@ -117,6 +118,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
 
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let settings = inputs
+        .products
         .settings
         .set_controller_port(occupied.local_addr().unwrap().port())
         .unwrap();
@@ -151,7 +153,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     .await;
     assert!(closed.is_ok(), "rebinding closes existing event streams");
 
-    inputs.settings.set_controller_port(0).unwrap();
+    inputs.products.settings.set_controller_port(0).unwrap();
     let rebound = controller_status(&mut status, |state| {
         state.address.is_some() && state.address != fallback.address
     })
@@ -210,7 +212,11 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
         reopened.token, regenerated,
         "regenerated token survives host restart"
     );
-    inputs.settings.set_controller_enabled(false).unwrap();
+    inputs
+        .products
+        .settings
+        .set_controller_enabled(false)
+        .unwrap();
     controller_status(&mut status, |state| state.address.is_none()).await;
     assert!(
         client
@@ -564,7 +570,7 @@ async fn exercise_http_api(
     let playlist = api(
         reqwest::Method::POST,
         "playlists",
-        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items,"current":false}),
+        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items}),
     )
     .await["id"]
         .clone();
@@ -577,14 +583,10 @@ async fn exercise_http_api(
         .find(|row| row["id"] == playlist)
         .unwrap();
     let playlist_pin = json!({"Playlist":{"playlist_id":row["object_id"]}});
-    let mut sidebar = settings.sidebar_changes();
+    let mut sidebar = settings.changes();
     assert_eq!(
         serde_json::to_value(&settings.load().sidebar.pins).unwrap(),
         json!([playlist_pin])
-    );
-    assert_eq!(
-        api(reqwest::Method::GET, "sources", Value::Null).await["new_playlist_current"],
-        false
     );
     api(
         reqwest::Method::POST,
@@ -860,17 +862,6 @@ async fn exercise_http_api(
         .await["favorite"],
         true
     );
-    let metadata = client
-        .get(format!("{base}/media"))
-        .bearer_auth(token)
-        .query(&[("uri", uri)])
-        .send()
-        .await
-        .unwrap()
-        .json::<Value>()
-        .await
-        .unwrap();
-    assert_eq!(metadata["favorite"], true);
     for include_current in [false, true] {
         settings
             .set_clear_queue_includes_current(include_current)
@@ -1085,7 +1076,10 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let page = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source)])
+        .query(&[(
+            "page",
+            &json!({"route":"Tracks","source":source}).to_string(),
+        )])
         .send()
         .await
         .unwrap()
@@ -1117,7 +1111,13 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let next = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source), ("offset", "48")])
+        .query(&[
+            (
+                "page",
+                json!({"route":"Tracks","source":source}).to_string(),
+            ),
+            ("offset", "48".into()),
+        ])
         .send()
         .await
         .unwrap()
@@ -1138,7 +1138,13 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let searched = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source), ("q", "random-149")])
+        .query(&[
+            (
+                "page",
+                json!({"route":"Tracks","source":source}).to_string(),
+            ),
+            ("q", "random-149".into()),
+        ])
         .send()
         .await
         .unwrap()

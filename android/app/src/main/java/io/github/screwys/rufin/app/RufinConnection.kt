@@ -1,7 +1,8 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
-import io.github.screwys.rufin.shared.rufin_core.CatalogRevision
+import io.github.screwys.rufin.shared.rufin_core.Changed
 import io.github.screwys.rufin.shared.library.sourceIdForUri
 
 import io.github.screwys.rufin.browse.BrowseConnection
@@ -26,9 +27,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.core.AndroidLibrary
 import io.github.screwys.rufin.core.AndroidLibraryEvents
-import io.github.screwys.rufin.shared.rufin_core.FavoriteSettlement
-import io.github.screwys.rufin.shared.rufin_core.FavoriteIntents
-import io.github.screwys.rufin.browse.favoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.SourceOperation
 import io.github.screwys.rufin.shared.rufin_core.SourceOwner
@@ -54,26 +52,11 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         feedbackTimeout = viewModelScope.launch { delay(2000); feedback = null }
     }
     internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
-    internal var favoriteIntents: FavoriteIntents? = null
-        private set
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
-    internal var favoriteRevision by mutableLongStateOf(0)
-        private set
-    private val settlements = MutableSharedFlow<FavoriteSettlement>(extraBufferCapacity = 32)
-    internal val favoriteSettlements = settlements.asSharedFlow()
-    internal fun projectedFavorite(kind: String, uri: String, fallback: Boolean): Boolean {
-        favoriteRevision
-        return favoriteIntents?.projectedItemFavorite(favoriteTarget(kind, uri), fallback) ?: fallback
-    }
-    internal fun setFavoriteIntent(kind: String, uri: String, value: Boolean) {
-        favoriteIntents?.setPending(favoriteTarget(kind, uri), value)
-        favoriteRevision++
-    }
-    internal fun releaseFavoriteIntent(kind: String, uri: String, requested: Boolean) {
-        favoriteIntents?.responseMatchesPending(favoriteTarget(kind, uri), requested)
-        favoriteRevision++
-    }
+    private val feed = MutableSharedFlow<Changed>(extraBufferCapacity = 64)
+    /** Committed library changes; each page asks its query whether one touches it. */
+    internal val changes = feed.asSharedFlow()
     internal var overviewExportName by mutableStateOf<String?>(null)
         private set
     private var overviewExportBytes: ByteArray? = null
@@ -116,7 +99,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     var pendingActions by mutableIntStateOf(0)
         private set
-    var catalogRevision by mutableStateOf<CatalogRevision?>(null)
+    var catalogChanges by mutableLongStateOf(0L)
         private set
     var sourceOperation by mutableStateOf<SourceOperation>(SourceOperation.Idle)
         private set
@@ -131,10 +114,13 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         is SourceOperation.Downloading -> operation.progress
         else -> null
     }
-    val selectedSourceName get() = sources?.sources?.firstOrNull { it.id == sources?.selectedSourceId }?.name.orEmpty()
+    fun sourceName(id: String) = sources?.sources?.firstOrNull { it.id == id }?.name.orEmpty()
     var sources by mutableStateOf<ConfiguredSources?>(null)
         private set
     var debugLogging by mutableStateOf(false)
+        private set
+    /** The committed preferences, followed once for every connection that shows them. */
+    var preferences by mutableStateOf<io.github.screwys.rufin.shared.rufin_core.CommittedPreferences?>(null)
         private set
     private var observation: Job? = null
 
@@ -176,26 +162,23 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 val core = result?.getOrNull() ?: return@collectLatest
                 val events = core.libraryEvents()
                 libraryEvents = events
-                favoriteIntents = events.favoriteIntents()
                 val owner = core.source()
                 sourceOwner = owner
                 val sourceChanges = owner.subscribe()
                 val operations = owner.subscribeOperation()
-                val catalog = owner.subscribeCatalog()
+                val catalog = owner.changes()
+                val settings = core.settings()
+                val preferenceChanges = settings.subscribePreferences()
                 debugLogging = core.debugLogging()
                 try {
                     sources = withContext(Dispatchers.Default) { sourceChanges.next() }
                     sourceOperation = withContext(Dispatchers.Default) { operations.next() }
-                    catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
                     ready = true
                     coroutineScope {
                         launch { connected.playbackNotices.collect { showFeedback(it) } }
                         launch {
                             while (isActive) {
-                                val event = withContext(Dispatchers.Default) { events.next() }
-                                favoriteRevision++
-                                event.favorite?.let { settlements.emit(it) }
-                                event.notice?.let { showFeedback(it) }
+                                showFeedback(withContext(Dispatchers.Default) { events.next() })
                             }
                         }
                         launch {
@@ -204,8 +187,13 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                             }
                         }
                         launch {
+                            while (isActive) preferences = withContext(Dispatchers.Default) { preferenceChanges.next() }
+                        }
+                        launch {
                             while (isActive) {
-                                catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
+                                val changed = withContext(Dispatchers.Default) { catalog.next() } ?: break
+                                catalogChanges++
+                                feed.emit(changed)
                             }
                         }
                         while (isActive) {
@@ -222,13 +210,14 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                     ready = false
                     sourceOperation = SourceOperation.Idle
                     sources = null
+                    preferences = null
+                    preferenceChanges.destroy()
+                    settings.destroy()
                     operations.destroy()
                     catalog.destroy()
                     sourceChanges.destroy()
                     sourceOwner = null
                     owner.destroy()
-                    favoriteIntents?.destroy()
-                    favoriteIntents = null
                     libraryEvents = null
                     events.destroy()
                 }
@@ -243,11 +232,6 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
             try { connected.resetStorage(storage, kind) }
             finally { storage.destroy() }
         }
-    }
-
-    internal suspend fun resetDatabase() {
-        val connected = snapshotFlow { service }.filterNotNull().first()
-        restartAfterStorageReset { connected.resetDatabase() }
     }
 
     private suspend fun restartAfterStorageReset(reset: suspend () -> Unit) {
@@ -323,9 +307,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         }
         if (route != null) {
             sourceIdForUri(mediaUri)?.takeIf { it != sources?.selectedSourceId }?.let { sourceOwner?.selectSource(it) }
-            browse.openRoute(route, title, kind)
+            browse.openRoute(route, title)
         } else connectedService().playRequest {
-            library.playRows("overview:$period:$mediaUri", listOf(mediaUri), 0UL, "now", false, translate("Listening overview"))
+            library.playUri(mediaUri, translate("Listening overview"))
         }
     }
 

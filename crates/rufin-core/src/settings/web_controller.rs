@@ -81,10 +81,6 @@ impl SettingsOwner {
         })
     }
 
-    pub fn web_controller_changes(&self) -> tokio::sync::watch::Receiver<ControllerSettings> {
-        self.file.web_controller_changes()
-    }
-
     pub fn web_controller_token(&self, regenerate: bool) -> Result<String, String> {
         let store = self.secrets.current().map_err(|error| error.to_string())?;
         let key = secret_key();
@@ -105,7 +101,7 @@ impl SettingsOwner {
             .save_secret(&key, &token)
             .map_err(|error| error.to_string())?;
         if regenerate {
-            self.file.web_controller_credentials_changed();
+            self.file.web_controller_token_replaced()?;
         }
         Ok(token)
     }

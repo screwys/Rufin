@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
+import io.github.screwys.rufin.shared.rufin_core.SecretStorageMode
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.core.translate
@@ -104,8 +105,6 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
     navigate: (MoreDestination) -> Unit) {
     var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
     LaunchedEffect(destination, model.ready, player.bridge) {
-        preferences.refreshApplicationSettings()
-        player.refreshSettings()
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
     }
     val state = preferences.applicationSettings
@@ -132,6 +131,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 }
                 SettingsGroup(translate("Metadata")) {
                     SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference { setPreferDistinctTrackCovers(it) } }
+                    SettingsSwitch(translate("Use sort tags"), state.useSortTags) { preferences.changePreference { setUseSortTags(it) } }
                     SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference { setExternalMetadataEnabled(it) } }
                     player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
@@ -147,10 +147,10 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 ScrobblingPage(preferences, embedded = true)
                 val links = state.externalSiteLinks
                 SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(links.copy(enabled = it)) } }
-                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(links.copy(lastfm = it)) } }
-                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(links.copy(musicbrainz = it)) } }
-                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(links.copy(server = it)) } }
+                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(enabled = it)) } }
+                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(lastfm = it)) } }
+                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(musicbrainz = it)) } }
+                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(server = it)) } }
                 }
                 SourcesPage(model, addSource, editSource, embedded = true, connectionsOnly = true)
             }
@@ -161,7 +161,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     PreferenceChoice(translate("Casting network"), preferences.castNetworkInterface.orEmpty(),
                         listOf("" to translate("Automatic")) + castNetworks.map { it.id to "${it.name} (${it.address})" },
                         select = { network -> preferences.changePreference { setCastNetworkInterface(network.takeIf { it.isNotEmpty() }) } })
-                    PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
+                    PreferenceChoice(translate("Secret storage"), state.secretStorageMode, listOf(SecretStorageMode.SYSTEM_KEYRING to translate("System keyring"), SecretStorageMode.CONFIG_FILE to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
                 BackupsPage(model, preferences, embedded = true) { navigate(MoreDestination.BackupSettings) }
             }

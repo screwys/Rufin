@@ -12,8 +12,8 @@ use crate::decode::{cached_poster, decode_display, decode_original};
 use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
-    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkRequest, CacheResolver,
-    DecodedImage, PendingArtwork, RequestId, RgbaImage, SourceResolver,
+    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkRequest, DecodedImage,
+    ExternalPolicy, PendingArtwork, RequestId, RgbaImage, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
@@ -26,7 +26,6 @@ struct Shared {
     cache: FilesystemCache,
     fetch: FetchContext,
     cache_commit: Mutex<()>,
-    cache_resolver: Mutex<Option<Arc<CacheResolver>>>,
     previews: Mutex<VecDeque<(String, String, Arc<crate::ArtworkPreview>)>>,
     state: Mutex<State>,
     wake: Condvar,
@@ -35,7 +34,6 @@ struct Shared {
 #[derive(Default)]
 struct State {
     next_request: u64,
-    cache_epoch: u64,
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
     foreground: VecDeque<ArtworkKey>,
@@ -104,42 +102,6 @@ impl Pipeline {
         &self.shared.cache
     }
 
-    pub(crate) fn import_missing_cache_file(
-        &self,
-        key: &str,
-        path: &Path,
-    ) -> Result<bool, ArtworkError> {
-        let _commit = lock_cache_commit(&self.shared);
-        Ok(self.shared.cache.import_missing(key, path)?)
-    }
-
-    pub(crate) fn install_cache_resolver(&self, resolver: Arc<CacheResolver>) {
-        *self
-            .shared
-            .cache_resolver
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Some(resolver);
-    }
-
-    pub(crate) fn invalidate_decoded_cache(&self) {
-        let commit = lock_cache_commit(&self.shared);
-        let mut state = lock_state(&self.shared);
-        state.cache_epoch = state.cache_epoch.wrapping_add(1);
-        state.decoded_index.entries.clear();
-        state.foreground.clear();
-        state.background.clear();
-        let jobs = std::mem::take(&mut state.jobs);
-        drop(state);
-        drop(commit);
-        for completion in jobs
-            .into_values()
-            .flat_map(|job| job.subscribers.into_values())
-        {
-            let _ = completion.completion.send(Resolution::Invalidated);
-        }
-        self.shared.wake.notify_all();
-    }
-
     pub(crate) fn remove_cache_entries(
         &self,
         entries: &[crate::ArtworkCacheEntry],
@@ -156,26 +118,19 @@ impl Pipeline {
         Ok(())
     }
 
-    pub(crate) fn cache_revision(&self) -> u64 {
-        lock_state(&self.shared).cache_epoch
-    }
-
-    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
-        self.shared.fetch.install_database(database);
-    }
     pub(crate) fn new(
         cache_root: &Path,
         runtime: Handle,
-        source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+        source_resolver: Arc<SourceResolver>,
+        catalog: Arc<library::Catalog>,
     ) -> Result<Self, ArtworkError> {
         let cache = FilesystemCache::new(cache_root.to_path_buf())?;
-        let fetch = FetchContext::new(source_resolver);
+        let fetch = FetchContext::new(source_resolver, catalog);
         let shared = Arc::new(Shared {
             runtime,
             cache,
             fetch,
             cache_commit: Mutex::new(()),
-            cache_resolver: Mutex::new(None),
             previews: Mutex::new(VecDeque::new()),
             state: Mutex::new(State {
                 next_request: 1,
@@ -289,6 +244,13 @@ impl Pipeline {
 
     pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
         request_key(&lock_state(&self.shared), request)
+    }
+
+    pub(crate) fn generation(&self, external: &ExternalPolicy) -> String {
+        let state = lock_state(&self.shared);
+        let epochs = state.source_epochs.values();
+        let invalidations = epochs.fold(state.external_epoch, |sum, at| sum.wrapping_add(*at));
+        ArtworkKey::binding_digest(&format!("{external:?}\0{invalidations}"))
     }
 
     pub(crate) fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -525,7 +487,6 @@ fn source_epoch(state: &State, binding: &ArtworkBinding) -> u64 {
         .and_then(|source_id| state.source_epochs.get(source_id))
         .copied()
         .unwrap_or_default()
-        .wrapping_add(state.cache_epoch)
 }
 
 fn run_worker(shared: Arc<Shared>, foreground_reserved: bool) {
@@ -616,36 +577,6 @@ fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Res
     result
 }
 
-fn resolve_peer_cache(
-    shared: &Shared,
-    work: &Work,
-    candidate: &Candidate,
-) -> Option<(crate::cache::CacheEntry, bool)> {
-    if work.request.cache_only {
-        return None;
-    }
-    let resolver = shared
-        .cache_resolver
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone()?;
-    let request = crate::CacheImageRequest {
-        family: candidate.key.clone(),
-        size: work.request.fetch_size,
-    };
-    let (key, file) = shared.runtime.block_on(resolver(request))?;
-    let _commit = lock_cache_commit(shared);
-    if !work_is_current(&lock_state(shared), work) {
-        return None;
-    }
-    shared.cache.import_missing(&key, &file).ok()?;
-    let path = shared.cache.file(&key).ok()??;
-    Some((
-        crate::cache::CacheEntry { path },
-        key.starts_with("originals/"),
-    ))
-}
-
 fn resolve_request(
     shared: &Shared,
     work: &Work,
@@ -663,11 +594,10 @@ fn resolve_request(
             }
         }
         let missing = shared.cache.is_missing(candidate);
-        let entry = shared.cache.ready_entry(candidate).map(|entry| (entry, true)).or_else(|| {
-            if missing || matches!(&candidate.image, library::ArtworkImage::Local { path, .. }
-                if Path::new(path).is_absolute() || path.starts_with("content:") || path.starts_with("rufin-document:"))
-            { None } else { resolve_peer_cache(shared, work, candidate) }
-        });
+        let entry = shared
+            .cache
+            .ready_entry(candidate)
+            .map(|entry| (entry, true));
         if let Some((entry, original)) = entry {
             let result = if !original {
                 read_display(shared, work, candidate, &entry.path)
@@ -709,26 +639,24 @@ fn resolve_request(
         return Ok(Resolution::Missing);
     }
     if let library::ArtworkImage::Playlist {
-        automatic: Some(_),
-        resolved,
+        mosaic: Some(picks),
         ..
     } = &candidate.image
     {
-        let Some(recipes) = resolved else {
-            let database = shared
-                .fetch
-                .database()
-                .ok_or("Playlist artwork storage is unavailable")?;
-            return match shared
-                .runtime
-                .block_on(database.resolve_playlist_artwork(candidate.clone()))
-                .map_err(|error| error.to_string())?
-            {
-                Some(resolved) => resolve_request(shared, work, &resolved),
-                None => Ok(Resolution::Invalidated),
-            };
-        };
-        return compose_playlist(shared, work, candidate, recipes);
+        let recipes = shared
+            .runtime
+            .block_on(
+                shared
+                    .fetch
+                    .catalog()
+                    .track_artwork_bindings(picks, &library::ReadCancellation::new()),
+            )
+            .map_err(|error| error.to_string())?
+            .iter()
+            .map(|binding| serde_json::from_slice::<Vec<Candidate>>(binding))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        return compose_playlist(shared, work, candidate, &recipes);
     }
     match shared.fetch.fetch(
         &shared.runtime,
@@ -972,19 +900,15 @@ fn cache_preview(
     if !refresh && cached_preview(shared, candidate, candidate.blur_hash()).is_some() {
         return;
     }
-    let database = shared.fetch.database();
+    let catalog = shared.fetch.catalog();
     let result: Result<String, ArtworkError> = shared.runtime.block_on(async {
-        if let Some(database) = &database {
-            if !refresh && let Some(hash) = database.artwork_preview(&candidate.key).await? {
-                return Ok(hash);
-            }
+        if !refresh && let Some(hash) = catalog.artwork_preview(&candidate.key).await? {
+            return Ok(hash);
         }
         let hash = encode()?;
-        if let Some(database) = database {
-            database
-                .write_artwork_preview(&candidate.key, &hash, refresh)
-                .await?;
-        }
+        catalog
+            .write_artwork_preview(&candidate.key, &hash, refresh)
+            .await?;
         Ok(hash)
     });
     match result {
@@ -1134,9 +1058,15 @@ mod tests {
         let shared = Shared {
             runtime: Handle::current(),
             cache,
-            fetch: FetchContext::new(Arc::new(Mutex::new(None))),
+            fetch: FetchContext::new(
+                Arc::new(|_: &sources::SourceId| None),
+                Arc::new(
+                    library::Catalog::open(directory.path().join("library.sqlite3"))
+                        .await
+                        .unwrap(),
+                ),
+            ),
             cache_commit: Mutex::new(()),
-            cache_resolver: Mutex::new(None),
             previews: Mutex::new(VecDeque::new()),
             state: Mutex::new(state),
             wake: Condvar::new(),
@@ -1192,9 +1122,14 @@ mod tests {
         let directory = tempfile::tempdir().expect("cache");
         let pipeline = Arc::new(
             Pipeline::new(
-                directory.path(),
+                &directory.path().join("covers"),
                 Handle::current(),
-                Arc::new(Mutex::new(None)),
+                Arc::new(|_: &sources::SourceId| None),
+                Arc::new(
+                    library::Catalog::open(directory.path().join("library.sqlite3"))
+                        .await
+                        .unwrap(),
+                ),
             )
             .expect("pipeline"),
         );

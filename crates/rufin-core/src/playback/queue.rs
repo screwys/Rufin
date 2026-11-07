@@ -1,11 +1,8 @@
-//! Compact live queue entries, two orders, and nearby resolved metadata.
+//! Compact live queue entries, two orders with their saved ranks, and nearby resolved metadata.
+//! The play order differs from the queue's order only while shuffle is on.
 use crate::playback::{QueueReorderTarget, QueueSelection};
-use playback::{Provenance, QueueRow, RepeatMode};
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-    sync::Arc,
-};
+use playback::{QueueProvenance, QueueRepeatMode, QueueRow};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -27,17 +24,20 @@ enum MetadataRead {
 
 #[derive(Clone, Debug)]
 pub(super) struct Sequence {
-    members: HashMap<OccurrenceId, library::QueueEntry>,
+    /// Each entry with its saved rank in `ordinary` and, while shuffle is on, in `order`.
+    members: HashMap<OccurrenceId, (library::QueueEntry, library::QueueRank)>,
     ordinary: Vec<OccurrenceId>,
     order: Vec<OccurrenceId>,
     rows: Vec<Arc<QueueRow>>,
     selected_index: Option<usize>,
     next_id: u64,
-    repeat_mode: RepeatMode,
+    repeat_mode: QueueRepeatMode,
     shuffle_enabled: bool,
     revision: u64,
     progress_millis: u64,
     dirty: Option<library::QueueUpdate>,
+    /// The current index, repeat and shuffle last saved.
+    saved: Option<(Option<usize>, QueueRepeatMode, bool)>,
     metadata_read: Option<MetadataRead>,
 }
 
@@ -50,11 +50,12 @@ impl Sequence {
             rows: Vec::new(),
             selected_index: None,
             next_id: 0,
-            repeat_mode: RepeatMode::Off,
+            repeat_mode: QueueRepeatMode::Off,
             shuffle_enabled: false,
             revision: 0,
             progress_millis: 0,
             dirty: None,
+            saved: None,
             metadata_read: Some(MetadataRead::Missing),
         }
     }
@@ -78,12 +79,21 @@ impl Sequence {
             next_id = next_id.max(window.ids.iter().max().unwrap() + 1);
             window.ids.iter().copied().map(OccurrenceId).collect()
         };
-        let order = window.order.iter().map(|i| ordinary[*i as usize]).collect();
+        let order = window
+            .order
+            .iter()
+            .map(|i| ordinary[*i as usize])
+            .collect::<Vec<_>>();
+        let saved = window.ranks.len() == ordinary.len();
         let mut sequence = Self {
-            members: ordinary
-                .iter()
-                .copied()
-                .zip(window.entries.iter().cloned())
+            members: (ordinary.iter().copied().zip(window.entries.iter().cloned()))
+                .enumerate()
+                .map(|(i, (id, entry))| {
+                    (
+                        id,
+                        (entry, window.ranks.get(i).cloned().unwrap_or_default()),
+                    )
+                })
                 .collect(),
             ordinary,
             order,
@@ -95,6 +105,7 @@ impl Sequence {
             revision,
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
+            saved: Some((window.current_index, window.repeat_mode, window.shuffled)),
             metadata_read: Some(MetadataRead::Missing),
         };
         if sequence
@@ -108,6 +119,17 @@ impl Sequence {
             if row.occurrence_id != id {
                 Arc::make_mut(row).occurrence_id = id;
             }
+        }
+        if !sequence.shuffle_enabled && sequence.order != sequence.ordinary {
+            let current = sequence.selected_index.and_then(|i| sequence.id_at(i));
+            sequence.order.clone_from(&sequence.ordinary);
+            sequence.selected_index = current.and_then(|id| sequence.index_of(id));
+            sequence.trim_rows();
+        }
+        if !saved {
+            let total = sequence.total();
+            sequence.place(Some(0..total), Some(0..total));
+            sequence.dirty = None;
         }
         Ok(sequence)
     }
@@ -131,7 +153,13 @@ impl Sequence {
             entries: self
                 .ordinary
                 .iter()
-                .map(|id| self.members[id].clone())
+                .map(|id| self.members[id].0.clone())
+                .collect::<Vec<_>>()
+                .into(),
+            ranks: self
+                .ordinary
+                .iter()
+                .map(|id| self.members[id].1.clone())
                 .collect::<Vec<_>>()
                 .into(),
             order: self
@@ -154,24 +182,58 @@ impl Sequence {
         }
         self.dirty.get_or_insert_default();
     }
-    fn save_order(&mut self, ordinary: Option<Range<usize>>, active: Option<Range<usize>>) {
-        let dirty = self.dirty.get_or_insert_default();
-        for (update, order, range) in [
-            (&mut dirty.ordinary, &self.ordinary, ordinary),
-            (&mut dirty.order, &self.order, active),
-        ] {
-            if let Some(range) = range {
-                update
-                    .get_or_insert_default()
-                    .coalesce(library::QueueOrderUpdate {
-                        rows: range.map(|i| (i, order[i].0)).collect(),
-                        total: order.len(),
-                    });
+    /// Gives the entries at `ordinary` of the queue's order, and while shuffle is on the entries
+    /// at `active` of the play order, ranks between their neighbours there, and saves them.
+    fn place(&mut self, ordinary: Option<Range<usize>>, active: Option<Range<usize>>) {
+        let mut placed = Vec::new();
+        if let Some(range) = ordinary {
+            let low = range
+                .start
+                .checked_sub(1)
+                .map(|i| self.members[&self.ordinary[i]].1.rank.clone());
+            let high = self
+                .ordinary
+                .get(range.end)
+                .map(|id| self.members[id].1.rank.clone());
+            let ranks = library::rank::spread(low.as_deref(), high.as_deref(), range.len());
+            for (i, rank) in range.zip(ranks) {
+                let id = self.ordinary[i];
+                if let Some((_, placed)) = self.members.get_mut(&id) {
+                    placed.rank = rank;
+                }
+                placed.push(id);
             }
+        }
+        if let Some(range) = active.filter(|_| self.shuffle_enabled) {
+            let low = range
+                .start
+                .checked_sub(1)
+                .and_then(|i| self.members[&self.order[i]].1.shuffle.clone());
+            let high = self
+                .order
+                .get(range.end)
+                .and_then(|id| self.members[id].1.shuffle.clone());
+            let ranks = library::rank::spread(low.as_deref(), high.as_deref(), range.len());
+            for (i, rank) in range.zip(ranks) {
+                let id = self.order[i];
+                if let Some((_, placed)) = self.members.get_mut(&id) {
+                    placed.shuffle = Some(rank);
+                }
+                placed.push(id);
+            }
+        }
+        let dirty = self.dirty.get_or_insert_default();
+        for id in placed {
+            dirty.entries.insert(id.0, self.members[&id].clone());
         }
     }
     pub(super) fn take_persistence(&mut self) -> Option<library::QueueUpdate> {
         let mut update = self.dirty.take()?;
+        let settings = (self.selected_index, self.repeat_mode, self.shuffle_enabled);
+        update.state |= update.replace || self.saved != Some(settings);
+        if update.state {
+            self.saved = Some(settings);
+        }
         update.current_index = self.selected_index;
         update.progress_millis = self.progress_millis as i64;
         update.repeat_mode = self.repeat_mode;
@@ -185,7 +247,9 @@ impl Sequence {
         self.order.iter().position(|i| *i == id)
     }
     pub(super) fn entry_at(&self, index: usize) -> Option<&library::QueueEntry> {
-        self.members.get(&self.id_at(index)?)
+        self.members
+            .get(&self.id_at(index)?)
+            .map(|(entry, _)| entry)
     }
     pub(super) fn page_entries(
         &self,
@@ -197,7 +261,7 @@ impl Sequence {
             .enumerate()
             .skip(offset)
             .take(limit)
-            .map(|(i, id)| (i, self.members[id].clone()))
+            .map(|(i, id)| (i, self.members[id].0.clone()))
             .collect()
     }
     pub(super) fn entries(&self) -> &[Arc<QueueRow>] {
@@ -225,11 +289,11 @@ impl Sequence {
         rank: usize,
     ) -> Option<usize> {
         self.order.iter().position(|id| {
-            let e = &self.members[id];
-            e.track_key == key && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
+            let e = &self.members[id].0;
+            e.track_key == key && matches!(&e.provenance, QueueProvenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
         })
     }
-    pub(super) fn repeat_mode(&self) -> RepeatMode {
+    pub(super) fn repeat_mode(&self) -> QueueRepeatMode {
         self.repeat_mode
     }
     pub(super) fn shuffle_enabled(&self) -> bool {
@@ -244,15 +308,15 @@ impl Sequence {
             entries: self
                 .members
                 .iter()
-                .map(|(id, entry)| (id.0, entry.clone()))
+                .map(|(id, member)| (id.0, member.clone()))
                 .collect(),
             ..Default::default()
         });
-        self.save_order(Some(0..self.total()), Some(0..self.total()));
         self.changed(true);
     }
+    /// Saves the position with the rest: on pause, stop, track change, seek and exit.
     pub(super) fn persist_state(&mut self) {
-        self.dirty.get_or_insert_default();
+        self.dirty.get_or_insert_default().state = true;
     }
     pub(super) fn revision(&self) -> u64 {
         self.revision
@@ -264,20 +328,7 @@ impl Sequence {
     pub(super) fn set_progress_millis(&mut self, value: u64) {
         self.progress_millis = value;
     }
-    pub(super) fn set_selected_duration(&mut self, millis: u64) {
-        let selected = self
-            .selected_index
-            .and_then(|i| self.id_at(i))
-            .map(|id| id.0);
-        if let Some(row) = self
-            .rows
-            .iter_mut()
-            .find(|row| row.occurrence_id == selected)
-        {
-            Arc::make_mut(row).track.metadata.duration_millis = millis.min(i64::MAX as u64) as i64;
-        }
-    }
-    pub(super) fn set_repeat_mode(&mut self, value: RepeatMode) {
+    pub(super) fn set_repeat_mode(&mut self, value: QueueRepeatMode) {
         if self.repeat_mode != value {
             self.repeat_mode = value;
             self.changed(false);
@@ -289,13 +340,13 @@ impl Sequence {
     }
     pub(super) fn next_index(&self, eos: bool) -> Option<usize> {
         let current = self.selected_index?;
-        if eos && self.repeat_mode == RepeatMode::One {
+        if eos && self.repeat_mode == QueueRepeatMode::One {
             return Some(current);
         }
         if current + 1 < self.total() {
             return Some(current + 1);
         }
-        (self.repeat_mode == RepeatMode::All && self.total() > 0).then_some(self.total())
+        (self.repeat_mode == QueueRepeatMode::All && self.total() > 0).then_some(self.total())
     }
     pub(super) fn next_index_eos(&self) -> Option<usize> {
         self.next_index(true)
@@ -305,7 +356,7 @@ impl Sequence {
     }
     pub(super) fn previous_index(&self) -> Option<usize> {
         let current = self.selected_index?;
-        if current == 0 && self.repeat_mode == RepeatMode::All {
+        if current == 0 && self.repeat_mode == QueueRepeatMode::All {
             self.total().checked_sub(1)
         } else {
             current.checked_sub(1)
@@ -327,10 +378,10 @@ impl Sequence {
         self.order.clone_from(&self.ordinary);
         if self.shuffle_enabled {
             library::shuffle_order(&mut self.order, self.revision.wrapping_add(1));
+            self.place(None, Some(0..self.total()));
         }
         self.selected_index = None;
         self.trim_rows();
-        self.save_order(None, Some(0..self.total()));
         self.changed(true);
     }
     pub(super) fn advance_index(&mut self, eos: bool) -> Option<usize> {
@@ -347,21 +398,26 @@ impl Sequence {
             return;
         }
         self.shuffle_enabled = enabled;
-        let start = self.selected_index.map_or(0, |i| i + 1);
         if enabled {
+            let start = self.selected_index.map_or(0, |i| i + 1);
             library::shuffle_order(&mut self.order[start..], seed);
+            self.place(None, Some(0..self.total()));
         } else {
-            let played = self.order[..start].iter().copied().collect::<HashSet<_>>();
-            self.order.truncate(start);
-            self.order.extend(
-                self.ordinary
-                    .iter()
-                    .filter(|id| !played.contains(id))
-                    .copied(),
-            );
+            // The queue plays in its own order again, from the current entry's place in it.
+            let current = self.selected_index.and_then(|i| self.id_at(i));
+            self.order.clone_from(&self.ordinary);
+            self.selected_index = current.and_then(|id| self.index_of(id));
+            for (_, rank) in self.members.values_mut() {
+                rank.shuffle = None;
+            }
+            self.dirty
+                .get_or_insert_default()
+                .coalesce(library::QueueUpdate {
+                    unshuffled: true,
+                    ..Default::default()
+                });
         }
         self.trim_rows();
-        self.save_order(None, Some(start..self.total()));
         self.changed(true);
     }
     pub(super) fn add_page(
@@ -395,11 +451,8 @@ impl Sequence {
             .map(|entry| {
                 let id = OccurrenceId(self.next_id);
                 self.next_id += 1;
-                self.dirty
-                    .get_or_insert_default()
-                    .entries
-                    .insert(id.0, entry.clone());
-                self.members.insert(id, entry);
+                self.members
+                    .insert(id, (entry, library::QueueRank::default()));
                 id
             })
             .collect::<Vec<_>>();
@@ -438,10 +491,11 @@ impl Sequence {
                 Some(row)
             }));
         self.trim_rows();
-        self.save_order(
-            Some(ordinary_at..self.ordinary.len()),
-            Some(at..self.total()),
-        );
+        if replacing {
+            self.place(Some(0..self.total()), Some(0..self.total()));
+        } else {
+            self.place(Some(ordinary_at..ordinary_at + count), Some(at..at + count));
+        }
         self.changed(true);
     }
     fn target(&self, target: &QueueReorderTarget) -> (Option<OccurrenceId>, bool) {
@@ -488,7 +542,6 @@ impl Sequence {
         let mut selected = None;
         let mut kept = 0;
         let mut next = 0;
-        let mut active_start = self.total();
         self.order.retain(|id| {
             let keep = removed.binary_search(id).is_err();
             if Some(*id) == current {
@@ -497,22 +550,11 @@ impl Sequence {
                     selected = Some(kept);
                 }
             }
-            if !keep {
-                active_start = active_start.min(kept);
-            }
             kept += usize::from(keep);
             keep
         });
-        let mut ordinary_start = self.ordinary.len();
-        let mut position = 0;
-        self.ordinary.retain(|id| {
-            let keep = removed.binary_search(id).is_err();
-            if !keep {
-                ordinary_start = ordinary_start.min(position);
-            }
-            position += usize::from(keep);
-            keep
-        });
+        self.ordinary
+            .retain(|id| removed.binary_search(id).is_err());
         let dirty = self.dirty.get_or_insert_default();
         for id in removed {
             self.members.remove(&id);
@@ -525,11 +567,17 @@ impl Sequence {
         }
         self.selected_index = selected;
         self.trim_rows();
-        self.save_order(
-            Some(ordinary_start..self.ordinary.len()),
-            Some(active_start..self.total()),
-        );
         self.changed(true);
+    }
+    /// Removes entries whose saved rows are gone already.
+    pub(super) fn forget(&mut self, selection: &QueueSelection) {
+        let forgotten = self.selection(selection);
+        self.remove(selection);
+        if let Some(dirty) = &mut self.dirty {
+            for id in forgotten {
+                dirty.removed.remove(&id.0);
+            }
+        }
     }
     pub(super) fn reorder(&mut self, selection: &QueueSelection, target: &QueueReorderTarget) {
         let selected = self.selection(selection);
@@ -551,7 +599,7 @@ impl Sequence {
         }
         self.selected_index = current.and_then(|id| self.index_of(id));
         self.trim_rows();
-        self.save_order(ordinary, active);
+        self.place(ordinary, active);
         self.changed(true);
     }
     pub(super) fn clear(&mut self, include_current: bool) {
@@ -600,7 +648,7 @@ impl Sequence {
             .window_range()
             .map(|i| self.order[i])
             .filter(|id| read == MetadataRead::Window || self.at_id(*id).is_none())
-            .map(|id| (id, self.members[&id].clone()))
+            .map(|id| (id, self.members[&id].0.clone()))
             .collect::<Vec<_>>();
         (!entries.is_empty()).then_some(entries)
     }
@@ -615,7 +663,7 @@ impl Sequence {
             if !self
                 .members
                 .get(&id)
-                .is_some_and(|entry| entry.track_key == item.track_key)
+                .is_some_and(|(entry, _)| entry.track_key == item.track_key)
             {
                 continue;
             }
@@ -634,14 +682,13 @@ impl Sequence {
             let Some(&position) = positions.get(&id) else {
                 continue;
             };
-            let entry = &self.members[&id];
+            let entry = &self.members[&id].0;
             changed = true;
             self.rows.push(Arc::new(QueueRow {
                 occurrence_id: Some(id.0),
                 position,
                 track: item,
                 provenance: entry.provenance.clone(),
-                received_from_connect: entry.received_from_connect,
             }));
         }
         self.trim_rows();
@@ -651,6 +698,8 @@ impl Sequence {
         }
         changed
     }
+    /// Moves entries to their tracks' new keys. The Write that moved the identities moved the
+    /// saved entries too, so only entries waiting to be saved change.
     pub(super) fn rekey_tracks(
         &mut self,
         pairs: &[(library::TrackKey, library::TrackKey)],
@@ -660,15 +709,18 @@ impl Sequence {
             keys.insert(old, keys.get(&new).copied().unwrap_or(new));
         }
         let mut changed = false;
-        for (id, entry) in &mut self.members {
+        for (id, (entry, _)) in &mut self.members {
             if let Some(&key) = keys.get(&entry.track_key)
                 && key != entry.track_key
             {
                 entry.track_key = key;
-                self.dirty
-                    .get_or_insert_default()
-                    .entries
-                    .insert(id.0, entry.clone());
+                if let Some((waiting, _)) = self
+                    .dirty
+                    .as_mut()
+                    .and_then(|dirty| dirty.entries.get_mut(&id.0))
+                {
+                    waiting.track_key = key;
+                }
                 changed = true;
             }
         }
@@ -678,10 +730,34 @@ impl Sequence {
                     Arc::make_mut(row).track.track_key = key;
                 }
             }
-            self.changed(true);
+            self.revision += 1;
             self.refresh_metadata();
         }
         changed
+    }
+
+    /// Shows committed favorites and ratings in the rows that show their tracks.
+    pub(super) fn show_states(&mut self, items: &[library::StateChange]) -> bool {
+        let mut changed = false;
+        for row in &mut self.rows {
+            for item in items {
+                if item.track() == Some(row.track.track_key) && !item.shown_in(&row.track.state) {
+                    item.show_in(&mut Arc::make_mut(row).track.state);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.revision += 1;
+        }
+        changed
+    }
+
+    /// Whether the rows shown hold one of these tracks.
+    pub(super) fn shows_any(&self, keys: &[library::TrackKey]) -> bool {
+        self.rows
+            .iter()
+            .any(|row| keys.contains(&row.track.track_key))
     }
 
     pub(super) fn need_metadata(&mut self) {
@@ -731,7 +807,7 @@ fn move_entries(
         keep
     });
     order.splice(at..at, moving.iter().copied());
-    Some(start.min(at)..end.max(at + moving.len()))
+    Some(at..at + moving.len())
 }
 
 impl Default for Sequence {
@@ -748,9 +824,8 @@ mod tests {
     fn page(start: usize, count: usize) -> super::super::commands::QueueBatch {
         let entries = (start..start + count)
             .map(|i| library::QueueEntry {
-                received_from_connect: false,
                 track_key: library::TrackKey::from_raw((i / 2 + 1) as i64),
-                provenance: Provenance::Manual,
+                provenance: QueueProvenance::Manual,
             })
             .collect::<Vec<_>>();
         let rows = entries
@@ -761,7 +836,6 @@ mod tests {
                 Arc::new(QueueRow {
                     occurrence_id: None,
                     position: i,
-                    received_from_connect: false,
                     provenance: e.provenance.clone(),
                     track: {
                         let reference = TrackReference::direct(
@@ -853,9 +927,7 @@ mod tests {
         assert_eq!(s.members.len(), 10_000);
         assert!(Arc::ptr_eq(&current, s.selected().unwrap()));
         let update = s.take_persistence().unwrap();
-        assert!(update.entries.is_empty());
-        assert!(update.ordinary.is_none());
-        assert_eq!(update.order.unwrap().rows.len(), 9999);
+        assert_eq!(update.entries.len(), 10_000);
         assert!(!update.replace);
         let entries = s.read_request().expect("nearby metadata");
         assert!(entries.len() <= 99);
@@ -863,18 +935,17 @@ mod tests {
         assert_eq!(s.order, s.ordinary);
     }
     #[test]
-    fn toggles_keep_history_and_repeat_resets_only_order() {
+    fn unshuffle_keeps_the_current_entry_and_repeat_resets_only_order() {
         let mut s = sequence(10);
         s.activate_index(2);
         s.shuffle(true, 3);
         s.advance_index(false);
-        let history = s.order[..4].to_vec();
         let current = s.id_at(s.selected_index().unwrap());
         s.shuffle(false, 0);
-        assert_eq!(s.order[..4], history);
+        assert_eq!(s.order, s.ordinary);
         assert_eq!(s.id_at(s.selected_index().unwrap()), current);
-        assert!(s.order[4..].windows(2).all(|w| w[0] < w[1]));
-        s.set_repeat_mode(RepeatMode::All);
+        assert!(s.take_persistence().unwrap().unshuffled);
+        s.set_repeat_mode(QueueRepeatMode::All);
         s.activate_index(9);
         s.take_persistence();
         let members = s.members.clone();
@@ -884,8 +955,6 @@ mod tests {
         assert_eq!(members, s.members);
         let update = s.take_persistence().unwrap();
         assert!(update.entries.is_empty());
-        assert!(update.order.is_some());
-        assert!(update.ordinary.is_none());
         s.activate_index(s.previous_index().unwrap());
         assert_eq!(s.selected_index(), Some(9));
         assert!(s.take_persistence().is_none());
@@ -904,14 +973,12 @@ mod tests {
         );
         let update = s.take_persistence().unwrap();
         assert_eq!(update.entries.len(), 1);
-        assert_eq!(update.ordinary.unwrap().rows.len(), 1);
-        assert_eq!(update.order.unwrap().rows.len(), 1);
         s.activate_index(3);
         let current_id = s.id_at(3).unwrap();
         let current = s.entry_at(3).unwrap().clone();
         s.set_progress_millis(42000);
         let prepared_id = s.id_at(4).unwrap();
-        let prepared = s.members[&prepared_id].clone();
+        let prepared = s.members[&prepared_id].0.clone();
         s.shuffle(true, 4);
         s.add_page(
             page(2000, 1),
@@ -927,7 +994,7 @@ mod tests {
         let moving = s
             .order
             .iter()
-            .find(|id| s.members[id].track_key == library::TrackKey::from_raw(501))
+            .find(|id| s.members[id].0.track_key == library::TrackKey::from_raw(501))
             .copied()
             .unwrap();
         s.reorder(

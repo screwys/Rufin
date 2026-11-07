@@ -35,6 +35,82 @@ pub struct TrackMetadata {
     pub album_loudness: Option<NativeGain>,
 }
 
+/// The TrackMetadata fields stored as typed `tracks` columns. `track_details.metadata` holds
+/// the rest.
+const THIN_TRACK_FIELDS: [&str; 13] = [
+    "title",
+    "artist",
+    "album",
+    "sort_text",
+    "duration_millis",
+    "disc_number",
+    "track_number",
+    "year",
+    "release_date",
+    "date_added",
+    "source_format",
+    "comment",
+    "bpm",
+];
+
+/// The AlbumMetadata fields stored as typed `albums` columns.
+const THIN_ALBUM_FIELDS: [&str; 7] = [
+    "title",
+    "artist",
+    "sort_text",
+    "year",
+    "release_date",
+    "date_added",
+    "is_compilation",
+];
+
+fn without(value: impl Serialize, fields: &[&str]) -> serde_json::Result<String> {
+    serde_json::to_string(&strip(serde_json::to_value(value)?, fields))
+}
+
+fn strip(mut value: serde_json::Value, fields: &[&str]) -> serde_json::Value {
+    if let Some(object) = value.as_object_mut() {
+        for field in fields {
+            object.remove(*field);
+        }
+        object.retain(|_, value| {
+            !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty())
+        });
+    }
+    value
+}
+
+/// The details row's JSON of whole TrackMetadata JSON, unknown fields included.
+pub(crate) fn track_details_value(value: serde_json::Value) -> serde_json::Value {
+    strip(value, &THIN_TRACK_FIELDS)
+}
+
+/// The album row's metadata JSON of whole AlbumMetadata JSON, unknown fields included.
+pub(crate) fn album_details_value(value: serde_json::Value) -> serde_json::Value {
+    strip(value, &THIN_ALBUM_FIELDS)
+}
+
+impl TrackMetadata {
+    /// The details row's JSON: everything the typed columns do not hold.
+    pub(crate) fn details_json(&self) -> serde_json::Result<String> {
+        without(self, &THIN_TRACK_FIELDS)
+    }
+}
+
+impl AlbumMetadata {
+    /// The album row's metadata JSON: everything the typed columns do not hold.
+    pub(crate) fn details_json(&self) -> serde_json::Result<String> {
+        without(self, &THIN_ALBUM_FIELDS)
+    }
+}
+
+/// SQL for the whole TrackMetadata JSON of a track row and its LEFT JOINed details row.
+pub(crate) fn track_metadata_sql(track: &str, details: &str) -> String {
+    format!(
+        "json_patch(coalesce(json({details}.metadata),'{{}}'),json_object('title',{track}.title,'artist',{track}.display_artist,'album',{track}.display_album,'sort_text',{track}.sort_text,'duration_millis',{track}.duration_millis,'disc_number',{track}.disc_number,'track_number',{track}.track_number,'year',{track}.year,'release_date',{track}.release_date,'date_added',{track}.date_added,'source_format',{track}.source_format,'comment',{track}.comment,'bpm',{track}.bpm))"
+    )
+}
+
 /// None on TrackMetadata means the old cache never observed raw album tags.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -149,5 +225,50 @@ impl<'de> Deserialize<'de> for TrackReference {
             metadata,
             artwork_binding: None,
         })
+    }
+}
+
+/// A date as ISO 8601 (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) from the forms tags and servers
+/// write: ISO with or without a time, `DD.MM.YYYY` (or with / or -), `YYYY/MM/DD` and `YYYYMMDD`.
+/// Other text stays as written. Release dates sort by it and years come from it.
+pub fn normalized_date(value: Option<String>) -> Option<String> {
+    let value = value?.trim().to_string();
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(prefix) = value.get(..10)
+        && prefix.as_bytes().get(4) == Some(&b'-')
+        && prefix.as_bytes().get(7) == Some(&b'-')
+    {
+        return Some(prefix.to_string());
+    }
+    let number = |text: &str,
+                  digits: std::ops::RangeInclusive<usize>,
+                  range: std::ops::RangeInclusive<u16>| {
+        (digits.contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| text.parse::<u16>().ok())
+            .flatten()
+            .filter(|value| range.contains(value))
+    };
+    let parts = match value.split(['.', '/', '-']).collect::<Vec<_>>()[..] {
+        [year, month, day] if year.len() == 4 => Some((year, month, day)),
+        [day, month, year] => Some((year, month, day)),
+        _ if value.len() == 8 => value
+            .get(..4)
+            .zip(value.get(4..6))
+            .zip(value.get(6..))
+            .map(|((year, month), day)| (year, month, day)),
+        _ => None,
+    };
+    let Some((year, month, day)) = parts else {
+        return Some(value);
+    };
+    match (
+        number(year, 4..=4, 1..=9999),
+        number(month, 1..=2, 1..=12),
+        number(day, 1..=2, 1..=31),
+    ) {
+        (Some(year), Some(month), Some(day)) => Some(format!("{year:04}-{month:02}-{day:02}")),
+        _ => Some(value),
     }
 }

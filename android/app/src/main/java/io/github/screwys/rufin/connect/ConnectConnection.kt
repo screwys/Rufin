@@ -7,13 +7,10 @@ import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
 import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
 import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
-import io.github.screwys.rufin.shared.downloads.DownloadDirectory
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import io.github.screwys.rufin.ui.userMessage
-
-internal data class ConnectMusicFolder(val sourceId: String, val rootId: String, val title: String, val location: String?)
 
 internal data class ConnectConfirmation(val kind: Confirmation, val message: String, val retry: () -> Unit)
 
@@ -32,10 +29,9 @@ internal class ConnectConnection(private val model: RufinConnection) {
         private set
     var fileSources by mutableStateOf<List<FileIntegration>>(emptyList())
         private set
-    var musicFolders by mutableStateOf<List<ConnectMusicFolder>>(emptyList())
-        private set
     private var bridge: ConnectOwner? = null
     private var dismissedStatusError: String? = null
+    private var offered: String? = null
     val visibleError get() = error ?: state?.error?.takeUnless { it == dismissedStatusError }
 
     suspend fun observe() {
@@ -60,6 +56,10 @@ internal class ConnectConnection(private val model: RufinConnection) {
                             val next = withContext(Dispatchers.Default) { subscription.next() }
                             if (next.connecting && state?.connecting != true) operationActive = true
                             if (!next.connecting && next.error == null) operationActive = false
+                            val offer = next.continuation?.device
+                            if (offer != null && offer != offered) model.showFeedback(
+                                translate("Continue from {device}").replace("{device}", next.continuation!!.name))
+                            offered = offer
                             state = next
                         }
                     }
@@ -78,16 +78,16 @@ internal class ConnectConnection(private val model: RufinConnection) {
     }
 
     private fun request(operation: suspend (ConnectOwner) -> ConnectStatus,
-        confirmed: (suspend (ConnectOwner) -> ConnectStatus)? = null, success: String? = null, blocking: Boolean = true) {
+        confirmed: (suspend (ConnectOwner) -> ConnectStatus)? = null, blocking: Boolean = true) {
         val owner = bridge ?: return
         model.runAction {
             if (blocking) pending = true
             error = null
             dismissedStatusError = null
-            try { operation(owner).let { if (bridge === owner) { state = it; success?.let { message -> model.showFeedback(message) } } } }
+            try { operation(owner).let { if (bridge === owner) state = it } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: ActionException.ConfirmationRequired) {
-                if (confirmed != null) confirmation = ConnectConfirmation(failure.confirmation, failure.reason) { request(confirmed, success = success) }
+                if (confirmed != null) confirmation = ConnectConfirmation(failure.confirmation, failure.reason) { request(confirmed) }
                 else error = failure.reason
             }
             catch (failure: ActionException.Failed) { error = failure.v1 }
@@ -114,38 +114,10 @@ internal class ConnectConnection(private val model: RufinConnection) {
                 throw IllegalStateException(translate("Local network permission was denied"))
             }
             owner.execute(action)
-        }, confirmed = confirmed, success = if (action is ConnectAction.Export) translate("Saved") else null,
-            blocking = action != ConnectAction.Refresh)
+        }, confirmed = confirmed, blocking = action != ConnectAction.Refresh)
     }
     fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
         { it.execute(ConnectAction.Join(invitation, true)) })
-    private suspend fun loadMusicFolders(owner: ConnectOwner): List<ConnectMusicFolder> {
-        val settings = owner.status().settings
-        return model.sources?.sources.orEmpty().flatMap { source ->
-            owner.roots(source.id).map { root ->
-                val location = settings.folders["${source.id}/${root.id}"] ?: settings.folders[source.id]
-                ConnectMusicFolder(source.id, root.id, "${source.name} · ${root.label}", when (location) {
-                    is DownloadDirectory.Native -> location.v1
-                    is DownloadDirectory.Document -> location.uri
-                    null -> null
-                })
-            }
-        }
-    }
-    fun refreshMusicFolders() = model.runAction { bridge?.let { musicFolders = loadMusicFolders(it) } }
-    fun folder(folder: ConnectMusicFolder, uri: String?) = request({ owner ->
-        val updated = owner.execute(ConnectAction.Folder(folder.sourceId, folder.rootId, uri?.let { DownloadDirectory.Document(it) } ?: DownloadDirectory.Native("")))
-        musicFolders = loadMusicFolders(owner)
-        updated
-    })
-    fun importDocument(uri: String) = request({ it.importDocument(uri, false, null) },
-        { it.importDocument(uri, true, null) }, success = translate("Applied"))
-    fun exportDocument(uri: String) = request({ it.exportDocument(uri) }, success = translate("Saved"))
-    fun importRemote(source: String, path: String) = request({
-        it.execute(ConnectAction.Import(path, source, false, null))
-    }, { it.execute(ConnectAction.Import(path, source, true, null)) }, success = translate("Applied"))
-    fun exportRemote(source: String, path: String) = action(ConnectAction.Export(path, source))
-    suspend fun profileFiles(source: String, folder: String): List<String> = bridge?.listProfileFiles(source, folder).orEmpty()
     fun confirm() { confirmation?.let { choice -> confirmation = null; choice.retry() } }
     fun cancelConfirmation() { confirmation = null }
     fun dismissOperation() { operationActive = false }

@@ -1,51 +1,6 @@
-use crate::LibraryResult;
-
+/// A letter-index bucket and the row where it starts.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct ScrollSection {
     pub title: String,
     pub index: u64,
-}
-
-// Input already carries the exact ordering and section expression.
-pub(crate) fn section_sql(input: &str) -> String {
-    format!(
-        "WITH section_rows AS ({input}), initials AS (SELECT lower(substr(section_text,1,1)) initial,unicode(substr(section_text,1,1)) code,section_position FROM section_rows), buckets AS (SELECT {SECTION_BUCKET_SQL} title,section_position FROM initials) SELECT json_object('title',title,'index',min(section_position)) FROM buckets GROUP BY title ORDER BY min(section_position)"
-    )
-}
-
-pub(crate) const SECTION_BUCKET_SQL: &str = "CASE
-        WHEN initial BETWEEN 'a' AND 'z' THEN upper(initial)
-        WHEN code BETWEEN 65382 AND 65437 AND code<>65392 THEN CASE
-            WHEN code=65382 OR code>=65436 THEN 'わ'
-            WHEN code BETWEEN 65383 AND 65387 OR code BETWEEN 65393 AND 65397 THEN 'あ'
-            WHEN code BETWEEN 65398 AND 65402 THEN 'か'
-            WHEN code BETWEEN 65403 AND 65407 THEN 'さ'
-            WHEN code=65391 OR code BETWEEN 65408 AND 65412 THEN 'た'
-            WHEN code BETWEEN 65413 AND 65417 THEN 'な'
-            WHEN code BETWEEN 65418 AND 65422 THEN 'は'
-            WHEN code BETWEEN 65423 AND 65427 THEN 'ま'
-            WHEN code BETWEEN 65388 AND 65390 OR code BETWEEN 65428 AND 65430 THEN 'や'
-            ELSE 'ら' END
-        WHEN code BETWEEN 12353 AND 12438 OR code BETWEEN 12449 AND 12538 THEN CASE
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)=12436 THEN 'あ'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END) IN (12437,12438) THEN 'か'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12362 THEN 'あ'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12372 THEN 'か'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12382 THEN 'さ'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12393 THEN 'た'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12398 THEN 'な'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12413 THEN 'は'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12418 THEN 'ま'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12424 THEN 'や'
-            WHEN (CASE WHEN code>=12449 THEN code-96 ELSE code END)<=12429 THEN 'ら'
-            ELSE 'わ' END
-        WHEN code BETWEEN 13312 AND 19903 OR code BETWEEN 19968 AND 40959 OR code BETWEEN 63744 AND 64255 OR code BETWEEN 131072 AND 205743 THEN '漢'
-        WHEN code BETWEEN 44032 AND 55203 OR code BETWEEN 4352 AND 4607 OR code BETWEEN 12593 AND 12686 THEN '한'
-        WHEN initial BETWEEN '0' AND '9' OR code<128 OR code IS NULL THEN '#'
-        ELSE '…' END";
-
-pub(crate) fn decode_sections(rows: Vec<String>) -> LibraryResult<Vec<ScrollSection>> {
-    rows.into_iter()
-        .map(|row| serde_json::from_str(&row).map_err(Into::into))
-        .collect()
 }

@@ -8,18 +8,16 @@ pub(crate) fn stable_hash(input: &str) -> u64 {
     })
 }
 
-pub(crate) fn normalized_date(value: Option<String>) -> Option<String> {
-    let value = value?.trim().to_string();
-    if value.is_empty() {
-        return None;
-    }
-    if let Some(prefix) = value.get(..10)
-        && prefix.as_bytes().get(4) == Some(&b'-')
-        && prefix.as_bytes().get(7) == Some(&b'-')
-    {
-        return Some(prefix.to_string());
-    }
-    Some(value)
+pub(crate) use library::normalized_date;
+
+/// The year of a date [`normalized_date`] returns.
+pub(crate) fn date_year(date: &str) -> Option<u16> {
+    let year = date.get(..4)?;
+    year.bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| year.parse().ok())
+        .flatten()
+        .filter(|year| *year > 0)
 }
 
 pub(crate) fn unix_seconds(value: Option<String>) -> Option<i64> {
@@ -99,7 +97,8 @@ mod tests {
             (Some("  "), None),
             (Some(" 2025-04-03T12:00:00Z "), Some("2025-04-03")),
             (Some("2025-04"), Some("2025-04")),
-            (Some("2025/04/03"), Some("2025/04/03")),
+            (Some("2025/04/03"), Some("2025-04-03")),
+            (Some("03/04/2025"), Some("2025-04-03")),
         ] {
             assert_eq!(
                 normalized_date(input.map(str::to_string)),

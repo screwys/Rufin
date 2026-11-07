@@ -19,10 +19,11 @@ use tokio::sync::Mutex;
 use crate::policy::normalized_date;
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
 use crate::remote_json::{boolean, field, id, items, strings};
-use crate::source::{SourceReadProgress, SourceReadStage};
+use crate::source::{SourceProgress, SourceProgressStage};
 use crate::{SourceError, SourceResult};
 
-use super::{ImageRef, SubsonicSource, normalize_release_types};
+use super::{ImageRef, SubsonicSource};
+use library::normalize_release_types;
 
 const NAVIDROME_PAGE_SIZE: usize = 1_000;
 const NAVIDROME_JSON_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -134,7 +135,11 @@ impl SubsonicSource {
         let ids: Vec<_> = values.iter().filter_map(|value| id(&value["id"])).collect();
         let mut result = Vec::with_capacity(ids.len());
         for ids in ids.chunks(100) {
-            let mut query = vec![("_start", "0".to_string()), ("_end", ids.len().to_string())];
+            let mut query = vec![
+                ("_start", "0".to_string()),
+                ("_end", ids.len().to_string()),
+                ("missing", "false".to_string()),
+            ];
             query.extend(ids.iter().map(|id| ("id", id.clone())));
             let page: Vec<Value> = self.navidrome_json(kind, &query).await?;
             let mut page: std::collections::HashMap<_, _> = page
@@ -229,20 +234,22 @@ impl SubsonicSource {
 
     pub(super) async fn acquire_navidrome_library(
         &self,
-        catalog: &mut library::Catalog<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        observation: &mut library::Observation<'_>,
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+    ) -> SourceResult<bool> {
+        let source_id = observation.source_id;
+        let walk = observation.is_walk();
+        let mut listed = vec!["track", "album", "artist"];
 
         use crate::SourceEntityKind::{Album, Artist, Track};
+        // Artists come first so that the albums and tracks crediting them are resolved once.
         for (kind, endpoint, stage) in [
-            (Album, "album", SourceReadStage::Albums),
-            (Track, "song", SourceReadStage::Tracks),
-            (Artist, "artist", SourceReadStage::Artists),
+            (Artist, "artist", SourceProgressStage::Artists),
+            (Album, "album", SourceProgressStage::Albums),
+            (Track, "song", SourceProgressStage::Tracks),
         ] {
-            progress(SourceReadProgress {
+            progress(SourceProgress {
                 stage,
                 completed: 0,
                 total: None,
@@ -252,7 +259,16 @@ impl SubsonicSource {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
                 }
-                let page = self.navidrome_page(endpoint, offset).await?;
+                let page = match self.navidrome_page(endpoint, offset).await {
+                    Ok(page) => page,
+                    // Albums and tracks still list; their credits make the artists.
+                    Err(error) if kind == Artist => {
+                        crate::source::optional_collection_error(error)?;
+                        listed.pop();
+                        break;
+                    }
+                    Err(error) => return Err(error),
+                };
                 let page_len = page.len();
                 if page_len == 0 {
                     break;
@@ -278,8 +294,8 @@ impl SubsonicSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, true).await?;
-                progress(SourceReadProgress {
+                observation.apply_catalog(&batch, true).await?;
+                progress(SourceProgress {
                     stage,
                     completed: offset,
                     total: None,
@@ -288,16 +304,18 @@ impl SubsonicSource {
                     break;
                 }
             }
-            if let Some(stamp) = stamp {
-                if cancelled() {
-                    return Err(crate::SourceError::Cancelled);
-                }
-                catalog
-                    .complete_source_observation(stamp, &[kind.as_str()], None)
-                    .await?;
-            }
         }
-        Ok(())
+        if walk {
+            if cancelled() {
+                return Err(crate::SourceError::Cancelled);
+            }
+            // Records that credit others go first: an artist stays while a track or album
+            // credits it.
+            observation
+                .complete_source_observation(&listed, None, None)
+                .await?;
+        }
+        Ok(listed.len() == 3)
     }
 
     async fn navidrome_page(&self, kind: &str, offset: usize) -> SourceResult<Vec<Value>> {
@@ -556,7 +574,7 @@ fn album_from_navidrome(
         },
         user_data: library::NativeUserState {
             rating: Some(rating(field(album, "rating")).map(|rating| i64::from(rating) * 10)),
-            favorite: boolean(&album["starred"]),
+            favorite: Some(boolean(&album["starred"]).unwrap_or(false)),
             ..Default::default()
         },
         object_id: source.id("album", raw_id),
@@ -630,7 +648,7 @@ fn track_from_navidrome(
     );
     let source_format = clean_optional(field(track, "suffix"));
     let duration_seconds = duration_seconds(field(track, "duration").unwrap_or_default());
-    let loudness_analysis_key = super::audio_key(
+    let audio_revision = super::audio_key(
         &object_id,
         source_path.as_deref(),
         source_format.as_deref(),
@@ -643,6 +661,7 @@ fn track_from_navidrome(
                 sample_rate_hz: field(track, "sampleRate"),
                 bit_depth: field(track, "bitDepth"),
                 channels: field(track, "channels"),
+                size_bytes: field(track, "size"),
             },
             sort_text: clean_optional(field(track, "sortTitle"))
                 .unwrap_or_else(|| title.clone())
@@ -690,12 +709,13 @@ fn track_from_navidrome(
             last_played: crate::policy::unix_seconds(field(track, "playDate")),
             play_count: capped_u32(field(track, "playCount")).map(i64::from),
             rating: Some(rating(field(track, "rating")).map(|rating| i64::from(rating) * 10)),
-            favorite: boolean(&track["starred"]),
+            favorite: Some(boolean(&track["starred"]).unwrap_or(false)),
             ..Default::default()
         },
         object_id,
         album_object_id: album_id,
-        loudness_analysis_key,
+        audio_revision: Some(audio_revision),
+        audio_hash: Some(audio_revision),
         source_path,
         folders: Some(
             field::<i64>(track, "libraryId")
@@ -728,14 +748,14 @@ fn artist_from_navidrome(
             ..Default::default()
         },
         user_data: library::NativeUserState {
-            favorite: boolean(&artist["starred"]),
+            favorite: Some(boolean(&artist["starred"]).unwrap_or(false)),
             rating: Some(rating(field(artist, "rating")).map(|rating| i64::from(rating) * 10)),
             ..Default::default()
         },
         object_id: source.id("artist", raw_id),
         artwork_binding: Some(crate::native_artwork_binding(
             source_id,
-            &navidrome_image_ref(source, "ar", raw_id, None),
+            &navidrome_image_ref(source, "ar", raw_id, field(artist, "updatedAt")),
         )?),
     })
 }
@@ -1224,17 +1244,17 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let source_id = crate::SourceId::new("source");
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
         (async {
             let mut batch = library::CatalogBatch::default();
             let result = batch
@@ -1249,37 +1269,30 @@ mod tests {
                     artwork_binding: None,
                     ..Default::default()
                 }]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
         .unwrap();
         {
             let result = source
-                .acquire_navidrome_library(&mut catalog, &|_| {}, &|| false)
+                .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
                 .await;
             result
-        }
-        .unwrap();
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
         }
         .unwrap();
         for clear in [false, true] {
             cleared.store(clear, Ordering::Relaxed);
             source_owner
-                .live_search(&database, "Track", 10)
+                .live_search(&catalog, "Track", 10, None)
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             {
                 let result = source
                     .acquire_collection(
-                        &mut catalog,
+                        &mut observation,
                         &crate::SourceCollection::Album("navidrome:album:album".into()),
                         false,
                         &|| false,
@@ -1288,14 +1301,7 @@ mod tests {
                 result
             }
             .unwrap();
-            {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            let row = database
+            let row = catalog
                 .track(
                     &(&library::source_entity_uri(&source_id, "track", "navidrome:track:track")),
                     &library::ReadCancellation::new(),
@@ -1322,6 +1328,67 @@ mod tests {
                     .query_pairs()
                     .any(|(key, value)| key == "id" && value == "track")
         }));
+    }
+
+    #[tokio::test]
+    async fn failed_artist_pages_still_list_albums_and_tracks() {
+        let server = MockServer::start().await;
+        page_match("artist", 0, "token")
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        page_match("album", 0, "token")
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": "album", "name": "Album", "albumArtist": "Artist", "albumArtistId": "artist"
+            }])))
+            .mount(&server)
+            .await;
+        page_match("song", 0, "token")
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "song", "title": "Song", "albumId": "album", "album": "Album",
+                    "participants": {"artist": [{"id": "artist", "name": "Artist"}]}
+                }])),
+            )
+            .mount(&server)
+            .await;
+        let source = navidrome_source_with_token(&server, "token");
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
+            .await
+            .unwrap();
+        let source_id = "navidrome:test".to_string();
+        catalog
+            .reconcile_source(
+                &library::SourceId::new(&source_id),
+                "navidrome",
+                "Navidrome",
+            )
+            .await
+            .unwrap();
+        let mut observation = catalog.observe(&source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        let complete = source
+            .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        assert!(!complete);
+        // The artist exists through the track's credit, unindexed until its page lists it.
+        for (entity, raw, indexed) in [
+            ("album", "album", true),
+            ("track", "song", true),
+            ("artist", "artist", false),
+        ] {
+            let object = String::from(source.id(entity, raw));
+            assert!(
+                catalog
+                    .source_contains_entity(&source_id, entity, &object, indexed)
+                    .await
+                    .unwrap(),
+                "{object}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1415,12 +1482,8 @@ mod tests {
             })
         }));
         first_albums[1] = serde_json::json!({"name": "Missing ID"});
-        page_match("album", 0, "token-a")
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("x-nd-authorization", "token-b")
-                    .set_body_json(first_albums),
-            )
+        page_match("album", 0, "token-b")
+            .respond_with(ResponseTemplate::new(200).set_body_json(first_albums))
             .expect(1)
             .mount(&server)
             .await;
@@ -1490,13 +1553,15 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        page_match("artist", 0, "token-b")
+        page_match("artist", 0, "token-a")
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
-                    "id": "track-artist-one",
-                    "name": "Track Artist",
-                    "mbzArtistId": "track-artist-mbid"
-                }])),
+                ResponseTemplate::new(200)
+                    .insert_header("x-nd-authorization", "token-b")
+                    .set_body_json(serde_json::json!([{
+                        "id": "track-artist-one",
+                        "name": "Track Artist",
+                        "mbzArtistId": "track-artist-mbid"
+                    }])),
             )
             .expect(1)
             .mount(&server)
@@ -1511,10 +1576,10 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().expect("Library directory");
-        let database = library::Database::open(directory.path().join("library.sqlite3"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
             .await
-            .expect("Library database");
-        database
+            .expect("Library Catalog");
+        catalog
             .reconcile_source(
                 &library::SourceId::new("navidrome:test"),
                 "navidrome",
@@ -1523,8 +1588,8 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("navidrome:test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         (async {
             let mut batch = library::CatalogBatch::default();
@@ -1540,7 +1605,7 @@ mod tests {
                     artwork_binding: None,
                     ..Default::default()
                 }]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
@@ -1548,47 +1613,44 @@ mod tests {
 
         {
             let result = source
-                .acquire_navidrome_library(&mut catalog, &|_| {}, &|| false)
+                .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         }
         .expect("private Navidrome library");
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .expect("publish Navidrome Inventory");
         let cancellation = library::ReadCancellation::new();
-        let source_key = database
-            .cached_source("navidrome:test", &cancellation)
-            .await
-            .expect("cached source")
-            .expect("published source")
-            .source;
-        let albums = library::ListRead {
-            playlist_scope: Default::default(),
-            kind: library::ListKind::Albums,
-            source: Some(source_key),
-            sort: library::CatalogSort::Title,
-            folder: None,
-            filter: ("AAA Rich Album").to_string(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
+        let source_key = {
+            catalog.loaded().await;
+            catalog.cached_source("navidrome:test")
         }
-        .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
-        .await
-        .map(|page| page.rows)
-        .expect("Album page");
+        .expect("published source")
+        .source;
+        let albums = crate::listed_albums(
+            &catalog,
+            library::ListRead {
+                playlist_scope: Default::default(),
+                kind: library::ListKind::Albums,
+                source: Some(source_key),
+                sort: library::LibraryField::Title,
+                folder: None,
+                filter: ("AAA Rich Album").to_string(),
+                descending: false,
+                favorites_only: false,
+                activity: false,
+            },
+        )
+        .await;
         let album = albums.first().expect("rich Album");
+        let view = catalog
+            .album(&album.media_uri, false, &cancellation)
+            .await
+            .unwrap()
+            .expect("rich Album view");
         assert_eq!(
-            album.metadata.musicbrainz_release_group_id.as_deref(),
+            view.metadata.musicbrainz_release_group_id.as_deref(),
             Some("release-group-one")
         );
-        assert_eq!(album.metadata.release_types, ["album", "live"]);
+        assert_eq!(view.metadata.release_types, ["album", "live"]);
         let binding: Vec<library::ArtworkCandidate> = serde_json::from_slice(
             album
                 .artwork_binding
@@ -1607,18 +1669,19 @@ mod tests {
             },
             Some("2026-08-27T00:00:00Z")
         );
-        let tracks = (&library::MemberRead::new(library::Collection::Source(source_key)))
-            .page(&database, library::RouteSeedWindow::top(), &cancellation)
-            .await
-            .expect("Track page");
-        let track_rows = tracks
-            .rows
-            .into_iter()
-            .map(library::MemberRow::into_track)
-            .collect::<Vec<_>>();
-        let track = track_rows.first().expect("rich Track");
+        let track_rows = crate::listed_tracks(
+            &catalog,
+            library::MemberRead::new(library::Collection::Source(source_key)),
+        )
+        .await;
         assert_eq!(track_rows.len(), 2);
-        assert_eq!(track_rows[1].metadata.title, "ZZZ Last Track");
+        assert_eq!(track_rows[1].title, "ZZZ Last Track");
+        let track = catalog
+            .tracks(&[track_rows[0].track_key], &cancellation)
+            .await
+            .unwrap()
+            .pop()
+            .expect("rich Track");
         assert_eq!(
             track.metadata.musicbrainz_recording_id.as_deref(),
             Some("recording-one")
@@ -1628,7 +1691,7 @@ mod tests {
             Some("release-track-one")
         );
         assert_eq!(track.metadata.bpm, Some(123));
-        let mapping = database
+        let mapping = catalog
             .mapping_track_page(source_key, None, None, 1, &cancellation)
             .await
             .expect("mapping Track");
@@ -1636,26 +1699,31 @@ mod tests {
             mapping[0].source_path,
             "/srv/navidrome/audio/Artist/Album/Track.flac"
         );
-        let artists = library::ListRead {
-            playlist_scope: Default::default(),
-            kind: library::ListKind::Artists {
-                album_artist: false,
+        let artists = crate::listed_artists(
+            &catalog,
+            library::ListRead {
+                playlist_scope: Default::default(),
+                kind: library::ListKind::Artists {
+                    album_artist: false,
+                },
+                source: Some(source_key),
+                sort: library::LibraryField::Title,
+                folder: None,
+                filter: ("Track Artist").to_string(),
+                descending: false,
+                favorites_only: false,
+                activity: false,
             },
-            source: Some(source_key),
-            sort: library::CatalogSort::Title,
-            folder: None,
-            filter: ("Track Artist").to_string(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
-        }
-        .page_artists(&database, library::RouteSeedWindow::top(), &cancellation)
-        .await
-        .map(|page| page.rows)
-        .expect("Track Artist page");
+        )
+        .await;
         assert_eq!(
-            artists[0].metadata.musicbrainz_artist_id.as_deref(),
+            catalog
+                .artist(&artists[0].media_uri, false, false, &cancellation)
+                .await
+                .unwrap()
+                .unwrap()
+                .musicbrainz_artist_id
+                .as_deref(),
             Some("track-artist-mbid")
         );
     }

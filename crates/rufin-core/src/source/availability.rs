@@ -1,5 +1,6 @@
 //! Checks media locations for cleanup and playback failure recovery.
-use super::{SourceOwner, string_error};
+use super::SourceOwner;
+use crate::string_error;
 use std::collections::HashSet;
 
 impl SourceOwner {
@@ -11,7 +12,7 @@ impl SourceOwner {
     }
 
     pub(crate) async fn missing_media(&self, uris: &[String]) -> Result<HashSet<String>, String> {
-        let database = &self.shared.database;
+        let catalog = &self.shared.catalog;
         let mut missing = HashSet::new();
         let source_uris: Vec<_> = uris
             .iter()
@@ -21,44 +22,52 @@ impl SourceOwner {
                     .map(|(source, _, _)| (uri.clone(), source))
             })
             .collect();
-        let catalog_missing: std::collections::HashSet<_> = database
+        let catalog_missing: std::collections::HashSet<_> = catalog
             .catalog_missing_media(&source_uris)
             .await
             .map_err(string_error)?
             .into_iter()
             .collect();
-        let paths = database
-            .local_media_locations(uris)
+        let mut playables = catalog
+            .playables_by_uri(uris)
             .await
-            .map_err(string_error)?;
-        let shared: Vec<_> = paths.iter().map(|(_, _, shared)| *shared).collect();
-        let paths = paths.into_iter().map(|(_, paths, _)| paths).collect();
-        let mut available = sources::local_files_available(paths)
-            .await
-            .map_err(string_error)?;
-        let native: Vec<_> = uris
+            .map_err(string_error)?
+            .into_iter()
+            .map(|playable| (playable.media_uri.clone(), playable))
+            .collect::<std::collections::HashMap<_, _>>();
+        // The copies playback looks for: the download, the track's own file and its mapped file.
+        let copies = uris
             .iter()
-            .enumerate()
-            .filter(|(index, uri)| direct_local_media(uri) && !available[*index])
-            .map(|(index, uri)| (index, uri.clone()))
-            .collect();
-        if !native.is_empty() {
-            let connect = self
-                .shared
-                .connect
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .upgrade();
-            if let Some(connect) = connect {
-                let requested: Vec<_> = native.iter().map(|(_, uri)| uri.clone()).collect();
-                let peers = connect.media_availability(&requested).await?;
-                for ((index, _), peer) in native.iter().zip(peers) {
-                    available[*index] = peer;
-                }
-            } else if native.iter().any(|(index, _)| shared[*index]) {
-                return Err("Rufin Connect is unavailable".into());
-            }
-        }
+            .map(|uri| {
+                let playable = playables.get(uri);
+                let own = playable.and_then(library::Playable::local_uri).or_else(|| {
+                    let backing = library::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
+                    Some(backing.unwrap_or_else(|| uri.clone())).filter(|_| direct_local_media(uri))
+                });
+                let paths = playable
+                    .and_then(|playable| playable.download.as_ref())
+                    .map(|download| download.uri.clone())
+                    .into_iter()
+                    .chain(own)
+                    .filter_map(|uri| location(&uri))
+                    .collect::<Vec<_>>();
+                (paths, playable.and_then(|playable| playable.mapped.clone()))
+            })
+            .collect::<Vec<_>>();
+        let paths = tokio::task::spawn_blocking(move || {
+            copies
+                .into_iter()
+                .map(|(mut paths, mapped)| {
+                    paths.extend(mapped.and_then(|mapped| mapped.locate()));
+                    paths
+                })
+                .collect()
+        })
+        .await
+        .map_err(string_error)?;
+        let available = sources::local_files_available(paths)
+            .await
+            .map_err(string_error)?;
         for (index, uri) in uris.iter().enumerate() {
             if available[index] {
                 continue;
@@ -73,15 +82,11 @@ impl SourceOwner {
             if kind != "track"
                 || !self
                     .configuration(&source)
-                    .is_some_and(|source| source.is_file_library())
+                    .is_some_and(|source| source.is(library::SourceKind::file_library))
             {
                 continue;
             }
-            let Some(file) = database
-                .observed_media_file(uri)
-                .await
-                .map_err(string_error)?
-            else {
+            let Some(file) = playables.remove(uri).and_then(|playable| playable.file) else {
                 continue;
             };
             if !self
@@ -107,6 +112,15 @@ async fn unavailable_local_folder_for_path(
         }
     }
     None
+}
+
+/// Where a file or document URI is on this device.
+fn location(uri: &str) -> Option<library::LocalMediaLocation> {
+    if uri.starts_with("content:") {
+        Some(library::LocalMediaLocation::Document(uri.to_owned()))
+    } else {
+        library::file_media_path(uri).map(library::LocalMediaLocation::File)
+    }
 }
 
 fn direct_local_media(uri: &str) -> bool {

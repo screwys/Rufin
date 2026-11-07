@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.first
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class MetadataConnection(
     private val model: RufinConnection, context: Context,
-    private val kind: String, private val mediaUri: String,
+    private val item: MetadataItemId,
     private val scope: CoroutineScope, private val onSaved: () -> Unit,
 ) {
     var batch by mutableStateOf<MetadataBatch?>(null)
@@ -95,12 +95,6 @@ internal class MetadataConnection(
             artwork = null
             results = null
             val source = snapshotFlow { model.sourceOwner }.filterNotNull().first()
-            val item = when (kind) {
-                "track" -> MetadataItemId.Track(mediaUri)
-                "album", "album_header" -> MetadataItemId.Album(mediaUri)
-                "artist" -> MetadataItemId.Artist(mediaUri)
-                else -> error("Choose a track, album or artist")
-            }
             val editor = MetadataEditor.open(source, item)
             batch?.destroy()
             batch = editor.trackBatch()
@@ -277,7 +271,7 @@ internal class MetadataConnection(
         }
     }
     fun save() = action {
-        if (kind == "track" || batch != null) {
+        if (item is MetadataItemId.Track || batch != null) {
             val summary = it.prepareSave()
             if (summary.tracks > 0UL) saveConfirmation = summary
         } else saveEditor(it)

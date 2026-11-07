@@ -12,7 +12,6 @@ mod plex;
 mod queue;
 pub(crate) mod state;
 pub use commands::*;
-pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
 
@@ -23,49 +22,47 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
         .contains(&position_millis)
 }
 
+use crate::string_error;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::features::follow;
 use crate::runtime::VisualizerPublication;
+use crate::scrobbling::Scrobbler;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::QueueUpdate;
-use library::{Database, ListenWrite, ReadCancellation};
+use library::{Catalog, Change, ListenWrite, ReadCancellation};
 use playback::{
-    PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
+    PlaybackBackend, PlaybackProjection, PreparedStream, QueueRepeatMode, RunId, StreamRequest,
 };
 use queue::Sequence;
-use scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 
 use crate::loudness::LoudnessAnalysisOwner;
-use crate::lyrics::{LyricsContext, LyricsService};
+use crate::lyrics::LyricsService;
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 use crate::waveform::{WaveformMedia, WaveformOwner};
 
-struct OutputSelection {
-    selected: playback::PlaybackOutput,
-    prepared: Option<Box<dyn PlaybackBackend>>,
-}
-
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PlaybackOwner {
-    database: Arc<Database>,
+    /// This owner, for the work it hands out that comes back to it.
+    this: std::sync::Weak<PlaybackOwner>,
+    catalog: Arc<Catalog>,
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
     pub updates: playback::PlaybackUpdates,
     visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
-    loudness: Arc<LoudnessAnalysisOwner>,
+    pub(crate) loudness: Arc<LoudnessAnalysisOwner>,
     pub(crate) lyrics: Arc<LyricsService>,
-    observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
-    source: Mutex<std::sync::Weak<SourceOwner>>,
-    connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
+    pub(crate) source: Arc<SourceOwner>,
+    /// Takes commands from construction on; they wait until the restored queue is in place.
     active: Mutex<Option<Playback>>,
     pending_queue: Mutex<Option<QueueUpdate>>,
     equalizer: Mutex<equalizer::EqualizerState>,
@@ -80,17 +77,13 @@ pub struct PlaybackOwner {
             + Sync,
     >,
     cast: playback_cast::CastManager,
-    output: Mutex<OutputSelection>,
+    output: Mutex<playback::PlaybackOutput>,
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
     rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
 }
 
 enum PlaybackStoreWork {
-    Continue {
-        prepared: Box<PreparedContinuation>,
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
     Activity(library::TrackKey, Box<ListenWrite>),
     Flush(std::sync::mpsc::SyncSender<()>),
     Output {
@@ -99,10 +92,74 @@ enum PlaybackStoreWork {
         audio_output: Option<String>,
     },
     Settings,
+    /// Queue entries and their tracks, compared with the saved queue once saves land.
+    Membership(Vec<(u64, library::TrackKey)>),
     Equalizer {
         snapshot: EqualizerPreferences,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+}
+
+/// Follows the source owner: when the selected source changes the queue's rows read again and
+/// analysis turns to it, a switch stops the analysis it runs, and streams resolve again when
+/// the folder mappings change.
+async fn follow_source(
+    owner: std::sync::Weak<PlaybackOwner>,
+    mut configured: tokio::sync::watch::Receiver<()>,
+    mut operation: tokio::sync::watch::Receiver<crate::runtime::source::SourceOperation>,
+) {
+    let mappings = |owner: &PlaybackOwner| {
+        owner
+            .settings
+            .load()
+            .sources
+            .configured
+            .iter()
+            .map(|configured| configured.local_access.clone())
+            .collect::<Vec<_>>()
+    };
+    let Some((mut selected, mut mapped)) = owner
+        .upgrade()
+        .map(|owner| (owner.source.selected_library(), mappings(&owner)))
+    else {
+        return;
+    };
+    loop {
+        tokio::select! {
+            changed = configured.changed() => {
+                let (Ok(()), Some(owner)) = (changed, owner.upgrade()) else {
+                    return;
+                };
+                let now = owner.source.selected_library();
+                if !crate::runtime::SelectedLibrary::same(now.as_ref(), selected.as_ref(), true) {
+                    selected = now;
+                    owner.library_changed(None);
+                    if owner.ebu_r128() {
+                        owner.loudness.library_changed();
+                    }
+                }
+                let now = mappings(&owner);
+                if now != mapped {
+                    mapped = now;
+                    if let Err(error) = owner.stream_inputs_changed() {
+                        debug!(%error, "could not resolve streams again");
+                    }
+                }
+            }
+            changed = operation.changed() => {
+                let switching = matches!(
+                    *operation.borrow_and_update(),
+                    crate::runtime::source::SourceOperation::Switching { .. }
+                );
+                let (Ok(()), Some(owner)) = (changed, owner.upgrade()) else {
+                    return;
+                };
+                if switching {
+                    owner.loudness.cancel();
+                }
+            }
+        }
+    }
 }
 
 fn enqueue_queue_save(
@@ -120,7 +177,7 @@ fn enqueue_queue_save(
 }
 
 async fn save_pending_queue(
-    database: &Database,
+    catalog: &Catalog,
     pending: &Mutex<Option<QueueUpdate>>,
     failed: &mut Option<QueueUpdate>,
 ) -> library::LibraryResult<()> {
@@ -133,7 +190,7 @@ async fn save_pending_queue(
         (Some(update), None) | (None, Some(update)) => update,
         (None, None) => return Ok(()),
     };
-    if let Err(error) = database.apply_queue_update(&update).await {
+    if let Err(error) = catalog.apply_queue_update(&update).await {
         *failed = Some(update);
         return Err(error);
     }
@@ -141,23 +198,22 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
-    pub(crate) fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
+    pub fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
         self.send(Command::Insert { input, target });
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<StartBackend>(
-        database: Arc<Database>,
+        catalog: Arc<Catalog>,
         settings: SettingsFile,
         runtime: tokio::runtime::Handle,
         visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
         visualizer_drain: Receiver<VisualizerPublication>,
-        artwork: artwork::Artwork,
         waveform: Arc<WaveformOwner>,
         lyrics: Arc<LyricsService>,
-        observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
         audio_outputs: fn() -> Vec<playback::AudioOutput>,
         scrobbler: Arc<Scrobbler>,
+        source: Arc<SourceOwner>,
         start_backend: StartBackend,
     ) -> Arc<Self>
     where
@@ -170,36 +226,30 @@ impl PlaybackOwner {
     {
         let stored = settings.load();
         let eq = equalizer::EqualizerState::new(
-            stored.equalizer,
+            stored.equalizer.clone(),
             stored.ui.playback.audio_output.as_deref(),
         );
-        let ui = stored.ui;
+        let ui = stored.ui.clone();
         let (store_sender, store_receiver) = async_channel::unbounded();
         let (report_sender, report_receiver) = async_channel::unbounded();
-        let artwork_settings = settings.clone();
-        let cast_artwork = artwork.clone();
-        let cast_artwork_path = move |stream: &playback::PreparedStream| {
-            cached_cast_artwork(
-                &cast_artwork,
-                &artwork_settings,
-                stream.row.as_ref()?.track.artwork_binding.as_deref(),
-            )
-        };
-        let owner = Arc::new(Self {
-            database,
+        let owner = Arc::new_cyclic(|this| Self {
+            this: this.clone(),
+            catalog,
+            loudness: LoudnessAnalysisOwner::new(
+                runtime.clone(),
+                settings.clone(),
+                Arc::clone(&source),
+            ),
             settings,
             runtime: runtime.clone(),
             updates: playback::PlaybackUpdates::default(),
             visualizer_events,
             visualizer_drain,
             waveform,
-            loudness: LoudnessAnalysisOwner::new(runtime),
             lyrics,
-            observe_playback,
             audio_outputs,
             scrobbler,
-            source: Mutex::new(std::sync::Weak::new()),
-            connect: Mutex::new(std::sync::Weak::new()),
+            source,
             active: Mutex::new(None),
             pending_queue: Mutex::new(None),
             equalizer: Mutex::new(eq),
@@ -210,32 +260,56 @@ impl PlaybackOwner {
             cast: playback_cast::CastManager::new(
                 ui.application.cast_proxy_enabled,
                 ui.cast_network_interface,
-                cast_artwork_path,
             ),
-            output: Mutex::new(OutputSelection {
-                selected: playback::PlaybackOutput::Local,
-                prepared: None,
-            }),
+            output: Mutex::new(playback::PlaybackOutput::Local),
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
         });
         let weak = Arc::downgrade(&owner);
+        // The queue restores after the Catalog loaded, so the first full pass has nothing to
+        // read again; later ones follow a lag.
+        let mut restored = false;
+        follow(
+            &owner.runtime,
+            &owner.catalog,
+            weak.clone(),
+            move |owner, changes| {
+                if std::mem::replace(&mut restored, true) || changes.is_some() {
+                    owner.library_changed(changes);
+                }
+                std::future::ready(())
+            },
+        );
         owner.runtime.spawn(async move {
             while let Ok((source_id, report)) = report_receiver.recv().await {
                 let Some(owner) = weak.upgrade() else { break };
                 if owner.settings.load().ui.application.private_mode {
                     continue;
                 }
-                let source = owner.source_owner();
-                if let Ok(Some(source)) =
-                    tokio::task::spawn_blocking(move || source?.client(&source_id).ok()).await
+                let source = Arc::clone(&owner.source);
+                if let Ok(Ok(source)) =
+                    tokio::task::spawn_blocking(move || source.client(&source_id)).await
                     && let Err(error) = source.report_playback(&report).await
                 {
                     debug!(%error, "could not report playback to source");
                 }
             }
         });
+        crate::settings::follow(
+            &owner.runtime,
+            &owner.settings,
+            Arc::downgrade(&owner),
+            |owner, previous, current| {
+                owner.settings_changed(&previous.ui, &current.ui);
+                std::future::ready(())
+            },
+        );
+        owner.runtime.spawn(follow_source(
+            Arc::downgrade(&owner),
+            owner.source.configuration_changes(),
+            owner.source.operation(),
+        ));
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
             let mut failed_queue_save = None;
@@ -247,123 +321,65 @@ impl PlaybackOwner {
         owner
     }
 
-    pub(crate) fn install_source_owner(&self, source: &Arc<SourceOwner>) {
-        *self
-            .source
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(source);
-    }
-
-    pub(crate) fn install_connect(&self, connect: &Arc<crate::connect::ConnectOwner>) {
-        *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
-    }
-
-    pub(crate) async fn start(self: &Arc<Self>) -> Result<PlaybackProjection, String> {
-        let stored = self.settings.load();
-        let sequence = match self.database.restore_queue().await {
-            Ok(mut restore) => {
-                if restore.entries.is_empty() {
-                    restore.repeat_mode = stored.ui.repeat_mode;
-                    restore.shuffled = stored.ui.shuffle_enabled;
-                }
-                Sequence::from_window(restore, 0, 0).map_err(string_error)
-            }
-            Err(error) => Err(string_error(error)),
-        }.unwrap_or_else(|error| {
-            warn!(%error, "could not restore optional Queue; starting with an empty playback window");
-            Sequence::new()
-        });
-        let owner = Arc::downgrade(self);
-        let clock_owner = Arc::downgrade(self);
-        let backend_owner = Arc::clone(self);
-        let (playback_output, backend) =
-            tokio::task::spawn_blocking(move || backend_owner.take_selected_backend())
-                .await
-                .map_err(string_error)??;
-        let (playback, projection) = Playback::start(
-            sequence,
-            random_identity(),
-            stored.ui.playback,
-            stored.ui.auto_dj_enabled,
-            usize::from(stored.ui.application.auto_dj_refill_threshold),
-            playback_output,
-            backend,
-            Arc::new(move || {
-                clock_owner
-                    .upgrade()
-                    .map_or_else(empty_clock_sample, |owner| owner.clock_sample())
-            }),
-            owner,
-        )
-        .map_err(string_error)?;
+    /// Takes commands at once; they wait until the saved queue is restored after the Catalog
+    /// loaded, so the first rows come first. The backend starts then, or for the first play.
+    pub(crate) fn start(self: &Arc<Self>) {
+        let (playback, receiver) = actor::channel();
         *self.active.lock().unwrap_or_else(|p| p.into_inner()) = Some(playback.clone());
-        Ok(projection)
-    }
-
-    pub async fn waveform_cache_usage(&self) -> Result<library::CacheUsage, String> {
-        let mut usage = self
-            .database
-            .waveform_cache_usage()
-            .await
-            .map_err(string_error)?;
-        let waveform = self.waveform.clone();
-        let legacy = self
-            .runtime
-            .spawn_blocking(move || waveform.legacy_cache_usage())
-            .await
-            .map_err(string_error)?
-            .map_err(string_error)?;
-        usage.entries += legacy.entries;
-        usage.bytes += legacy.bytes;
-        Ok(usage)
-    }
-
-    pub async fn clear_waveform_cache(&self) -> Result<(), String> {
-        let waveform = self.waveform.clone();
-        self.runtime
-            .spawn_blocking(move || waveform.clear_legacy_cache())
-            .await
-            .map_err(string_error)?
-            .map_err(string_error)?;
-        self.database
-            .clear_waveform_cache()
-            .await
-            .map_err(string_error)
-    }
-
-    pub(crate) fn remove_waveform_cache(&self, source: &sources::SourceId) -> Result<(), String> {
-        self.waveform
-            .remove_source_cache(source)
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) async fn forget_source(&self, source: library::SourceKey) -> Result<(), String> {
-        let Some(active) = self.active() else {
-            return Ok(());
-        };
-        let queue = active.handoff_snapshot().map_err(string_error)?.0;
-        let positions = self
-            .database
-            .queue_positions_for_source(&queue, source)
-            .await
-            .map_err(string_error)?;
-        if !positions.is_empty() {
-            let keys = positions
-                .into_iter()
-                .map(|position| queue.entries[queue.order[position] as usize].track_key)
-                .collect();
-            active
-                .command(Command::Forget(keys))
-                .map_err(string_error)?;
-        }
-        Ok(())
+        let owner = Arc::downgrade(self);
+        let catalog = Arc::clone(&self.catalog);
+        self.runtime.spawn(async move {
+            catalog.loaded().await;
+            let Some(strong) = owner.upgrade() else {
+                return;
+            };
+            let stored = strong.settings.load();
+            let sequence = match strong.catalog.restore_queue(false).await {
+                Ok(mut restore) => {
+                    if restore.entries.is_empty() {
+                        restore.repeat_mode = stored.ui.repeat_mode;
+                        restore.shuffled = stored.ui.shuffle_enabled;
+                    }
+                    Sequence::from_window(restore, 0, 0).map_err(string_error)
+                }
+                Err(error) => Err(string_error(error)),
+            }
+            .unwrap_or_else(|error| {
+                warn!(%error, "could not restore optional Queue; starting with an empty playback window");
+                Sequence::new()
+            });
+            let clock_owner = owner.clone();
+            let output = strong.playback_output();
+            drop(strong);
+            if let Err(error) = playback.run(
+                receiver,
+                sequence,
+                random_identity(),
+                stored.ui.playback.clone(),
+                stored.ui.auto_dj_enabled,
+                usize::from(stored.ui.application.auto_dj_refill_threshold),
+                output,
+                None,
+                Arc::new(move || {
+                    clock_owner
+                        .upgrade()
+                        .map_or_else(empty_clock_sample, |owner| owner.clock_sample())
+                }),
+                owner,
+            ) {
+                warn!(%error, "could not start playback");
+                return;
+            }
+            playback
+                .downgrade()
+                .post(|player, _| player.start_backend());
+        });
     }
 
     fn take_active(&self) -> Option<Playback> {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();
         self.publish_current_media(None);
-        (self.observe_playback)(None);
         self.updates.clear();
         active
     }
@@ -372,7 +388,6 @@ impl PlaybackOwner {
         if current_media_changed {
             self.publish_current_media(projection.view.transport.current.clone().map(Arc::new));
         }
-        (self.observe_playback)(Some(&projection));
         self.updates.publish(projection);
     }
 
@@ -410,13 +425,10 @@ impl PlaybackOwner {
                 self.equalizer_write_finished(&result);
                 let _ = reply.send(result);
             }
-            PlaybackStoreWork::Continue { prepared, reply } => {
-                let _ = reply.send(self.commit_continuation(*prepared, failed_queue_save).await);
-            }
             PlaybackStoreWork::Activity(key, activity) => self.store_activity(key, *activity).await,
             PlaybackStoreWork::Flush(reply) => {
                 if let Err(error) =
-                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                    save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save).await
                 {
                     warn!(%error, "could not persist Queue");
                 }
@@ -436,9 +448,22 @@ impl PlaybackOwner {
             }
             PlaybackStoreWork::Settings => {
                 if let Err(error) =
-                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                    save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save).await
                 {
                     warn!(%error, "could not persist Queue");
+                }
+            }
+            PlaybackStoreWork::Membership(entries) => {
+                if save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
+                    .await
+                    .is_ok()
+                    && let Ok(moves) = self.catalog.saved_queue_moves(&entries).await
+                    && !moves.is_empty()
+                    && let Some(active) = self.active()
+                {
+                    active
+                        .downgrade()
+                        .post(move |player, sample| player.saved_membership(&moves, sample));
                 }
             }
         }
@@ -463,20 +488,10 @@ impl PlaybackOwner {
         if self.request_plex_auto_dj(&request) {
             return;
         }
-        let database = self.database.clone();
-        let source = self.source_owner();
-        let selected = source.as_ref().and_then(|owner| owner.selected_library());
-        let source = source.as_ref().map(Arc::downgrade).unwrap_or_default();
+        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
-            let candidates = crate::radio::radio_candidates(
-                &database,
-                source,
-                selected,
-                library::RadioSeed::Track(request.seed_media_uri.clone()),
-                request.requested_count,
-                &library::ReadCancellation::new(),
-            )
-            .await;
+            let candidates = candidates.await;
             playback.post(move |player, sample| match candidates {
                 Ok(candidates) => {
                     if let Err(error) = player.complete_auto_dj_candidates(
@@ -502,13 +517,12 @@ impl PlaybackOwner {
 
     async fn store_activity(&self, current_track: library::TrackKey, listen: ListenWrite) {
         let deliveries = self.scrobbler.listen_delivery_targets(&listen);
-        match self
-            .database
+        if let Err(error) = self
+            .catalog
             .record_listen(&listen, Some(current_track), &deliveries)
             .await
         {
-            Ok(_) => self.scrobbler.listen_recorded(deliveries.len()),
-            Err(error) => warn!(%error, "could not record Rufin Activity"),
+            warn!(%error, "could not record Rufin Activity");
         }
     }
 
@@ -518,45 +532,66 @@ impl PlaybackOwner {
         run: RunId,
         occurrence: Arc<playback::QueueRow>,
         request: StreamRequest,
-        normalization: playback::LoudnessNormalization,
     ) -> tokio::task::JoinHandle<()> {
-        let database = Arc::clone(&self.database);
-        let source_owner = self.source_owner();
+        let catalog = Arc::clone(&self.catalog);
+        let source_owner = Arc::clone(&self.source);
         let local = self.settings.local_configuration();
-        let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade();
+        // A cast receiver shows the cover the cache holds.
+        let cast_artwork = (!self.playback_output().is_local()).then(|| {
+            (
+                self.source.artwork().clone(),
+                self.settings.load().ui.artwork_policy(),
+            )
+        });
         self.runtime.spawn(async move {
-            let loudness =
-                cached_loudness(&database, &occurrence.track.media_uri, normalization).await;
+            let playable = match catalog.playable(occurrence.track.track_key).await {
+                Ok(Some(playable)) => Arc::new(playable),
+                Ok(None) => {
+                    let kind = playback::FailureKind::UnavailableMedia;
+                    let error = playback::BackendFailure::with_kind(kind, kind.summary());
+                    playback.post(move |player, sample| player.stream_failed(run, error, sample));
+                    return;
+                }
+                Err(error) => {
+                    let error = playback::BackendFailure::new(error.to_string());
+                    playback.post(move |player, sample| player.stream_failed(run, error, sample));
+                    return;
+                }
+            };
+            let downloads = source_owner.downloads().clone();
             let result = prepare_stream(
-                &database,
+                &playable,
                 request,
                 local.as_ref(),
-                connect
-                    .as_deref()
-                    .map(|connect| (connect, occurrence.as_ref())),
+                Some(&downloads),
                 move |source_id| async move {
-                    tokio::task::spawn_blocking(move || {
-                        source_owner
-                            .ok_or_else(crate::source::source_access_unavailable)?
-                            .client(&source_id)
-                    })
-                    .await
-                    .map_err(string_error)?
+                    tokio::task::spawn_blocking(move || source_owner.client(&source_id))
+                        .await
+                        .map_err(string_error)?
                 },
             )
-            .await;
-            let result = match result {
-                Ok(stream) if !local_stream_available(stream.uri()).await => {
-                    let kind = playback::FailureKind::UnavailableMedia;
-                    Err(playback::BackendFailure::with_kind(kind, kind.summary()))
+            .await
+            .map(|stream| {
+                let mut stream =
+                    prepare_media_stream(stream, track_loudness(&playable), occurrence);
+                if let Some((artwork, policy)) = cast_artwork {
+                    stream.artwork_path = stream
+                        .row
+                        .as_ref()
+                        .and_then(|row| row.track.artwork_binding.as_deref())
+                        .and_then(|binding| {
+                            artwork.cache_only_file(
+                                &artwork::ArtworkRequest::new(
+                                    artwork::ArtworkBinding::opaque(binding),
+                                    512,
+                                )
+                                .with_external(policy),
+                            )
+                        })
+                        .map(Arc::new);
                 }
-                Ok(stream) => Ok(prepare_media_stream(stream, loudness, occurrence)),
-                Err(error) => Err(playback::BackendFailure::new(error)),
-            };
+                stream
+            });
             playback.post(move |player, sample| match result {
                 Ok(stream) => player.stream_resolved(run, stream),
                 Err(error) => player.stream_failed(run, error, sample),
@@ -564,59 +599,49 @@ impl PlaybackOwner {
         })
     }
 
-    fn resolve_loudness(
+    /// What a committed settings change means for playback, in the order it applies.
+    fn settings_changed(
         &self,
-        playback: WeakPlayback,
-        run: RunId,
-        mut stream: PreparedStream,
-    ) -> tokio::task::JoinHandle<()> {
-        let database = self.database.clone();
-        self.runtime.spawn(async move {
-            stream.loudness = cached_loudness(
-                &database,
-                &stream
-                    .row
-                    .as_ref()
-                    .expect("prepared queue entry")
-                    .track
-                    .media_uri,
-                playback::LoudnessNormalization::ReplayGain,
-            )
-            .await;
-            playback.post(move |player, _| player.loudness_resolved(run, stream));
-        })
+        previous: &crate::settings::Settings,
+        current: &crate::settings::Settings,
+    ) {
+        if previous.player_display.seekbar_waveform_enabled
+            != current.player_display.seekbar_waveform_enabled
+        {
+            self.waveform
+                .settings_changed(self.current_media().map(|media| self.waveform_media(media)));
+        }
+        // The player saves its own volume and mute; only an edit of the rest, the output
+        // included, concerns it.
+        let edited = playback::PlaybackSettings {
+            volume: current.playback.volume,
+            muted: current.playback.muted,
+            ..previous.playback.clone()
+        };
+        if edited != current.playback {
+            self.playback_settings_changed(current.playback.clone());
+        }
+        if previous.application.cast_proxy_enabled != current.application.cast_proxy_enabled {
+            self.cast
+                .set_proxy_media(current.application.cast_proxy_enabled);
+        }
+        if previous.cast_network_interface != current.cast_network_interface {
+            self.cast
+                .set_network_interface(current.cast_network_interface.clone());
+        }
+        if previous.application.auto_dj_refill_threshold
+            != current.application.auto_dj_refill_threshold
+        {
+            self.send(Command::SetAutoDj {
+                enabled: current.auto_dj_enabled,
+                refill_threshold: usize::from(current.application.auto_dj_refill_threshold),
+            });
+        }
     }
 
-    pub(crate) fn waveform_setting_changed(&self, enabled: bool) {
-        self.waveform.settings_changed(
-            enabled,
-            self.current_media().map(|media| self.waveform_media(media)),
-        );
-    }
-    pub(crate) fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
+    fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
         self.equalizer_output_changed(settings.audio_output.as_deref());
-        self.loudness.settings_changed(
-            settings.loudness_normalization,
-            settings.loudness_normalization_scope,
-            settings.write_ebu_r128_tags,
-            self.source_owner(),
-        );
         self.send(Command::UpdateSettings(settings));
-    }
-    pub(crate) fn cancel_loudness_analysis(&self) {
-        self.loudness.cancel();
-    }
-    pub(crate) fn cast_proxy_setting_changed(&self, enabled: bool) {
-        self.cast.set_proxy_media(enabled);
-    }
-    pub(crate) fn cast_network_setting_changed(&self, network: Option<String>) {
-        self.cast.set_network_interface(network);
-    }
-    pub(crate) fn auto_dj_threshold_changed(&self, enabled: bool, threshold: u8) {
-        self.send(Command::SetAutoDj {
-            enabled,
-            refill_threshold: usize::from(threshold),
-        });
     }
     pub(crate) fn stream_inputs_changed(&self) -> Result<(), String> {
         let active = self
@@ -626,20 +651,18 @@ impl PlaybackOwner {
             .command(Command::StreamInputsChanged)
             .map_err(string_error)
     }
-    pub(crate) fn rekey_tracks(&self, pairs: Arc<[(library::TrackKey, library::TrackKey)]>) {
-        self.send(Command::RekeyTracks(pairs));
-    }
-    pub(crate) fn catalog_changed(&self) {
-        if self.active().is_some() {
-            self.send(Command::CatalogChanged);
-            let playback = self.settings.load().ui.playback;
-            self.loudness.library_changed(
-                playback.loudness_normalization,
-                playback.loudness_normalization_scope,
-                playback.write_ebu_r128_tags,
-                self.source_owner(),
-            );
+    /// Committed Changes the queue hears, or None after a lag.
+    pub(crate) fn library_changed(&self, changes: Option<Vec<Arc<Change>>>) {
+        if let Some(active) = self.active() {
+            active.downgrade().post(move |player, _| {
+                player.library_changed(changes.as_deref());
+            });
         }
+    }
+
+    pub(crate) fn ebu_r128(&self) -> bool {
+        self.settings.load().ui.playback.loudness_normalization
+            == playback::LoudnessNormalization::EbuR128
     }
     pub(crate) fn current_media(&self) -> Option<Arc<playback::CurrentMedia>> {
         self.updates
@@ -655,30 +678,12 @@ impl PlaybackOwner {
             .clone()
     }
 
-    fn source_owner(&self) -> Option<Arc<SourceOwner>> {
-        self.source
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .upgrade()
-    }
     fn publish_current_media(&self, media: Option<Arc<playback::CurrentMedia>>) {
         let waveform = media
             .as_ref()
             .map(|media| self.waveform_media(Arc::clone(media)));
         self.waveform.current_changed(waveform);
-        let Some(media) = media else {
-            self.lyrics.set_current(None);
-            return;
-        };
-        let source_owner = self.source_owner();
-        let input_digest = library::source_entity_parts(&media.row.track.media_uri)
-            .and_then(|(source_id, _, _)| source_owner.as_ref()?.configuration(&source_id))
-            .and_then(|configuration| configuration.input_identity().ok())
-            .map_or([0; 32], |input| input.digest);
-        self.lyrics.set_current(Some(LyricsContext {
-            media,
-            input_digest,
-        }));
+        self.lyrics.set_current(media);
     }
 
     fn waveform_media(&self, media: Arc<playback::CurrentMedia>) -> WaveformMedia {
@@ -688,11 +693,8 @@ impl PlaybackOwner {
                 self.settings.playback_stream_quality(),
             ),
             media,
-            source: self
-                .source_owner()
-                .map(|source| Arc::downgrade(&source))
-                .unwrap_or_default(),
-            database: Arc::clone(&self.database),
+            source: Arc::clone(&self.source),
+            catalog: Arc::clone(&self.catalog),
         }
     }
 
@@ -723,19 +725,6 @@ impl PlaybackOwner {
         }
     }
 
-    fn take_selected_backend(
-        &self,
-    ) -> Result<(playback::PlaybackOutput, Box<dyn PlaybackBackend>), String> {
-        let (selected, prepared) = {
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            (output.selected.clone(), output.prepared.take())
-        };
-        let backend = match prepared {
-            Some(backend) => backend,
-            None => self.start_output_backend(&selected)?,
-        };
-        Ok((selected, backend))
-    }
     fn start_output_backend(
         &self,
         output: &playback::PlaybackOutput,
@@ -758,19 +747,7 @@ impl PlaybackOwner {
         selected: playback::PlaybackOutput,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<(), String> {
-        if self
-            .output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected
-            == selected
-        {
-            return Ok(());
-        }
-        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
-        {
-            self.select_rufin(selected, cancelled)?;
-            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
+        if *self.output.lock().unwrap_or_else(|p| p.into_inner()) == selected {
             return Ok(());
         }
         if self
@@ -786,6 +763,21 @@ impl PlaybackOwner {
                 );
                 return Ok(());
             }
+        }
+        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
+        {
+            // The Plex player's queue comes back here first, and goes on from here.
+            if self
+                .plex
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_some()
+            {
+                self.leave_plex(cancelled.clone())?;
+            }
+            self.select_rufin(selected, cancelled)?;
+            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
+            return Ok(());
         }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::PlexCompanion)
         {
@@ -807,19 +799,14 @@ impl PlaybackOwner {
                 return Ok(());
             }
         }
+        let active = self
+            .active()
+            .ok_or_else(|| "Playback is unavailable".to_string())?;
         let backend = self.start_output_backend(&selected)?;
-        if let Some(active) = self.active() {
-            active
-                .replace_backend(selected.clone(), backend)
-                .map_err(string_error)?;
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            output.selected = selected;
-            output.prepared = None;
-        } else {
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            output.selected = selected;
-            output.prepared = Some(backend);
-        }
+        active
+            .replace_backend(selected.clone(), backend)
+            .map_err(string_error)?;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = selected;
         self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
         Ok(())
     }
@@ -839,23 +826,6 @@ impl PlaybackOwner {
 }
 
 impl PlaybackOwner {
-    pub fn snapshot(&self) -> Result<library::QueueRestore, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return self
-                .runtime
-                .block_on(receiver.snapshot())
-                .map(|snapshot| snapshot.map(|snapshot| snapshot.queue).unwrap_or_default());
-        }
-        let Some(active) = self.active() else {
-            return Ok(library::QueueRestore::default());
-        };
-        active
-            .handoff_snapshot()
-            .map(|(queue, _, _)| queue)
-            .map_err(string_error)
-    }
-
     pub fn play_selection(&self, request: PlayRequest) {
         if self.play_rufin(&request) {
             return;
@@ -891,11 +861,8 @@ impl PlaybackOwner {
     pub fn activate_occurrence(&self, id: u64) {
         self.send(Command::ActivateOccurrence(id));
     }
-    pub fn move_occurrence_after_current(&self, id: u64) {
-        self.send(Command::MoveOccurrenceAfterCurrent(id));
-    }
-    pub fn move_after_current(&self, position: usize) {
-        self.send(Command::MoveAfterCurrent(position));
+    pub fn move_selection_after_current(&self, selection: QueueSelection) {
+        self.send(Command::MoveAfterCurrentSelection(selection));
     }
     pub fn reorder(&self, selection: QueueSelection, target: QueueReorderTarget) {
         self.send(Command::Reorder { selection, target });
@@ -913,16 +880,12 @@ impl PlaybackOwner {
         cancellation: library::ReadCancellation,
     ) -> impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>> + Send + 'static + use<>
     {
-        let database = self.database.clone();
-        let source = self
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        let selected = source.upgrade().and_then(|owner| owner.selected_library());
+        let catalog = self.catalog.clone();
+        let source = Arc::clone(&self.source);
+        let selected = source.selected_library();
         async move {
             crate::radio::radio_candidates(
-                &database,
+                &catalog,
                 source,
                 selected,
                 seed,
@@ -933,15 +896,6 @@ impl PlaybackOwner {
         }
     }
 
-    pub fn play_random(&self, request: RandomPlayRequest) {
-        if self.random_rufin(&request) {
-            return;
-        }
-        if self.random_plex(&request) {
-            return;
-        }
-        self.send(Command::Random(request));
-    }
     pub fn play_radio(&self, request: RadioPlayRequest) {
         if self.radio_rufin(&request) {
             return;
@@ -1000,29 +954,14 @@ impl PlaybackOwner {
             seed: random_u64(),
         })
     }
+    /// Moves on from the repeat mode the player shows, wherever it plays.
     pub fn cycle_repeat(&self) {
-        if self
-            .rufin
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
-            && let Some(projection) = self.current_projection()
-        {
-            self.set_repeat(next_repeat(projection.view.controls.repeat_mode));
-            return;
-        }
-        match self.settings.edit(|stored| {
-            stored.ui.repeat_mode = next_repeat(stored.ui.repeat_mode);
-            Ok(stored.ui.repeat_mode)
-        }) {
-            Ok(repeat) => self.send(Command::SetRepeat(repeat)),
-            Err(error) => {
-                warn!(%error, "could not save repeat setting");
-                self.set_repeat(RepeatMode::Off);
-            }
-        }
+        let shown = (self.updates.current()).map(|view| view.controls.repeat_mode);
+        self.set_repeat(next_repeat(
+            shown.unwrap_or_else(|| self.settings.load().ui.repeat_mode),
+        ));
     }
-    pub fn set_repeat(&self, repeat: RepeatMode) {
+    pub fn set_repeat(&self, repeat: QueueRepeatMode) {
         if let Err(error) = self.settings.edit(|stored| {
             stored.ui.repeat_mode = repeat;
             Ok(())
@@ -1080,7 +1019,6 @@ impl PlaybackOwner {
         self.output
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .selected
             .clone()
     }
     pub fn discover_remote_outputs(&self) -> Result<Vec<playback::RemoteOutput>, String> {
@@ -1112,15 +1050,6 @@ impl PlaybackOwner {
         if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
             plex.cancel();
         }
-        if let Some(mut backend) = self
-            .output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .prepared
-            .take()
-        {
-            let _ = backend.shutdown();
-        }
         if let Some(active) = self.active() {
             let _ = active.shutdown();
         }
@@ -1136,167 +1065,231 @@ impl PlaybackOwner {
     }
 }
 
+/// Opens a playable from the first usable of its download, its mapped file and its own local
+/// file, then its source's remote file or server stream. A local copy is usable when it is a
+/// regular file with the size it should have; one that cannot be looked at is skipped. A
+/// managed download gone from its folder or the wrong size is forgotten, so its rules download
+/// it again. A local track with no usable copy is unavailable.
 pub(crate) async fn prepare_stream<F>(
-    database: &Database,
+    playable: &library::Playable,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
-    file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
+    downloads: Option<&crate::downloads::Downloads>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
-) -> Result<audio_processing::ResolvedStream, String>
+) -> Result<audio_processing::ResolvedStream, playback::BackendFailure>
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
-    let mut access = database
-        .playback_access(&request.media_uri)
-        .await
-        .ok()
-        .flatten();
-    let cue = library::cue_media_parts(&request.media_uri);
-    let file_uri = cue
-        .as_ref()
-        .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
-    if access.is_none() && cue.is_some() && library::document_media_id(file_uri).is_some() {
-        access = database
-            .playback_access(file_uri)
-            .await
-            .map_err(string_error)?;
-    }
+    let failure = playback::BackendFailure::new;
+    let unavailable = || {
+        let kind = playback::FailureKind::UnavailableMedia;
+        playback::BackendFailure::with_kind(kind, kind.summary())
+    };
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;
         url::Url::from_file_path(access).ok().map(String::from)
     };
-    if let Some((uri, _)) = access.as_mut()
-        && let Some(granted) = granted_uri(uri)
-    {
-        *uri = granted;
-    }
+    let granted = |uri: String| granted_uri(&uri).unwrap_or(uri);
+    let cue = library::cue_media_parts(&request.media_uri);
+    let file_uri = cue
+        .as_ref()
+        .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
     let granted_file = granted_uri(file_uri);
     let file_uri = granted_file.as_deref().unwrap_or(file_uri);
-    let mut fetched_uri = None;
-    if let Some((connect, occurrence)) = file_transfer
-        && connect.is_local_media(&request.media_uri).await?
-    {
-        if occurrence.received_from_connect && file_uri.starts_with("content://") {
-            return Err("The source device did not provide a portable document identity".into());
-        }
-        let received_document = url::Url::parse(file_uri)
-            .is_ok_and(|uri| uri.scheme() == "content")
-            && occurrence.received_from_connect;
-        if received_document && !matches!(access, Some((_, library::LocalAccessOrigin::Download))) {
-            access = None;
-        }
-        let remote = received_document
-            || database
-                .file_media_is_remote(&request.media_uri, occurrence.received_from_connect)
-                .await
-                .map_err(string_error)?;
-        let local_access = match access.as_ref() {
-            Some((uri, _)) => local_access_available(uri).await.unwrap_or(false),
-            None => false,
-        };
-        // A content URI received from another device is not a grant to this device's provider.
-        let available =
-            local_access || (!remote && local_access_available(file_uri).await.unwrap_or(false));
-        if !available {
-            let peer = connect.peer_access();
-            if let Some(location) = peer
-                .mapped_file(database, &request.media_uri)
-                .await
-                .map_err(string_error)?
-            {
-                fetched_uri = Some(match location {
-                    library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
-                        .map(String::from)
-                        .map_err(|_| "Media path must be absolute".to_owned())?,
-                    library::LocalMediaLocation::Document(uri) => uri,
-                });
-            } else {
-                let mut stream = peer.stream(request.clone()).await.map_err(string_error)?;
-                if let Some((start, end)) = database
-                    .playback_window(&request.media_uri)
-                    .await
-                    .map_err(string_error)?
-                {
-                    stream = stream.with_window(start, end);
-                }
-                return Ok(stream);
-            }
-        }
+    let local_media =
+        url::Url::parse(file_uri).is_ok_and(|uri| matches!(uri.scheme(), "file" | "content"));
+    let download = playable
+        .download
+        .clone()
+        .map(|download| library::PlayableDownload {
+            uri: granted(download.uri),
+            ..download
+        });
+    let own = playable
+        .local_uri()
+        .map(granted)
+        .or_else(|| local_media.then(|| file_uri.to_owned()));
+    let candidates = Candidates {
+        download: download.clone(),
+        mapped: playable.mapped.clone(),
+        own,
+        failed: request.failed_local.clone(),
+    };
+    let (chosen, broken) = tokio::task::spawn_blocking(move || candidates.choose())
+        .await
+        .map_err(|error| failure(error.to_string()))?;
+    if let (Some(broken), Some(downloads)) = (broken, downloads) {
+        warn!(media_uri = %playable.media_uri, "forgetting a download that is gone or the wrong size");
+        downloads.forget(playable.media_uri.clone(), broken);
     }
-    if let Some((uri, library::LocalAccessOrigin::Download)) = access.as_ref()
-        && !local_access_available(uri).await?
-    {
-        access = None;
-    }
+    let from_download = chosen
+        .as_ref()
+        .zip(download.as_ref())
+        .is_some_and(|(chosen, download)| *chosen == download.uri);
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
-    let content_type = if let Some((uri, library::LocalAccessOrigin::Download)) = &access {
-        let path = if uri.starts_with("content:") {
-            let uri = uri.clone();
-            Some(
-                tokio::task::spawn_blocking(move || sources::stat_document(&uri))
-                    .await
-                    .map_err(string_error)?
-                    .map_err(string_error)?
-                    .name
-                    .into(),
-            )
-        } else {
-            library::file_media_path(uri)
-        };
-        path.and_then(|path: std::path::PathBuf| {
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .and_then(audio_mime)
+    let content_type = match &chosen {
+        Some(uri) if from_download => {
+            let path = if uri.starts_with("content:") {
+                let uri = uri.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || sources::stat_document(&uri))
+                        .await
+                        .map_err(|error| failure(error.to_string()))?
+                        .map_err(|error| failure(error.to_string()))?
+                        .name
+                        .into(),
+                )
+            } else {
+                library::file_media_path(uri)
+            };
+            path.and_then(|path: std::path::PathBuf| {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .and_then(audio_mime)
+            })
+        }
+        _ => None,
+    };
+    // A local track has nothing else to play from.
+    if chosen.is_none() && (local_media || playable.source_kind.as_deref() == Some("local")) {
+        return Err(unavailable());
+    }
+    if let Some((start, end)) = playable
+        .window
+        .filter(|_| chosen.is_some() || cue.is_some())
+    {
+        return Ok(direct_stream(chosen.unwrap_or_else(|| file_uri.to_owned()))
+            .await
+            .map_err(failure)?
+            .with_content_type(content_type)
+            .with_window(start, end));
+    }
+    if let Some(uri) = chosen.or_else(|| library::normalize_direct_media_uri(file_uri)) {
+        return Ok(direct_stream(uri)
+            .await
+            .map_err(failure)?
+            .with_content_type(content_type));
+    }
+    let source_id = playable
+        .source_id
+        .clone()
+        .ok_or_else(|| failure(crate::source::source_access_unavailable()))?;
+    let source = source(source_id).await.map_err(failure)?;
+    source
+        .stream(playable, request)
+        .await
+        .map_err(|error| match error {
+            sources::SourceError::NotFound => unavailable(),
+            error => failure(error.to_string()),
         })
-    } else {
-        None
-    };
-    let access_uri = access.map(|(uri, _)| uri).or(fetched_uri);
-    let window = database
-        .playback_window(&request.media_uri)
-        .await
-        .map_err(string_error)?;
-    if let Some((start, end)) = window.filter(|_| access_uri.is_some() || cue.is_some()) {
-        return Ok(
-            direct_stream(access_uri.unwrap_or_else(|| file_uri.to_owned()))
-                .await?
-                .with_content_type(content_type)
-                .with_window(start, end),
-        );
-    }
-    if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
-        return Ok(direct_stream(uri).await?.with_content_type(content_type));
-    }
-    let (source_id, kind, _) = library::source_entity_parts(&request.media_uri)
-        .ok_or_else(crate::source::source_access_unavailable)?;
-    if kind != "track" {
-        return Err(crate::source::source_access_unavailable());
-    }
-    let source = source(source_id).await?;
-    source.stream(database, request).await.map_err(string_error)
 }
 
-// Catches a removed local file before it reaches playback, where a failed
-// gapless preload would cut the current song short.
-async fn local_stream_available(uri: &str) -> bool {
-    let local = url::Url::parse(uri).is_ok_and(|uri| matches!(uri.scheme(), "file" | "content"));
-    !local || local_access_available(uri).await.unwrap_or(true)
+/// A playable's local copies in the order playback tries them.
+struct Candidates {
+    download: Option<library::PlayableDownload>,
+    mapped: Option<library::MappedFile>,
+    own: Option<String>,
+    /// The copy that failed to open or decode: it and the ones before it are passed over.
+    failed: Option<String>,
 }
 
-async fn local_access_available(uri: &str) -> Result<bool, String> {
-    let location = if url::Url::parse(uri).is_ok_and(|uri| uri.scheme() == "content") {
-        library::LocalMediaLocation::Document(uri.to_owned())
-    } else if let Some(path) = library::file_media_path(uri) {
-        library::LocalMediaLocation::File(path)
+impl Candidates {
+    /// The first usable copy, and the path of a managed download that is gone from its folder
+    /// or the wrong size. This blocks on the file system or the document provider.
+    fn choose(self) -> (Option<String>, Option<String>) {
+        let mut passed = self.failed.is_some();
+        let mut broken = None;
+        let mut pass = |uri: &str| {
+            let skip = passed;
+            if self.failed.as_deref() == Some(uri) {
+                passed = false;
+            }
+            skip
+        };
+        if let Some(download) = &self.download
+            && !pass(&download.uri)
+        {
+            match look(&download.uri, download.size) {
+                Found::Usable => return (Some(download.uri.clone()), None),
+                // A folder that is gone (an unmounted drive) keeps its downloads.
+                Found::Missing if download.managed && folder_present(download) => {
+                    broken = Some(download.uri.clone());
+                }
+                Found::Missing | Found::Unusable => {}
+            }
+        }
+        if let Some(uri) = self
+            .mapped
+            .as_ref()
+            .and_then(library::MappedFile::locate_playable)
+            .map(|location| match location {
+                library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
+                    .map(String::from)
+                    .unwrap_or_default(),
+                library::LocalMediaLocation::Document(uri) => uri,
+            })
+            && !pass(&uri)
+        {
+            return (Some(uri), broken);
+        }
+        if let Some(uri) = &self.own
+            && !pass(uri)
+            && look(uri, None) == Found::Usable
+        {
+            return (Some(uri.clone()), broken);
+        }
+        (None, broken)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Found {
+    Usable,
+    /// Not there, or not the size it should be.
+    Missing,
+    /// Not a regular file, or it could not be looked at.
+    Unusable,
+}
+
+/// Whether the folder a download was saved under is there.
+fn folder_present(download: &library::PlayableDownload) -> bool {
+    match download.root.as_deref() {
+        Some(root) if root.starts_with("content:") => {
+            sources::stat_document(root).is_ok_and(|entry| entry.directory)
+        }
+        Some(root) => std::path::Path::new(root).is_dir(),
+        None => library::file_media_path(&download.uri)
+            .and_then(|path| path.parent().map(std::path::Path::is_dir))
+            .unwrap_or(false),
+    }
+}
+
+fn look(uri: &str, size: Option<u64>) -> Found {
+    let (file, actual) = if url::Url::parse(uri).is_ok_and(|uri| uri.scheme() == "content") {
+        match sources::stat_document(uri) {
+            Ok(entry) => (!entry.directory, entry.size),
+            Err(sources::SourceError::NotFound) => return Found::Missing,
+            Err(_) => return Found::Unusable,
+        }
     } else {
-        return Ok(false);
+        let Some(path) = library::file_media_path(uri) else {
+            return Found::Unusable;
+        };
+        match std::fs::metadata(path) {
+            Ok(metadata) => (metadata.is_file(), Some(metadata.len())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Found::Missing,
+            Err(_) => return Found::Unusable,
+        }
     };
-    sources::local_files_available(vec![vec![location]])
-        .await
-        .map(|available| available.first() == Some(&true))
-        .map_err(string_error)
+    if !file {
+        Found::Unusable
+    } else if size.is_some_and(|size| actual.is_some_and(|actual| actual != size)) {
+        Found::Missing
+    } else {
+        Found::Usable
+    }
 }
 
 async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, String> {
@@ -1312,27 +1305,17 @@ async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, 
     }
 }
 
-async fn cached_loudness(
-    database: &Database,
-    uri: &str,
-    mode: playback::LoudnessNormalization,
-) -> Option<playback::TrackLoudness> {
-    if mode == playback::LoudnessNormalization::Off {
-        return None;
+/// The gains a playable carries, as the backend takes them.
+pub(crate) fn track_loudness(playable: &library::Playable) -> playback::TrackLoudness {
+    playback::TrackLoudness {
+        track: playable.gains.track_loudness().map(Box::new),
+        album: playable.gains.album_loudness().map(Box::new),
     }
-    let (track, album) = database
-        .playback_loudness(uri, &ReadCancellation::new())
-        .await
-        .unwrap_or_default();
-    Some(playback::TrackLoudness {
-        track: track.map(Box::new),
-        album: album.map(Box::new),
-    })
 }
 
 fn prepare_media_stream(
     stream: audio_processing::ResolvedStream,
-    loudness: Option<playback::TrackLoudness>,
+    loudness: playback::TrackLoudness,
     occurrence: Arc<playback::QueueRow>,
 ) -> PreparedStream {
     let content_type = occurrence
@@ -1341,22 +1324,7 @@ fn prepare_media_stream(
         .source_format
         .as_deref()
         .and_then(audio_mime);
-    PreparedStream::new(stream, loudness).with_row(occurrence, content_type)
-}
-
-fn cached_cast_artwork(
-    artwork: &artwork::Artwork,
-    settings: &SettingsFile,
-    binding: Option<&[u8]>,
-) -> Option<std::path::PathBuf> {
-    let stored = settings.load();
-    let binding = artwork::ArtworkBinding::opaque(binding?);
-    let external = artwork::ExternalPolicy::new(
-        stored.ui.application.external_metadata_enabled,
-        stored.ui.allows_external_metadata_lookup(),
-        stored.ui.lastfm_api_key,
-    );
-    artwork.cache_only_file(&artwork::ArtworkRequest::new(binding, 512).with_external(external))
+    PreparedStream::new(stream, Some(loudness)).with_row(occurrence, content_type)
 }
 
 pub(crate) fn audio_mime(source_format: &str) -> Option<String> {
@@ -1375,11 +1343,11 @@ pub(crate) fn audio_mime(source_format: &str) -> Option<String> {
     Some(mime.to_string())
 }
 
-const fn next_repeat(value: RepeatMode) -> RepeatMode {
+const fn next_repeat(value: QueueRepeatMode) -> QueueRepeatMode {
     match value {
-        RepeatMode::Off => RepeatMode::All,
-        RepeatMode::All => RepeatMode::One,
-        RepeatMode::One => RepeatMode::Off,
+        QueueRepeatMode::Off => QueueRepeatMode::All,
+        QueueRepeatMode::All => QueueRepeatMode::One,
+        QueueRepeatMode::One => QueueRepeatMode::Off,
     }
 }
 pub(crate) fn random_u64() -> u64 {
@@ -1412,9 +1380,6 @@ fn empty_clock_sample() -> ClockSample {
 }
 fn external_source_reporting_enabled(private_mode: bool) -> bool {
     !private_mode
-}
-fn string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
 }
 
 #[cfg(test)]
@@ -1455,8 +1420,7 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            received_from_connect: false,
-            provenance: playback::Provenance::Manual,
+            provenance: playback::QueueProvenance::Manual,
             track: {
                 let reference = test_media(source_format);
                 library::TrackView {
@@ -1485,7 +1449,7 @@ mod tests {
     fn prepared_original_stream_keeps_cast_format() {
         let prepared = prepare_media_stream(
             audio_processing::ResolvedStream::new("https://provider.example/stream?id=track"),
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
         );
 
@@ -1497,7 +1461,7 @@ mod tests {
         let prepared = prepare_media_stream(
             audio_processing::ResolvedStream::new("https://provider.example/stream?id=track")
                 .with_content_type(Some("audio/mpeg".to_string())),
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
         );
 
@@ -1507,11 +1471,11 @@ mod tests {
     #[tokio::test]
     async fn downloaded_transcode_keeps_its_actual_format_and_canonical_occurrence() {
         let folder = tempfile::tempdir().unwrap();
-        let database = library::Database::open(folder.path().join("library.sqlite3"))
+        let catalog = library::Catalog::open(folder.path().join("library.sqlite3"))
             .await
             .unwrap();
         let occurrence = test_occurrence("flac");
-        database
+        catalog
             .queue_entries(
                 library::QueueLoad::items(vec![(
                     occurrence.track.clone().into(),
@@ -1524,28 +1488,28 @@ mod tests {
         let path = folder.path().join("track.opus");
         std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
-        database
-            .write_local_access(
-                None,
-                &[&library::LocalAccessWrite {
-                    media_uri: occurrence.track.media_uri.clone(),
-                    origin: library::LocalAccessOrigin::Download,
-                    path: path.to_string_lossy().into_owned(),
-                    root: folder.path().to_string_lossy().into_owned(),
-                    relative_path: "track.opus".into(),
-                    size_bytes: 0,
-                    mtime_ns: 0,
-                    device_id: None,
-                    inode: None,
-                    parser_version: 1,
-                    access_uri: uri.clone(),
-                    loudness_analysis_key: None,
-                }],
-            )
+        catalog
+            .save_download(&library::DownloadFile {
+                media_uri: occurrence.track.media_uri.clone(),
+                encoding: "mp3".into(),
+                path: uri.clone(),
+                storage_root: folder.path().to_string_lossy().into_owned(),
+                relative_path: "track.opus".into(),
+                managed: true,
+                ..Default::default()
+            })
             .await
             .unwrap();
+        let key = catalog
+            .track_keys(
+                std::slice::from_ref(&occurrence.track.media_uri),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()[0];
+        let playable = catalog.playable(key).await.unwrap().unwrap();
         let stream = super::prepare_stream(
-            &database,
+            &playable,
             playback::StreamRequest::new(
                 occurrence.track.media_uri.clone(),
                 playback::StreamQuality::Original,
@@ -1559,7 +1523,7 @@ mod tests {
         let canonical = occurrence.track.media_uri.clone();
         let prepared = prepare_media_stream(
             stream,
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             occurrence.into(),
         );
         assert_eq!(prepared.uri(), uri);
@@ -1568,6 +1532,31 @@ mod tests {
             Some("audio/ogg; codecs=opus")
         );
         assert_eq!(prepared.row.as_ref().unwrap().track.media_uri, canonical);
+    }
+
+    #[test]
+    fn a_download_is_forgotten_only_when_its_folder_is_there() {
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("downloads");
+        std::fs::create_dir(&root).unwrap();
+        let uri = url::Url::from_file_path(root.join("track.flac"))
+            .unwrap()
+            .to_string();
+        let candidates = || super::Candidates {
+            download: Some(library::PlayableDownload {
+                uri: uri.clone(),
+                size: Some(16),
+                managed: true,
+                root: Some(root.to_string_lossy().into_owned()),
+            }),
+            mapped: None,
+            own: None,
+            failed: None,
+        };
+        assert_eq!(candidates().choose(), (None, Some(uri.clone())));
+        // An unmounted drive: the folder is gone, and so is no download.
+        std::fs::rename(&root, folder.path().join("unmounted")).unwrap();
+        assert_eq!(candidates().choose(), (None, None));
     }
 }
 
@@ -1594,14 +1583,13 @@ impl PlaybackOwner {
     ) -> Result<Arc<library::MemberSelection>, PlaybackError> {
         let runtime = self.runtime.clone();
         runtime
-            .spawn_blocking(move || {
-                let queue = self.snapshot().map_err(PlaybackError::Message)?;
+            .spawn(async move {
+                let entries = self.queue_entries().await.map_err(PlaybackError::Message)?;
                 Ok(Arc::new(library::MemberSelection::Keys {
                     source: None,
-                    keys: queue
-                        .order
+                    keys: entries
                         .iter()
-                        .map(|index| queue.entries[*index as usize].track_key)
+                        .map(|entry| entry.track_key)
                         .collect::<Vec<_>>()
                         .into(),
                 }))

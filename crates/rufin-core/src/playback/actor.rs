@@ -8,7 +8,7 @@ use std::time::Duration;
 use super::{
     PlaybackOwner,
     queue::{Sequence, SequenceError},
-    state::{ClockSample, Command, ExternalPlayback, Player},
+    state::{ClockSample, Command, ContinuedListen, ExternalPlayback, Player},
 };
 use playback::{
     PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream, RunId,
@@ -82,19 +82,22 @@ impl Playback {
         WeakPlayback(Arc::downgrade(&self.0))
     }
 
+    /// Starts the worker for this handle. What was posted to it before waits for the worker.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn start(
+    pub(super) fn run(
+        &self,
+        receiver: Receiver<Message>,
         sequence: Sequence,
         prefix: impl Into<Arc<str>>,
         settings: PlaybackSettings,
         auto_dj: bool,
         threshold: usize,
         output: PlaybackOutput,
-        backend: Box<dyn PlaybackBackend>,
+        backend: Option<Box<dyn PlaybackBackend>>,
         clock: Clock,
         owner: Weak<PlaybackOwner>,
-    ) -> PlaybackResult<(Self, PlaybackProjection)> {
-        let (playback, receiver) = channel();
+    ) -> PlaybackResult<PlaybackProjection> {
+        let playback = self;
         let mut player = Player::new(
             sequence,
             prefix,
@@ -107,13 +110,15 @@ impl Playback {
             playback.downgrade(),
         );
         let initial = player.projection();
-        owner
-            .upgrade()
-            .ok_or(PlaybackError::Unavailable)?
-            .publish(initial.clone(), true);
+        let strong = owner.upgrade().ok_or(PlaybackError::Unavailable)?;
+        strong.publish(initial.clone(), true);
+        // The worker starts backends, which run their tasks on Rufin's runtime.
+        let runtime = strong.runtime.clone();
+        drop(strong);
         let thread = thread::Builder::new()
             .name("rufin-playback".into())
             .spawn(move || {
+                let _runtime = runtime.enter();
                 loop {
                     let message = if player.external_clock_running() {
                         receiver.recv_timeout(Duration::from_millis(33))
@@ -147,7 +152,7 @@ impl Playback {
             })
             .map_err(|error| PlaybackError::WorkerStart(error.to_string()))?;
         *playback.0.thread.lock().unwrap_or_else(|p| p.into_inner()) = Some(thread);
-        Ok((playback, initial))
+        Ok(initial)
     }
 
     fn request<T: Send + 'static>(
@@ -187,25 +192,6 @@ impl Playback {
         self.request(move |player, _| Ok(player.page_entries(offset, limit)))
     }
 
-    pub(crate) fn continuation(&self) -> PlaybackResult<Option<playback::Continuation>> {
-        self.request(|player, sample| Ok(player.continuation(sample)))
-    }
-    pub(crate) fn stop_continuation(
-        &self,
-        expected: playback::ContinuationHeader,
-    ) -> PlaybackResult<Option<playback::ContinuationHeader>> {
-        self.request(move |player, sample| Ok(player.stop_continuation(&expected, sample)))
-    }
-    pub(crate) fn adopt_continuation(
-        &self,
-        continuation: playback::Continuation,
-        stream: PreparedStream,
-        backend: Box<dyn PlaybackBackend>,
-    ) -> PlaybackResult<()> {
-        self.request(move |player, sample| {
-            player.adopt_continuation(continuation, stream, backend, sample)
-        })
-    }
     pub(crate) fn handoff_snapshot(
         &self,
     ) -> PlaybackResult<(
@@ -233,9 +219,15 @@ impl Playback {
         queue: library::QueueRestore,
         stream: PreparedStream,
         playing: bool,
+        listen: Option<ContinuedListen>,
         backend: Box<dyn PlaybackBackend>,
     ) -> PlaybackResult<()> {
-        self.request(move |player, _| player.adopt_local(queue, stream, playing, backend))
+        self.request(move |player, sample| {
+            player.adopt_local(queue, stream, playing, listen, backend, sample)
+        })
+    }
+    pub(crate) fn current_listen(&self) -> PlaybackResult<Option<ContinuedListen>> {
+        self.request(|player, sample| Ok(player.current_listen(sample)))
     }
     pub(crate) fn auto_dj_unavailable(
         &self,

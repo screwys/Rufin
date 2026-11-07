@@ -1023,24 +1023,24 @@ mod tests {
         let path = directory.path().join("original.wav");
         fs::write(&path, silent_wav()).unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let key = database
+        let key = catalog
             .remember_media_uris(std::slice::from_ref(&uri))
             .await
             .unwrap()[0];
         let before = revision(&path).unwrap();
         let (editor, draft) =
-            crate::FileEditSession::open(None, &database, uri.clone(), SourceEntityKind::Track)
+            crate::FileEditSession::open(None, &catalog, uri.clone(), SourceEntityKind::Track)
                 .await
                 .unwrap();
         assert_eq!(draft.revision.as_deref(), Some(before.as_str()));
         editor
-            .save(&database, track_edit(&[("title", "Direct original")]))
+            .save(&catalog, track_edit(&[("title", "Direct original")]))
             .await
             .unwrap();
-        let rows = database
+        let rows = catalog
             .tracks_by_uris(
                 std::slice::from_ref(&uri),
                 &library::ReadCancellation::new(),
@@ -1159,7 +1159,7 @@ mod tests {
             "[00:02.000]Updated"
         );
         assert_eq!(fs::read(&path).unwrap(), audio);
-        let database = library::Database::open(root.join("lyrics.sqlite"))
+        let catalog = library::Catalog::open(root.join("lyrics.sqlite"))
             .await
             .unwrap();
         let (configuration, source, _) = crate::Source::connect(
@@ -1173,7 +1173,7 @@ mod tests {
         .unwrap()
         .into_parts();
         let source = Arc::new(source);
-        database
+        catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -1182,12 +1182,17 @@ mod tests {
             .await
             .unwrap();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let cancellation = library::ReadCancellation::new();
-        let result = database
-            .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+        let result = catalog
+            .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), None, &cancellation)
             .await
             .unwrap();
         assert_eq!(
@@ -1196,12 +1201,16 @@ mod tests {
             "sidecars are searchable after scanning"
         );
         source
-            .write_lyrics(&database, uri.as_str(), "[00:02.000]Replacement", true)
+            .write_lyrics(&catalog, uri.as_str(), "[00:02.000]Replacement", true)
             .await
             .unwrap();
         assert_eq!(
-            database
-                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+            catalog
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("replacement"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1209,8 +1218,12 @@ mod tests {
             1
         );
         assert!(
-            database
-                .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+            catalog
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("updated"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1218,12 +1231,21 @@ mod tests {
         );
         fs::remove_file(path.with_extension("lrc")).unwrap();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert!(
-            database
-                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+            catalog
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("replacement"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1231,12 +1253,21 @@ mod tests {
         );
         fs::write(path.with_extension("lrc"), "[00:03.000]Returned").unwrap();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert_eq!(
-            database
-                .search_tracks_by_lyrics(&library::SearchRequest::new("returned"), &cancellation)
+            catalog
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("returned"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1278,7 +1309,7 @@ mod tests {
             )
             .unwrap();
         }
-        let database = library::Database::open(directory.path().join("library.db"))
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let connected = crate::Source::connect(
@@ -1289,7 +1320,7 @@ mod tests {
         .await
         .unwrap();
         let (configuration, source, _) = connected.into_parts();
-        database
+        catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -1300,14 +1331,14 @@ mod tests {
         let source = std::sync::Arc::new(source);
         source
             .acquire_catalog(
-                &database,
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
-        let track = database
+        let track = catalog
             .track(
                 &(url::Url::from_file_path(&paths[0]).unwrap().as_str()),
                 &library::ReadCancellation::new(),
@@ -1318,11 +1349,8 @@ mod tests {
         let artist = crate::file::media::artist_credit("Album Artist".into(), None);
         let artist_uri =
             library::source_entity_uri(&configuration.source_id, "artist", &artist.object_id);
-        let (send, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = send.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
+        crate::published(&mut updates);
         for (uri, kind, title) in [
             (artist_uri, SourceEntityKind::Artist, "Renamed Artist"),
             (
@@ -1332,12 +1360,12 @@ mod tests {
             ),
         ] {
             let (editor, _draft) =
-                crate::FileEditSession::open(Some(source.clone()), &database, uri, kind)
+                crate::FileEditSession::open(Some(source.clone()), &catalog, uri, kind)
                     .await
                     .unwrap();
             editor
                 .save_tracks(
-                    &database,
+                    &catalog,
                     Some(MetadataEdit {
                         kind,
                         changes: [("title".into(), title.into())].into(),
@@ -1352,9 +1380,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(updates.try_recv().unwrap().metadata);
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates)
+                    .expect("catalog update")
+                    .1
+                    .intersects(sources::Shown::CATALOG)
+            );
+            assert!(
+                crate::published(&mut updates).is_none(),
                 "one publication for the collection save"
             );
         }
@@ -1459,7 +1492,7 @@ mod tests {
         let root = directory.path().canonicalize().unwrap();
         let audio = root.join("café %.wav");
         fs::write(&audio, silent_wav()).unwrap();
-        let database = library::Database::open(root.join("library.db"))
+        let catalog = library::Catalog::open(root.join("library.db"))
             .await
             .unwrap();
         let connected = crate::Source::connect(
@@ -1472,7 +1505,7 @@ mod tests {
         .await
         .unwrap();
         let (configuration, source, _) = connected.into_parts();
-        database
+        catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -1482,15 +1515,15 @@ mod tests {
             .unwrap();
         source
             .acquire_catalog(
-                &database,
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
-        let before = database
+        let before = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await
             .unwrap()
@@ -1499,26 +1532,20 @@ mod tests {
             root.join(".").join("café %.wav"),
             library::file_media_path(&uri).unwrap(),
         ] {
-            let mut catalog = database
-                .catalog(source.source_id().as_str(), None)
-                .await
-                .unwrap();
-            let (observation, facts) =
-                crate::file::local::scan::read_saved_file(&catalog, &uri, &path)
+            let mut observation = catalog.observe(source.source_id().as_str()).await.unwrap();
+            let (file, facts) =
+                crate::file::local::scan::read_saved_file(&observation, &uri, &path)
                     .await
                     .unwrap();
-            catalog
-                .write_file_observations(
-                    &observation.into_iter().collect::<Vec<_>>(),
-                    vec![facts],
-                    true,
-                )
+            observation
+                .write_files(library::FileBatch {
+                    files: file.into_iter().collect(),
+                    tracks: vec![facts],
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
-            database
-                .publish_catalog_update(source.source_id().as_str(), catalog.into_changes())
-                .await;
-            let after = database
+            let after = catalog
                 .track(&(&uri), &library::ReadCancellation::new())
                 .await
                 .unwrap()
@@ -1561,7 +1588,7 @@ mod tests {
         }
         let original_files = paths.map(|path| fs::read(path).unwrap());
         let database_path = root.join("library.db");
-        let database = library::Database::open(&database_path).await.unwrap();
+        let catalog = library::Catalog::open(&database_path).await.unwrap();
         let connected = crate::Source::connect(
             crate::SourceId::new("remove-local-root"),
             crate::SourceSetup::Local {
@@ -1572,7 +1599,7 @@ mod tests {
         .await
         .unwrap();
         let (configuration, source, _) = connected.into_parts();
-        database
+        catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -1581,60 +1608,56 @@ mod tests {
             .await
             .unwrap();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
-            .await
-            .unwrap();
-        let key = database
-            .source_identity_key(source.source_id())
-            .await
-            .unwrap()
-            .unwrap();
-        let mut physical = database
-            .source_files(
-                source.source_id().as_str(),
-                &[audio.to_string_lossy().into_owned()],
-            )
-            .await
-            .unwrap()
-            .pop()
-            .unwrap();
-        physical.root = audio
-            .ancestors()
-            .last()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        database
-            .catalog(source.source_id().as_str(), None)
-            .await
-            .unwrap()
-            .write_file_observations(&[(physical, Vec::new())], Vec::new(), true)
-            .await
-            .unwrap();
-        let progress = std::sync::Mutex::new(Vec::new());
-        source
-            .catch_up_local(
-                &database,
-                &|update| progress.lock().unwrap().push(update),
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
                 Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
-        assert!(
-            progress.into_inner().unwrap().is_empty(),
-            "accepted released metadata does not need a new read"
-        );
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
+        // A released point import held this file under the filesystem root.
+        use sqlx::Connection as _;
+        let mut stored = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE files SET root=?1 WHERE path=?2")
+            .bind(audio.ancestors().last().unwrap().to_string_lossy().as_ref())
+            .bind(audio.to_string_lossy().as_ref())
+            .execute(&mut stored)
+            .await
+            .unwrap();
+        stored.close().await.unwrap();
+        // The listed root takes the row over.
+        source
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
+            .await
+            .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(key))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
             2,
             "a historical point-import root must not withdraw the configured music tree"
         );
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
         assert!(
-            database
+            catalog
                 .tracks_by_uris(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -1645,32 +1668,30 @@ mod tests {
                 .is_some()
         );
         let playlist = source
-            .import_local_paths(&database, vec![imported.clone()], "Imported", &|_| {})
+            .import_local_paths(&catalog, vec![imported.clone()], "Imported", &|_| {})
             .await
             .unwrap();
         let imported_uri = url::Url::from_file_path(&imported).unwrap().to_string();
         assert_eq!(
-            database
-                .playlist_entry_uri_page(playlist, -1)
+            catalog
+                .playlist_entry_uri_page(playlist, 0)
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|(_, _, uri)| uri)
+                .map(|(_, uri)| uri)
                 .collect::<Vec<_>>(),
             vec![imported_uri.clone()],
             "import retains the selected already-indexed file"
         );
         let new_uri = url::Url::from_file_path(&new_audio).unwrap().to_string();
-        let key = database
-            .source_identity_key(source.source_id())
-            .await
-            .unwrap()
-            .unwrap();
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
         assert_eq!(
-            database
-                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            crate::stored_files(&catalog, source.source_id().as_str())
                 .await
-                .unwrap()
                 .into_iter()
                 .find(|file| file.path == imported.to_string_lossy())
                 .unwrap()
@@ -1678,14 +1699,12 @@ mod tests {
             old_root.to_string_lossy()
         );
         source
-            .import_playlist_files(&database, playlist)
+            .import_playlist_files(&catalog, playlist)
             .await
             .unwrap();
         assert_eq!(
-            database
-                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            crate::stored_files(&catalog, source.source_id().as_str())
                 .await
-                .unwrap()
                 .into_iter()
                 .find(|file| file.path == imported.to_string_lossy())
                 .unwrap()
@@ -1710,84 +1729,79 @@ mod tests {
         };
         let (configuration, source, _) = (*connected).into_parts();
         let first_tracks = tokio::sync::Notify::new();
-        let progress = |progress: crate::SourceReadProgress| {
-            if progress.stage == crate::SourceReadStage::Tracks {
+        let progress = |progress: crate::SourceProgress| {
+            if progress.stage == crate::SourceProgressStage::Tracks {
                 first_tracks.notify_one();
             }
         };
         tokio::select! {
             biased;
             () = first_tracks.notified() => {}
-            result = source.acquire_catalog(&database, &progress, Arc::new(AtomicBool::new(false)), true) => panic!("refresh completed before interruption: {result:?}"),
+            result = source.acquire_catalog(&catalog, &progress, Arc::new(AtomicBool::new(false)), crate::Refresh::Changed) => panic!("refresh completed before interruption: {result:?}"),
         }
         assert!(
-            database
-                .cached_source(
-                    source.source_id().as_str(),
-                    &library::ReadCancellation::new()
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .catalog_complete
+            {
+                catalog.loaded().await;
+                catalog.cached_source(source.source_id().as_str())
+            }
+            .unwrap()
+            .catalog_complete
         );
         drop(source);
-        database.close().await.unwrap();
+        catalog.close().await.unwrap();
 
-        let database = library::Database::open(&database_path).await.unwrap();
-        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        let catalog = library::Catalog::open(&database_path).await.unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None, None).unwrap();
         source
-            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .expect("catch up the edited roots after an interrupted refresh");
-        let tracks = (&library::MemberRead::new(library::Collection::Source(key)))
-            .rows(&database, 0, 10, &library::ReadCancellation::new())
-            .await
-            .map(|rows| {
-                rows.into_iter()
-                    .map(library::MemberRow::into_track)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(tracks.len(), 2);
+        let tracks = crate::listed_tracks(
+            &catalog,
+            library::MemberRead::new(library::Collection::Source(key)),
+        )
+        .await;
+        assert_eq!(tracks.len(), 1);
         assert!(tracks.iter().any(|track| track.media_uri == new_uri));
-        assert!(tracks.iter().any(|track| track.media_uri == imported_uri));
+        assert!(
+            tracks.iter().all(|track| track.media_uri != imported_uri),
+            "a dropped file inside a removed folder hides with it"
+        );
         assert!(tracks.iter().all(|track| track.media_uri != uri));
-        let entries = database
-            .playlist_entry_uri_page(playlist, -1)
-            .await
-            .unwrap();
+        let entries = catalog.playlist_entry_uri_page(playlist, 0).await.unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].2, imported_uri);
-        let inventory = database
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
+        assert_eq!(entries[0].1, imported_uri);
+        let inventory = crate::stored_files(&catalog, source.source_id().as_str()).await;
         assert!(!inventory.is_empty());
         assert!(
             inventory
                 .iter()
                 .any(|file| Path::new(&file.root) == new_root)
         );
-        let folders = source.browse_folder(&database, None, None).await.unwrap();
+        let folders = source.browse_folder(&catalog, None, None).await.unwrap();
         assert!(
             folders
                 .folders
                 .iter()
                 .all(|folder| !folder.name.contains("old"))
         );
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
+        crate::published(&mut updates);
         source
-            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
-        while let Ok(update) = updates.try_recv() {
-            assert!(!update.changed());
-        }
+        assert!(crate::published(&mut updates).is_none());
 
         let edit = crate::Source::edit(
             configuration,
@@ -1806,48 +1820,45 @@ mod tests {
         };
         let (configuration, source, _) = (*connected).into_parts();
         drop(source);
-        database.close().await.unwrap();
-        let database = library::Database::open(&database_path).await.unwrap();
-        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        catalog.close().await.unwrap();
+        let catalog = library::Catalog::open(&database_path).await.unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None, None).unwrap();
         source
-            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let file_uri = url::Url::from_file_path(&file_root).unwrap().to_string();
-        let tracks = (&library::MemberRead::new(library::Collection::Source(key)))
-            .rows(&database, 0, 10, &library::ReadCancellation::new())
-            .await
-            .map(|rows| {
-                rows.into_iter()
-                    .map(library::MemberRow::into_track)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(tracks.len(), 3);
+        let tracks = crate::listed_tracks(
+            &catalog,
+            library::MemberRead::new(library::Collection::Source(key)),
+        )
+        .await;
+        assert_eq!(tracks.len(), 2);
         assert!(tracks.iter().any(|track| track.media_uri == file_uri));
-        let inventory = database
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
+        let inventory = crate::stored_files(&catalog, source.source_id().as_str()).await;
         assert!(
             inventory
                 .iter()
                 .any(|file| Path::new(&file.root) == file_root)
         );
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        crate::published(&mut updates);
         source
-            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
-        while let Ok(update) = updates.try_recv() {
-            assert!(!update.changed());
-        }
+        assert!(crate::published(&mut updates).is_none());
 
-        database.delete_playlist(None, playlist).await.unwrap();
+        catalog.delete_playlists(&[playlist]).await.unwrap();
         let edit = crate::Source::edit(
             configuration,
             None,
@@ -1865,22 +1876,29 @@ mod tests {
         };
         let (configuration, source, _) = (*connected).into_parts();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
-        let key = database
-            .source_identity_key(source.source_id())
-            .await
-            .unwrap()
-            .unwrap();
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
         assert_eq!(
-            (&library::MemberRead::new(library::Collection::Source(key)))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
-            1
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
+            0
         );
-        let cached = database
+        let cached = catalog
             .tracks_by_uris(
                 std::slice::from_ref(&uri),
                 &library::ReadCancellation::new(),
@@ -1888,18 +1906,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cached.len(), 1);
-        let physical = database
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
-        assert!(
-            physical
-                .iter()
-                .find(|file| Path::new(&file.path) == audio)
-                .unwrap()
-                .current_output,
-            "removing a configured root keeps its accepted parsed output"
-        );
         let edit = crate::Source::edit(
             configuration,
             None,
@@ -1917,27 +1923,25 @@ mod tests {
         };
         let (_, source, _) = (*connected).into_parts();
         source
-            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(key))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
-            1,
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
+            0,
             "the excluded descendant must not be re-admitted with its parent root"
         );
-        let members = library::MemberRead::new(library::Collection::Source(key))
-            .rows(&database, 0, 10, &library::ReadCancellation::new())
-            .await
-            .unwrap();
-        assert_eq!(
-            members[0].track().media_uri,
-            imported_uri,
-            "the explicit import overrides the excluded folder"
-        );
-        let after_edit = database
+        let after_edit = catalog
             .tracks_by_uris(
                 std::slice::from_ref(&uri),
                 &library::ReadCancellation::new(),
@@ -1952,12 +1956,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_playlist_entry_waits_while_the_others_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let (present, missing) = (root.join("present.wav"), root.join("missing.wav"));
+        fs::write(&present, silent_wav()).unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let connected = crate::Source::connect(
+            crate::SourceId::new("import-local"),
+            crate::SourceSetup::Local { roots: Vec::new() },
+            "",
+        )
+        .await
+        .unwrap();
+        let (configuration, source, _) = connected.into_parts();
+        catalog
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
+        let path = root.join("mix.m3u");
+        fs::write(
+            &path,
+            format!("{}\n{}\n", present.display(), missing.display()),
+        )
+        .unwrap();
+        let playlist = crate::import_local_playlist_file(&catalog, &path, None, |_| None)
+            .await
+            .unwrap()
+            .playlist;
+        for (appeared, listed) in [(false, 1), (false, 1), (true, 2)] {
+            if appeared {
+                fs::write(&missing, silent_wav()).unwrap();
+            }
+            crate::import_local_playlist_file(&catalog, &path, Some(playlist), |_| None)
+                .await
+                .unwrap();
+            source
+                .import_playlist_files(&catalog, playlist)
+                .await
+                .unwrap();
+            assert_eq!(
+                crate::listed_tracks(
+                    &catalog,
+                    library::MemberRead::new(library::Collection::Source(key))
+                )
+                .await
+                .len(),
+                listed
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn imported_local_files_survive_rescan_and_playlist_deletion() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let audio = root.join("Jóga #1.wav");
         fs::write(&audio, silent_wav()).unwrap();
-        let database = library::Database::open(directory.path().join("library.db"))
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let source_id = crate::SourceId::new("import-local");
@@ -1969,7 +2036,7 @@ mod tests {
         .await
         .unwrap();
         let (configuration, source, _) = connected.into_parts();
-        database
+        catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -1987,29 +2054,29 @@ mod tests {
         let path = root.join("mix.m3u8");
         let contents = format!("{0}\n{0}\n", imported_path.display());
         fs::write(&path, &contents).unwrap();
-        let playlist = crate::import_local_playlist_file(&database, &path, None, |_| None)
+        let playlist = crate::import_local_playlist_file(&catalog, &path, None, |_| None)
             .await
             .unwrap();
         source
-            .import_playlist_files(&database, playlist.playlist)
+            .import_playlist_files(&catalog, playlist.playlist)
             .await
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
-        let entries = database
-            .playlist_entry_uri_page(playlist.playlist, -1)
+        let entries = catalog
+            .playlist_entry_uri_page(playlist.playlist, 0)
             .await
             .unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().all(|(_, _, value)| value == &uri));
+        assert!(entries.iter().all(|(_, value)| value == &uri));
         fs::write(&path, format!("#EXTM3U\n{contents}")).unwrap();
         let reloaded =
-            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
                 .await
                 .unwrap();
         assert!(!reloaded.changed);
         assert_eq!(
-            database
-                .playlist_entry_uri_page(playlist.playlist, -1)
+            catalog
+                .playlist_entry_uri_page(playlist.playlist, 0)
                 .await
                 .unwrap(),
             entries
@@ -2020,24 +2087,24 @@ mod tests {
             fs::write(&other, silent_wav()).unwrap();
             fs::remove_file(&imported_path).unwrap();
             std::os::unix::fs::symlink(&other, &imported_path).unwrap();
-            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
                 .await
                 .unwrap();
             let other_uri = url::Url::from_file_path(&other).unwrap().to_string();
-            let retargeted = database
-                .playlist_entry_uri_page(playlist.playlist, -1)
+            let retargeted = catalog
+                .playlist_entry_uri_page(playlist.playlist, 0)
                 .await
                 .unwrap();
             assert_eq!(retargeted.len(), 2);
-            assert!(retargeted.iter().all(|(_, _, value)| value == &other_uri));
+            assert!(retargeted.iter().all(|(_, value)| value == &other_uri));
             fs::remove_file(&imported_path).unwrap();
             std::os::unix::fs::symlink(&audio, &imported_path).unwrap();
-            crate::import_local_playlist_file(&database, &path, Some(playlist.playlist), |_| None)
+            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
                 .await
                 .unwrap();
         }
         assert!(
-            database
+            catalog
                 .tracks_by_uris(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -2049,15 +2116,15 @@ mod tests {
         );
         source
             .acquire_catalog(
-                &database,
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
         assert!(
-            database
+            catalog
                 .tracks_by_uris(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -2068,32 +2135,34 @@ mod tests {
                 .is_some()
         );
         let second = source
-            .import_local_paths(&database, vec![audio.clone()], "Second", &|_| {})
+            .import_local_paths(&catalog, vec![audio.clone()], "Second", &|_| {})
             .await
             .unwrap();
-        let source_key = database
-            .source_identity_key(source.source_id())
-            .await
-            .unwrap()
-            .unwrap();
+        let source_key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(source_key))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(source_key))
+            )
+            .await
+            .len(),
             1
         );
-        let folders = source.browse_folder(&database, None, None).await.unwrap();
+        let folders = source.browse_folder(&catalog, None, None).await.unwrap();
         assert!(
             folders.folders.is_empty() && folders.tracks.is_empty(),
             "outside-root imports remain outside library folders"
         );
-        database
-            .delete_playlist(None, playlist.playlist)
+        catalog
+            .delete_playlists(&[playlist.playlist])
             .await
             .unwrap();
         assert!(
-            database
+            catalog
                 .tracks_by_uris(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -2103,21 +2172,23 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        database.delete_playlist(None, second).await.unwrap();
-        let key = database
-            .source_identity_key(source.source_id())
-            .await
-            .unwrap()
-            .unwrap();
+        catalog.delete_playlists(&[second]).await.unwrap();
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
         assert_eq!(
-            (&library::MemberRead::new(library::Collection::Source(key)))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
             1
         );
         assert!(
-            database
+            catalog
                 .tracks_by_uris(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -2128,55 +2199,121 @@ mod tests {
                 .is_some()
         );
         assert!(audio.is_file());
-        database.close().await.unwrap();
-        let database = library::Database::open(directory.path().join("library.db"))
+        catalog.close().await.unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         source
-            .catch_up_local(
-                &database,
+            .acquire_catalog(
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(key))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
             1
         );
         fs::remove_file(&audio).unwrap();
         source
-            .catch_up_local(
-                &database,
+            .acquire_catalog(
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(key))
-                .count(&database, &library::ReadCancellation::new())
-                .await
-                .unwrap(),
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
             0
         );
         fs::write(&audio, silent_wav()).unwrap();
         source
-            .catch_up_local(
-                &database,
+            .acquire_catalog(
+                &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
         assert_eq!(
-            library::MemberRead::new(library::Collection::Source(key))
-                .count(&database, &library::ReadCancellation::new())
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(key))
+            )
+            .await
+            .len(),
+            1
+        );
+    }
+
+    /// A sidecar added beside an unchanged CUE sheet reads the sheet again, and the walk
+    /// replaces the sheet's inputs instead of failing on them at every launch.
+    #[tokio::test]
+    async fn a_sidecar_beside_an_unchanged_cue_sheet_keeps_walks_writing() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("Album.wav"), silent_wav()).unwrap();
+        fs::write(
+            root.join("Album.cue"),
+            "FILE \"Album.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 00:00:40\n",
+        )
+        .unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(store.path().join("store.sqlite"))
+            .await
+            .unwrap();
+        let (configuration, source, _) = crate::Source::connect(
+            crate::SourceId::new("cue-sidecar"),
+            crate::SourceSetup::Local {
+                roots: vec![root.clone()],
+            },
+            "",
+        )
+        .await
+        .unwrap()
+        .into_parts();
+        catalog
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        let walk = || {
+            source.acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
+        };
+        walk().await.unwrap();
+        fs::write(root.join("01.lrc"), "[00:00.00]First line").unwrap();
+        walk().await.unwrap();
+        walk().await.unwrap();
+        assert_eq!(
+            crate::stored_files(&catalog, "cue-sidecar")
                 .await
-                .unwrap(),
+                .iter()
+                .filter(|file| file.path.ends_with("01.lrc"))
+                .count(),
             1
         );
     }
@@ -2441,7 +2578,7 @@ pub(crate) fn readonly_album_metadata(
         .collect(),
     );
     metadata.revision = revision;
-    metadata.track_count = album.summary.track_count.max(0) as usize;
+    metadata.track_count = album.row.summary.track_count.max(0) as usize;
     metadata
 }
 
@@ -2452,19 +2589,15 @@ pub(crate) fn readonly_artist_metadata(
     let mut metadata = MetadataDraft::new(
         SourceEntityKind::Artist,
         vec![
-            MetadataField::new("title", artist.metadata.name.clone(), false),
+            MetadataField::new("title", artist.row.name.clone(), false),
             MetadataField::new(
                 "musicbrainz_artist_id",
-                artist
-                    .metadata
-                    .musicbrainz_artist_id
-                    .clone()
-                    .unwrap_or_default(),
+                artist.musicbrainz_artist_id.clone().unwrap_or_default(),
                 false,
             ),
         ],
     );
     metadata.revision = revision;
-    metadata.track_count = artist.summary.track_count.max(0) as usize;
+    metadata.track_count = artist.row.summary.track_count.max(0) as usize;
     metadata
 }

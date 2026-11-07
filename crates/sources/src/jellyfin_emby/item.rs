@@ -12,14 +12,14 @@ use super::ServerKind;
 pub(super) struct Playlist {
     pub id: String,
     pub name: String,
+    /// Changes when the playlist or its entries change.
+    pub revision: Option<String>,
     pub image_ref: Option<ImageRef>,
-    pub duration_seconds: u32,
-    pub track_count: usize,
 }
 
 pub(super) const ALBUM_FIELDS: &str = "SortName,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
 pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
-pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ImageBlurHashes,ChildCount";
+pub(super) const PLAYLIST_FIELDS: &str = "ImageTags,ImageBlurHashes,Etag";
 pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
 pub(super) fn album_from_item(
@@ -59,15 +59,7 @@ pub(super) fn album_from_item(
             genres: genre_credits_from_pairs(server, &item["GenreItems"]),
             ..Default::default()
         },
-        user_data: library::NativeUserState {
-            favorite: item["UserData"]
-                .is_object()
-                .then(|| favorite(&item["UserData"])),
-            rating: item["UserData"]
-                .is_object()
-                .then(|| user_rating(&item["UserData"]).map(|rating| i64::from(rating) * 10)),
-            ..Default::default()
-        },
+        user_data: user_state(&item["UserData"]),
         object_id: server.object_id("album", &item_id),
         artwork_binding: image_ref
             .as_ref()
@@ -154,23 +146,14 @@ pub(super) fn track_from_item(
                 sample_rate_hz: stream.and_then(|stream| field(stream, "SampleRate")),
                 bit_depth: stream.and_then(|stream| field(stream, "BitDepth")),
                 channels: stream.and_then(|stream| field(stream, "Channels")),
+                size_bytes: None,
             },
             artists: artists,
             album_artists: artist_credits_from_pairs(server, &item["AlbumArtists"]),
             genres: genre_credits_from_pairs(server, &item["GenreItems"]),
             ..Default::default()
         },
-        user_data: library::NativeUserState {
-            last_played: crate::policy::unix_seconds(field(&item["UserData"], "LastPlayedDate")),
-            play_count: play_count(&item["UserData"]).map(i64::from),
-            rating: item["UserData"]
-                .is_object()
-                .then(|| user_rating(&item["UserData"]).map(|rating| i64::from(rating) * 10)),
-            favorite: item["UserData"]
-                .is_object()
-                .then(|| favorite(&item["UserData"])),
-            ..Default::default()
-        },
+        user_data: user_state(&item["UserData"]),
         object_id,
         album_object_id,
         artwork_binding: image_ref
@@ -178,7 +161,8 @@ pub(super) fn track_from_item(
             .map(|image| crate::native_artwork_binding(source, image))
             .transpose()?,
         source_path,
-        loudness_analysis_key: *audio.finalize().as_bytes(),
+        audio_revision: Some(*audio.finalize().as_bytes()),
+        audio_hash: Some(*audio.finalize().as_bytes()),
         ..Default::default()
     }))
 }
@@ -295,15 +279,7 @@ pub(super) fn artist_from_item(
             musicbrainz_artist_id: source_id(&item["ProviderIds"], "MusicBrainzArtist"),
             ..Default::default()
         },
-        user_data: library::NativeUserState {
-            favorite: item["UserData"]
-                .is_object()
-                .then(|| favorite(&item["UserData"])),
-            rating: item["UserData"]
-                .is_object()
-                .then(|| user_rating(&item["UserData"]).map(|rating| i64::from(rating) * 10)),
-            ..Default::default()
-        },
+        user_data: user_state(&item["UserData"]),
         object_id: server.object_id("artist", &item_id),
         artwork_binding: primary_image_ref(server, "artist", &item_id, item)
             .as_ref()
@@ -316,12 +292,13 @@ pub(super) fn genre_from_item(
     server: ServerKind,
     source: &str,
     item: &Value,
-) -> library::LibraryResult<Option<library::GenreObservation>> {
+) -> library::LibraryResult<Option<library::TagObservation>> {
     let Some(item_id) = id(&item["Id"]) else {
         return Ok(None);
     };
     let name = field(item, "Name").unwrap_or_else(|| "Unknown Genre".to_string());
-    Ok(Some(library::GenreObservation {
+    Ok(Some(library::TagObservation {
+        kind: library::TagKind::Genre,
         object_id: server.object_id("genre", &item_id),
         metadata: library::TagMetadata {
             sort_text: Some(name.to_lowercase()),
@@ -339,11 +316,8 @@ pub(super) fn playlist_from_item(server: ServerKind, item: &Value) -> Option<Pla
     Some(Playlist {
         id: String::from(server.object_id("playlist", &item_id)),
         name: field(item, "Name").unwrap_or_else(|| "Untitled Playlist".to_string()),
+        revision: field(item, "Etag"),
         image_ref: primary_image_ref(server, "playlist", &item_id, item),
-        duration_seconds: duration_seconds(field(item, "RunTimeTicks")),
-        track_count: field::<i32>(item, "ChildCount")
-            .and_then(|count| usize::try_from(count).ok())
-            .unwrap_or_default(),
     })
 }
 
@@ -405,16 +379,30 @@ fn duration_seconds(ticks: Option<i64>) -> u32 {
         .unwrap_or(0)
 }
 
+/// An item's user data; a track's also counts its plays.
+pub(super) fn user_state(data: &Value) -> library::NativeUserState {
+    let present = data.is_object();
+    library::NativeUserState {
+        favorite: present.then(|| favorite(data)),
+        rating: present.then(|| user_rating(data).map(|rating| i64::from(rating) * 10)),
+        play_count: play_count(data).map(i64::from),
+        last_played: crate::policy::unix_seconds(field(data, "LastPlayedDate")),
+        ..Default::default()
+    }
+}
+
 pub(super) fn favorite(data: &Value) -> bool {
     boolean(&data["IsFavorite"]).unwrap_or(false)
 }
 pub(super) fn play_count(data: &Value) -> Option<u32> {
     field::<i32>(data, "PlayCount").map(|v| v.max(0) as u32)
 }
+/// The user's rating; Jellyfin writes a cleared one as 0.
 pub(super) fn user_rating(data: &Value) -> Option<u8> {
     field::<f64>(data, "Rating")
         .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
         .map(|v| v.round() as u8)
+        .filter(|v| *v > 0)
 }
 
 pub(super) fn primary_image_ref(
@@ -491,16 +479,16 @@ mod tests {
     #[tokio::test]
     async fn emby_import_preserves_distinct_alternate_album_covers() {
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("emby"), "emby", "Emby")
             .await
             .unwrap();
         let catalog_source_id = ("emby").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
         let albums: Vec<Value> =
             serde_json::from_str(include_str!("fixtures/alternate-album-covers.json")).unwrap();
         for album in &albums {
@@ -520,21 +508,14 @@ mod tests {
             (async {
                 let mut batch = library::CatalogBatch::default();
                 let result = batch.albums.extend_from_slice(&[(mapped).clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
         }
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         let catalog_source_id = ("emby").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         for album in &albums {
             (async {
                 let mut batch = library::CatalogBatch::default();
@@ -546,30 +527,23 @@ mod tests {
                 .unwrap()
                 .unwrap())
                 .clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
         }
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         for album in albums {
             let object = format!("emby:album:{}", album["Id"].as_str().unwrap());
             let uri = library::source_entity_uri(&crate::SourceId::new("emby"), "album", &object);
-            let row = database
+            let row = catalog
                 .album(&(&uri), false, &library::ReadCancellation::new())
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(row.metadata.title, album["Name"].as_str().unwrap());
             let binding: Vec<library::ArtworkCandidate> =
-                serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();
+                serde_json::from_slice(row.row.artwork_binding.as_deref().unwrap()).unwrap();
             assert_eq!(
                 match &binding[0].image {
                     library::ArtworkImage::Native { item_id, .. } => item_id.as_str(),

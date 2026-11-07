@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="content">
+    <property name="orientation">vertical</property>
+    <child>
+      <object class="GtkHeaderBar" id="header"/>
+    </child>
+    <child>
+      <object class="AdwStatusPage" id="status">
+        <property name="vexpand">true</property>
+      </object>
+    </child>
+  </object>
+</interface>

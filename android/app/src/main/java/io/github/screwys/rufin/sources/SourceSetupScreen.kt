@@ -48,6 +48,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     val canSubmit = when (form.kind) {
         "plex" -> sourceId != null || setup.authorized && setup.choices.isNotEmpty()
         "emby" -> form.manualEmby && form.url.isNotBlank() || setup.authorized && setup.choices.isNotEmpty() || sourceId != null
+        "peer" -> form.name.isNotBlank()
         else -> setup.authorized || form.url.isNotBlank()
     }
     if (mapping && sourceId != null) LocalAccessDialog(model, sourceId,
@@ -102,7 +103,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 }
                 } }
             } else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (sourceId != null) SourceRatingSettings(setup)
+                if (form.offersHalfStarSetting) SourceRatingSettings(setup)
                 SettingsGroup {
                     SettingsRow(translate("Music"), leading = { RufinIcon("rufin-folders-symbolic", null) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
@@ -113,7 +114,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 }
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic")) item {
+                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic", "peer")) item {
                     SettingsGroup { SettingsRow(translate("Local File Mapping"),
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
@@ -150,7 +151,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     "plex" -> item { PlexSourceForm(setup, sourceId != null, browser) }
                     "webdav", "smb" -> item { FileSourceForm(setup, sourceId != null, browser) }
                 }
-                if (sourceId != null && form.kind in setOf("navidrome", "subsonic")) item { SourceRatingSettings(setup) }
+                if (form.offersHalfStarSetting) item { SourceRatingSettings(setup) }
                 item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     setup.code?.let { code -> Text(code, style = MaterialTheme.typography.headlineLarge) }
                     setup.browserUrl?.takeUnless { setup.authorized || setup.choosingProfiles }?.let { url ->

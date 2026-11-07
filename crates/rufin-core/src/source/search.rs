@@ -1,42 +1,55 @@
 use crate::runtime::SelectedLibrary;
-use library::{ReadCancellation, SearchMode, SearchRequest, SearchResults};
+use library::{
+    LibraryError, LibraryResult, ReadCancellation, SearchMode, SearchRequest, SearchResults,
+};
 
-pub async fn acquire_search(
+/// How many results of each kind a search shows.
+const SEARCH_LIMIT: usize = 60;
+
+/// What `query` finds in the selected source and music folder: titles, from its server when it
+/// searches live and `live` asks, else from the Catalog; or lyrics, in every source, the
+/// selected one in its music folder.
+pub(crate) async fn search(
     owner: &super::SourceOwner,
-    database: &library::Database,
     selected: Option<&SelectedLibrary>,
     mode: SearchMode,
     query: String,
-    limit: usize,
-    cancellation: ReadCancellation,
-) -> Result<SearchResults, String> {
+    live: bool,
+    cancel: &ReadCancellation,
+) -> LibraryResult<SearchResults> {
+    let catalog = &owner.shared.catalog;
+    let request = SearchRequest::with_limit(query.as_str(), SEARCH_LIMIT);
     if mode == SearchMode::Lyrics {
-        return database
-            .search_tracks_by_lyrics(&SearchRequest::with_limit(query, limit), &cancellation)
-            .await
-            .map_err(|error| error.to_string());
+        let folder = selected.and_then(|selected| selected.music_folder_key);
+        return catalog
+            .search_tracks_by_lyrics(&request, folder, cancel)
+            .await;
     }
-    let selected = selected.ok_or_else(|| "No source selected".to_owned())?;
-    if selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
+    let selected =
+        selected.ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()))?;
+    if live
+        && selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
         && let Some(source) = owner.cached_client(&selected.source_id)
     {
-        let live = source.live_search(database, &query, limit);
+        let folder = selected
+            .music_folder_key
+            .zip(selected.music_folder_object_id.as_deref());
+        let live = source.live_search(catalog, &query, SEARCH_LIMIT, folder);
         let result = tokio::select! {
             result = live => result,
-            () = cancellation.cancelled() => return Err(library::LibraryError::ReadCancelled.to_string()),
+            () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         };
         if let Ok(rows) = result {
             return Ok(rows);
         }
     }
-    database
+    catalog
         .search(
             selected.source_key,
             selected.music_folder_key,
             false,
-            &SearchRequest::with_limit(query, limit),
-            &cancellation,
+            &request,
+            cancel,
         )
         .await
-        .map_err(|error| error.to_string())
 }

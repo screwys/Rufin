@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.rufin_core.Menu
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -59,16 +60,19 @@ internal enum class BrowseSwipeAction(val icon: String) {
         PlayRadioLater -> translate("Play radio later")
     }
 
-    fun availableFor(item: BrowseItem): Boolean = when (this) {
-        Favorite -> item.row.kind in setOf("track", "album", "album_header", "artist")
-        PlayLater, PlayNext, AddToPlaylist -> item.row.kind != "playlist_folder" && (item.row.kind == "track" || item.row.detailRoute != null)
-        PlayRadio, PlayRadioNext, PlayRadioLater -> item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "playlist")
-        Download -> item.row.kind != "playlist_folder" && (item.row.kind == "track" || item.row.detailRoute != null)
+    /** Whether the row offers it, as core's swipe Menu says. */
+    fun availableFor(offered: Menu): Boolean = when (this) {
+        Favorite -> offered.favorite
+        PlayLater -> offered.playLater
+        PlayNext -> offered.playNext
+        Download -> offered.download
+        AddToPlaylist -> offered.addToPlaylist
+        PlayRadio, PlayRadioNext, PlayRadioLater -> offered.radio != null
     }
 }
 
 private class BrowseGestureActions(
-    val left: BrowseSwipeAction, val right: BrowseSwipeAction,
+    val browse: BrowseConnection, val left: BrowseSwipeAction, val right: BrowseSwipeAction,
     val activate: (BrowseItem, BrowseSwipeAction) -> Unit,
 )
 
@@ -79,15 +83,15 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
     playlist: (BrowseItem) -> Unit, content: @Composable () -> Unit,
 ) {
     val actions = remember(left, right, browse, playlist) {
-        BrowseGestureActions(left, right) { item, action ->
+        BrowseGestureActions(browse, left, right) { item, action ->
             when (action) {
                 BrowseSwipeAction.Favorite -> browse.favorite(item)
-                BrowseSwipeAction.PlayLater -> browse.play(item, "append")
-                BrowseSwipeAction.PlayNext -> browse.play(item, "next")
+                BrowseSwipeAction.PlayLater -> browse.play(item, QueuePlacement.End)
+                BrowseSwipeAction.PlayNext -> browse.play(item, QueuePlacement.AfterCurrent)
                 BrowseSwipeAction.AddToPlaylist -> playlist(item)
-                BrowseSwipeAction.PlayRadio -> browse.radio(item, "now")
-                BrowseSwipeAction.PlayRadioNext -> browse.radio(item, "next")
-                BrowseSwipeAction.PlayRadioLater -> browse.radio(item, "append")
+                BrowseSwipeAction.PlayRadio -> browse.radio(item, QueuePlacement.Replace(0UL))
+                BrowseSwipeAction.PlayRadioNext -> browse.radio(item, QueuePlacement.AfterCurrent)
+                BrowseSwipeAction.PlayRadioLater -> browse.radio(item, QueuePlacement.End)
                 BrowseSwipeAction.Download -> browse.download(item)
             }
         }
@@ -97,12 +101,16 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
 
 @Composable
 internal fun BrowseSwipeActions(
-    item: BrowseItem, enabled: Boolean,
+    listed: BrowseItem, enabled: Boolean,
     content: @Composable () -> Unit,
 ) {
     val configured = LocalBrowseGestureActions.current
-    val left = (configured?.left ?: BrowseSwipeAction.Favorite).takeIf { it.availableFor(item) }
-    val right = (configured?.right ?: BrowseSwipeAction.PlayLater).takeIf { it.availableFor(item) }
+    // A swipe acts on the row as it shows now, with the favorites and ratings committed since.
+    val item = configured?.browse?.shown(listed) ?: listed
+    val library = configured?.browse?.library
+    val offered = remember(item.row, library) { library?.swipes(item.row) }
+    val left = configured?.left?.takeIf { offered != null && it.availableFor(offered) }
+    val right = configured?.right?.takeIf { offered != null && it.availableFor(offered) }
     if (!enabled || configured == null || left == null && right == null) {
         content()
         return
@@ -124,7 +132,7 @@ internal fun BrowseSwipeActions(
                 dragging = false
                 if (activate) {
                     val action = when { released < -threshold -> left; released > threshold -> right; else -> null }
-                    if (action != null) actions?.activate?.invoke(currentItem, action)
+                    if (action != null) actions.activate(currentItem, action)
                 }
                 settled.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow))

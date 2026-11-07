@@ -1,4 +1,4 @@
-import { api, state } from "./connection.js";
+import { api } from "./connection.js";
 import { el, icon } from "./ui.js";
 
 const mediaType = "application/x-rufin-media";
@@ -6,15 +6,10 @@ const pinType = "application/x-rufin-collection";
 let current = null;
 let preview = null;
 
+// What dragging or playing a row carries: the page core says it plays, else its track's URI;
+// a playlist folder carries neither.
 function mediaSelection(kind, row) {
-  return {
-    kind,
-    row,
-    source: row.source ?? state.source,
-    folder:
-      row.source && row.source !== state.source ? null : state.selectedLibrary,
-    ...(kind === "track" ? { uris: [row.uri] } : {}),
-  };
+  return { kind, row, ...(row.play ? { page: row.play } : row.uri ? { uris: [row.uri] } : {}) };
 }
 
 function bindDrag(node, read, pinnable = true) {
@@ -22,7 +17,7 @@ function bindDrag(node, read, pinnable = true) {
   node.addEventListener("dragstart", (event) => {
     const media = read();
     current = Promise.resolve(media);
-    event.dataTransfer.setData(mediaType, "");
+    if (media.page || media.uris) event.dataTransfer.setData(mediaType, "");
     if (pinnable) event.dataTransfer.setData(pinType, "");
     event.dataTransfer.effectAllowed = "copyMove";
     preview?.remove();
@@ -34,7 +29,7 @@ function bindDrag(node, read, pinnable = true) {
     const artwork =
       node.querySelector(".cover, .pin-cover") ||
       node.closest(".home-showcase")?.querySelector(".cover");
-    cover.append(artwork ? artwork.cloneNode(true) : icon("tracks"));
+    cover.append(artwork ? artwork.cloneNode(true) : icon("rufin-tracks-symbolic"));
     const row = media.row || JSON.parse(node.dataset.row);
     preview.append(
       cover,
@@ -63,13 +58,10 @@ function acceptsPin(event) {
   return event.dataTransfer.types.includes(pinType);
 }
 
+// Plays or queues a collection's page whole or the selected rows of a page, or tracks by URI.
 function queueMedia(media, mode = "append", position = {}) {
-  return api(media.uris ? "/queue" : `/queue/${media.kind}`, "POST", {
-    source: media.source || null,
-    folder: media.kind === "smart-playlist" ? media.folder : null,
-    ...(media.uris
-      ? { uris: media.uris }
-      : { id: media.row.id, album_artists: !!media.row.album_artists }),
+  return api("/queue", "POST", {
+    ...(media.uris ? { uris: media.uris } : { page: media.page, ranges: media.ranges }),
     mode,
     ...position,
   });
@@ -78,17 +70,7 @@ function queueMedia(media, mode = "append", position = {}) {
 function playlistMedia(id, media) {
   return api("/playlists/entries", "POST", {
     id,
-    source: media.source || null,
-    folder: media.folder,
-    ...(media.uris
-      ? { uris: media.uris }
-      : {
-          selection: {
-            kind: media.kind.replaceAll("-", "_"),
-            id: media.row.id,
-            album_artists: !!media.row.album_artists,
-          },
-        }),
+    ...(media.uris ? { uris: media.uris } : { page: media.page, ranges: media.ranges }),
   });
 }
 

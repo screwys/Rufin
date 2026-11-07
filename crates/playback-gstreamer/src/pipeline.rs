@@ -453,8 +453,10 @@ impl PlayerPipeline {
         let (slot, inputs) = (self.slot, self.inputs.clone());
         let (session, last_error) = (Arc::clone(&self.session), Arc::clone(&self.last_error));
         bus.set_sync_handler(move |_, message| {
+            // The first error names the cause: an element that fails to start posts its own,
+            // then the base class posts a generic one.
             if message.type_() == gst::MessageType::Error {
-                *lock_recover(&last_error) = Some(message.clone());
+                lock_recover(&last_error).get_or_insert_with(|| message.clone());
             }
             let id = session.load(Ordering::Acquire);
             if id != 0 {
@@ -657,21 +659,6 @@ impl PlayerPipeline {
             let _ = inputs.send(WorkerInput::Wake);
             None
         }));
-    }
-
-    pub(super) fn update_loudness(&mut self, loudness: &TrackLoudness) {
-        {
-            let gapless = lock_recover(&self.gapless);
-            if gapless.pending.is_none() {
-                *lock_recover(&self.queued_loudness) = Some(loudness.clone());
-            }
-        }
-        if let Some(stream) = self.current_stream.as_mut() {
-            stream.loudness = Some(loudness.clone());
-        }
-        if let Some(graph) = self.audio_graph.as_mut() {
-            graph.set_loudness(loudness.clone());
-        }
     }
 
     pub(super) fn configure_audio(

@@ -80,18 +80,17 @@ pub fn controller_colors(
     settings: &crate::settings::Settings,
     directory: &Path,
 ) -> BTreeMap<String, String> {
-    let crate::settings::ThemePreference::Named(id) = &settings.appearance.theme_preference else {
-        return BTreeMap::new();
-    };
+    let preference = &settings.appearance.theme_preference;
     let mut themes = builtins();
-    if id.starts_with("custom:") {
+    if matches!(preference, crate::settings::ThemePreference::Named(id) if id.starts_with("custom:"))
+    {
         let (custom, errors) = custom(directory);
         for error in errors {
             tracing::warn!(%error, "could not load theme");
         }
         themes.extend(custom);
     }
-    let Some(theme) = themes.iter().find(|theme| &theme.id == id) else {
+    let Some(theme) = preference.selected(&themes) else {
         return BTreeMap::new();
     };
     theme_colors(

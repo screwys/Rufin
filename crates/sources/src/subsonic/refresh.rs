@@ -4,7 +4,7 @@ use library::Freshness;
 
 use super::*;
 use crate::remote_json as json;
-use crate::source::{SourceReadProgress, SourceReadStage};
+use crate::source::{SourceProgress, SourceProgressStage};
 use serde_json::Value;
 
 const ALBUM_REQUEST_SIZE: usize = 500;
@@ -37,7 +37,7 @@ impl ScanStatus {
 impl SubsonicSource {
     async fn acquire_favorites(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let body = self.get_json("getStarred2", &[]).await?;
@@ -57,7 +57,7 @@ impl SubsonicSource {
 
         check_cancelled(cancelled)?;
         for (field, kind) in [("song", "track"), ("album", "album"), ("artist", "artist")] {
-            catalog
+            observation
                 .replace_source_favorites(kind, &ids(field, kind))
                 .await?;
         }
@@ -67,81 +67,120 @@ impl SubsonicSource {
 
     pub(crate) async fn acquire_user_collections(
         &self,
-        catalog: &mut library::Catalog<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        observation: &mut library::Observation<'_>,
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let stamp = catalog.observed;
-
-        let stamp = Some(match stamp {
-            Some(stamp) => stamp,
-            None => catalog.start_observation().await?,
-        });
-        if let Err(error) = self.acquire_favorites(catalog, cancelled).await {
+        if !observation.is_walk() {
+            observation.start_observation().await?;
+        }
+        if let Err(error) = self.acquire_favorites(observation, cancelled).await {
+            crate::source::optional_collection_error(error)?;
+        }
+        if let Err(error) = self.acquire_played_albums(observation, cancelled).await {
             crate::source::optional_collection_error(error)?;
         }
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Playlists, 0));
-        match self.acquire_playlists(catalog, progress, cancelled).await {
+        progress(stage(SourceProgressStage::Playlists, 0));
+        match self
+            .acquire_playlists(observation, progress, cancelled)
+            .await
+        {
             Ok(()) => {
-                if let Some(stamp) = stamp {
-                    check_cancelled(cancelled)?;
-                    catalog
-                        .complete_source_observation(stamp, &["playlist"], None)
-                        .await?;
-                }
+                check_cancelled(cancelled)?;
+                observation
+                    .complete_source_observation(&["playlist"], None, None)
+                    .await?;
             }
             Err(error) => {
                 crate::source::optional_collection_error(error)?;
             }
         }
-        crate::source::acquire_home(catalog, cancelled, |section| self.home_section(section))
+        crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
         check_cancelled(cancelled)?;
+        Ok(())
+    }
+
+    /// Plays elsewhere leave the scan marker alone: the recently played albums whose server
+    /// play is newer than their tracks' stored ones are read again.
+    async fn acquire_played_albums(
+        &self,
+        observation: &mut library::Observation<'_>,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let query = [("type", "recent".to_string()), ("size", "24".to_string())];
+        let body: Value = self.get_json("getAlbumList2", &query).await?;
+        let played = json::items(&body["albumList2"]["album"])
+            .iter()
+            .filter_map(|album| {
+                let played = crate::policy::unix_seconds(json::field(album, "played"))?;
+                Some((self.id("album", &json::id(&album["id"])?), played))
+            })
+            .collect::<Vec<_>>();
+        let catalog = observation.catalog;
+        for album in catalog
+            .albums_played_since(observation.source_id, &played)
+            .await?
+        {
+            let album = crate::SourceCollection::Album(album);
+            self.acquire_collection(observation, &album, false, cancelled)
+                .await?;
+        }
         Ok(())
     }
 
     pub(crate) async fn acquire_playlist_snapshot(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         playlist_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
-
-        let snapshot = self.read_playlist(source_id, playlist_id).await?;
-        let mut batch = library::CatalogBatch::default();
-        batch.playlists.push(snapshot.playlist.header.clone());
+        let snapshot = self
+            .read_playlist(observation.source_id, playlist_id)
+            .await?;
         check_cancelled(cancelled)?;
-        catalog.apply_catalog(&batch, true).await?;
-        catalog
-            .write_source_playlist_page(
-                &snapshot.playlist.header.object_id,
-                0,
-                &snapshot.entries,
+        self.write_playlist_snapshot(observation, &snapshot).await
+    }
+
+    pub(super) async fn write_playlist_snapshot(
+        &self,
+        observation: &mut library::Observation<'_>,
+        snapshot: &PlaylistSnapshot,
+    ) -> SourceResult<()> {
+        let header = &snapshot.playlist.header;
+        observation
+            .apply_catalog(
+                &library::CatalogBatch {
+                    playlists: vec![header.clone()],
+                    ..Default::default()
+                },
                 true,
             )
             .await?;
-        catalog
+        observation
+            .write_source_playlist_page(&header.object_id, 0, &snapshot.entries, true)
+            .await?;
+        observation
             .write_source_playlist_freshness(
-                &snapshot.playlist.header.object_id,
+                &header.object_id,
                 snapshot.playlist.revision.as_deref(),
                 snapshot.playlist.valid_until,
             )
             .await?;
-
         Ok(())
     }
 
     pub(crate) async fn home_section(
         &self,
-        section: crate::SourceHomeSection,
+        section: library::HomeSectionKind,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         let (list_type, extra) = match section {
-            crate::SourceHomeSection::MostPlayed => ("frequent", Vec::new()),
-            crate::SourceHomeSection::NewlyAdded => ("newest", Vec::new()),
-            crate::SourceHomeSection::RecentlyPlayed => ("recent", Vec::new()),
-            crate::SourceHomeSection::RecentlyReleased => (
+            library::HomeSectionKind::Explore => return Ok(Vec::new()),
+            library::HomeSectionKind::MostPlayed => ("frequent", Vec::new()),
+            library::HomeSectionKind::NewlyAdded => ("newest", Vec::new()),
+            library::HomeSectionKind::RecentlyPlayed => ("recent", Vec::new()),
+            library::HomeSectionKind::RecentlyReleased => (
                 "byYear",
                 vec![
                     ("fromYear", current_year().to_string()),
@@ -179,12 +218,12 @@ impl SubsonicSource {
 
     pub(crate) async fn acquire_catalog(
         &self,
-        catalog: &mut library::Catalog<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        observation: &mut library::Observation<'_>,
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<bool> {
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let source_id = observation.source_id;
+        let walk = observation.is_walk();
 
         check_cancelled(cancelled)?;
         let mut complete = true;
@@ -199,22 +238,31 @@ impl SubsonicSource {
         let mut batch = library::CatalogBatch::default();
         batch.folders.extend_from_slice(&music_folders);
         check_cancelled(cancelled)?;
-        catalog.apply_catalog(&batch, true).await?;
+        observation.apply_catalog(&batch, true).await?;
         check_cancelled(cancelled)?;
+        if walk && complete {
+            observation
+                .complete_source_observation(&["folder"], None, None)
+                .await?;
+        }
         if self.has_navidrome_library() {
-            self.acquire_navidrome_library(catalog, progress, cancelled)
+            complete &= self
+                .acquire_navidrome_library(observation, progress, cancelled)
                 .await?;
         } else {
+            // Artists come first so that the albums and tracks crediting them are resolved
+            // once.
+            let mut listed = Vec::new();
             for (entity, read_stage) in [
-                ("album", SourceReadStage::Albums),
-                ("track", SourceReadStage::Tracks),
-                ("artist", SourceReadStage::Artists),
+                ("artist", SourceProgressStage::Artists),
+                ("album", SourceProgressStage::Albums),
+                ("track", SourceProgressStage::Tracks),
             ] {
                 progress(stage(read_stage, 0));
                 let result = async {
                     if entity == "track" {
                         return self
-                            .acquire_tracks(catalog, &music_folders, progress, cancelled)
+                            .acquire_tracks(observation, &music_folders, progress, cancelled)
                             .await;
                     }
                     let mut offset = 0_usize;
@@ -273,46 +321,52 @@ impl SubsonicSource {
                                 .collect::<library::LibraryResult<_>>()?;
                         }
                         check_cancelled(cancelled)?;
-                        catalog.apply_catalog(&batch, true).await?;
+                        observation.apply_catalog(&batch, true).await?;
                         progress(stage(read_stage, offset));
                         if page.len() < ALBUM_REQUEST_SIZE {
                             break;
                         }
                     }
-                    if let Some(stamp) = stamp {
-                        check_cancelled(cancelled)?;
-                        catalog
-                            .complete_source_observation(stamp, &[entity], None)
-                            .await?;
-                    }
                     Ok(())
                 }
                 .await;
-                if let Err(error) = result {
-                    complete = false;
-                    crate::source::optional_collection_error(error)?;
+                match result {
+                    Ok(()) => listed.push(entity),
+                    Err(error) => {
+                        complete = false;
+                        crate::source::optional_collection_error(error)?;
+                    }
                 }
+            }
+            if walk {
+                // Records that credit others go first: an artist stays while a track or album
+                // credits it.
+                listed.reverse();
+                check_cancelled(cancelled)?;
+                observation
+                    .complete_source_observation(&listed, None, None)
+                    .await?;
             }
         }
 
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Genres, 0));
+        progress(stage(SourceProgressStage::Genres, 0));
         match self.read_genres().await {
             Ok(genres) => {
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .apply_catalog(
                         &library::CatalogBatch {
-                            genres,
+                            tags: genres,
                             ..Default::default()
                         },
                         true,
                     )
                     .await?;
-                if let Some(stamp) = stamp {
+                if walk {
                     check_cancelled(cancelled)?;
-                    catalog
-                        .complete_source_observation(stamp, &["genre"], None)
+                    observation
+                        .complete_source_observation(&["genre"], None, None)
                         .await?;
                 }
             }
@@ -320,24 +374,24 @@ impl SubsonicSource {
         }
 
         check_cancelled(cancelled)?;
-        self.acquire_user_collections(catalog, progress, cancelled)
+        self.acquire_user_collections(observation, progress, cancelled)
             .await?;
 
         check_cancelled(cancelled)?;
 
-        progress(stage(SourceReadStage::Finalizing, 0));
+        progress(stage(SourceProgressStage::Finalizing, 0));
         Ok(complete)
     }
 
     pub(super) async fn acquire_tracks(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         music_folders: &[library::FolderObservation],
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let source_id = observation.source_id;
+        let walk = observation.is_walk();
 
         let scopes = if music_folders.is_empty() {
             vec![None]
@@ -393,23 +447,17 @@ impl SubsonicSource {
                 }
                 batch.tracks = tracks;
                 check_cancelled(cancelled)?;
-                catalog.apply_catalog(&batch, true).await?;
-                progress(stage(SourceReadStage::Tracks, emitted));
+                observation.apply_catalog(&batch, true).await?;
+                progress(stage(SourceProgressStage::Tracks, emitted));
             }
             if let Some(folder) = folder
-                && let Some(stamp) = stamp
+                && walk
             {
                 check_cancelled(cancelled)?;
-                catalog
-                    .complete_source_folder_membership(&folder.object_id, stamp)
+                observation
+                    .complete_source_folder_membership(&folder.object_id)
                     .await?;
             }
-        }
-        if let Some(stamp) = stamp {
-            check_cancelled(cancelled)?;
-            catalog
-                .complete_source_observation(stamp, &["track"], None)
-                .await?;
         }
         Ok(())
     }
@@ -434,7 +482,7 @@ impl SubsonicSource {
             .collect())
     }
 
-    async fn read_genres(&self) -> SourceResult<Vec<library::GenreObservation>> {
+    async fn read_genres(&self) -> SourceResult<Vec<library::TagObservation>> {
         let body: Value = self.get_json("getGenres", &[]).await?;
         Ok(json::items(&body["genres"]["genre"])
             .iter()
@@ -442,13 +490,14 @@ impl SubsonicSource {
                 let name = json::field::<String>(genre, "value")
                     .or_else(|| json::field(genre, "name"))
                     .filter(|name| !name.trim().is_empty())?;
-                Some(library::GenreObservation {
+                Some(library::TagObservation {
+                    kind: library::TagKind::Genre,
                     object_id: self.id("genre", &name),
                     metadata: library::TagMetadata {
                         sort_text: Some(name.to_lowercase()),
                         name,
                     },
-                    ..Default::default()
+                    artwork_binding: None,
                 })
             })
             .collect())
@@ -456,12 +505,12 @@ impl SubsonicSource {
 
     async fn acquire_playlists(
         &self,
-        catalog: &mut library::Catalog<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        observation: &mut library::Observation<'_>,
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
 
         let body: Value = self.get_json("getPlaylists", &[]).await?;
         let playlists = json::items(&body["playlists"]["playlist"]);
@@ -477,15 +526,17 @@ impl SubsonicSource {
             };
             batch.playlists.push(playlist.header.clone());
             check_cancelled(cancelled)?;
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64;
+            // A playlist is read again when its revision changed or its validity ended; a
+            // server that sets no validity (gonic) leaves the revision alone to decide.
             let retained = if let Some(revision) = playlist.revision.as_deref()
-                && playlist.valid_until.is_some_and(|deadline| deadline > now)
+                && playlist.valid_until.is_none_or(|deadline| deadline > now)
             {
-                database
+                catalog
                     .source_playlist_is_fresh(
                         source_id,
                         &playlist.header.object_id,
@@ -497,11 +548,11 @@ impl SubsonicSource {
                 false
             };
             if !retained {
-                self.acquire_playlist_snapshot(catalog, &playlist.header.object_id, cancelled)
+                self.acquire_playlist_snapshot(observation, &playlist.header.object_id, cancelled)
                     .await?;
             }
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Playlists,
+            progress(SourceProgress {
+                stage: SourceProgressStage::Playlists,
                 completed: position + 1,
                 total: Some(total),
             });
@@ -577,8 +628,8 @@ fn completed_freshness(status: ScanStatus) -> Option<Vec<u8>> {
     .then(|| freshness(status))
 }
 
-fn stage(stage: SourceReadStage, completed: usize) -> SourceReadProgress {
-    SourceReadProgress {
+fn stage(stage: SourceProgressStage, completed: usize) -> SourceProgress {
+    SourceProgress {
         stage,
         completed,
         total: None,
@@ -693,55 +744,49 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
 
         let cancellation = library::ReadCancellation::new();
-        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 3), (6, 4), (4, 5), (5, 5)] {
+        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 2), (6, 2), (4, 3), (5, 3)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             let result = {
                 let result = source
-                    .acquire_user_collections(&mut catalog, &|_| {}, &|| false)
+                    .acquire_user_collections(&mut observation, &|_| {}, &|| false)
                     .await;
                 result
             };
-            {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                    .await;
-                result
-            }
-            .unwrap();
+            result.unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
-            let rows = library::ListRead {
-                playlist_scope: Default::default(),
-                kind: library::ListKind::Playlists,
-                source: (Some(
-                    database
-                        .source_identity_key(&crate::SourceId::new("source"))
-                        .await
-                        .unwrap()
+            let rows = crate::listed_playlists(
+                &catalog,
+                library::ListRead {
+                    playlist_scope: Default::default(),
+                    kind: library::ListKind::Playlists,
+                    source: (Some(
+                        {
+                            catalog.loaded().await;
+                            catalog.source_key(&crate::SourceId::new("source"))
+                        }
                         .unwrap(),
-                ))
-                .into(),
-                sort: library::CatalogSort::Position,
-                folder: None,
-                filter: ("").to_string(),
-                descending: false,
-                favorites_only: false,
-                downloaded_only: false,
-                activity: false,
-            }
-            .playlists(&database, 0, 2, &cancellation)
-            .await
-            .unwrap();
+                    ))
+                    .into(),
+                    sort: library::LibraryField::RowIndex,
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false,
+                    activity: false,
+                },
+            )
+            .await;
             if next == 5 {
                 assert!(rows.is_empty());
                 continue;
@@ -761,7 +806,7 @@ mod tests {
                 next <= 1
             );
             assert_eq!(
-                database
+                catalog
                     .selected_track_uris(
                         &library::MemberRead::new(library::Collection::Playlist(playlist))
                             .selection(),
@@ -836,22 +881,18 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let marker = library::Freshness::new(b"unchanged catalog".to_vec()).unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        let stamp = Some(catalog.start_observation().await.unwrap());
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        let stamp = Some(observation.start_observation().await.unwrap());
         (async {
             let mut batch = library::CatalogBatch::default();
             let result = batch.albums.extend_from_slice(&[(super::album_from_json(
@@ -862,7 +903,7 @@ mod tests {
             .unwrap()
             .unwrap())
             .clone()]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
@@ -877,72 +918,62 @@ mod tests {
             .unwrap()
             .unwrap())
             .clone()]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
         .unwrap();
-        (async { let mut batch = library::CatalogBatch::default(); let result = batch.tracks.extend_from_slice(&[(super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap()).clone()]); catalog.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
+        (async { let mut batch = library::CatalogBatch::default(); let result = batch.tracks.extend_from_slice(&[(super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
         {
-            let result = source.acquire_favorites(&mut catalog, &|| false).await;
+            let result = source.acquire_favorites(&mut observation, &|| false).await;
             result
         }
         .unwrap();
         {
             let result = source
-                .acquire_playlist_snapshot(&mut catalog, "subsonic:playlist:playlist", &|| false)
+                .acquire_playlist_snapshot(&mut observation, "subsonic:playlist:playlist", &|| {
+                    false
+                })
                 .await;
             result
         }
         .unwrap();
         (async {
-            let update = {
-                if let Some(stamp) = stamp {
-                    catalog
-                        .complete_source_observation(
-                            stamp,
-                            &[
-                                "track", "album", "artist", "genre", "mood", "folder", "playlist",
-                            ],
-                            (Some(marker.clone())).as_ref(),
-                        )
-                        .await
-                        .unwrap();
-                }
-                if let Some(stamp) = stamp {
-                    catalog
-                        .complete_source_observation(stamp, &[], Some(&marker))
-                        .await
-                        .unwrap();
-                }
-                Ok::<_, library::LibraryError>(catalog.changes().clone())
-            }?;
-            database
-                .publish_catalog_update(&catalog_source_id, update)
-                .await;
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker), None)
+                    .await
+                    .unwrap();
+            }
             Ok::<_, library::LibraryError>(())
         })
         .await
         .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         for (next, expected) in [(2, true), (1, false), (0, true)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             let result = {
                 let result = source
-                    .acquire_user_collections(&mut catalog, &|_| {}, &|| false)
+                    .acquire_user_collections(&mut observation, &|_| {}, &|| false)
                     .await;
                 result
             };
-            {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                    .await;
-                result
-            }
-            .unwrap();
+            result.unwrap();
             for (kind, id) in [("track", "track"), ("album", "album"), ("artist", "artist")] {
                 let uri = library::source_entity_uri(
                     &crate::SourceId::new("source"),
@@ -954,7 +985,7 @@ mod tests {
                     "album" => library::FavoriteTarget::Album(uri),
                     _ => library::FavoriteTarget::Artist(uri),
                 };
-                assert_eq!(database.favorite(&target).await.unwrap(), expected);
+                assert_eq!(catalog.favorite(&target).await.unwrap(), expected);
             }
             let cancellation = library::ReadCancellation::new();
             let uri = library::source_entity_uri(
@@ -962,68 +993,58 @@ mod tests {
                 "track",
                 "subsonic:track:track",
             );
-            let row = database
+            let row = catalog
                 .track(&(&uri), &cancellation)
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(row.metadata.comment.as_deref(), Some("Keep"));
             assert!(
-                database
+                catalog
                     .accept_freshness("source", &marker, &cancellation)
                     .await
                     .unwrap()
             );
             assert_eq!(
-                library::ListRead {
-                    playlist_scope: Default::default(),
-                    kind: library::ListKind::Playlists,
-                    source: (Some(
-                        database
-                            .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                            .await
+                crate::listed_playlists(
+                    &catalog,
+                    library::ListRead {
+                        playlist_scope: Default::default(),
+                        kind: library::ListKind::Playlists,
+                        source: (Some(
+                            {
+                                catalog.loaded().await;
+                                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                            }
                             .unwrap()
-                            .unwrap()
-                    ))
-                    .into(),
-                    sort: library::CatalogSort::Title,
-                    folder: None,
-                    filter: ("").to_string(),
-                    descending: false,
-                    favorites_only: false,
-                    downloaded_only: false,
-                    activity: false
-                }
-                .count(&database, &cancellation)
+                        ))
+                        .into(),
+                        sort: library::LibraryField::Title,
+                        folder: None,
+                        filter: ("").to_string(),
+                        descending: false,
+                        favorites_only: false,
+                        activity: false
+                    }
+                )
                 .await
-                .map(|count| count as i64)
-                .unwrap(),
+                .len() as i64,
                 i64::from(next != 1)
             );
         }
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        crate::published(&mut updates);
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         let result = {
             let result = source
-                .acquire_user_collections(&mut catalog, &|_| {}, &|| false)
+                .acquire_user_collections(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         };
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            result
-        }
-        .unwrap();
-        assert!(!catalog.changes().changed());
+        result.unwrap();
+        assert!(!observation.changed());
         assert!(
-            updates.try_recv().is_err(),
+            crate::published(&mut updates).is_none(),
             "unchanged native data stays quiet"
         );
     }
@@ -1096,17 +1117,13 @@ mod tests {
                 unreachable!()
             };
             let directory = tempfile::tempdir().unwrap();
-            let database = library::Database::open(directory.path().join("library.sqlite"))
+            let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap();
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            database.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            let mut updates = catalog.changes();
             let marker = library::Freshness::new(b"server-observation".to_vec()).unwrap();
             if folders_available {
-                database
+                catalog
                     .reconcile_source(
                         &library::SourceId::new("source"),
                         "nextcloud music",
@@ -1115,16 +1132,16 @@ mod tests {
                     .await
                     .unwrap();
                 let catalog_source_id = ("source").to_string();
-                let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-                catalog.start_observation().await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+                observation.start_observation().await.unwrap();
                 let batch=library::CatalogBatch {
                     albums:vec![super::album_from_json(source,"source",&serde_json::json!({"id":"album","name":"Album","artist":"Artist"})).unwrap().unwrap()],
                     tracks:vec![super::track_from_json(source,"source",&serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap().unwrap()],
-                    genres:vec![library::GenreObservation {object_id:"cached-genre".into(),metadata:library::TagMetadata {name:"Cached".into(),sort_text:Some("cached".into())},..Default::default()}],
+                    tags:vec![library::TagObservation {kind:library::TagKind::Genre,object_id:"cached-genre".into(),metadata:library::TagMetadata {name:"Cached".into(),sort_text:Some("cached".into())},artwork_binding:None}],
                     playlists:vec![library::PlaylistObservation {object_id:"cached-playlist".into(),name:"Cached".into(),sort_text:"cached".into(),..Default::default()}],..Default::default()
                 };
-                catalog.apply_catalog(&batch, true).await.unwrap();
-                catalog
+                observation.apply_catalog(&batch, true).await.unwrap();
+                observation
                     .write_source_playlist_page(
                         "cached-playlist",
                         0,
@@ -1136,7 +1153,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                catalog
+                observation
                     .replace_source_home_section(
                         "recently-played",
                         None,
@@ -1150,13 +1167,12 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.into_changes())
-                    .await;
-                updates.try_recv().expect("initial catalog update");
+                crate::published(&mut updates)
+                    .expect("initial catalog update")
+                    .1;
             }
             let progress = std::sync::Mutex::new(Vec::new());
-            database
+            catalog
                 .reconcile_source(
                     &library::SourceId::new("source"),
                     "nextcloud music",
@@ -1165,12 +1181,12 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-            let stamp = Some(catalog.start_observation().await.unwrap());
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+            let stamp = Some(observation.start_observation().await.unwrap());
             let complete = {
                 let result = source
                     .acquire_catalog(
-                        &mut catalog,
+                        &mut observation,
                         &|value| {
                             progress.lock().unwrap().push(value);
                         },
@@ -1181,35 +1197,25 @@ mod tests {
             }
             .unwrap();
             (async {
-                let update = {
-                    if let Some(stamp) = stamp {
-                        catalog
-                            .complete_source_observation(
-                                stamp,
-                                &[],
-                                Some(&marker).filter(|_| complete),
-                            )
-                            .await?;
-                    }
-                    Ok::<_, library::LibraryError>(catalog.changes().clone())
-                }?;
-                database
-                    .publish_catalog_update(&catalog_source_id, update)
-                    .await;
+                if stamp.is_some() {
+                    observation
+                        .complete_source_observation(&[], Some(&marker).filter(|_| complete), None)
+                        .await?;
+                }
                 Ok::<_, library::LibraryError>(())
             })
             .await
             .unwrap();
-            let publication = updates.try_recv().expect("catalog update");
-            assert!(publication.metadata);
+            let publication = crate::published(&mut updates).expect("catalog update").1;
+            assert!(publication.intersects(sources::Shown::CATALOG));
             let cancellation = library::ReadCancellation::new();
-            let home = database
+            let home = catalog
                 .home_page(
-                    database
-                        .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                        .await
-                        .unwrap()
-                        .unwrap(),
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,
@@ -1225,7 +1231,7 @@ mod tests {
                     .lock()
                     .unwrap()
                     .iter()
-                    .filter(|progress| progress.stage == crate::SourceReadStage::Tracks)
+                    .filter(|progress| progress.stage == crate::SourceProgressStage::Tracks)
                     .map(|progress| progress.completed)
                     .max(),
                 Some(if folders_available { 4 } else { 2 })
@@ -1236,7 +1242,7 @@ mod tests {
                     "track",
                     &format!("subsonic:track:{id}"),
                 );
-                let track = database
+                let track = catalog
                     .track(&(&uri), &cancellation)
                     .await
                     .unwrap()
@@ -1244,7 +1250,7 @@ mod tests {
                 assert_eq!(track.metadata.title, title);
             }
             assert_eq!(
-                database
+                catalog
                     .accept_freshness("source", &marker, &cancellation)
                     .await
                     .unwrap(),
@@ -1257,16 +1263,14 @@ mod tests {
                     "subsonic:track:removed",
                 );
                 assert!(
-                    !database
+                    !catalog
                         .selected_track_uris(
                             &library::MemberRead::new(library::Collection::Source(
-                                database
-                                    .source_identity_key(&library::SourceId::new(
-                                        &catalog_source_id
-                                    ))
-                                    .await
-                                    .unwrap()
-                                    .unwrap()
+                                {
+                                    catalog.loaded().await;
+                                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                                }
+                                .unwrap()
                             ))
                             .selection(),
                             None,
@@ -1277,17 +1281,15 @@ mod tests {
                         .contains(&removed)
                 );
                 assert!(
-                    database
+                    catalog
                         .catalog_keys(
                             library::CatalogKind::Genre,
                             Some(
-                                database
-                                    .source_identity_key(&library::SourceId::new(
-                                        &catalog_source_id
-                                    ))
-                                    .await
-                                    .unwrap()
-                                    .unwrap()
+                                {
+                                    catalog.loaded().await;
+                                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                                }
+                                .unwrap()
                             ),
                             &[("cached-genre").to_owned()],
                             &cancellation
@@ -1297,21 +1299,22 @@ mod tests {
                         .unwrap()
                         .is_some()
                 );
-                let playlist = database
-                    .playlist_key_by_object(
-                        database
-                            .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                            .await
-                            .unwrap()
-                            .unwrap(),
-                        "cached-playlist",
-                        &cancellation,
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap();
+                let playlist = library::PlaylistKey::from_raw(
+                    catalog
+                        .catalog_keys(
+                            library::CatalogKind::Playlist,
+                            {
+                                catalog.loaded().await;
+                                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                            },
+                            &["cached-playlist".into()],
+                            &cancellation,
+                        )
+                        .await
+                        .unwrap()[0],
+                );
                 assert_eq!(
-                    database
+                    catalog
                         .selected_track_uris(
                             &library::MemberRead::new(library::Collection::Playlist(playlist))
                                 .selection(),
@@ -1324,17 +1327,15 @@ mod tests {
                 );
                 assert_eq!(home.recently_played.albums.len(), 1);
                 for id in ["one", "two"] {
-                    let folder = database
+                    let folder = catalog
                         .catalog_keys(
                             library::CatalogKind::Folder,
                             Some(
-                                database
-                                    .source_identity_key(&library::SourceId::new(
-                                        &catalog_source_id,
-                                    ))
-                                    .await
-                                    .unwrap()
-                                    .unwrap(),
+                                {
+                                    catalog.loaded().await;
+                                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                                }
+                                .unwrap(),
                             ),
                             &[(&source.id("music-folder", id)).to_string()],
                             &cancellation,
@@ -1344,15 +1345,13 @@ mod tests {
                         .unwrap()
                         .unwrap();
                     assert_eq!(
-                        database
+                        catalog
                             .home_page(
-                                database
-                                    .source_identity_key(&library::SourceId::new(
-                                        &catalog_source_id
-                                    ))
-                                    .await
-                                    .unwrap()
-                                    .unwrap(),
+                                {
+                                    catalog.loaded().await;
+                                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                                }
+                                .unwrap(),
                                 Some(folder),
                                 0,
                                 0,
@@ -1373,15 +1372,15 @@ mod tests {
             let source = source_owner;
             source
                 .acquire_catalog(
-                    &database,
+                    &catalog,
                     &|value| progress.lock().unwrap().push(value),
                     std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    false,
+                    crate::Refresh::Check,
                 )
                 .await
                 .unwrap();
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates).is_none(),
                 "unchanged automatic acquisition stays quiet"
             );
             assert!(
@@ -1389,7 +1388,7 @@ mod tests {
                     .lock()
                     .unwrap()
                     .iter()
-                    .any(|value| value.stage == crate::SourceReadStage::Tracks)
+                    .any(|value| value.stage == crate::SourceProgressStage::Tracks)
             );
         }
     }
@@ -1426,7 +1425,7 @@ mod tests {
         .expect("OpenSubsonic source");
 
         let entries = source
-            .home_section(crate::SourceHomeSection::NewlyAdded)
+            .home_section(library::HomeSectionKind::NewlyAdded)
             .await
             .expect("OpenSubsonic Newly Added");
 
