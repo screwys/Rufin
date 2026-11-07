@@ -212,6 +212,12 @@ impl SelectedFeed {
         if self.cancelled.load(Ordering::Acquire) {
             return false;
         }
+        self.keep(incoming);
+        let _ = self.wake.try_send(());
+        true
+    }
+
+    fn keep(&self, incoming: SelectedFeedChange) {
         let mut pending = self
             .pending
             .lock()
@@ -220,13 +226,19 @@ impl SelectedFeed {
             Some(current) => current.merge(incoming),
             None => incoming,
         });
-        drop(pending);
-        let _ = self.wake.try_send(());
-        true
     }
 }
 
 impl SelectedFeedChange {
+    fn lists(&self) -> bool {
+        matches!(
+            self,
+            Self::Remote(RemoteItemChange::BoundaryLost)
+                | Self::Files(crate::file::remote::changes::FileChange::FullRefresh)
+                | Self::Local(LocalLiveChange::Rescan)
+        )
+    }
+
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (Self::Remote(current), Self::Remote(incoming)) => {
@@ -280,25 +292,22 @@ impl SelectedFeed {
         }
     }
 
-    /// Whether the pending change lists the whole source, so it waits for a running listing
-    /// and catches up from that listing's start.
+    /// Whether the pending change lists the whole source.
     pub fn pending_listing(&self) -> bool {
-        matches!(
-            *self
-                .pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-            Some(
-                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)
-                    | SelectedFeedChange::Files(
-                        crate::file::remote::changes::FileChange::FullRefresh
-                    )
-                    | SelectedFeedChange::Local(LocalLiveChange::Rescan)
-            )
-        )
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .is_some_and(SelectedFeedChange::lists)
     }
 
-    pub async fn apply_pending(&self, catalog: &Catalog) -> SourceResult<()> {
+    /// Applies the pending change. A change that lists the whole source runs through `list`,
+    /// which says whether the listing ran; one that did not stays pending for the next check.
+    pub async fn apply_pending(
+        &self,
+        catalog: &Catalog,
+        list: impl std::ops::AsyncFnOnce(Refresh) -> bool,
+    ) -> SourceResult<()> {
         if self.cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
@@ -311,29 +320,17 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match change {
-            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => self
-                .source
-                .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Check)
-                .await
-                .map(|_| ()),
             SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => {
-                match self.source.apply_changes(catalog, items).await {
-                    Err(error) if !matches!(error, SourceError::Cancelled) => {
-                        tracing::warn!(%error, "source change failed; catching up");
-                        self.source
-                            .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Check)
-                            .await
-                            .map(|_| ())
-                    }
-                    result => result,
+                let result = self.source.apply_changes(catalog, items).await;
+                // What a failed apply missed comes from a listing of what changed.
+                if result
+                    .as_ref()
+                    .is_err_and(|error| !matches!(error, SourceError::Cancelled))
+                {
+                    self.submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost));
                 }
+                result
             }
-            SelectedFeedChange::Files(crate::file::remote::changes::FileChange::FullRefresh)
-            | SelectedFeedChange::Local(LocalLiveChange::Rescan) => self
-                .source
-                .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Changed)
-                .await
-                .map(|_| ()),
             SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Paths {
                 paths,
                 rename,
@@ -351,6 +348,18 @@ impl SelectedFeed {
                         self.cancelled.load(Ordering::Acquire)
                     })
                     .await
+            }
+            // A lost remote boundary checks what changed since the last sync; a file feed
+            // walks everything.
+            listing => {
+                let refresh = match listing {
+                    SelectedFeedChange::Remote(_) => Refresh::Check,
+                    _ => Refresh::Changed,
+                };
+                if !list(refresh).await {
+                    self.keep(listing);
+                }
+                Ok(())
             }
         }
     }

@@ -940,23 +940,27 @@ impl SourceOwner {
                 return;
             };
             let owner = Self { shared };
-            // Live changes apply while a listing runs; a check or a whole listing waits for
-            // it, and finishing it wakes this loop.
-            let refreshing = owner.shared.is_refreshing(&source_id);
-            if !event {
-                if !refreshing {
+            // Live changes apply while a refresh runs; a check or a whole listing waits for
+            // it, and finishing it wakes this loop. A listing that did not run is retried on
+            // the next tick.
+            if !event && !observer.pending_listing() {
+                if !owner.shared.is_refreshing(&source_id) {
                     owner.check_remote_freshness(&source_id, &source).await;
                 }
                 continue;
             }
-            if refreshing && observer.pending_listing() {
-                continue;
-            }
-            if let Err(error) = observer.apply_pending(&owner.shared.catalog).await {
+            let list = async |refresh| {
+                !owner.shared.is_refreshing(&source_id)
+                    && owner
+                        .refresh_now(&source_id, &source, true, refresh)
+                        .await
+                        .is_ok()
+            };
+            if let Err(error) = observer.apply_pending(&owner.shared.catalog, list).await {
                 if source_error_is_cancelled(&error) {
                     return;
                 }
-                warn!(%error, "source change failed; the next boundary catches up");
+                warn!(%error, "source change failed; a listing catches up");
             }
         }
     }
