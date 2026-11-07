@@ -935,6 +935,7 @@ async fn read(
     };
     let found = match &header {
         Some(Header::Tag(tag)) => tag.summary.track_count > 0,
+        Some(Header::Album(album)) => album.row.summary.track_count > 0,
         Some(_) => true,
         None => !named,
     };
@@ -942,7 +943,7 @@ async fn read(
         view.body = Body::Missing;
         return Ok(Opened {
             view: Arc::new(view),
-            header,
+            header: None,
             first: 0,
             rows: Vec::new(),
             favorites,
