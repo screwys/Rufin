@@ -376,6 +376,11 @@ impl PlexSource {
             }
             offset += rows.len();
             if finished {
+                if observation.is_walk() {
+                    observation
+                        .complete_source_observation(&["playlist"], None, None)
+                        .await?;
+                }
                 return Ok(());
             }
         }

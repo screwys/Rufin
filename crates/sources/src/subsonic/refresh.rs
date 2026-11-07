@@ -209,6 +209,11 @@ impl SubsonicSource {
         check_cancelled(cancelled)?;
         observation.apply_catalog(&batch, true).await?;
         check_cancelled(cancelled)?;
+        if walk && complete {
+            observation
+                .complete_source_observation(&["folder"], None, None)
+                .await?;
+        }
         if self.has_navidrome_library() {
             complete &= self
                 .acquire_navidrome_library(observation, progress, cancelled)
