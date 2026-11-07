@@ -500,7 +500,7 @@ async fn library_changes_preserve_run_progress_prepared_next_and_positions() {
     let before = session.view();
     let run = session.current_run();
     let next_run = session.next_plan.as_ref().map(|plan| plan.next_run);
-    session.library_changed(None, &sample);
+    session.library_changed(None);
     let rows = session
         .sequence
         .read_request()

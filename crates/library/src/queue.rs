@@ -440,6 +440,17 @@ impl Catalog {
         Ok(())
     }
 
+    /// The entries among `entries` (id, track) that the saved queue lost, with None, or holds
+    /// with another track.
+    pub async fn saved_queue_moves(
+        &self,
+        entries: &[(u64, crate::TrackKey)],
+    ) -> LibraryResult<Vec<(u64, crate::TrackKey, Option<crate::TrackKey>)>> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT value->>0,value->>1,track_key FROM json_each(?1) LEFT JOIN queue_entries ON entry_id=value->>0 WHERE track_key IS NOT value->>1")
+            .bind(serde_json::to_string(entries)?).fetch_all(&mut *reader).await?)
+    }
+
     pub async fn restore_queue(&self) -> LibraryResult<QueueRestore> {
         let mut reader = self.acquire_reader().await?;
         let mut transaction = reader.begin().await?;

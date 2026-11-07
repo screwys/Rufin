@@ -952,20 +952,16 @@ impl Player {
 
     /// Follows committed Changes, or everything after a lag. Identity moves move queue entries,
     /// whose saved rows their Write moved already. Changed tracks that the queue shows read the
-    /// shown rows again; their committed favorites and ratings show in them as they are. Entries
-    /// of a forgotten source, which its Write deleted, leave the queue.
-    pub(super) fn library_changed(
-        &mut self,
-        changes: Option<&[Arc<library::Change>]>,
-        sample: &ClockSample,
-    ) {
+    /// shown rows again; their committed favorites and ratings show in them as they are. After a
+    /// lag or a forgotten source, whose Write deleted its entries, the queue follows the saved one.
+    pub(super) fn library_changed(&mut self, changes: Option<&[Arc<library::Change>]>) {
         let Some(changes) = changes else {
+            self.reread_membership();
             self.sequence.refresh_metadata();
             return;
         };
         let mut rekeys = Vec::new();
         let mut refresh = false;
-        let mut forgotten = false;
         for scope in changes.iter().flat_map(|change| &change.scopes) {
             match scope {
                 library::Scope::Reload | library::Scope::Display => refresh = true,
@@ -981,7 +977,7 @@ impl Player {
                 library::Scope::Source {
                     phase: library::SourcePhase::Removed,
                     ..
-                } => forgotten = true,
+                } => self.reread_membership(),
                 _ => {}
             }
         }
@@ -989,9 +985,6 @@ impl Player {
             let mut changed = false;
             self.edit_queue(|sequence| changed = sequence.rekey_tracks(&rekeys));
             self.dirty |= changed;
-        }
-        if forgotten {
-            self.forget_gone(sample);
         }
         if refresh {
             self.sequence.refresh_metadata();
@@ -1647,38 +1640,49 @@ impl Player {
         self.changed_queue(removing_current, false, sample);
     }
     /// Removes the entries whose tracks the Catalog no longer holds with a source.
-    fn forget_gone(&mut self, sample: &ClockSample) {
-        let keys = (0..self.sequence.total())
-            .filter_map(|position| self.sequence.entry_at(position))
-            .map(|entry| entry.track_key)
-            .collect::<Vec<_>>();
-        let sourced = self.owner().catalog.tracks_with_source(&keys);
-        let gone = keys
-            .into_iter()
-            .zip(sourced)
-            .filter(|(_, sourced)| !sourced)
-            .map(|(key, _)| key)
-            .collect::<std::collections::HashSet<_>>();
-        if gone.is_empty() {
+    /// Compares the queue with the saved one once its edits are saved: a Write that deleted or
+    /// moved saved entries, which a forgotten source or a missed change did, wrote the truth.
+    fn reread_membership(&mut self) {
+        if self.external.is_some() {
             return;
         }
-        let ids = (0..self.sequence.total())
-            .filter(|&position| {
-                self.sequence
-                    .entry_at(position)
-                    .is_some_and(|entry| gone.contains(&entry.track_key))
+        if let Some(update) = self.take_queue_persistence() {
+            self.owner().save_queue(update);
+        }
+        let entries = (0..self.sequence.total())
+            .filter_map(|i| {
+                Some((
+                    self.sequence.id_at(i)?.0,
+                    self.sequence.entry_at(i)?.track_key,
+                ))
             })
+            .collect();
+        let _ = (self.owner().store_sender).try_send(super::PlaybackStoreWork::Membership(entries));
+    }
+
+    /// Entries the saved queue lost leave; entries whose saved track moved follow it.
+    pub(super) fn saved_membership(
+        &mut self,
+        moves: &[(u64, library::TrackKey, Option<library::TrackKey>)],
+        sample: &ClockSample,
+    ) {
+        let rekeys = (moves.iter())
+            .filter_map(|(_, old, new)| Some((*old, (*new)?)))
             .collect::<Vec<_>>();
-        let previous = self.sequence.selected_index();
-        if previous.as_ref().is_some_and(|id| ids.contains(id)) {
+        let mut changed = false;
+        self.edit_queue(|sequence| changed = sequence.rekey_tracks(&rekeys));
+        self.dirty |= changed;
+        let gone = (moves.iter())
+            .filter_map(|(id, _, new)| new.is_none().then_some(*id))
+            .collect::<Vec<_>>();
+        let current = (self.sequence.selected_index())
+            .and_then(|i| self.sequence.id_at(i))
+            .is_some_and(|id| gone.contains(&id.0));
+        if current {
             self.finish_queue_run(sample, RunEndReason::Stopped)
         }
-        self.edit_queue(|sequence| sequence.forget(&QueueSelection::Positions(ids.clone())));
-        self.changed_queue(
-            previous.is_some_and(|position| ids.contains(&position)),
-            true,
-            sample,
-        );
+        self.edit_queue(|sequence| sequence.forget(&QueueSelection::Occurrences(gone)));
+        self.changed_queue(current, true, sample);
     }
     fn reorder(
         &mut self,

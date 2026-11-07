@@ -242,21 +242,6 @@ impl Catalog {
             .collect()
     }
 
-    /// Whether the Catalog holds each of these tracks with a source.
-    pub fn tracks_with_source(&self, keys: &[crate::TrackKey]) -> Vec<bool> {
-        use crate::catalog::snapshot::Packed;
-        let snapshot = self.snapshot();
-        keys.iter()
-            .map(|key| {
-                snapshot
-                    .tracks
-                    .get(key.raw())
-                    .and_then(|record| snapshot.source_key(record.source()))
-                    .is_some()
-            })
-            .collect()
-    }
-
     /// Every committed Write, in commit order. A receiver that falls behind gets a Lagged
     /// error, which means everything may have changed.
     pub fn changes(&self) -> broadcast::Receiver<Arc<Change>> {

@@ -92,6 +92,8 @@ enum PlaybackStoreWork {
         audio_output: Option<String>,
     },
     Settings,
+    /// Queue entries and their tracks, compared with the saved queue once saves land.
+    Membership(Vec<(u64, library::TrackKey)>),
     Equalizer {
         snapshot: EqualizerPreferences,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
@@ -451,6 +453,18 @@ impl PlaybackOwner {
                     warn!(%error, "could not persist Queue");
                 }
             }
+            PlaybackStoreWork::Membership(entries) => {
+                if save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
+                    .await
+                    .is_ok()
+                    && let Ok(moves) = self.catalog.saved_queue_moves(&entries).await
+                    && let Some(active) = self.active()
+                {
+                    active
+                        .downgrade()
+                        .post(move |player, sample| player.saved_membership(&moves, sample));
+                }
+            }
         }
     }
 
@@ -639,8 +653,8 @@ impl PlaybackOwner {
     /// Committed Changes the queue hears, or None after a lag.
     pub(crate) fn library_changed(&self, changes: Option<Vec<Arc<Change>>>) {
         if let Some(active) = self.active() {
-            active.downgrade().post(move |player, sample| {
-                player.library_changed(changes.as_deref(), sample);
+            active.downgrade().post(move |player, _| {
+                player.library_changed(changes.as_deref());
             });
         }
     }
