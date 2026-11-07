@@ -63,7 +63,8 @@ impl Shell {
             {
                 return glib::Propagation::Proceed;
             }
-            if shell.route_keyboard_available()
+            if (shell.route_keyboard_available()
+                || shell.queue_selection_focused(current_focus.as_ref()))
                 && !focus_blocks_selection_shortcut(current_focus.as_ref())
                 && let Some(shortcut) = selection_shortcut(key, state)
                 && shell.run_selection_shortcut(shortcut, current_focus.as_ref())
@@ -179,9 +180,7 @@ impl Shell {
             }
             return true;
         }
-        if !self.queue_selection_focused(focus)
-            && let Some(selection) = self.current_playlist_entry_selection_snapshot()
-        {
+        if let Some(selection) = self.current_playlist_entry_selection_snapshot() {
             match shortcut {
                 SelectionShortcut::Play(placement) => {
                     selection.play(&self.products.playback, placement, false)
