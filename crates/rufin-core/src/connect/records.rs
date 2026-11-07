@@ -1343,15 +1343,10 @@ impl Records {
                 self.open(value)?;
             }
         }
+        // Held rows compete with the page's, so one newest row per id applies.
         let mut pending = std::mem::take(&mut receiving.held);
-        pending.extend(
-            self.store
-                .newer(rows)
-                .await
-                .map_err(string_error)?
-                .into_iter()
-                .map(|row| (from.to_owned(), row)),
-        );
+        pending.extend(rows.into_iter().map(|row| (from.to_owned(), row)));
+        let pending = self.store.newer(pending).await.map_err(string_error)?;
         let (applied, held) = self.apply(pending, end.is_some()).await?;
         receiving.held = held;
         if let Some(lowest) = receiving
@@ -1414,13 +1409,14 @@ impl Records {
                 applied.extend(ready.into_iter().map(|(_, row)| row));
                 continue;
             }
-            // One failing row must not lose the others: the sender records an unchanged
-            // value only once.
-            for (_, row) in ready {
+            // One failing row must not lose the others, and waits as a held one does: the
+            // sender records an unchanged value only once.
+            for (from, row) in ready {
                 match self.apply_kind(kind, &[&row]).await {
                     Ok(()) => applied.push(row),
                     Err(error) => {
                         tracing::warn!(%error, id = row.id, "Connect could not apply a record");
+                        held.push((from, row));
                     }
                 }
             }

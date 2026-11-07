@@ -182,7 +182,10 @@ async fn pull(
         match pull.next().await? {
             Frame::Page(rows) => {
                 let sequence = rows.last().unwrap().sequence;
-                let rows = store.newer(rows).await?;
+                let rows = store
+                    .newer(rows.into_iter().map(|row| ((), row)).collect())
+                    .await?;
+                let rows = rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
                 let cursor = Cursor::Pulled {
                     device: &device,
                     sequence,
@@ -336,7 +339,7 @@ async fn enrollment_records_media_and_removal() {
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].value.as_ref(), rows[0].device.as_str()), (Some(&edit), c.identity().as_str()));
         // B's copy loses to nothing it already holds, and its own write wins over C's.
-        assert!(b_store.newer(rows).await.unwrap().is_empty());
+        assert!(b_store.newer(rows.into_iter().map(|row| ((), row)).collect()).await.unwrap().is_empty());
         b_store.write(vec![change("setting:preference:third", Some(serde_json::json!("made on B")))], None).await.unwrap();
         let (_, rows) = pull(&c, &c_store, &a, &profile).await.unwrap();
         assert!(rows.is_empty());

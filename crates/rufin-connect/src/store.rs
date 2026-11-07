@@ -338,9 +338,10 @@ impl Store {
         Ok((!rows.is_empty()).then_some(sequence))
     }
 
-    /// The rows that win against the stored records: a greater `(clock, device)`, one per id.
-    pub async fn newer(&self, rows: Vec<Row>) -> Result<Vec<Row>> {
-        let ids = rows.iter().map(|row| &row.id).collect::<Vec<_>>();
+    /// The rows that win against the stored records: a greater `(clock, device)`, one per id,
+    /// each with the tag it came with.
+    pub async fn newer<T>(&self, rows: Vec<(T, Row)>) -> Result<Vec<(T, Row)>> {
+        let ids = rows.iter().map(|(_, row)| &row.id).collect::<Vec<_>>();
         let stored: HashMap<String, (i64, String)> = sqlx::query_as::<_, (String, i64, String)>(
             "SELECT id,clock,device FROM connect_records WHERE id IN (SELECT value FROM json_each(?1))",
         )
@@ -350,22 +351,22 @@ impl Store {
         .into_iter()
         .map(|(id, clock, device)| (id, (clock, device)))
         .collect();
-        let mut newest = HashMap::<String, Row>::new();
-        for row in rows {
+        let mut newest = HashMap::<String, (T, Row)>::new();
+        for (tag, row) in rows {
             let stamp = (row.clock, row.device.as_str());
             if stored
                 .get(&row.id)
                 .is_some_and(|(clock, device)| stamp <= (*clock, device.as_str()))
                 || newest
                     .get(&row.id)
-                    .is_some_and(|kept| stamp <= (kept.clock, kept.device.as_str()))
+                    .is_some_and(|(_, kept)| stamp <= (kept.clock, kept.device.as_str()))
             {
                 continue;
             }
-            newest.insert(row.id.clone(), row);
+            newest.insert(row.id.clone(), (tag, row));
         }
         let mut rows = newest.into_values().collect::<Vec<_>>();
-        rows.sort_by_key(|row| row.sequence);
+        rows.sort_by_key(|(_, row)| row.sequence);
         Ok(rows)
     }
 
