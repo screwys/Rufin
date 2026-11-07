@@ -1950,8 +1950,11 @@ impl Actor {
                 .await
             {
                 Ok(true) => {
-                    self.remove_job_track(&source_id, &job_id, &media_uri, true);
-                    self.persist_and_publish(source_id.as_ref()).await;
+                    if self.remove_job_track(&source_id, &job_id, &media_uri, true) {
+                        self.persist_and_publish(source_id.as_ref()).await;
+                    } else {
+                        self.publish(source_id.as_ref()).await;
+                    }
                     continue;
                 }
                 Ok(false) => {}
@@ -2192,10 +2195,8 @@ impl Actor {
             ))),
         };
         let persist = match result {
-            Ok(()) => {
-                self.remove_job_track(&source_id, &job_id, &media_uri, true);
-                true
-            }
+            // The queue file keeps jobs; a restart finds their finished tracks by receipt.
+            Ok(()) => self.remove_job_track(&source_id, &job_id, &media_uri, true),
             Err(DownloadFailure::Item(error)) => {
                 warn!(%error, source_id=?source_id, %media_uri, "could not download track");
                 self.mark_subject_incomplete(&subject).await;
@@ -2513,18 +2514,19 @@ impl Actor {
             .find(|job| job.id == job_id)
     }
 
+    /// Takes `media_uri` from its job; true when that ended the job.
     fn remove_job_track(
         &mut self,
         source_id: &Option<SourceId>,
         job_id: &str,
         media_uri: &str,
         completed: bool,
-    ) {
+    ) -> bool {
         let Some(jobs) = self.jobs.get_mut(source_id) else {
-            return;
+            return false;
         };
         let Some(job_index) = jobs.iter().position(|job| job.id == job_id) else {
-            return;
+            return false;
         };
         let job = &mut jobs[job_index];
         if let Some(position) = job
@@ -2539,9 +2541,10 @@ impl Actor {
         }
         if job.remaining.is_empty() {
             jobs.remove(job_index);
-        } else {
-            job.state = DownloadQueueState::Downloading;
+            return true;
         }
+        job.state = DownloadQueueState::Downloading;
+        false
     }
 
     async fn mark_subject_incomplete(&mut self, subject: &DownloadSubject) {
