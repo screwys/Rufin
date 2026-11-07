@@ -2870,6 +2870,9 @@ impl Actor {
             )
             .await
             .map_err(|error| error.to_string())?;
+            // The cancelled jobs stay gone however many files remain.
+            remove_file_if_present(&directory.join(QUEUE_FILE)).await?;
+            remove_file_if_present(&directory.join(QUEUE_PART_FILE)).await?;
             let mut after = String::new();
             loop {
                 let records = self
@@ -2885,8 +2888,6 @@ impl Actor {
                     self.retire_receipt(&record).await?;
                 }
             }
-            remove_file_if_present(&directory.join(QUEUE_FILE)).await?;
-            remove_file_if_present(&directory.join(QUEUE_PART_FILE)).await?;
             match tokio::fs::remove_dir(&directory).await {
                 Ok(()) => Ok(()),
                 Err(error)
@@ -2901,9 +2902,9 @@ impl Actor {
             }
         }
         .await;
+        self.publish(Some(source_id)).await;
         match result {
             Ok(()) => {
-                self.publish(Some(source_id)).await;
                 if notify {
                     let _ = self
                         .events
