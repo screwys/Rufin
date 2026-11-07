@@ -128,24 +128,9 @@ pub(super) fn watch(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
                 let (Some(owner), Some(session)) = (weak.upgrade(), session_of.upgrade()) else {
                     return;
                 };
-                read(&owner, &session).await;
+                sync(&owner, &session).await;
             }
         }));
-}
-
-async fn read(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
-    let Some(folder) = owner.status.borrow().settings.folder.clone() else {
-        return;
-    };
-    let _lock = session.folder.lock.lock().await;
-    let result = async {
-        let folder = Folder::open(owner, &folder)?;
-        read_others(session, &folder).await
-    }
-    .await;
-    if let Err(error) = result {
-        tracing::warn!(%error, "Connect could not read the sync folder");
-    }
 }
 
 async fn write_own(
