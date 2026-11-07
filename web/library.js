@@ -816,8 +816,9 @@ function bindHome(signal, offsets) {
       refresh.onclick = () =>
         run(async () => {
           refresh.disabled = true;
-          // The change it commits reads Home again, this block from its start.
-          section.dataset.offset = offset = 0;
+          // A change it commits reads Home again at this block's start.
+          offset = 0;
+          layout();
           try {
             await api("/home", "POST", { source: state.source, block: section.dataset.block }, signal);
           } finally {
