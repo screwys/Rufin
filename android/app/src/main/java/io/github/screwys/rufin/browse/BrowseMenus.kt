@@ -188,12 +188,13 @@ private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, tit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BrowseMenuSheet(
-    model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection,
+    model: RufinConnection, browse: BrowseConnection, listed: BrowseItem, player: PlayerConnection,
     onDismiss: () -> Unit, onPlaylist: () -> Unit, onMetadata: () -> Unit, onRemove: (() -> Unit)? = null,
     onNavigate: (Route, String, String?) -> Unit,
     onPlayNow: ((Boolean) -> Unit)? = null,
 ) {
-    val projected = favoriteItem(model, item)
+    // The menu offers and labels what the row shows now, with the changes committed since.
+    val item = favoriteItem(model, listed)
     val playingUri by remember(player) { derivedStateOf { player.playback?.transport?.current?.id?.mediaUri } }
     val playbackControls by remember(player) { derivedStateOf {
         Triple(player.playback?.controls?.shuffleEnabled == true, player.playback?.controls?.autoDjEnabled == true, player.playback?.controls?.repeatMode)
@@ -236,8 +237,8 @@ internal fun BrowseMenuSheet(
                 MediaMenuDivider()
             }
             val offered = menu
-            BrowseMenuHeader(projected, player,
-                onFavorite = if (offered?.favorite == true) ({ browse.favorite(projected) }) else null,
+            BrowseMenuHeader(item, player,
+                onFavorite = if (offered?.favorite == true) ({ browse.favorite(item) }) else null,
                 onDetails = if (item.row.target != null) ({ details = true }) else null)
             if (offered != null) {
                 val plays = listOfNotNull(

@@ -68,7 +68,7 @@ internal enum class BrowseSwipeAction(val icon: String) {
 }
 
 private class BrowseGestureActions(
-    val left: BrowseSwipeAction, val right: BrowseSwipeAction,
+    val browse: BrowseConnection, val left: BrowseSwipeAction, val right: BrowseSwipeAction,
     val activate: (BrowseItem, BrowseSwipeAction) -> Unit,
 )
 
@@ -79,7 +79,7 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
     playlist: (BrowseItem) -> Unit, content: @Composable () -> Unit,
 ) {
     val actions = remember(left, right, browse, playlist) {
-        BrowseGestureActions(left, right) { item, action ->
+        BrowseGestureActions(browse, left, right) { item, action ->
             when (action) {
                 BrowseSwipeAction.Favorite -> browse.favorite(item)
                 BrowseSwipeAction.PlayLater -> browse.play(item, QueuePlacement.End)
@@ -97,10 +97,12 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
 
 @Composable
 internal fun BrowseSwipeActions(
-    item: BrowseItem, enabled: Boolean,
+    listed: BrowseItem, enabled: Boolean,
     content: @Composable () -> Unit,
 ) {
     val configured = LocalBrowseGestureActions.current
+    // A swipe acts on the row as it shows now, with the favorites and ratings committed since.
+    val item = configured?.browse?.visiblePage?.shown(listed) ?: listed
     val left = (configured?.left ?: BrowseSwipeAction.Favorite).takeIf { it.availableFor(item) }
     val right = (configured?.right ?: BrowseSwipeAction.PlayLater).takeIf { it.availableFor(item) }
     if (!enabled || configured == null || left == null && right == null) {

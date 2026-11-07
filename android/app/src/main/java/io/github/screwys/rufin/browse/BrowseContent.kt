@@ -466,6 +466,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     marquee: Boolean = false,
 ) {
+    val shown = favoriteItem(player.model, item)
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !marquee) {
@@ -481,7 +482,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
             // The labels under the title: the list's grid fields, one per line.
-            item.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
+            shown.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
                 Text(line, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
