@@ -224,45 +224,46 @@ impl SubsonicSource {
         folder_object_id: Option<&str>,
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<crate::LiveFolderPage> {
-        let mut page = crate::LiveFolderPage::default();
-        if let Some(folder) = folder_object_id {
-            let body: Value = self
-                .get_json(
-                    "getMusicDirectory",
-                    &[("id", raw_item_id(folder).to_string())],
-                )
-                .await?;
-            for child in json::items(&body["directory"]["child"]) {
-                let Some(id) = json::id(&child["id"]) else {
-                    continue;
-                };
-                if json::boolean(&child["isDir"]).unwrap_or(false) {
-                    page.folders.push(crate::LiveFolder {
-                        object_id: self.id("folder", &id),
-                        name: json::field(child, "title")
-                            .unwrap_or_else(|| "Untitled Folder".to_string()),
-                    });
-                } else {
-                    page.tracks.push(self.id("track", &id));
-                }
+        let body: Value = match folder_object_id {
+            Some(folder) => {
+                let query = [("id", raw_item_id(folder).to_string())];
+                self.get_json("getMusicDirectory", &query).await?
             }
-        } else {
-            let parameters = music_folder_object_id
-                .map(|folder| vec![("musicFolderId", raw_item_id(folder).to_string())])
-                .unwrap_or_default();
-            let body: Value = self.get_json("getIndexes", &parameters).await?;
-            for artist in json::items(&body["indexes"]["index"])
+            None => {
+                let parameters = music_folder_object_id
+                    .map(|folder| vec![("musicFolderId", raw_item_id(folder).to_string())])
+                    .unwrap_or_default();
+                self.get_json("getIndexes", &parameters).await?
+            }
+        };
+        let mut page = crate::LiveFolderPage::default();
+        let artists = json::items(&body["indexes"]["shortcut"]).iter().chain(
+            json::items(&body["indexes"]["index"])
                 .iter()
-                .flat_map(|index| json::items(&index["artist"]))
-            {
-                let Some(id) = json::id(&artist["id"]) else {
-                    continue;
-                };
+                .flat_map(|index| json::items(&index["artist"])),
+        );
+        for artist in artists {
+            let Some(id) = json::id(&artist["id"]) else {
+                continue;
+            };
+            page.folders.push(crate::LiveFolder {
+                object_id: self.id("folder", &id),
+                name: json::field(artist, "name").unwrap_or_else(|| "Untitled Folder".to_string()),
+            });
+        }
+        let children = json::items(&body["directory"]["child"]).iter();
+        for child in children.chain(json::items(&body["indexes"]["child"])) {
+            let Some(id) = json::id(&child["id"]) else {
+                continue;
+            };
+            if json::boolean(&child["isDir"]).unwrap_or(false) {
                 page.folders.push(crate::LiveFolder {
                     object_id: self.id("folder", &id),
-                    name: json::field(artist, "name")
+                    name: json::field(child, "title")
                         .unwrap_or_else(|| "Untitled Folder".to_string()),
                 });
+            } else {
+                page.tracks.push(self.id("track", &id));
             }
         }
         Ok(page)
