@@ -198,7 +198,7 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
-    pub(crate) fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
+    pub fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
         self.send(Command::Insert { input, target });
     }
 

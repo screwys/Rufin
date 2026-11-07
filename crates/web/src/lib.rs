@@ -342,6 +342,7 @@ async fn queue_play(
     }
     let input: Input = body(request).await?;
     use rufin_core::playback::QueuePlacement;
+    let insert = input.mode == "insert";
     let placement = match input.mode.as_str() {
         "replace" => QueuePlacement::Replace { anchor_index: 0 },
         "append" | "insert" => QueuePlacement::End,
@@ -398,13 +399,14 @@ async fn queue_play(
             (None, Some(_), _) => return Err(gone()),
         };
         match (anchor, input.ranges) {
-            // Selected rows play in the page's order.
-            (_, Some(ranges)) => page::selection(products, token, Some(ranges))
+            // Selected rows play in the page's order; an insert queues them or the page as GTK's
+            // drop does.
+            (_, ranges) if insert || ranges.is_some() => page::selection(products, token, ranges)
                 .await?
                 .map(|selection| rufin_core::playback::PlayRequest::tracks(selection, placement)),
             // A page without a track plays whole, as its header and the card that opens it do.
-            (None, None) => Some(page::play(products, &token, placement).await?),
-            (Some((key, entry)), None) => page::open(products, token, 0, 0).await?.view.play_track(
+            (None, _) => Some(page::play(products, &token, placement).await?),
+            (Some((key, entry)), _) => page::open(products, token, 0, 0).await?.view.play_track(
                 key,
                 entry,
                 input.index.unwrap_or(0),
@@ -416,11 +418,8 @@ async fn queue_play(
     };
     let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || {
-        if input.mode == "insert" {
-            if let Some(selection) = request.selection() {
-                queue.insert(selection, queue_drop_target(input.before, input.after));
-            }
-            return;
+        if insert {
+            return queue.insert_load(request.input, queue_drop_target(input.before, input.after));
         }
         queue.play_selection(request)
     })

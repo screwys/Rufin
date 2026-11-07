@@ -84,25 +84,6 @@ impl PlayRequest {
         request.reactivate = true;
         request
     }
-    pub fn selection(&self) -> Option<library::MemberSelection> {
-        let groups = match &self.input {
-            library::QueueLoad::Tracks(groups) => groups,
-            library::QueueLoad::Uris(uris, _) => {
-                return Some(library::MemberSelection::Uris(uris.clone().into()));
-            }
-            _ => return None,
-        };
-        if groups.len() == 1 {
-            Some(groups[0].0.clone())
-        } else {
-            Some(library::MemberSelection::Concat(
-                groups
-                    .iter()
-                    .map(|(selection, _)| selection.clone())
-                    .collect(),
-            ))
-        }
-    }
     pub fn with_context(mut self, context: Arc<str>) -> Self {
         match &mut self.input {
             library::QueueLoad::Tracks(groups) => {
