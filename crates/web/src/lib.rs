@@ -1121,10 +1121,14 @@ async fn events(
                     changed = source.changed() => { changed.ok()?; vec![json!({"source":*source.borrow_and_update()})] },
                     changed = lyrics.changed() => { changed.ok()?; vec![json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)})] },
                     changed = appearance.changed() => { changed.ok()?; vec![json!({"appearance":*appearance.borrow_and_update()})] },
+                    // The pins, and the page when it reads in the saved order or lists.
                     changed = sidebar.changed() => {
                         changed.ok()?;
-                        let now = sidebar.borrow_and_update().ui.sidebar.clone();
-                        if now == pins { Vec::new() } else { pins = now; vec![json!({"pins_changed":true})] }
+                        let now = Arc::clone(&sidebar.borrow_and_update());
+                        let reread = stream.pages.page(stream.id).is_some_and(|view| view.settings_reread(&now.ui).is_some());
+                        let mut values = if reread { vec![json!({"page_refresh":"reread"})] } else { Vec::new() };
+                        if now.ui.sidebar != pins { pins = now.ui.sidebar.clone(); values.push(json!({"pins_changed":true})) }
+                        values
                     },
                     changed = catalog.next() => vec![changed_json(&products, stream.pages.page(stream.id).as_deref(), &changed?)],
                 }
