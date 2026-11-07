@@ -417,15 +417,10 @@ impl SearchPopup {
         clear.connect_clicked(move |_| {
             if let Some(popup) = weak.upgrade() {
                 if let Some(shell) = popup.shell.upgrade() {
-                    shell
-                        .settings
-                        .update_app_settings("clear recent searches", |settings| {
-                            if settings.recent_search_results.is_empty() {
-                                return false;
-                            }
-                            settings.recent_search_results.clear();
-                            true
-                        });
+                    if let Err(error) = shell.settings.persistence.clear_search_results() {
+                        tracing::warn!(%error, "failed to clear recent searches");
+                    }
+                    shell.settings.sync();
                     popup.render();
                 }
             }
@@ -439,16 +434,14 @@ impl SearchPopup {
                         return;
                     };
                     if let Some(shell) = popup.shell.upgrade() {
-                        shell
-                            .settings
-                            .update_app_settings("remove recent search", |settings| {
-                                let previous = settings.recent_search_results.len();
-                                settings.recent_search_results.retain(|recent| {
-                                    recent.media_uri != result.media_uri
-                                        || recent.kind != result.kind
-                                });
-                                previous != settings.recent_search_results.len()
-                            });
+                        let settings = &shell.settings;
+                        if let Err(error) = settings
+                            .persistence
+                            .remove_search_result(result.kind, &result.media_uri)
+                        {
+                            tracing::warn!(%error, "failed to remove a recent search");
+                        }
+                        settings.sync();
                         popup.render();
                     }
                 }
