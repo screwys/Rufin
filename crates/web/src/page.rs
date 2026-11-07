@@ -235,11 +235,12 @@ pub(super) async fn open(
         )
         .await
         .map_err(read_error)?;
-    // A smart playlist page keeps the time it opened at.
-    let token = PageToken {
-        options: opened.view.options().clone(),
-        ..token
-    };
+    // A smart playlist page keeps the time it opened at, and every page the order it opened
+    // in, so its later windows read in it whatever the saved order becomes.
+    let (sort, descending) = opened.view.order();
+    let mut options = opened.view.options().clone();
+    (options.sort, options.descending) = (Some(sort), Some(descending));
+    let token = PageToken { options, ..token };
     let missed = reading.missed().map(|missed| {
         let mut value = json!({});
         show_changed(products, &mut value, Some(&opened.view), &missed);

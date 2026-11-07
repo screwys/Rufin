@@ -144,12 +144,12 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
         content.setAttribute("role", "grid");
         content.setAttribute("aria-label", tr("Tracks"));
         content.setAttribute("aria-multiselectable", "true");
-        content.setAttribute("aria-rowcount", total + 1);
         header = table.cloneNode(false);
         header.classList.add("library-header");
         header.append(table.querySelector("thead").cloneNode(true));
         content.prepend(header);
       }
+      if (header) content.setAttribute("aria-rowcount", total + 1);
       node.hidden = false;
       const page = { start, node, remove, count };
       pages.set(start, page);
