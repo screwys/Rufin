@@ -12,31 +12,28 @@ use library::PlaylistEntryKey;
 use crate::widgets::view_model::Rows;
 use library::{PlaylistKey, Row};
 
-/// Where the track `media_uri` names is read in `rows`.
-fn track_position(rows: &Rows<Row>, media_uri: &str) -> Option<u32> {
-    rows.ready_position(|row| match row {
-        Row::Track(track) | Row::AlbumTrack { track, .. } => track.media_uri == media_uri,
-        _ => false,
-    })
-}
-
 #[derive(Clone)]
 pub struct TrackSelection {
-    input: Rc<dyn Fn(&gtk::Bitset) -> library::MemberSelection>,
-    position: Rc<dyn Fn(&str) -> Option<u32>>,
+    rows: Rows<Row>,
     selection: PositionSelectionModel,
 }
 
 impl TrackSelection {
     pub fn new(rows: &Rows<Row>) -> Self {
-        let selection = PositionSelectionModel::new(rows.list_model());
-        let input = rows.clone();
-        let locate = rows.clone();
         Self {
-            input: Rc::new(move |positions| input.selection(positions)),
-            position: Rc::new(move |uri| track_position(&locate, uri)),
-            selection,
+            rows: rows.clone(),
+            selection: PositionSelectionModel::new(rows.list_model()),
         }
+    }
+
+    /// Whether row `position` of these rows shows the track `media_uri`.
+    fn shows(&self, position: u32, media_uri: &str) -> bool {
+        self.rows
+            .ready(position as usize)
+            .is_some_and(|row| match row.as_ref() {
+                Row::Track(track) | Row::AlbumTrack { track, .. } => track.media_uri == media_uri,
+                _ => false,
+            })
     }
 
     pub fn selection_model(&self) -> gtk::SelectionModel {
@@ -56,34 +53,42 @@ impl TrackSelection {
         self.selection == *selection
     }
 
-    pub fn selected_tracks_for(&self, clicked: &str) -> Option<TrackSelectionSnapshot> {
-        let position = (self.position)(clicked)?;
+    /// The selection a click on row `position`, showing `media_uri`, acts on when it is part
+    /// of a larger one.
+    pub fn selected_tracks_for(
+        &self,
+        position: u32,
+        media_uri: &str,
+    ) -> Option<TrackSelectionSnapshot> {
         let positions = self.selection.selection();
-        (positions.size() > 1 && positions.contains(position)).then(|| TrackSelectionSnapshot {
-            input: (self.input)(&positions),
-            count: positions.size() as usize,
-        })
+        (positions.size() > 1 && positions.contains(position) && self.shows(position, media_uri))
+            .then(|| TrackSelectionSnapshot {
+                input: self.rows.selection(&positions),
+                count: positions.size() as usize,
+            })
     }
 
     pub fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
         let positions = self.selection.selection();
         (positions.size() > 0).then(|| TrackSelectionSnapshot {
-            input: (self.input)(&positions),
+            input: self.rows.selection(&positions),
             count: positions.size() as usize,
         })
     }
 
-    pub fn dragged_tracks_for(&self, clicked: &str) -> TrackSelectionSnapshot {
-        self.selected_tracks_for(clicked).unwrap_or_else(|| {
-            let positions = gtk::Bitset::new_empty();
-            if let Some(position) = (self.position)(clicked) {
-                positions.add(position);
-            }
-            TrackSelectionSnapshot {
-                input: (self.input)(&positions),
-                count: positions.size() as usize,
-            }
-        })
+    /// What dragging row `position`, showing `media_uri`, carries.
+    pub fn dragged_tracks_for(&self, position: u32, media_uri: &str) -> TrackSelectionSnapshot {
+        self.selected_tracks_for(position, media_uri)
+            .unwrap_or_else(|| {
+                let positions = gtk::Bitset::new_empty();
+                if self.shows(position, media_uri) {
+                    positions.add(position);
+                }
+                TrackSelectionSnapshot {
+                    input: self.rows.selection(&positions),
+                    count: positions.size() as usize,
+                }
+            })
     }
 }
 
@@ -168,7 +173,7 @@ pub fn install_track_drag_source(
     target: &impl IsA<gtk::Widget>,
     artwork: &Rc<crate::widgets::artwork::ArtworkState>,
     selection: TrackSelection,
-    current_track: impl Fn() -> Option<(String, String, ArtworkBinding)> + 'static,
+    current_track: impl Fn() -> Option<(u32, String, String, ArtworkBinding)> + 'static,
 ) {
     target.as_ref().set_valign(gtk::Align::Fill);
     let preview = MediaDragPreviewBinding::default();
@@ -181,10 +186,10 @@ pub fn install_track_drag_source(
     source.connect_prepare(move |_, _, _| {
         prepare_preview.clear();
         let artwork_state = preview_shell.upgrade()?;
-        let (track, title, artwork) = current_track()?;
+        let (position, track, title, artwork) = current_track()?;
         prepare_preview.prepare_cache_only(&artwork_state, title, artwork);
         Some(media_drag_content_provider(MediaDragSource::selection(
-            selection.dragged_tracks_for(&track),
+            selection.dragged_tracks_for(position, &track),
         )))
     });
     preview.connect(&source);

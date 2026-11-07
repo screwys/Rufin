@@ -1277,7 +1277,7 @@ impl AlbumTrackSlot {
                 if let Some(shell) = menu_shell.upgrade()
                     && let Some(track) = row
                 {
-                    present_track_context_menu(target, &shell, (*track).clone(), position);
+                    present_track_context_menu(target, &shell, (*track).clone(), None, position);
                 }
             });
         install_context_menu_openers(&widget, Rc::clone(&menu));

@@ -56,7 +56,13 @@ where
                     })
                     .flatten()
                 {
-                    present_track_context_menu(target, &shell, track, position);
+                    present_track_context_menu(
+                        target,
+                        &shell,
+                        track,
+                        Some(item.position()),
+                        position,
+                    );
                 }
             }),
         );

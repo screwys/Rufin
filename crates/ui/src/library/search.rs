@@ -261,7 +261,9 @@ impl SearchItem {
             return;
         }
         match self {
-            Self::Track(row, _) => present_track_context_menu(target, shell, row.clone(), position),
+            Self::Track(row, _) => {
+                present_track_context_menu(target, shell, row.clone(), None, position);
+            }
             _ => present_row_menu(target, shell.shell(), self.row(), None, position),
         }
     }

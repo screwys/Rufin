@@ -135,11 +135,15 @@ impl CatalogUi {
         self.track_selections.borrow_mut().push(selection);
     }
 
-    pub fn current_route_track_selection(&self, clicked: &str) -> Option<TrackSelectionSnapshot> {
+    pub fn current_route_track_selection(
+        &self,
+        position: u32,
+        clicked: &str,
+    ) -> Option<TrackSelectionSnapshot> {
         self.track_selections
             .borrow()
             .iter()
-            .find_map(|selection| selection.selected_tracks_for(clicked))
+            .find_map(|selection| selection.selected_tracks_for(position, clicked))
     }
 
     pub fn current_route_track_selection_snapshot(&self) -> Option<TrackSelectionSnapshot> {

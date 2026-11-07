@@ -8,9 +8,13 @@ pub fn present_track_context_menu(
     target: &gtk::Widget,
     shell: &Rc<CatalogUi>,
     track: library::TrackRow,
+    row: Option<u32>,
     position: Option<(f64, f64)>,
 ) {
-    if let Some(selection) = shell.current_route_track_selection(&track.media_uri) {
+    // A row of a selectable list opens the selection it is part of.
+    if let Some(selection) =
+        row.and_then(|row| shell.current_route_track_selection(row, &track.media_uri))
+    {
         present_track_selection_menu(target, shell.shell(), selection, position);
         return;
     }

@@ -656,18 +656,21 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
         let body = CollectionGridCardCell::new(shell, fields, controls.clone().upcast());
         let cover = ArtworkTile::new_elastic_square();
         cover_host.append(&cover.widget());
+        let menu_position = Rc::clone(&position);
+        let selectable = selection.is_some();
         install_grid_context(
             shell,
             &current,
             &menu,
             &controls.imp().overlay,
             &body.card,
-            |target, shell, row, point| {
+            move |target, shell, row, point| {
                 if let Some(track) = row.track_row() {
                     super::collection_context::present_track_context_menu(
                         target,
                         shell,
                         track.clone(),
+                        selectable.then(|| menu_position.get()),
                         point,
                     );
                 }
@@ -686,14 +689,15 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             FavoriteTarget::Track(row.media_uri().to_string())
         });
         let drag_current = Rc::clone(&current);
+        let drag_position = Rc::clone(&position);
         let drag_artwork = cover.drag_paintable_source();
         install_compact_media_drag_source(&body.card, &drag_artwork, move || {
             let current = drag_current.borrow();
             let track = current.as_ref()?;
             let source = match selection.as_ref() {
-                Some(selection) => {
-                    MediaDragSource::selection(selection.dragged_tracks_for(track.media_uri()))
-                }
+                Some(selection) => MediaDragSource::selection(
+                    selection.dragged_tracks_for(drag_position.get(), track.media_uri()),
+                ),
                 None => MediaDragSource::capture_target(PlayTarget::of_track(track.track_row()?)),
             };
             Some((source, track.title().to_string()))

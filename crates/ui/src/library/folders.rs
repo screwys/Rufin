@@ -595,7 +595,11 @@ fn install_folder_cell_menu(
             };
             match crate::widgets::view_model::item_at_from_item::<Row>(&item) {
                 Some(Row::Track(track)) => super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
+                    target,
+                    &shell,
+                    track,
+                    Some(item.position()),
+                    position,
                 ),
                 Some(row @ Row::Folder(_)) => {
                     if let Some(view) = rows.view() {

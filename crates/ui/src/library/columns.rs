@@ -1063,15 +1063,15 @@ fn install_track_list_item_context_menu<T: Clone + 'static>(
     install_context_menu_openers(
         target,
         Rc::new(move |target, position| {
+            let Some(item) = item.upgrade() else { return };
             let Some(track) = item
-                .upgrade()
-                .and_then(|item| item.item())
+                .item()
                 .and_then(|object| object_item::<T, _>(object, |row| track_value(row).cloned()))
                 .flatten()
             else {
                 return;
             };
-            present_track_context_menu(target, &shell, track, position);
+            present_track_context_menu(target, &shell, track, Some(item.position()), position);
         }),
     );
 }

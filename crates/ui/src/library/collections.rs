@@ -1120,6 +1120,7 @@ fn install_track_column_drag_source<T: TrackPresentation>(
                     .map(artwork::ArtworkBinding::opaque)
                     .unwrap_or_default();
                 (
+                    item.position(),
                     track.media_uri().to_string(),
                     track.title().to_string(),
                     artwork,
