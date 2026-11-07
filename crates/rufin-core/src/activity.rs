@@ -68,7 +68,7 @@ pub async fn export_png(
     tokio::task::spawn_blocking(move || {
         let images = loaded
             .into_iter()
-            .filter_map(|(binding, image)| match image.resized_to_fit(512) {
+            .filter_map(|(binding, image)| match image.resized_to_cover(512) {
                 Ok(image) => Some((binding, image)),
                 Err(error) => {
                     tracing::debug!(%error, "Could not read report artwork");
