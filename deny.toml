@@ -9,9 +9,9 @@ ignore = [
     { id = "RUSTSEC-2026-0374", reason = "Askama 0.16 and i18n-config 0.4 still use basic-toml for build-time configuration. Maintenance advisory with no patched release; remove when these dependencies migrate to toml." },
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2026-0387", reason = "age 0.12 pulls p256 0.13 -> elliptic-curve 0.13 -> crypto-bigint 0.5, which has no patched release. Rufin uses only age X25519 identities, so the affected P-256 arithmetic (p256tag recipients) is unused. crypto-bigint 0.7 is patched; remove when age moves to p256 0.14." },
-    { id = "RUSTSEC-2026-0441", reason = "pin-utils is pulled by smb -> sspi -> async-dnssd on macOS and iOS only. Maintenance advisory with no patched release; remove when sspi or async-dnssd drop pin-utils." },
     { id = "RUSTSEC-2026-0451", reason = "vodozemac 0.11.1 and earlier leave Olm root and chain keys in freed memory. Rufin uses only vodozemac SAS for Connect pairing and never creates Olm sessions. 0.11.2 needs curve25519-dalek 5.0.0, which conflicts with the =5.0.0-rc.1 pin of smb -> sspi; remove when smb moves to an sspi without that pin." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
+    { id = "RUSTSEC-2026-0441", reason = "smb 0.12 pins sspi 0.21, which pulls async-dnssd -> pin-utils on macOS only. Maintenance advisory with no successor release of async-dnssd; remove when smb moves to an sspi without async-dnssd." },
 ]
 
 [licenses]
