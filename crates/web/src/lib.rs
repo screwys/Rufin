@@ -524,13 +524,14 @@ async fn playback_command(
                     .get("volume")
                     .and_then(Value::as_f64)
                     .ok_or_else(|| bad_request("volume must be a number"))?;
-                transport.set_volume(volume);
                 if value
                     .get("persist")
                     .and_then(Value::as_bool)
                     .unwrap_or(true)
                 {
                     transport.persist_volume(volume);
+                } else {
+                    transport.set_volume(volume);
                 }
             }
             "mute" => transport.set_muted(
