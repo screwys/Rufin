@@ -133,7 +133,7 @@ pub(super) fn row_data(
 }
 
 /// The page the web draws for `route`: an artist's tracks for the artist page.
-fn web_page(route: rufin_core::route::Route) -> rufin_core::route::Route {
+pub(super) fn web_page(route: rufin_core::route::Route) -> rufin_core::route::Route {
     use rufin_core::route::Route;
     match route {
         Route::ArtistDetail(uri) => Route::ArtistTracks(uri),

@@ -8,7 +8,7 @@
     <div class="showcase-content" data-row="{{ row.data }}" data-kind="album">
       <div class="showcase-heading"><span class="eyebrow">{{ section.title }}</span>{% if row.menu.radio.is_some() %}{% call m::action(localization::tr("Album radio"), "rufin-audio-only-symbolic", "radio", "icon-button") %}{% endcall %}{% endif %}</div>
       <h2 class="showcase-title">{{ row.title }}</h2>
-      <button type="button" class="metadata-link" data-action="artists">{{ row.artist() }}</button>
+      <button type="button" class="metadata-link" data-action="link" data-field="artist">{{ row.artist() }}</button>
       <div class="showcase-summary">
         {% if row.year() > 0 %}<span>{% call m::icon("rufin-x-office-calendar-symbolic") %}{% endcall %}{{ row.year() }}</span>{% endif %}
         <span>{% call m::icon("rufin-tracks-symbolic") %}{% endcall %}{{ row.track_count() }}</span>

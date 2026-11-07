@@ -339,7 +339,7 @@ pub(super) fn row_json(
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             let mut value = json!({"kind":"track","uri":track.media_uri,"object_id":track.object_id,"title":track.title,"artist":track.artist,"album":track.album,
                 "duration_ms":track.duration_millis,"track_number":track.track_number,"disc_number":track.disc_number,
-                "year":track.year,"favorite":track.state.favorite,"rating":track.state.rating,"source_id":track.source_id,"media":media::media_links(scope, &track.links, &track.album)});
+                "year":track.year,"favorite":track.state.favorite,"rating":track.state.rating,"source_id":track.source_id});
             if let Some(entry) = &track.entry {
                 value["id"] = json!(entry.key);
                 value["position"] = json!(entry.position);
@@ -388,7 +388,59 @@ pub(super) fn row_json(
     if let Some(pin) = row.pin() {
         value["pin"] = json!(pin);
     }
+    links(products, scope, row, &mut value);
     value
+}
+
+/// What a row's linked texts and Go to menu open, in the source and music folder of `scope`:
+/// `links`, the pages of each linked field's spans by field, as core links them, and `go_to`,
+/// the destinations core's Go to lists that a browser opens.
+pub(super) fn links(products: &ProductHandles, scope: &PageToken, row: &Row, value: &mut Value) {
+    use rufin_core::{menu::GoTo, route::detail_links};
+    let page = |route| scope.at(browser::web_page(route));
+    let fields = match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => [
+            ("artist", LibraryField::Artist),
+            ("album_artist", LibraryField::AlbumArtist),
+            ("album", LibraryField::Album),
+        ]
+        .map(|(name, field)| {
+            let text = rufin_core::settings::presentation::row_field(row, field);
+            let links = &track.links;
+            let album = links.album_media_uri.as_deref();
+            let spans = detail_links::metadata_links(
+                field,
+                &text,
+                album,
+                &links.artists,
+                &links.album_artists,
+            );
+            (name, spans)
+        })
+        .to_vec(),
+        Row::Album(album) | Row::AlbumHeading(album) => {
+            let artists = detail_links::album_row_artist_links(album);
+            vec![("artist", artists.clone()), ("album_artist", artists)]
+        }
+        _ => Vec::new(),
+    };
+    let fields = fields.into_iter().map(|(name, links)| {
+        let spans = links.spans().iter().map(|span| {
+            json!({"name":links.display_text().get(span.range.clone()),"page":page(span.route.clone())})
+        });
+        (name.to_owned(), spans.collect())
+    });
+    value["links"] = Value::Object(fields.collect());
+    let go_to = rufin_core::menu::go_to(&products.source, row)
+        .into_iter()
+        .filter_map(|target| match target {
+            GoTo::Artist(name, route) => Some(json!({"name":name,"page":page(route)})),
+            GoTo::Album(route) => Some(json!({"page":page(route)})),
+            GoTo::Source(link) => link
+                .url
+                .map(|url| json!({"title":localization::tr(link.title),"url":url})),
+        });
+    value["go_to"] = json!(go_to.collect::<Vec<_>>());
 }
 
 /// What a row shows for `fields`, as `[{field, text}]`.

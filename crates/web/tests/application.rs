@@ -862,17 +862,6 @@ async fn exercise_http_api(
         .await["favorite"],
         true
     );
-    let metadata = client
-        .get(format!("{base}/media"))
-        .bearer_auth(token)
-        .query(&[("uri", uri)])
-        .send()
-        .await
-        .unwrap()
-        .json::<Value>()
-        .await
-        .unwrap();
-    assert_eq!(metadata["favorite"], true);
     for include_current in [false, true] {
         settings
             .set_clear_queue_includes_current(include_current)

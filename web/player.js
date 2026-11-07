@@ -14,7 +14,7 @@ import {
 
 import { api, session, state } from "./connection.js";
 
-import { goToMedia, markCurrent, setFavorite } from "./library.js";
+import { markCurrent, openLinks, setFavorite } from "./library.js";
 import { showQueueMenu } from "./queue.js";
 
 let receivedAt = 0;
@@ -322,13 +322,12 @@ function init() {
       run(() => showQueueMenu(state.playback.current, $("player-menu")));
   });
   new ResizeObserver(scrollLyrics).observe($("lyrics"));
-  for (const [id, kind] of [
-    ["player-artist", "artists"],
-    ["player-album", "albums"],
+  for (const [id, field] of [
+    ["player-artist", "artist"],
+    ["player-album", "album"],
   ]) {
     $(id).addEventListener("click", () => {
-      if (state.playback?.current?.track)
-        run(() => goToMedia(state.playback.current.track, kind, $(id)));
+      if (state.playback?.current?.track) openLinks(state.playback.current.track, field, $(id));
     });
   }
   $("play-pause").addEventListener("click", () =>

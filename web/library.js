@@ -24,7 +24,6 @@ import {
   showMenu,
   playRadio,
   goToMenu,
-  mediaLinks,
 } from "./menus.js";
 
 import { renderSources, sources, updateSources } from "./sources.js";
@@ -430,26 +429,12 @@ async function setFavorite(row, kind = "track") {
     if (node.dataset.favoriteUri === row.uri) showFavorite(node, result.favorite);
 }
 
-async function goToMedia(row, kind, anchor, rowKind = "track") {
-  const metadata = await mediaLinks(row, rowKind);
-  const links =
-    kind === "albums" ? [metadata.album].filter(Boolean) : metadata.artists;
-  const open = (link) => openMediaLink(link);
-  if (links.length === 1) open(links[0]);
-  else if (links.length)
-    showMenu(
-      links.map((link) => [link.name || link.title, () => open(link)]),
-      anchor,
-    );
-  else
-    notice(
-      kind === "albums" ? tr("Album unavailable") : tr("Artist unavailable"),
-    );
-}
-
-// Opens the page of an album or artist link.
-function openMediaLink(link) {
-  navigate(link.page);
+// Opens what a row's linked field names: its one page, or a menu of them.
+function openLinks(row, field, anchor) {
+  const links = row.links?.[field] || [];
+  if (links.length === 1) navigate(links[0].page);
+  else if (links.length) showMenu(links.map((link) => [link.name, () => navigate(link.page)]), anchor);
+  else notice(field === "album" ? tr("Album unavailable") : tr("Artist unavailable"));
 }
 
 // The selected rows as ordered [start, end) ranges, and the row Shift selects from.
@@ -514,7 +499,7 @@ async function showTrackMenu(index, row, anchor, event) {
       tr("Remove from Playlist"),
       () => api("/playlists/entries", "DELETE", { id: opened.route.PlaylistDetail, ...media }),
     ]);
-  const destination = menu.go_to && await goToMenu(row);
+  const destination = menu.go_to && goToMenu(row);
   if (destination) actions.push(null, destination);
   showMenu(actions, anchor, event);
 }
@@ -542,7 +527,7 @@ function bindTracks(host, signal) {
             if (action === "next" || action === "append") return playUris([row.uri], action);
             if (action === "favorite") return setFavorite(row);
             if (action === "menu") return showTrackMenu(index, row, button);
-            return goToMedia(row, action, button);
+            return openLinks(row, button.dataset.field, button);
           });
         } else if (event.detail < 2) selectTrack(index, event);
       },
@@ -714,10 +699,8 @@ function bindCards(host) {
               await api(`/playlists?id=${row.id}`, "DELETE");
           },
         ]);
-      if (options.go_to) {
-        const destination = await goToMenu(row, kind);
-        if (destination) actions.push(null, destination);
-      }
+      const destination = options.go_to && goToMenu(row);
+      if (destination) actions.push(null, destination);
       showMenu(actions, anchor, event);
     };
     card.addEventListener("click", (event) => {
@@ -727,8 +710,7 @@ function bindCards(host) {
       const action = button.dataset.action;
       run(() => {
         if (action === "open") return open();
-        if (action === "artists" || action === "albums")
-          return goToMedia(row, action, button, kind);
+        if (action === "link") return openLinks(row, button.dataset.field, button);
         if (action === "favorite") return setFavorite(row, kind);
         if (action === "radio") return playRadio(row.menu.radio);
         if (action === "menu") return menu(button);
@@ -869,9 +851,8 @@ function disposeHome() {
 
 export {
   cardCover,
-  openMediaLink,
   init,
-  goToMedia,
+  openLinks,
   loadView,
   markCurrent,
   navigate,

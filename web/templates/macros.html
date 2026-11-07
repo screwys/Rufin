@@ -32,7 +32,7 @@
     </div>
   </div>
   {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="collection-title" data-action="open">{{ row.title }}</button>{% else %}<a class="collection-title" href="{{ row.href }}" data-action="open">{% if row.kind() == "playlist-folder" %}{% call icon("rufin-folders-symbolic") %}{% endcall %}{% endif %}{{ row.title }}</a>{% endif %}
-  {% for (field, text) in row.labels() %}{% if field == LibraryField::Artist || field == LibraryField::AlbumArtist %}<button type="button" class="metadata-link" data-action="artists">{{ text }}</button>{% else if field == LibraryField::Album %}<button type="button" class="metadata-link" data-action="albums">{{ text }}</button>{% else %}<p>{{ text }}</p>{% endif %}{% endfor %}
+  {% for (field, text) in row.labels() %}{% if field == LibraryField::Artist || field == LibraryField::AlbumArtist %}<button type="button" class="metadata-link" data-action="link" data-field="{% if field == LibraryField::AlbumArtist %}album_artist{% else %}artist{% endif %}">{{ text }}</button>{% else if field == LibraryField::Album %}<button type="button" class="metadata-link" data-action="link" data-field="album">{{ text }}</button>{% else %}<p>{{ text }}</p>{% endif %}{% endfor %}
   {% call media_menu(row) %}{% endcall %}
   </form>
 </article>

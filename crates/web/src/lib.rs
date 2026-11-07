@@ -716,7 +716,9 @@ fn track_json(
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"media":media::media_links(scope, &track.links, &track.metadata.album)});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite});
+    let links = library::Row::Track(library::TrackRow::from(track.clone()));
+    page::links(products, scope, &links, &mut row);
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }

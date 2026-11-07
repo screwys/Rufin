@@ -1,7 +1,7 @@
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { loadView, openMediaLink } from "./library.js";
+import { loadView, navigate } from "./library.js";
 
 import { $, button, el, icon, run, notice } from "./ui.js";
 import { sourceIcon } from "./sources.js";
@@ -151,41 +151,13 @@ function playlistMenu(target) {
   ];
 }
 
-// The album and artists a row links to: track rows carry them, albums ask the server in the
-// source and music folder of the page the album opens.
-async function mediaLinks(row, kind = "track") {
-  if (kind !== "track")
-    return api(`/media?${new URLSearchParams({ uri: row.uri, page: JSON.stringify(row.page) })}`);
-  return row.media;
-}
-
-async function goToMenu(row, kind = "track") {
-  if (kind === "artist")
-    return [
-      tr("Go to"),
-      null,
-      "rufin-external-link-compact-symbolic",
-      [
-        [
-          tr("Go to {artist}", { artist: row.name }),
-          () => openMediaLink(row),
-          "rufin-artists-symbolic",
-        ],
-      ],
-    ];
-  const metadata = await mediaLinks(row, kind);
-  const items = metadata.artists.map((artist) => [
-    tr("Go to {artist}", { artist: artist.name }),
-    () => openMediaLink(artist),
-    "rufin-artists-symbolic",
-  ]);
-  const album = kind === "album" ? row : metadata.album;
-  if (album)
-    items.push([
-      tr("Go to Album"),
-      () => openMediaLink(album),
-      "rufin-albums-symbolic",
-    ]);
+// Go to on a row: the artists, album and server page core lists for it.
+function goToMenu(row) {
+  const items = (row.go_to || []).map((target) => {
+    if (target.url) return [target.title, () => open(target.url, "_blank", "noopener"), "rufin-external-link-compact-symbolic"];
+    if (target.name) return [tr("Go to {artist}", { artist: target.name }), () => navigate(target.page), "rufin-artists-symbolic"];
+    return [tr("Go to Album"), () => navigate(target.page), "rufin-albums-symbolic"];
+  });
   return items.length ? [tr("Go to"), null, "rufin-external-link-compact-symbolic", items] : null;
 }
 
@@ -486,7 +458,6 @@ function init() {
 export {
   openPlaylistTransfer,
   goToMenu,
-  mediaLinks,
   closeMenus,
   openName,
   playRadio,

@@ -1,7 +1,7 @@
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { setFavorite, goToMedia } from "./library.js";
+import { setFavorite, openLinks } from "./library.js";
 
 import { playlistMenu, radioMenu, showMenu, goToMenu } from "./menus.js";
 
@@ -111,7 +111,7 @@ function showQueue(value) {
     const metadata = el("div", "queue-track");
     const artist = button(
       row.track.artist || tr("Unknown artist"),
-      () => goToMedia(row.track, "artists", artist),
+      () => openLinks(row.track, "artist", artist),
       null,
       "metadata-link queue-artist",
     );
@@ -178,12 +178,8 @@ function showQueue(value) {
   }
 }
 
-async function showQueueMenu(row, anchor, event) {
-  const metadata = await api(
-    `/media?${new URLSearchParams({ uri: row.track.uri })}`,
-  );
-  const track = { ...row.track, favorite: metadata.favorite };
-  const destination = await goToMenu(track);
+function showQueueMenu(row, anchor, event) {
+  const track = row.track, destination = goToMenu(track);
   showMenu(
     [
       [tr("Play"), () => api("/queue/activate", "POST", { position: row.position })],
