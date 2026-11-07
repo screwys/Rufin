@@ -34,6 +34,8 @@ let viewRequest = null;
 
 // The page shown: its token as the server resolved it, or "sources".
 let opened = null;
+// `token` without the read it names, so its page reads anew.
+const anew = (token) => ({ ...token, options: { ...token.options, read: undefined } });
 
 // What the page's fragment says of itself: its title, Back page, navigation entry, order and
 // actions.
@@ -55,9 +57,11 @@ let libraryTotal = null;
 let listPosition = () => 0;
 
 // Pages the list of `token` in windows as it scrolls, from row `at`; `extra` parameters, such
-// as a new order, apply to the first window, which names the page as it opened.
+// as a new order, apply to the first window, which reads the page anew and names it as it
+// opened.
 async function loadLibrary(token, extra, signal, initialPage, at) {
   signal.throwIfAborted();
+  token = anew(token);
   const content = $("content"), scroller = $("main"), pages = new Map();
   const before = el("div"), after = el("div");
   before.setAttribute("aria-hidden", "true");
@@ -367,7 +371,7 @@ async function loadView(initial = false, extra = {}, at = null) {
     }
     if (opened.route === "Home") {
       if (!initial)
-        await fragment(`/api/page?${new URLSearchParams({ page: JSON.stringify(opened) })}`, $("content"), signal);
+        await fragment(`/api/page?${new URLSearchParams({ page: JSON.stringify(anew(opened)) })}`, $("content"), signal);
       const home = $("content").querySelector("[data-page]").dataset;
       showPage(home);
       bindHome(signal, offsets);

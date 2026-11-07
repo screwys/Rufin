@@ -51,6 +51,13 @@ impl PageToken {
         }
     }
 
+    /// This page without the read it names.
+    pub fn anew(&self) -> Self {
+        let mut page = self.clone();
+        page.options.read = None;
+        page
+    }
+
     pub fn json(&self) -> String {
         serde_json::to_string(self).expect("page token")
     }
@@ -236,10 +243,12 @@ pub(super) async fn open(
         .await
         .map_err(read_error)?;
     // A smart playlist page keeps the time it opened at, and every page the order it opened
-    // in, so its later windows read in it whatever the saved order becomes.
+    // in and its read, so its later windows read in it whatever the saved order becomes and
+    // its plays are of the read it shows.
     let (sort, descending) = opened.view.order();
     let mut options = opened.view.options().clone();
     (options.sort, options.descending) = (Some(sort), Some(descending));
+    options.read = Some(opened.view.read());
     let token = PageToken { options, ..token };
     let missed = reading.missed().map(|missed| {
         let mut value = json!({});

@@ -60,6 +60,9 @@ pub struct OpenOptions {
     pub smart_opened: Option<i64>,
     /// The layout the page shows when not the saved one: the web shows lists as cards.
     pub layout: Option<LibraryLayout>,
+    /// The read this open continues, which its plays carry: a web page's later windows and
+    /// plays reopen it. A new read when `None`.
+    pub read: Option<u64>,
 }
 
 impl Default for OpenOptions {
@@ -76,6 +79,7 @@ impl Default for OpenOptions {
             release_filters: None,
             smart_opened: None,
             layout: None,
+            read: None,
         }
     }
 }
@@ -792,7 +796,8 @@ async fn read(
 ) -> LibraryResult<Opened> {
     let catalog = Arc::clone(&view.owner.shared.catalog);
     static READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    view.read = READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    view.read = (view.options.read)
+        .unwrap_or_else(|| READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let named = header.is_some();
     view.header = header.or(view.header);
     let (header, first, rows, favorites) = match plan {
@@ -987,6 +992,11 @@ impl View {
 
     pub fn options(&self) -> &OpenOptions {
         &self.options
+    }
+
+    /// This read's identity, which [`OpenOptions::read`] continues.
+    pub fn read(&self) -> u64 {
+        self.read
     }
 
     /// Whether this view lists what `previous` listed: read again for a committed change,

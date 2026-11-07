@@ -1023,7 +1023,9 @@ impl Pages {
         Some((
             stream,
             *reads,
-            shown.as_ref().is_some_and(|(page, _)| page == token),
+            shown
+                .as_ref()
+                .is_some_and(|(page, _)| page.anew() == token.anew()),
         ))
     }
 
