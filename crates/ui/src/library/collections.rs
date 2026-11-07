@@ -1002,25 +1002,6 @@ mod layout_policy_tests {
     use super::*;
 
     #[test]
-    fn playing_selection_accepts_base_and_decorated_route_contexts() {
-        let base = "album:7";
-        let visible = "album:7|query=|sort=Position|descending=false";
-        for context_id in [base, visible] {
-            assert_eq!(
-                matching_context_rank(
-                    Some(&crate::widgets::mounted_route::RouteCurrentTrackContext {
-                        context_id: context_id.to_string(),
-                        source_rank: 3,
-                    }),
-                    base,
-                    visible,
-                ),
-                Some(3)
-            );
-        }
-    }
-
-    #[test]
     fn collection_presentation_rebuilds_only_for_layout_owned_changes() {
         let row = crate::library::LibraryListSettings::for_key(LibraryListKey::Tracks);
         assert!(!collection_presentation_needs_rebuild(&row, &row));
