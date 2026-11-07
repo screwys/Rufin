@@ -741,9 +741,29 @@ async fn native_states(
         rows: &[(&str, &NativeUserState)],
         state: fn(&mut R) -> &mut NativeState,
     ) -> LibraryResult<()> {
-        let rows = rows
+        // Only rows whose stored state the incoming one changes are read and written.
+        let incoming = rows
             .iter()
             .filter(|(_, incoming)| **incoming != NativeUserState::default())
+            .map(|(object, state)| {
+                let rating = state.rating.map(|rating| rating.unwrap_or(-1));
+                (
+                    object,
+                    state.favorite,
+                    rating,
+                    state.play_count,
+                    state.last_played,
+                )
+            })
+            .collect::<Vec<_>>();
+        let objects: HashSet<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH incoming(object,favorite,rating,plays,played) AS(SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]') FROM json_each(?2))
+            SELECT row.object_id FROM incoming CROSS JOIN {} row ON row.source_key=?1 AND row.object_id=incoming.object
+            WHERE incoming.favorite IS NOT NULL AND incoming.favorite IS NOT row.native_favorite OR incoming.rating IS NOT NULL AND incoming.rating IS NOT coalesce(row.native_rating,-1)
+            OR incoming.plays IS NOT NULL AND incoming.plays IS NOT row.native_play_count OR incoming.played IS NOT NULL AND incoming.played IS NOT row.native_last_played", R::TABLE.name)))
+            .bind(source).bind(serde_json::to_string(&incoming)?).fetch_all(write.connection().await?).await?.into_iter().collect();
+        let rows = rows
+            .iter()
+            .filter(|(object, _)| objects.contains(*object))
             .collect::<Vec<_>>();
         let objects = rows.iter().map(|(object, _)| *object).collect::<Vec<_>>();
         write.read_objects::<R>(source, None, &objects).await?;
