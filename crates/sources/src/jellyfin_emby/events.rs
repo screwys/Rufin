@@ -86,19 +86,11 @@ impl JellyfinEmbySource {
     pub(crate) async fn listen_library_changes(
         &self,
         on_ready: &mut (dyn FnMut() -> bool + Send),
-        on_gap: &mut (dyn FnMut() -> bool + Send),
         on_change: &mut (dyn FnMut(RemoteItemChange) -> bool + Send),
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
-        let mut boundary_established = false;
-        let mut gap_reported = false;
         loop {
-            let ready = &mut || {
-                boundary_established = true;
-                gap_reported = false;
-                on_ready()
-            };
-            let keep_listening = match self.listen_library_changes_once(ready, on_change).await {
+            let keep_listening = match self.listen_library_changes_once(on_ready, on_change).await {
                 Ok(keep_listening) => keep_listening,
                 Err(error) => {
                     warn!(%error, "Library change feed disconnected");
@@ -107,12 +99,6 @@ impl JellyfinEmbySource {
             };
             if !keep_listening {
                 return Ok(());
-            }
-            if boundary_established && !gap_reported {
-                gap_reported = true;
-                if !on_gap() {
-                    return Ok(());
-                }
             }
             sleep(delay).await;
             delay = delay.saturating_mul(2).min(FEED_RETRY_MAX);

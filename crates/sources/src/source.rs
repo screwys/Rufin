@@ -2336,17 +2336,13 @@ impl Source {
                         ready_feed
                             .submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
                     };
-                    let gap_feed = Arc::clone(&producer);
-                    let mut gap = move || {
-                        gap_feed.submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
-                    };
                     let change_feed = Arc::clone(&producer);
                     let mut changed =
                         move |change| change_feed.submit(SelectedFeedChange::Remote(change));
                     let result = match &producer.source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider
-                                .listen_library_changes(&mut ready, &mut gap, &mut changed)
+                                .listen_library_changes(&mut ready, &mut changed)
                                 .await
                         }
                         _ => return,
