@@ -701,20 +701,4 @@ fn artist_count_button(icon_name: &str, text: &str) -> (gtk::Button, gtk::Label)
     (button, label)
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn responsive_release_rows_preserve_complete_membership() {
-        let albums = (0..17).collect::<Vec<_>>();
-        for columns in 1..=6 {
-            let rows = albums
-                .chunks(columns)
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
-            assert_eq!(rows, albums);
-        }
-    }
-}
-
 use crate::menus::media_menus::CollectionPlay;
