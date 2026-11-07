@@ -600,25 +600,33 @@ impl SubsonicSource {
         )
         .await
     }
-    /// One updatePlaylist: removes the entries at these indexes of the server's order, then
-    /// appends these tracks. A move removes the tail from its lower index and appends it again.
+    /// Removes the entries at these indexes of the server's order, then appends these tracks.
+    /// A move removes the tail from its lower index and appends it again. With formPost it is
+    /// one updatePlaylist; without, the fields go in the URL, so they go in calls of 256,
+    /// removals from the highest index so the lower ones stay in place.
     pub async fn edit_playlist_entries(
         &self,
         playlist_id: &str,
         remove: &[usize],
         add: &[String],
     ) -> SourceResult<()> {
-        let mut extra = vec![("playlistId", raw_item_id(playlist_id).to_string())];
-        extra.extend(
-            remove
-                .iter()
-                .map(|index| ("songIndexToRemove", index.to_string())),
-        );
-        extra.extend(
-            add.iter()
-                .map(|track_id| ("songIdToAdd", raw_item_id(track_id).to_string())),
-        );
-        self.change("updatePlaylist", &extra).await.map(drop)
+        let form = self.extension_version("formPost").await.unwrap_or_default() > 0;
+        let mut remove = remove.to_vec();
+        remove.sort_unstable_by(|a, b| b.cmp(a));
+        let fields = remove
+            .iter()
+            .map(|index| ("songIndexToRemove", index.to_string()))
+            .chain(
+                add.iter()
+                    .map(|track_id| ("songIdToAdd", raw_item_id(track_id).to_string())),
+            )
+            .collect::<Vec<_>>();
+        for fields in fields.chunks(if form { fields.len().max(1) } else { 256 }) {
+            let mut extra = vec![("playlistId", raw_item_id(playlist_id).to_string())];
+            extra.extend_from_slice(fields);
+            self.change("updatePlaylist", &extra).await?;
+        }
+        Ok(())
     }
 
     /// A call that changes the server. With formPost its fields go in the body, so a long list
