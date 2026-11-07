@@ -310,7 +310,7 @@ impl Records {
     pub(super) async fn load_devices(&self) -> Result<(), String> {
         let devices = self
             .store
-            .bodies("device")
+            .bodies("device:")
             .await
             .map_err(string_error)?
             .into_iter()

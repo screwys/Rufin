@@ -122,7 +122,7 @@ impl Records {
     pub(super) async fn load_sessions(&self) -> Result<(), String> {
         self.remember_sessions(
             self.store
-                .bodies("session")
+                .bodies("session:")
                 .await
                 .map_err(string_error)?
                 .into_iter()
@@ -353,14 +353,12 @@ impl Records {
         else {
             return Ok(None);
         };
-        let id = format!("queue:{device}");
         let Some(queue) = self
             .store
-            .bodies("queue")
+            .bodies(&format!("queue:{device}"))
             .await
             .map_err(string_error)?
-            .into_iter()
-            .find(|row| row.id == id)
+            .pop()
             .and_then(|row| serde_json::from_value::<QueueValue>(row.value?).ok())
             .filter(|queue| queue.revision == session.queue_revision)
         else {

@@ -259,9 +259,9 @@ impl Store {
         Ok(rows.into_iter().collect())
     }
 
-    /// The live records of a kind that hold their value.
-    pub async fn bodies(&self, kind: &str) -> Result<Vec<Row>> {
-        let (start, end) = kind_range(kind);
+    /// The live records whose id starts with `prefix`, such as `<kind>:`, that hold their value.
+    pub async fn bodies(&self, prefix: &str) -> Result<Vec<Row>> {
+        let (start, end) = (prefix, format!("{prefix}\u{10ffff}"));
         sqlx::query(rows!(
             " WHERE id>=?1 AND id<?2 AND deleted=0 AND body IS NOT NULL"
         ))
