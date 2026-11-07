@@ -924,7 +924,7 @@ impl Catalog {
         drop(writer);
         match sealed {
             Ok(stamp) => {
-                if let Err(error) = image::write(&self.inner.store.path, &snapshot, &stamp) {
+                if let Err(error) = image::write(&self.inner.store.path, snapshot, &stamp) {
                     tracing::debug!(%error, "could not write the Catalog image");
                 }
             }

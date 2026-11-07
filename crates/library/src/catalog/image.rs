@@ -443,13 +443,19 @@ fn decode(bytes: &[u8]) -> Option<Snapshot> {
     input.0.is_empty().then_some(snapshot)
 }
 
-/// Writes the image beside the Store, replacing the previous one only once it is complete.
-pub(crate) fn write(store: &Path, snapshot: &Snapshot, stamp: &Stamp) -> std::io::Result<()> {
+/// Writes the image beside the Store, replacing the previous one only once it is complete. The
+/// Catalog is released once the image is in the page cache, before it is flushed to disk.
+pub(crate) fn write(
+    store: &Path,
+    snapshot: std::sync::RwLockReadGuard<'_, Snapshot>,
+    stamp: &Stamp,
+) -> std::io::Result<()> {
     let target = path(store);
     let partial = target.with_extension("image-partial");
     let mut file = std::io::BufWriter::new(std::fs::File::create(&partial)?);
     file.write_all(&header(stamp))?;
-    let file = encode(snapshot, stamp, file)?.into_inner()?;
+    let file = encode(&snapshot, stamp, file)?.into_inner()?;
+    drop(snapshot);
     file.sync_data()?;
     drop(file);
     std::fs::rename(partial, target)
