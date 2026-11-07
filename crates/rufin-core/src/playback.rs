@@ -1210,7 +1210,10 @@ where
     source
         .stream(playable, request)
         .await
-        .map_err(|error| failure(error.to_string()))
+        .map_err(|error| match error {
+            sources::SourceError::NotFound => unavailable(),
+            error => failure(error.to_string()),
+        })
 }
 
 /// A playable's local copies in the order playback tries them.
