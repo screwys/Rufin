@@ -35,40 +35,31 @@ use rufin_core::settings::presentation::{album_field, artist_field};
 
 const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 
-pub fn bind_collection_title<T: Clone + 'static>(
+/// What a collection title cell of `factory` shows as playing: a step of the column's one
+/// render, given the item, its label and what the row plays.
+pub fn collection_title_playing(
     factory: &gtk::SignalListItemFactory,
     shell: &Rc<CatalogUi>,
-    target: impl Fn(&T) -> Option<PlayTarget> + 'static,
-) {
+) -> Rc<dyn Fn(&gtk::ListItem, &gtk::Label, Option<PlayTarget>)> {
     let bindings = Rc::new(RefCell::new(HashMap::<
         usize,
         Rc<super::grid_cells::MediaPlayingBinding>,
     >::new()));
-    let bind_cells = Rc::clone(&bindings);
-    let shell = Rc::clone(shell);
-    connect_row_bind(factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
-            return;
-        };
-        let binding = bind_cells
-            .borrow_mut()
-            .entry(item.as_ptr() as usize)
-            .or_insert_with(|| super::grid_cells::MediaPlayingBinding::new(&shell, &cell.label()))
-            .clone();
-        let target = item
-            .item()
-            .and_then(|object| object_item::<T, _>(object, &target))
-            .flatten();
-        binding.bind(&shell, target);
-    });
+    let unbind = Rc::clone(&bindings);
     factory.connect_unbind(move |_, item| {
-        if let Some(binding) = bindings.borrow_mut().remove(&(item.as_ptr() as usize)) {
+        if let Some(binding) = unbind.borrow_mut().remove(&(item.as_ptr() as usize)) {
             binding.refresh(None);
         }
     });
+    let shell = Rc::clone(shell);
+    Rc::new(move |item, label, target| {
+        let binding = bindings
+            .borrow_mut()
+            .entry(item.as_ptr() as usize)
+            .or_insert_with(|| super::grid_cells::MediaPlayingBinding::new(&shell, label))
+            .clone();
+        binding.bind(&shell, target);
+    })
 }
 
 mod collection_index_cell_imp {
@@ -1004,11 +995,8 @@ where
     F: Fn(&ArtistRow) -> String + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
-    if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
-        bind_collection_title::<ArtistRow>(&factory, shell, move |row| {
-            Some(PlayTarget::of_artist(row))
-        });
-    }
+    let playing = matches!(field, LibraryField::Title | LibraryField::TitleMerged)
+        .then(|| collection_title_playing(&factory, shell));
     let shell = Rc::clone(shell);
     let value = Rc::new(value);
 
@@ -1031,9 +1019,23 @@ where
         let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
             return;
         };
-        let Some((text, downloaded)) = item.item().and_then(|object| {
-            object_item::<ArtistRow, _>(object, |row| (value(row), row.summary.downloaded()))
-        }) else {
+        let shown = item.item().and_then(|object| {
+            object_item::<ArtistRow, _>(object, |row| {
+                (
+                    value(row),
+                    row.summary.downloaded(),
+                    PlayTarget::of_artist(row),
+                )
+            })
+        });
+        if let Some(playing) = &playing {
+            playing(
+                item,
+                &cell.label(),
+                shown.as_ref().map(|(.., target)| target.clone()),
+            );
+        }
+        let Some((text, downloaded, _)) = shown else {
             cell.clear();
             return;
         };

@@ -636,7 +636,7 @@ fn named_collection_column<T: NamedCollectionRow>(
         ),
         LibraryField::Title | LibraryField::TitleMerged => {
             let factory = gtk::SignalListItemFactory::new();
-            super::columns::bind_collection_title::<T>(&factory, shell, move |row| row.playback());
+            let playing = super::columns::collection_title_playing(&factory, shell);
             let setup_shell = Rc::clone(shell);
             factory.connect_setup(move |_, item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -660,7 +660,9 @@ fn named_collection_column<T: NamedCollectionRow>(
                 let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
                     return;
                 };
-                let Some(row) = item_at_from_item::<T>(item) else {
+                let row = item_at_from_item::<T>(item);
+                playing(item, &cell.label(), row.as_ref().and_then(T::playback));
+                let Some(row) = row else {
                     cell.clear();
                     return;
                 };
