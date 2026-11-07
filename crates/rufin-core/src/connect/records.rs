@@ -563,8 +563,8 @@ impl Records {
                         entries.push(*key);
                     }
                 }
-                // Playlists were added or removed, and their entries with them.
-                Scope::Playlists => kinds.extend(["playlist", "entry", "artwork"]),
+                // A removed playlist's entries go with it; the next full pass tombstones them.
+                Scope::Playlists => kinds.push("playlist"),
                 Scope::Smart { object, .. } => smart.push(object.clone()),
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Analysis { hash } => hashes.push(*hash),
