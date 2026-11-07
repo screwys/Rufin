@@ -111,7 +111,7 @@ pub struct LocalSource {
     roots: Vec<PathBuf>,
     excluded_folders: Vec<PathBuf>,
     pub(crate) documents: Vec<crate::file::remote::FileSource>,
-    artwork: walk::ArtworkState,
+    pub(crate) artwork: walk::ArtworkState,
 }
 
 impl LocalSource {

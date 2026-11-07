@@ -255,7 +255,7 @@ fn within(row: &StoredFile, root: &str, key: &str) -> bool {
 }
 
 /// The directory of a file path or location, as the artwork pass matches track paths.
-fn parent_directory(path: &str) -> Option<String> {
+pub(crate) fn parent_directory(path: &str) -> Option<String> {
     if let Ok(mut uri) = url::Url::parse(path)
         && uri.path_segments().is_some()
     {
@@ -1078,12 +1078,13 @@ impl<F: FileSource> Walker<'_, '_, F> {
     }
 }
 
-/// The directories a cancelled walk left without their folder artwork, for the next pass.
+/// The directories a cancelled walk or a tag save left without their folder artwork, for the
+/// next pass.
 #[derive(Default)]
 pub(crate) struct ArtworkState(Mutex<BTreeSet<String>>);
 
 impl ArtworkState {
-    fn defer(&self, mut directories: BTreeSet<String>) {
+    pub(crate) fn defer(&self, mut directories: BTreeSet<String>) {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())

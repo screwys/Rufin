@@ -470,7 +470,7 @@ impl PreparedFile {
         observation: &mut library::Observation<'_>,
     ) -> Result<(), Error> {
         let saved = self.read_catalog(source, observation).await?;
-        publish_saved_files(observation, &mut vec![saved]).await
+        publish_saved_files(source, observation, &mut vec![saved]).await
     }
 }
 
@@ -479,7 +479,9 @@ struct SavedFile {
     facts: library::TrackObservation,
 }
 
+/// Publishes saved files; their folders' artwork is read by the source's next artwork pass.
 async fn publish_saved_files(
+    source: &Source,
     observation: &mut library::Observation<'_>,
     pending: &mut Vec<SavedFile>,
 ) -> Result<(), Error> {
@@ -491,10 +493,20 @@ async fn publish_saved_files(
         batch.files.extend(saved.observation);
         batch.tracks.push(saved.facts);
     }
+    let directories = batch
+        .files
+        .iter()
+        .filter_map(|file| crate::file::walk::parent_directory(&file.path))
+        .collect();
     observation
         .write_files(batch)
         .await
         .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+    match &source.implementation {
+        Implementation::Local(local) => local.artwork.defer(directories),
+        Implementation::Files(files) => files.artwork.defer(directories),
+        _ => {}
+    }
     Ok(())
 }
 
@@ -906,6 +918,7 @@ impl FileEditSession {
                                 );
                                 if pending.len() == 128 {
                                     publish_saved_files(
+                                        source,
                                         observation.as_mut().unwrap(),
                                         &mut pending,
                                     )
@@ -1017,7 +1030,12 @@ impl FileEditSession {
         }
         .await;
         let publication = if !pending.is_empty() {
-            publish_saved_files(observation.as_mut().unwrap(), &mut pending).await
+            publish_saved_files(
+                self.source.as_deref().unwrap(),
+                observation.as_mut().unwrap(),
+                &mut pending,
+            )
+            .await
         } else {
             Ok(())
         };
