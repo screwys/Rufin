@@ -45,15 +45,6 @@ msgstr ""
 "{listens} прослушиваний."
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-"Выбрать, где это устройство будет хранить локальную музыку, полученную через "
-"Connect. Соответствующие файлы, уже находящиеся в папке, будут использованы "
-"повторно; отсутствующие файлы будут загружены здесь."
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -153,13 +144,6 @@ msgstr ""
 "Локальные пути также могут быть абсолютными."
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-"Удалить локальный источник и его кэшированную библиотеку из Rufin? Ваши "
-"музыкальные файлы не будут удалены."
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -167,6 +151,22 @@ msgstr ""
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
+msgstr ""
+
+#, fuzzy
+#| msgid ""
+#| "Remove Local and its cached library from Rufin? Your music files will not "
+#| "be deleted."
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Удалить локальный источник и его кэшированную библиотеку из Rufin? Ваши "
+"музыкальные файлы не будут удалены."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
 msgstr ""
 
 msgid ""
@@ -242,13 +242,6 @@ msgid ""
 msgstr ""
 "Это принадлежит Rufin. Оно может включать элементы из всех настроенных "
 "источников, но не синхронизируется с удалёнными устройствами."
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr ""
-"Это удаляет сервер, кэшированные метаданные библиотеки, снимок очереди и "
-"сохраненный токен для"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -512,9 +505,6 @@ msgstr "Анонимный (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Анонимный"
 
-msgid "Another device"
-msgstr "Другое устройство"
-
 msgid "Any genre"
 msgstr "Любой жанр"
 
@@ -533,9 +523,6 @@ msgstr "Появляется в"
 msgid "Application name"
 msgstr "Название приложения"
 
-msgid "Applied"
-msgstr "Применено"
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Применяется отдельно к боковой панели и полноэкранному режиму"
 
@@ -544,11 +531,6 @@ msgstr "Применить шаблон"
 
 msgid "Apply"
 msgstr "Применить"
-
-#, fuzzy
-#| msgid "Join profile"
-msgid "Applying profile"
-msgstr "Присоединиться к профилю"
 
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердить вход в системе в вашем браузере"
@@ -753,9 +735,6 @@ msgstr "Синий"
 msgid "Brightness (%)"
 msgstr ""
 
-msgid "Browse"
-msgstr "Обзор"
-
 #, fuzzy
 #| msgid "Lyrics"
 msgid "By Lyrics"
@@ -859,11 +838,6 @@ msgstr "Каналы"
 
 msgid "Check for updates"
 msgstr "Проверить обновления"
-
-#, fuzzy
-#| msgid "Receiving profile"
-msgid "Checking profile"
-msgstr "Получение профиля"
 
 msgid "Choose Folder"
 msgstr "Выбрать Папку"
@@ -1077,9 +1051,6 @@ msgstr "Подтвердить"
 
 msgid "Connect a device"
 msgstr "Подключить устройство"
-
-msgid "Connect file"
-msgstr "Подключить файл"
 
 msgid "Connect is not enabled"
 msgstr "Подключение не включено"
@@ -1684,9 +1655,6 @@ msgstr "Всё, включая новые треки"
 msgid "Excluded folders"
 msgstr "Исключенные папки"
 
-msgid "Existing profile file"
-msgstr "Существующий файл профиля"
-
 msgid "Expand lyrics and visualizer"
 msgstr "Развернуть текст песни и визуализатор"
 
@@ -1718,9 +1686,6 @@ msgstr "Экспортировать плейлист"
 #| msgid "Export playlist"
 msgid "Export preset"
 msgstr "Экспортировать плейлист"
-
-msgid "Export to connection"
-msgstr "Экспорт в подключение"
 
 msgid "Export your listening history in Rufin"
 msgstr "Экспортируйте историю прослушиваний в Rufin"
@@ -1861,9 +1826,6 @@ msgstr "Найдите свой токен пользователя ListenBrainz
 msgid "Finding lyrics..."
 msgstr "Поиск текста песни..."
 
-msgid "Finishing setup"
-msgstr ""
-
 msgid "Fit to height"
 msgstr ""
 
@@ -1903,9 +1865,6 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Удалить источник"
-
-msgid "Forget \"{name}\"?"
-msgstr "Забыть \"{name}\"?"
 
 msgid "Format not supported"
 msgstr ""
@@ -2105,9 +2064,6 @@ msgstr "Импортировать резервную копию"
 msgid "Import Playlist"
 msgstr "Импортировать плейлист"
 
-msgid "Import from connection"
-msgstr "Импорт из подключения"
-
 #, fuzzy
 #| msgid "Import theme"
 msgid "Import preset"
@@ -2118,11 +2074,6 @@ msgstr "Импортировать тему"
 
 msgid "Import"
 msgstr "Импорт"
-
-#, fuzzy
-#| msgid "Join profile"
-msgid "Importing profile"
-msgstr "Присоединиться к профилю"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2173,9 +2124,6 @@ msgstr "Jellyfin"
 
 msgid "Join profile"
 msgstr "Присоединиться к профилю"
-
-msgid "Join using"
-msgstr "Подключиться, используя"
 
 msgid "Join"
 msgstr "Присоединиться"
@@ -2356,9 +2304,6 @@ msgstr[2] ""
 msgid "Local files and folders"
 msgstr "Локальные файлы и папки"
 
-msgid "Local folder"
-msgstr "Локальная папка"
-
 msgid "Local imports and access"
 msgstr "Локальные источники и доступ к ним"
 
@@ -2370,9 +2315,6 @@ msgstr "Локальная папка с музыкой недоступна"
 
 msgid "Local music folder"
 msgstr "Локальная папка с музыкой"
-
-msgid "Local music folders"
-msgstr "Локальный источник, папки с музыкой"
 
 msgid "Local network permission is required for remote connections"
 msgstr "Для удалённых подключений требуется разрешение локальной сети"
@@ -2762,9 +2704,6 @@ msgstr "Пока нет избранных артистов"
 msgid "No favorites yet"
 msgstr "Пока нет избранных"
 
-msgid "No file connections"
-msgstr "Нет подключений к файлам"
-
 msgid "No file linked"
 msgstr "Файл не привязан"
 
@@ -2876,6 +2815,11 @@ msgstr "Не играет"
 
 msgid "Nothing queued"
 msgstr "В очереди ничего нет"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Сейчас не играет"
 
 msgid "Notifications"
 msgstr "Уведомления"
@@ -3241,11 +3185,6 @@ msgstr "Предпочитать переводы"
 msgid "Preferences"
 msgstr "Настройки"
 
-#, fuzzy
-#| msgid "Receiving collection"
-msgid "Preparing collection"
-msgstr "Получение коллекции"
-
 msgid "Preparing library..."
 msgstr "Подготовка библиотеки…"
 
@@ -3313,9 +3252,6 @@ msgstr "Приватный режим"
 msgid "Profile PIN"
 msgstr "PIN-код профиля"
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-
 msgid "Profile up to date"
 msgstr "Профиль обновлен"
 
@@ -3374,9 +3310,6 @@ msgstr "Загрузка..."
 
 msgid "Ready"
 msgstr "Готово"
-
-msgid "Receiving collection"
-msgstr "Получение коллекции"
 
 msgid "Receiving profile"
 msgstr "Получение профиля"
@@ -3544,9 +3477,6 @@ msgstr "Удалить правило"
 msgid "Remove search"
 msgstr "Удалить из поиска"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-
 msgid "Remove unavailable tracks"
 msgstr "Удалить недоступные треки"
 
@@ -3609,16 +3539,6 @@ msgstr "Требовать шифрование SMB"
 
 msgid "Reset appearance"
 msgstr "Сбросить настройки внешнего вида"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database"
-msgstr "Дата выпуска"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database?"
-msgstr "Дата выпуска"
 
 msgid "Reset to defaults"
 msgstr "Восстановить настройки по умолчанию"
@@ -3779,11 +3699,6 @@ msgstr "Сохранено..."
 
 msgid "Saves lyrics to your source"
 msgstr "Сохраняет текст песни в источнике"
-
-#, fuzzy
-#| msgid "Search in page"
-msgid "Saving changes"
-msgstr "Поиск по странице"
 
 msgid "Saving..."
 msgstr "Сохранение..."
@@ -4180,6 +4095,9 @@ msgstr "Название песни"
 msgid "Song"
 msgstr "Песня"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 msgid "Sort by"
 msgstr "Сортировать по"
 
@@ -4305,6 +4223,11 @@ msgstr "Переключить панель"
 msgid "Switching library..."
 msgstr "Переключение библиотеки…"
 
+#, fuzzy
+#| msgid "Save in folder"
+msgid "Sync folder"
+msgstr "Сохранить в папке"
+
 msgid "Synced lyrics"
 msgstr "Синхронизированные тексты песен"
 
@@ -4344,6 +4267,9 @@ msgstr "Текст"
 msgid "The API token was not accepted. Please connect again."
 msgstr "Токен API не был принят. Пожалуйста, повторите подключение."
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
@@ -4362,10 +4288,18 @@ msgstr "Эти эмодзи соответствуют"
 msgid "This can be turned off after pairing if you want"
 msgstr "Это можно отключить после сопряжения, если вы хотите"
 
+#, fuzzy
+#| msgid "This removes the folder from the Local source"
+msgid "This device was removed from the profile"
+msgstr "Это удаляет папку из Локального источника"
+
 msgid "This device"
 msgstr "Это устройство"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+#, fuzzy
+#| msgid ""
+#| "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 "Это принадлежит {source}. Обычные плейлисты синхронизируются с вашим "
 "устройством."
@@ -4594,9 +4528,6 @@ msgstr "Использовать обложку каждого трека, ес�
 msgid "Use existing"
 msgstr "Использовать существующий"
 
-msgid "Use folder"
-msgstr "Использовать папку"
-
 msgid "Use for this output"
 msgstr ""
 
@@ -4613,6 +4544,11 @@ msgstr "Использовать максимальный год"
 
 msgid "Use minimum year"
 msgstr "Использовать минимальный год"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use sort tags"
+msgstr "Использовать настройки источника"
 
 msgid "Use source setting"
 msgstr "Использовать настройки источника"
@@ -4676,9 +4612,6 @@ msgstr "Шкала громкости"
 
 msgid "Volume"
 msgstr "Громкость"
-
-msgid "Waiting for a peer"
-msgstr "Ожидание подключения к другому устройству"
 
 msgid "Waiting for connection"
 msgstr "Ожидание подключения"
@@ -4880,12 +4813,6 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr ""
-
-msgid "{current} MiB"
-msgstr ""
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
@@ -4995,6 +4922,102 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid ""
+#~ "Choose where this device stores local music received through Connect. "
+#~ "Matching files already in the folder are reused; missing files are "
+#~ "downloaded here."
+#~ msgstr ""
+#~ "Выбрать, где это устройство будет хранить локальную музыку, полученную "
+#~ "через Connect. Соответствующие файлы, уже находящиеся в папке, будут "
+#~ "использованы повторно; отсутствующие файлы будут загружены здесь."
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "Это удаляет сервер, кэшированные метаданные библиотеки, снимок очереди и "
+#~ "сохраненный токен для"
+
+#~ msgid "Another device"
+#~ msgstr "Другое устройство"
+
+#~ msgid "Applied"
+#~ msgstr "Применено"
+
+#, fuzzy
+#~| msgid "Join profile"
+#~ msgid "Applying profile"
+#~ msgstr "Присоединиться к профилю"
+
+#~ msgid "Browse"
+#~ msgstr "Обзор"
+
+#, fuzzy
+#~| msgid "Receiving profile"
+#~ msgid "Checking profile"
+#~ msgstr "Получение профиля"
+
+#~ msgid "Connect file"
+#~ msgstr "Подключить файл"
+
+#~ msgid "Existing profile file"
+#~ msgstr "Существующий файл профиля"
+
+#~ msgid "Export to connection"
+#~ msgstr "Экспорт в подключение"
+
+#~ msgid "Forget \"{name}\"?"
+#~ msgstr "Забыть \"{name}\"?"
+
+#~ msgid "Import from connection"
+#~ msgstr "Импорт из подключения"
+
+#, fuzzy
+#~| msgid "Join profile"
+#~ msgid "Importing profile"
+#~ msgstr "Присоединиться к профилю"
+
+#~ msgid "Join using"
+#~ msgstr "Подключиться, используя"
+
+#~ msgid "Local folder"
+#~ msgstr "Локальная папка"
+
+#~ msgid "Local music folders"
+#~ msgstr "Локальный источник, папки с музыкой"
+
+#~ msgid "No file connections"
+#~ msgstr "Нет подключений к файлам"
+
+#, fuzzy
+#~| msgid "Receiving collection"
+#~ msgid "Preparing collection"
+#~ msgstr "Получение коллекции"
+
+#~ msgid "Receiving collection"
+#~ msgstr "Получение коллекции"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database"
+#~ msgstr "Дата выпуска"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database?"
+#~ msgstr "Дата выпуска"
+
+#, fuzzy
+#~| msgid "Search in page"
+#~ msgid "Saving changes"
+#~ msgstr "Поиск по странице"
+
+#~ msgid "Use folder"
+#~ msgstr "Использовать папку"
+
+#~ msgid "Waiting for a peer"
+#~ msgstr "Ожидание подключения к другому устройству"
 
 #, fuzzy
 #~| msgid "Upload artwork"
@@ -5730,9 +5753,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "This removes cached library metadata for"
 #~ msgstr "Это удаляет кэшированные метаданные библиотеки для"
-
-#~ msgid "This removes the folder from the Local source"
-#~ msgstr "Это удаляет папку из Локального источника"
 
 #~ msgid "This removes the folder from the Local source."
 #~ msgstr "Это удаляет папку из локального источника."

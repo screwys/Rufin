@@ -37,22 +37,12 @@ msgstr ""
 "O arquivo de backup pode conter informações confidenciais. Deseja definir "
 "uma senha?"
 
-#, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
 msgstr ""
 "Backup restaurado com {entries} entradas de playlist ignoradas e {listens} "
 "reproduções ignoradas."
-
-msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-"Escolha onde este dispositivo armazena as músicas locais recebidas através "
-"do Connect. Os arquivos correspondentes que já estão na pasta são "
-"reutilizados; os arquivos ausentes são baixados aqui."
 
 msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
@@ -103,8 +93,7 @@ msgstr ""
 "Os registros contêm segredos e caminhos absolutos de pastas ocultados, mas "
 "você ainda pode querer revisar os registros antes de compartilhá-los"
 
-msgid ""
-"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Nenhum resultado ¯\\_(°╭╮°)_/¯"
 
 msgid ""
@@ -122,9 +111,9 @@ msgid ""
 "not save credentials at all."
 msgstr ""
 "Nenhum serviço secreto encontrado. Você pode ter um serviço secreto, mas o "
-"portal pode estar corrompido, você pode verificar {link_start}este problema"
-"{link_end} para corrigi-lo, caso contrário, o Rufin usará um arquivo para "
-"armazenar suas credenciais. Cancelar não salvará as credenciais."
+"portal pode estar corrompido, você pode verificar {link_start}este "
+"problema{link_end} para corrigi-lo, caso contrário, o Rufin usará um arquivo "
+"para armazenar suas credenciais. Cancelar não salvará as credenciais."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -154,13 +143,6 @@ msgstr ""
 "caminhos locais também podem ser absolutos."
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-"Remover o Local e sua biblioteca em cache do Rufin? Seus arquivos de música "
-"não serão excluídos."
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -174,7 +156,22 @@ msgstr ""
 "Remover todos os dados, configurações e logins salvos do Rufin? O Rufin será "
 "reiniciado após limpar os dados."
 
-#, rust-format
+#, fuzzy
+#| msgid ""
+#| "Remove Local and its cached library from Rufin? Your music files will not "
+#| "be deleted."
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Remover o Local e sua biblioteca em cache do Rufin? Seus arquivos de música "
+"não serão excluídos."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
+msgstr ""
+
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
@@ -247,13 +244,6 @@ msgid ""
 msgstr ""
 "Isto pertence ao Rufin. Pode incluir entradas de todas as fontes "
 "configuradas, mas não é sincronizado com remotos."
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr ""
-"Isso remove o servidor, metadados da biblioteca em cache, instantâneo da "
-"fila e token salvo para"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -499,9 +489,6 @@ msgstr "Anônimo (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anônimo"
 
-msgid "Another device"
-msgstr "Outro dispositivo"
-
 msgid "Any genre"
 msgstr "Qualquer gênero"
 
@@ -520,9 +507,6 @@ msgstr "Aparece em"
 msgid "Application name"
 msgstr "Nome do aplicativo"
 
-msgid "Applied"
-msgstr "Aplicado"
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Aplica-se à barra lateral e tela cheia separadamente"
 
@@ -532,16 +516,12 @@ msgstr "Aplicar modelo"
 msgid "Apply"
 msgstr "Aplicar"
 
-msgid "Applying profile"
-msgstr "Aplicando perfil"
-
 msgid "Approve sign-in in your browser"
 msgstr "Aprove a entrada no seu navegador"
 
 msgid "Approve"
 msgstr "Aprovar"
 
-#, rust-format
 msgid "April {year}"
 msgstr "Abril de {year}"
 
@@ -608,7 +588,6 @@ msgstr "O processamento de áudio está indisponível durante a transmissão"
 msgid "Audio"
 msgstr "Áudio"
 
-#, rust-format
 msgid "August {year}"
 msgstr "Agosto de {year}"
 
@@ -663,11 +642,9 @@ msgstr "Configurações de backup"
 msgid "Backup exported"
 msgstr "Backup exportado"
 
-#, rust-format
 msgid "Backup failed: {error}"
 msgstr "Falha no backup: {error}"
 
-#, rust-format
 msgid "Backup restored with warnings: {warnings}"
 msgstr "Backup restaurado com avisos: {warnings}"
 
@@ -721,9 +698,6 @@ msgstr "Azul"
 
 msgid "Brightness (%)"
 msgstr "Brilho (%)"
-
-msgid "Browse"
-msgstr "Navegar"
 
 msgid "By Lyrics"
 msgstr "Por letras"
@@ -797,7 +771,6 @@ msgstr "Alterar ordem de ordenação"
 msgid "Change"
 msgstr "Alterar"
 
-#, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "As alterações se aplicam à faixa {count}"
@@ -811,9 +784,6 @@ msgstr "Canais"
 
 msgid "Check for updates"
 msgstr "Verificar atualizações"
-
-msgid "Checking profile"
-msgstr "Verificando perfil"
 
 msgid "Choose Folder"
 msgstr "Escolher pasta"
@@ -991,7 +961,6 @@ msgstr "Condição"
 msgid "Configure another"
 msgstr "Configurar outro"
 
-#, rust-format
 msgid "Configured items: {count}"
 msgstr "Itens configurados: {count}"
 
@@ -1000,9 +969,6 @@ msgstr "Confirmar"
 
 msgid "Connect a device"
 msgstr "Conectar um dispositivo"
-
-msgid "Connect file"
-msgstr "Conectar arquivo"
 
 msgid "Connect is not enabled"
 msgstr "O Connect não está habilitado"
@@ -1019,7 +985,6 @@ msgstr "Conecte seus servidores de música ou pastas locais."
 msgid "Connect"
 msgstr "Conectar"
 
-#, rust-format
 msgid "Connected as {username}"
 msgstr "Conectado como {username}"
 
@@ -1035,7 +1000,6 @@ msgstr "Conectando dispositivos"
 msgid "Connecting to music server..."
 msgstr "Conectando ao servidor de música..."
 
-#, rust-format
 msgid "Connecting to {device}..."
 msgstr "Conectando a {device}..."
 
@@ -1069,7 +1033,6 @@ msgstr "Conteúdos"
 msgid "Context Menus"
 msgstr "Menus de contexto"
 
-#, rust-format
 msgid "Continue from {device}"
 msgstr "Continuar de {device}"
 
@@ -1094,7 +1057,6 @@ msgstr "Copiar convite"
 msgid "Copy link"
 msgstr "Copiar link"
 
-#, rust-format
 msgid "Copy of {name}"
 msgstr "Cópia de {name}"
 
@@ -1119,11 +1081,9 @@ msgstr "Não foi possível carregar esta página"
 msgid "Could not open browser"
 msgstr "Não foi possível abrir o navegador"
 
-#, rust-format
 msgid "Could not open file: {error}"
 msgstr "Não foi possível abrir o arquivo: {error}"
 
-#, rust-format
 msgid "Could not open folder: {error}"
 msgstr "Não foi possível abrir a pasta: {error}"
 
@@ -1139,7 +1099,6 @@ msgstr "Não foi possível receber atualizações ao vivo"
 msgid "Could not save diagnostic log"
 msgstr "Não foi possível salvar o registro de diagnóstico"
 
-#, rust-format
 msgid "Could not update Rufin to {version}"
 msgstr "Não foi possível atualizar o Rufin para {version}"
 
@@ -1149,7 +1108,6 @@ msgstr "Não foi possível atualizar os favoritos"
 msgid "Couldn't connect to the server"
 msgstr "Não foi possível conectar ao servidor"
 
-#, rust-format
 msgid "Couldn't connect to {service}"
 msgstr "Não foi possível conectar a {service}"
 
@@ -1162,7 +1120,7 @@ msgstr "Não foi possível carregar esta pasta"
 msgid "Couldn't search for lyrics"
 msgstr "Não foi possível buscar letras"
 
-msgid "Couldn\342\200\231t download Japanese dictionary"
+msgid "Couldn’t download Japanese dictionary"
 msgstr "Não foi possível baixar o dicionário japonês"
 
 msgid "Country"
@@ -1248,7 +1206,6 @@ msgstr "Dias antes do término do ano"
 msgid "Debug logging"
 msgstr "Registro de depuração"
 
-#, rust-format
 msgid "December {year}"
 msgstr "Dezembro de {year}"
 
@@ -1267,7 +1224,7 @@ msgstr "Padrão"
 msgid "Delete Playlist"
 msgstr "Excluir playlist"
 
-#, python-brace-format, rust-format
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Excluir \"{name}\"?"
 
@@ -1280,7 +1237,6 @@ msgstr "Excluir arquivo de playlist"
 msgid "Delete preset"
 msgstr "Excluir predefinição"
 
-#, rust-format
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
 msgstr[0] "Excluir playlist {count}?"
@@ -1334,7 +1290,6 @@ msgstr "Desativado"
 msgid "Disc number"
 msgstr "Número do disco"
 
-#, rust-format
 msgid "Disc {number}"
 msgstr "Disco {number}"
 
@@ -1374,7 +1329,6 @@ msgstr "Exibição"
 msgid "Do not encrypt"
 msgstr "Não criptografar"
 
-#, rust-format
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
 msgstr[0] "Deseja aplicar as alterações de metadados à faixa {count}?"
@@ -1425,14 +1379,12 @@ msgstr "Baixando dicionário japonês..."
 msgid "Downloading artwork"
 msgstr "Baixando capa"
 
-#, rust-format
 msgid "Downloading artwork... {count} checked"
 msgstr "Baixando capa... {count} verificadas"
 
 msgid "Downloading lyrics"
 msgstr "Baixando letras"
 
-#, rust-format
 msgid "Downloading lyrics... {count} checked"
 msgstr "Baixando letras... {count} verificadas"
 
@@ -1577,9 +1529,6 @@ msgstr "Tudo, incluindo novas faixas"
 msgid "Excluded folders"
 msgstr "Pastas excluídas"
 
-msgid "Existing profile file"
-msgstr "Arquivo de perfil existente"
-
 msgid "Expand lyrics and visualizer"
 msgstr "Expandir letras e visualizador"
 
@@ -1609,9 +1558,6 @@ msgstr "Exportar playlist"
 
 msgid "Export preset"
 msgstr "Exportar predefinição"
-
-msgid "Export to connection"
-msgstr "Exportar para conexão"
 
 msgid "Export your listening history in Rufin"
 msgstr "Exportar seu histórico de audição no Rufin"
@@ -1664,7 +1610,6 @@ msgstr "Favoritos"
 msgid "Featured genres"
 msgstr "Gêneros em destaque"
 
-#, rust-format
 msgid "February {year}"
 msgstr "Fevereiro de {year}"
 
@@ -1733,9 +1678,6 @@ msgstr "Encontre seu token de usuário do ListenBrainz"
 msgid "Finding lyrics..."
 msgstr "Encontrando letras..."
 
-msgid "Finishing setup"
-msgstr "Finalizando configuração"
-
 msgid "Fit to height"
 msgstr "Ajustar à altura"
 
@@ -1774,10 +1716,6 @@ msgstr ""
 msgid "Forget Source"
 msgstr "Esquecer fonte"
 
-#, rust-format
-msgid "Forget \"{name}\"?"
-msgstr "Esquecer \"{name}\"?"
-
 msgid "Format not supported"
 msgstr "Formato não suportado"
 
@@ -1796,7 +1734,7 @@ msgstr "Limite de taxa de quadros"
 msgid "Frames per second"
 msgstr "Quadros por segundo"
 
-msgid "Frequency \302\267 Hz"
+msgid "Frequency · Hz"
 msgstr "Frequência 302267 Hz"
 
 msgid "Frequency scale"
@@ -1829,7 +1767,7 @@ msgstr "Tela cheia"
 msgid "Furigana"
 msgstr "Furigana"
 
-msgid "Gain \302\267 dB"
+msgid "Gain · dB"
 msgstr "Ganho 302267 dB"
 
 msgid "Gain"
@@ -1868,7 +1806,6 @@ msgstr "Obter token"
 msgid "Go to Album"
 msgstr "Ir para o álbum"
 
-#, rust-format
 msgid "Go to {artist}"
 msgstr "Ir para {artist}"
 
@@ -1971,9 +1908,6 @@ msgstr "Importar backup"
 msgid "Import Playlist"
 msgstr "Importar playlist"
 
-msgid "Import from connection"
-msgstr "Importar da conexão"
-
 msgid "Import preset"
 msgstr "Importar predefinição"
 
@@ -1982,9 +1916,6 @@ msgstr "Importar tema"
 
 msgid "Import"
 msgstr "Importar"
-
-msgid "Importing profile"
-msgstr "Importando perfil"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2021,7 +1952,6 @@ msgstr "ID do item"
 msgid "Item is no longer available"
 msgstr "O item não está mais disponível"
 
-#, rust-format
 msgid "January {year}"
 msgstr "Janeiro de {year}"
 
@@ -2034,17 +1964,12 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Entrar no perfil"
 
-msgid "Join using"
-msgstr "Entrar usando"
-
 msgid "Join"
 msgstr "Entrar"
 
-#, rust-format
 msgid "July {year}"
 msgstr "Julho de {year}"
 
-#, rust-format
 msgid "June {year}"
 msgstr "Junho de {year}"
 
@@ -2199,7 +2124,6 @@ msgstr ""
 "O acesso a arquivos locais é necessário antes que essas tags possam ser "
 "salvas."
 
-#, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2212,9 +2136,6 @@ msgstr[1] ""
 msgid "Local files and folders"
 msgstr "Arquivos e pastas locais"
 
-msgid "Local folder"
-msgstr "Pasta local"
-
 msgid "Local imports and access"
 msgstr "Importações e acesso locais"
 
@@ -2226,9 +2147,6 @@ msgstr "A pasta de música local está indisponível"
 
 msgid "Local music folder"
 msgstr "Pasta de música local"
-
-msgid "Local music folders"
-msgstr "Pastas de música local"
 
 msgid "Local network permission is required for remote connections"
 msgstr "A permissão de rede local é necessária para conexões remotas"
@@ -2299,7 +2217,6 @@ msgstr "Gerenciar"
 msgid "Mapped Local Path"
 msgstr "Caminho local mapeado"
 
-#, rust-format
 msgid "March {year}"
 msgstr "Março de {year}"
 
@@ -2318,7 +2235,6 @@ msgstr "Ano máximo"
 msgid "Maximum"
 msgstr "Máximo"
 
-#, rust-format
 msgid "May {year}"
 msgstr "Maio de {year}"
 
@@ -2596,9 +2512,6 @@ msgstr "Nenhum artista favorito ainda"
 msgid "No favorites yet"
 msgstr "Nenhum favorito ainda"
 
-msgid "No file connections"
-msgstr "Nenhuma conexão de arquivo"
-
 msgid "No file linked"
 msgstr "Nenhum arquivo vinculado"
 
@@ -2653,7 +2566,6 @@ msgstr "Nenhuma playlist ainda"
 msgid "No related tracks found"
 msgstr "Nenhuma faixa relacionada encontrada"
 
-#, rust-format
 msgid "No results for \"{query}\""
 msgstr "Nenhum resultado para"
 
@@ -2708,10 +2620,14 @@ msgstr "Nada reproduzindo"
 msgid "Nothing queued"
 msgstr "Nada na fila"
 
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Nada reproduzido ainda"
+
 msgid "Notifications"
 msgstr "Notificações"
 
-#, rust-format
 msgid "November {year}"
 msgstr "Novembro de {year}"
 
@@ -2727,7 +2643,6 @@ msgstr "Número de backups"
 msgid "Number of songs"
 msgstr "Número de músicas"
 
-#, rust-format
 msgid "October {year}"
 msgstr "Outubro de {year}"
 
@@ -2846,7 +2761,6 @@ msgstr "Data de lançamento original"
 msgid "Original"
 msgstr "Original"
 
-#, rust-format
 msgid "Original: {value}"
 msgstr "Original: {value}"
 
@@ -2993,7 +2907,6 @@ msgstr "Velocidade de reprodução"
 msgid "Playback"
 msgstr "Reprodução"
 
-#, rust-format
 msgid "Playing from {}"
 msgstr "Reproduzindo de {}"
 
@@ -3003,7 +2916,6 @@ msgstr "Reproduzindo de"
 msgid "Playing on this device"
 msgstr "Reproduzindo neste dispositivo"
 
-#, rust-format
 msgid "Playing on {device}"
 msgstr "Reproduzindo em {device}"
 
@@ -3070,9 +2982,6 @@ msgstr "Preferir traduções"
 msgid "Preferences"
 msgstr "Preferências"
 
-msgid "Preparing collection"
-msgstr "Preparando coleção"
-
 msgid "Preparing library..."
 msgstr "Preparando biblioteca..."
 
@@ -3131,9 +3040,6 @@ msgstr "Modo privado"
 msgid "Profile PIN"
 msgstr "PIN do perfil"
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr "O download do perfil está incompleto. Tente novamente para continuar."
-
 msgid "Profile up to date"
 msgstr "Perfil atualizado"
 
@@ -3190,9 +3096,6 @@ msgstr "Lendo tags..."
 
 msgid "Ready"
 msgstr "Pronto"
-
-msgid "Receiving collection"
-msgstr "Recebendo coleção"
 
 msgid "Receiving profile"
 msgstr "Recebendo perfil"
@@ -3350,11 +3253,6 @@ msgstr "Remover regra"
 msgid "Remove search"
 msgstr "Remover pesquisa"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-"Remover o banco de dados da biblioteca? As configurações e logins salvos "
-"serão mantidos."
-
 msgid "Remove unavailable tracks"
 msgstr "Remover faixas indisponíveis"
 
@@ -3403,7 +3301,6 @@ msgstr "Tags ReplayGain"
 msgid "ReplayGain"
 msgstr "Normalização do volume"
 
-#, rust-format
 msgid "Request failed ({status})"
 msgstr "Falha na solicitação ({status})"
 
@@ -3412,12 +3309,6 @@ msgstr "Exigir criptografia SMB"
 
 msgid "Reset appearance"
 msgstr "Redefinir aparência"
-
-msgid "Reset database"
-msgstr "Redefinir banco de dados"
-
-msgid "Reset database?"
-msgstr "Redefinir banco de dados?"
 
 msgid "Reset to defaults"
 msgstr "Restaurar padrões"
@@ -3545,7 +3436,6 @@ msgstr "Login do Plex salvo"
 msgid "Saved logins"
 msgstr "Logins salvos"
 
-#, rust-format
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
@@ -3568,9 +3458,6 @@ msgstr "Salvando..."
 
 msgid "Saves lyrics to your source"
 msgstr "Salva letras na sua fonte"
-
-msgid "Saving changes"
-msgstr "Salvando alterações"
 
 msgid "Saving..."
 msgstr "Salvando..."
@@ -3656,7 +3543,6 @@ msgstr "Pesquisando no MusicBrainz..."
 msgid "Searching for devices..."
 msgstr "Pesquisando dispositivos..."
 
-#, rust-format
 msgid "Searching for {provider} servers on the local network..."
 msgstr "Pesquisando servidores {provider} na rede local..."
 
@@ -3678,7 +3564,6 @@ msgstr "Avançar"
 msgid "Seek playback"
 msgstr "Buscar na reprodução"
 
-#, rust-format
 msgid "Seek to {time}"
 msgstr "Ir para {time}"
 
@@ -3706,14 +3591,12 @@ msgstr "Selecionar fonte"
 msgid "Select all"
 msgstr "Selecionar tudo"
 
-#, rust-format
 msgid "Select {title}"
 msgstr "Selecionar {title}"
 
 msgid "Selected folders"
 msgstr "Pastas selecionadas"
 
-#, rust-format
 msgid "Selected items: {count}"
 msgstr "Itens selecionados: {count}"
 
@@ -3723,7 +3606,6 @@ msgstr "Seleção"
 msgid "Self-host an Iroh Relay"
 msgstr "Auto-hospedar um Relay Iroh"
 
-#, rust-format
 msgid "September {year}"
 msgstr "Setembro de {year}"
 
@@ -3748,7 +3630,6 @@ msgstr "Amostra do servidor"
 msgid "Server Settings"
 msgstr "Configurações do servidor"
 
-#, rust-format
 msgid "Server discovery failed: {error}"
 msgstr "A descoberta do servidor falhou: {error}"
 
@@ -3866,7 +3747,6 @@ msgstr "Aleatório"
 msgid "Sidebar Items"
 msgstr "Itens da barra lateral"
 
-#, rust-format
 msgid "Sidebar item {position}"
 msgstr "Item da barra lateral {position}"
 
@@ -3951,6 +3831,9 @@ msgstr "Título da música"
 msgid "Song"
 msgstr "Música"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 msgid "Sort by"
 msgstr "Ordenar por"
 
@@ -3984,7 +3867,7 @@ msgstr "Fonte"
 msgid "Sources"
 msgstr "Fontes"
 
-msgid "Spectrum \302\267 dBFS"
+msgid "Spectrum · dBFS"
 msgstr "Espectro 302267 dBFS"
 
 msgid "Spectrum line"
@@ -4062,6 +3945,11 @@ msgstr "Alternar painel"
 msgid "Switching library..."
 msgstr "Alternando biblioteca..."
 
+#, fuzzy
+#| msgid "Save in folder"
+msgid "Sync folder"
+msgstr "Salvar na pasta"
+
 msgid "Synced lyrics"
 msgstr "Letras sincronizadas"
 
@@ -4101,6 +3989,9 @@ msgstr "Texto"
 msgid "The API token was not accepted. Please connect again."
 msgstr "O token de API não foi aceito. Conecte-se novamente."
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr "A conexão não existe mais"
 
@@ -4119,18 +4010,22 @@ msgstr "Estes emojis correspondem"
 msgid "This can be turned off after pairing if you want"
 msgstr "Isso pode ser desativado após o emparelhamento, se desejar"
 
+msgid "This device was removed from the profile"
+msgstr ""
+
 msgid "This device"
 msgstr "Este dispositivo"
 
-#, rust-format
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+#, fuzzy
+#| msgid ""
+#| "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 "Isto pertence a {source}. Playlists normais são sincronizadas com seu remoto."
 
 msgid "This isn't available"
 msgstr "Isto não está disponível"
 
-#, rust-format
 msgid "This playlist only accepts {source} tracks"
 msgstr "Esta playlist aceita apenas faixas de {source}"
 
@@ -4281,11 +4176,9 @@ msgstr "Intervalo de verificação de atualizações"
 msgid "Update"
 msgstr "Atualizar"
 
-#, rust-format
 msgid "Updated Rufin to {version}"
 msgstr "Rufin atualizado para {version}"
 
-#, rust-format
 msgid "Updating Rufin to {version}..."
 msgstr "Atualizando Rufin para {version}..."
 
@@ -4334,9 +4227,6 @@ msgstr "Usar a capa própria de cada faixa quando disponível"
 msgid "Use existing"
 msgstr "Usar existente"
 
-msgid "Use folder"
-msgstr "Usar pasta"
-
 msgid "Use for this output"
 msgstr "Usar para esta saída"
 
@@ -4352,6 +4242,11 @@ msgstr "Usar ano máximo"
 
 msgid "Use minimum year"
 msgstr "Usar ano mínimo"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use sort tags"
+msgstr "Usar configuração da fonte"
 
 msgid "Use source setting"
 msgstr "Usar configuração da fonte"
@@ -4415,9 +4310,6 @@ msgstr "Escala de volume"
 
 msgid "Volume"
 msgstr "Volume"
-
-msgid "Waiting for a peer"
-msgstr "Aguardando por um par"
 
 msgid "Waiting for connection"
 msgstr "Aguardando conexão"
@@ -4485,11 +4377,9 @@ msgstr "Sua música pertence aqui"
 msgid "Your queue is empty."
 msgstr "Sua fila está vazia."
 
-#, rust-format
 msgid "Your {period} in Rufin"
 msgstr "Seu {period} no Rufin"
 
-#, rust-format
 msgid "Your {period}"
 msgstr "Seu {period}"
 
@@ -4550,101 +4440,76 @@ msgstr "hoje"
 msgid "yesterday"
 msgstr "ontem"
 
-#, rust-format
 msgid "{action} (Shuffle)"
 msgstr "{action} (Aleatório)"
 
-#, rust-format
 msgid "{completed} of {total} ({cached} cached)"
 msgstr "{completed} de {total} ({cached} em cache)"
 
-#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} álbum"
 msgstr[1] "{count} álbuns"
 
-#, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "{count} dia atrás"
 msgstr[1] "{count} dias atrás"
 
-#, rust-format
 msgid "{count} entry"
 msgid_plural "{count} entries"
 msgstr[0] "{count} entrada"
 msgstr[1] "{count} entradas"
 
-#, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "{count} pasta selecionada"
 msgstr[1] "{count} pastas selecionadas"
 
-#, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} mês atrás"
 msgstr[1] "{count} meses atrás"
 
-#, rust-format
 msgid "{count} play"
 msgid_plural "{count} plays"
 msgstr[0] "{count} reprodução"
 msgstr[1] "{count} reproduções"
 
-#, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] "{count} resultado"
 msgstr[1] "{count} resultados"
 
-#, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} faixa"
 msgstr[1] "{count} faixas"
 
-#, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] "{count} semana atrás"
 msgstr[1] "{count} semanas atrás"
 
-#, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} ano atrás"
 msgstr[1] "{count} anos atrás"
 
-#, rust-format
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr "{current} / {total} MiB ({percent}%)"
-
-#, rust-format
-msgid "{current} MiB"
-msgstr "{current} MiB"
-
-#, rust-format
-msgid "{field} \302\267 Different across {count} track"
-msgid_plural "{field} \302\267 Different across {count} tracks"
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] "{field} 302267 Diferente em {count} faixa"
 msgstr[1] "{field} 302267 Diferente em {count} faixas"
 
-#, rust-format
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} de {total}, {cached} em cache)"
 
-#, rust-format
 msgid "{stage} ({count} of {total} tracks)"
 msgstr "{stage} ({count} de {total} faixas)"
 
-#, rust-format
 msgid "{stage}: {completed} / {total}"
 msgstr "{stage}: {completed} / {total}"
 
-#, rust-format
 msgid "{stage}: {completed}"
 msgstr "{stage}: {completed}"
 
@@ -4692,13 +4557,11 @@ msgid "Choose a separate installation folder."
 msgstr "Escolha uma pasta de instalação separada."
 
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
 msgstr "Feche o {app_name} e tente a instalação novamente."
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
 msgstr "Feche o {app_name} e tente a desinstalação novamente."
@@ -4714,7 +4577,6 @@ msgid "Create desktop shortcut"
 msgstr "Criar atalho na área de trabalho"
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
 msgstr "Remover o cache do {app_name}"
@@ -4725,7 +4587,6 @@ msgid "Setup could not complete the installation. Please try again."
 msgstr "A configuração não pôde concluir a instalação. Tente novamente."
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "The {app_name} automatic update option is invalid."
 msgstr "A opção de atualização automática do {app_name} é inválida."
@@ -4734,3 +4595,103 @@ msgstr "A opção de atualização automática do {app_name} é inválida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bem-vindo à configuração do Rufin"
+
+#~ msgid ""
+#~ "Choose where this device stores local music received through Connect. "
+#~ "Matching files already in the folder are reused; missing files are "
+#~ "downloaded here."
+#~ msgstr ""
+#~ "Escolha onde este dispositivo armazena as músicas locais recebidas "
+#~ "através do Connect. Os arquivos correspondentes que já estão na pasta são "
+#~ "reutilizados; os arquivos ausentes são baixados aqui."
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "Isso remove o servidor, metadados da biblioteca em cache, instantâneo da "
+#~ "fila e token salvo para"
+
+#~ msgid "Another device"
+#~ msgstr "Outro dispositivo"
+
+#~ msgid "Applied"
+#~ msgstr "Aplicado"
+
+#~ msgid "Applying profile"
+#~ msgstr "Aplicando perfil"
+
+#~ msgid "Browse"
+#~ msgstr "Navegar"
+
+#~ msgid "Checking profile"
+#~ msgstr "Verificando perfil"
+
+#~ msgid "Connect file"
+#~ msgstr "Conectar arquivo"
+
+#~ msgid "Existing profile file"
+#~ msgstr "Arquivo de perfil existente"
+
+#~ msgid "Export to connection"
+#~ msgstr "Exportar para conexão"
+
+#~ msgid "Finishing setup"
+#~ msgstr "Finalizando configuração"
+
+#~ msgid "Forget \"{name}\"?"
+#~ msgstr "Esquecer \"{name}\"?"
+
+#~ msgid "Import from connection"
+#~ msgstr "Importar da conexão"
+
+#~ msgid "Importing profile"
+#~ msgstr "Importando perfil"
+
+#~ msgid "Join using"
+#~ msgstr "Entrar usando"
+
+#~ msgid "Local folder"
+#~ msgstr "Pasta local"
+
+#~ msgid "Local music folders"
+#~ msgstr "Pastas de música local"
+
+#~ msgid "No file connections"
+#~ msgstr "Nenhuma conexão de arquivo"
+
+#~ msgid "Preparing collection"
+#~ msgstr "Preparando coleção"
+
+#~ msgid "Profile download is incomplete. Retry to continue."
+#~ msgstr ""
+#~ "O download do perfil está incompleto. Tente novamente para continuar."
+
+#~ msgid "Receiving collection"
+#~ msgstr "Recebendo coleção"
+
+#~ msgid "Remove the library database? Settings and saved logins will be kept."
+#~ msgstr ""
+#~ "Remover o banco de dados da biblioteca? As configurações e logins salvos "
+#~ "serão mantidos."
+
+#~ msgid "Reset database"
+#~ msgstr "Redefinir banco de dados"
+
+#~ msgid "Reset database?"
+#~ msgstr "Redefinir banco de dados?"
+
+#~ msgid "Saving changes"
+#~ msgstr "Salvando alterações"
+
+#~ msgid "Use folder"
+#~ msgstr "Usar pasta"
+
+#~ msgid "Waiting for a peer"
+#~ msgstr "Aguardando por um par"
+
+#~ msgid "{current} / {total} MiB ({percent}%)"
+#~ msgstr "{current} / {total} MiB ({percent}%)"
+
+#~ msgid "{current} MiB"
+#~ msgstr "{current} MiB"

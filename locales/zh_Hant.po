@@ -37,12 +37,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -117,11 +111,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -129,6 +118,16 @@ msgstr ""
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
+msgstr ""
+
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
 msgstr ""
 
 msgid ""
@@ -180,11 +179,6 @@ msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
 msgstr ""
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -460,11 +454,6 @@ msgstr ""
 msgid "Anonymous"
 msgstr ""
 
-#, fuzzy
-#| msgid "This device"
-msgid "Another device"
-msgstr "此裝置"
-
 msgid "Any genre"
 msgstr "任何曲風"
 
@@ -483,9 +472,6 @@ msgstr ""
 msgid "Application name"
 msgstr "應用程式名稱"
 
-msgid "Applied"
-msgstr ""
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
@@ -494,11 +480,6 @@ msgstr ""
 
 msgid "Apply"
 msgstr ""
-
-#, fuzzy
-#| msgid "Change Secret Storage"
-msgid "Applying profile"
-msgstr "變更敏感存儲空間"
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -727,9 +708,6 @@ msgstr "藍色"
 msgid "Brightness (%)"
 msgstr ""
 
-msgid "Browse"
-msgstr ""
-
 #, fuzzy
 #| msgid "Lyrics"
 msgid "By Lyrics"
@@ -837,11 +815,6 @@ msgstr "變更"
 
 msgid "Check for updates"
 msgstr ""
-
-#, fuzzy
-#| msgid "Change Secret Storage"
-msgid "Checking profile"
-msgstr "變更敏感存儲空間"
 
 #, fuzzy
 #| msgid "Locate Folder"
@@ -1075,11 +1048,6 @@ msgstr ""
 #| msgid "Connecting to {device}..."
 msgid "Connect a device"
 msgstr "正在連接到 {device}..."
-
-#, fuzzy
-#| msgid "Connection failed"
-msgid "Connect file"
-msgstr "連接失敗"
 
 #, fuzzy
 #| msgid "Connection failed"
@@ -1770,9 +1738,6 @@ msgstr "所有內容，包含新曲目"
 msgid "Excluded folders"
 msgstr "新增資料夾"
 
-msgid "Existing profile file"
-msgstr ""
-
 msgid "Expand lyrics and visualizer"
 msgstr ""
 
@@ -1810,11 +1775,6 @@ msgstr "智慧播放清單"
 #| msgid "Smart playlists"
 msgid "Export preset"
 msgstr "智慧播放清單"
-
-#, fuzzy
-#| msgid "Connection"
-msgid "Export to connection"
-msgstr "連接"
 
 msgid "Export your listening history in Rufin"
 msgstr ""
@@ -1963,9 +1923,6 @@ msgstr "尋找您的 ListenBrainz 使用者憑證"
 msgid "Finding lyrics..."
 msgstr "無歌詞"
 
-msgid "Finishing setup"
-msgstr ""
-
 msgid "Fit to height"
 msgstr ""
 
@@ -2009,9 +1966,6 @@ msgstr ""
 #| msgid "Forget Server"
 msgid "Forget Source"
 msgstr "遺忘伺服器"
-
-msgid "Forget \"{name}\"?"
-msgstr ""
 
 msgid "Format not supported"
 msgstr ""
@@ -2220,11 +2174,6 @@ msgid "Import Playlist"
 msgstr "智慧播放清單"
 
 #, fuzzy
-#| msgid "Waiting for connection"
-msgid "Import from connection"
-msgstr "正在等候連線"
-
-#, fuzzy
 #| msgid "Edit metadata"
 msgid "Import preset"
 msgstr "編輯元資料"
@@ -2236,11 +2185,6 @@ msgstr "編輯元資料"
 
 msgid "Import"
 msgstr ""
-
-#, fuzzy
-#| msgid "Change Secret Storage"
-msgid "Importing profile"
-msgstr "變更敏感存儲空間"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2290,9 +2234,6 @@ msgstr "Jellyfin"
 #| msgid "Change Secret Storage"
 msgid "Join profile"
 msgstr "變更敏感存儲空間"
-
-msgid "Join using"
-msgstr ""
 
 msgid "Join"
 msgstr ""
@@ -2477,11 +2418,6 @@ msgstr[0] ""
 msgid "Local files and folders"
 msgstr "本地音樂資料夾"
 
-#, fuzzy
-#| msgid "Local Folders"
-msgid "Local folder"
-msgstr "本地資料夾"
-
 msgid "Local imports and access"
 msgstr ""
 
@@ -2492,11 +2428,6 @@ msgid "Local music folder is unavailable"
 msgstr ""
 
 msgid "Local music folder"
-msgstr "本地音樂資料夾"
-
-#, fuzzy
-#| msgid "Local music folder"
-msgid "Local music folders"
 msgstr "本地音樂資料夾"
 
 msgid "Local network permission is required for remote connections"
@@ -2926,11 +2857,6 @@ msgid "No favorites yet"
 msgstr "暫無最愛"
 
 #, fuzzy
-#| msgid "Connection"
-msgid "No file connections"
-msgstr "連接"
-
-#, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
 msgstr "無資料夾被選擇"
@@ -3060,6 +2986,11 @@ msgstr "未播放任何內容"
 
 msgid "Nothing queued"
 msgstr "未佇列任何內容"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "尚未播放任何內容"
 
 msgid "Notifications"
 msgstr "通知"
@@ -3473,11 +3404,6 @@ msgstr "偏好翻譯"
 msgid "Preferences"
 msgstr "偏好設定"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Preparing collection"
-msgstr "選擇"
-
 msgid "Preparing library..."
 msgstr "媒體庫準備中..."
 
@@ -3547,9 +3473,6 @@ msgstr "無痕模式"
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-
 msgid "Profile up to date"
 msgstr ""
 
@@ -3614,11 +3537,6 @@ msgstr "正在儲存..."
 
 msgid "Ready"
 msgstr ""
-
-#, fuzzy
-#| msgid "Selection"
-msgid "Receiving collection"
-msgstr "選擇"
 
 msgid "Receiving profile"
 msgstr ""
@@ -3806,9 +3724,6 @@ msgstr "移除規則"
 msgid "Remove search"
 msgstr "移除資料夾"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-
 #, fuzzy
 #| msgid "Album title"
 msgid "Remove unavailable tracks"
@@ -3881,16 +3796,6 @@ msgstr ""
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "外觀"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database"
-msgstr "發行日期"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database?"
-msgstr "發行日期"
 
 msgid "Reset to defaults"
 msgstr "重置回預設值"
@@ -4052,11 +3957,6 @@ msgstr "已儲存"
 
 msgid "Saves lyrics to your source"
 msgstr ""
-
-#, fuzzy
-#| msgid "Search Again"
-msgid "Saving changes"
-msgstr "重新搜尋"
 
 msgid "Saving..."
 msgstr "正在儲存..."
@@ -4494,6 +4394,9 @@ msgstr "曲名"
 msgid "Song"
 msgstr "歌曲"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 #, fuzzy
 #| msgid "Sort"
 msgid "Sort by"
@@ -4633,6 +4536,11 @@ msgstr ""
 msgid "Switching library..."
 msgstr "正在切換媒體庫..."
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Sync folder"
+msgstr "移除資料夾"
+
 msgid "Synced lyrics"
 msgstr "已同步歌詞"
 
@@ -4678,6 +4586,9 @@ msgstr ""
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
@@ -4698,10 +4609,13 @@ msgstr ""
 msgid "This can be turned off after pairing if you want"
 msgstr ""
 
+msgid "This device was removed from the profile"
+msgstr ""
+
 msgid "This device"
 msgstr "此裝置"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
@@ -4946,11 +4860,6 @@ msgstr ""
 msgid "Use existing"
 msgstr "歌詞設定"
 
-#, fuzzy
-#| msgid "Add folder"
-msgid "Use folder"
-msgstr "新增資料夾"
-
 msgid "Use for this output"
 msgstr ""
 
@@ -4969,6 +4878,11 @@ msgstr "最大年份"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "最小年份"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use sort tags"
+msgstr "歌詞設定"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5036,11 +4950,6 @@ msgstr ""
 
 msgid "Volume"
 msgstr ""
-
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Waiting for a peer"
-msgstr "正在等候連線"
 
 msgid "Waiting for connection"
 msgstr "正在等候連線"
@@ -5229,12 +5138,6 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr ""
-
-msgid "{current} MiB"
-msgstr ""
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
@@ -5323,6 +5226,97 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Another device"
+#~ msgstr "此裝置"
+
+#, fuzzy
+#~| msgid "Change Secret Storage"
+#~ msgid "Applying profile"
+#~ msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#~| msgid "Change Secret Storage"
+#~ msgid "Checking profile"
+#~ msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect file"
+#~ msgstr "連接失敗"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Export to connection"
+#~ msgstr "連接"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Import from connection"
+#~ msgstr "正在等候連線"
+
+#, fuzzy
+#~| msgid "Change Secret Storage"
+#~ msgid "Importing profile"
+#~ msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#~| msgid "Local Folders"
+#~ msgid "Local folder"
+#~ msgstr "本地資料夾"
+
+#, fuzzy
+#~| msgid "Local music folder"
+#~ msgid "Local music folders"
+#~ msgstr "本地音樂資料夾"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "No file connections"
+#~ msgstr "連接"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Preparing collection"
+#~ msgstr "選擇"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Receiving collection"
+#~ msgstr "選擇"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database"
+#~ msgstr "發行日期"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database?"
+#~ msgstr "發行日期"
+
+#, fuzzy
+#~| msgid "Search Again"
+#~ msgid "Saving changes"
+#~ msgstr "重新搜尋"
+
+#, fuzzy
+#~| msgid "Add folder"
+#~ msgid "Use folder"
+#~ msgstr "新增資料夾"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Waiting for a peer"
+#~ msgstr "正在等候連線"
 
 #, fuzzy
 #~| msgid "Download started"

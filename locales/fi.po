@@ -36,12 +36,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -119,13 +113,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-"Poistetaanko paikallinen kirjasto ja sen välimuisti Rufinista? "
-"Musiikkitiedostoja ei poisteta."
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -133,6 +120,22 @@ msgstr ""
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
+msgstr ""
+
+#, fuzzy
+#| msgid ""
+#| "Remove Local and its cached library from Rufin? Your music files will not "
+#| "be deleted."
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Poistetaanko paikallinen kirjasto ja sen välimuisti Rufinista? "
+"Musiikkitiedostoja ei poisteta."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
 msgstr ""
 
 msgid ""
@@ -185,11 +188,6 @@ msgstr ""
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
-msgstr ""
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
 msgstr ""
 
 msgid ""
@@ -458,11 +456,6 @@ msgstr "Anonyymi (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anonyymi"
 
-#, fuzzy
-#| msgid "On this device"
-msgid "Another device"
-msgstr "Tällä laitteella"
-
 msgid "Any genre"
 msgstr "Mikä tahansa tyylilaji"
 
@@ -481,9 +474,6 @@ msgstr ""
 msgid "Application name"
 msgstr "Sovelluksen nimi"
 
-msgid "Applied"
-msgstr "Toteutettu"
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
@@ -492,11 +482,6 @@ msgstr "Toteuta mallipohja"
 
 msgid "Apply"
 msgstr "Toteuta"
-
-#, fuzzy
-#| msgid "Home Profile"
-msgid "Applying profile"
-msgstr "Kotiprofiili"
 
 #, fuzzy
 #| msgid "Complete sign-in in your browser"
@@ -711,9 +696,6 @@ msgstr "Sininen"
 msgid "Brightness (%)"
 msgstr ""
 
-msgid "Browse"
-msgstr ""
-
 #, fuzzy
 #| msgid "Lyrics"
 msgid "By Lyrics"
@@ -813,11 +795,6 @@ msgstr "Vaihda"
 
 msgid "Check for updates"
 msgstr "Tarkista päivitykset"
-
-#, fuzzy
-#| msgid "Change Profile"
-msgid "Checking profile"
-msgstr "Vaihda profiilia"
 
 msgid "Choose Folder"
 msgstr "Valitse kansio"
@@ -1047,11 +1024,6 @@ msgstr "Vahvista"
 #| msgid "Connecting to {device}..."
 msgid "Connect a device"
 msgstr "Yhdistetään laitteeseen {device}..."
-
-#, fuzzy
-#| msgid "Connection failed"
-msgid "Connect file"
-msgstr "Yhteys epäonnistui"
 
 #, fuzzy
 #| msgid "Connection failed"
@@ -1730,9 +1702,6 @@ msgstr "Kaikki, mukaan lukien uudet kappaleet"
 msgid "Excluded folders"
 msgstr "Lisää kansio"
 
-msgid "Existing profile file"
-msgstr "Olemassa oleva profiilitiedosto"
-
 msgid "Expand lyrics and visualizer"
 msgstr "Laajenna sanoitukset ja visualisointi"
 
@@ -1766,11 +1735,6 @@ msgstr "Vie soittolista"
 #| msgid "Export playlist"
 msgid "Export preset"
 msgstr "Vie soittolista"
-
-#, fuzzy
-#| msgid "Connection"
-msgid "Export to connection"
-msgstr "Yhteys"
 
 msgid "Export your listening history in Rufin"
 msgstr ""
@@ -1917,9 +1881,6 @@ msgstr ""
 msgid "Finding lyrics..."
 msgstr "Muokkaa sanoituksia"
 
-msgid "Finishing setup"
-msgstr ""
-
 msgid "Fit to height"
 msgstr ""
 
@@ -1961,9 +1922,6 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Unohda lähde"
-
-msgid "Forget \"{name}\"?"
-msgstr "Unohdetaanko \"{name}\"?"
 
 msgid "Format not supported"
 msgstr ""
@@ -2168,11 +2126,6 @@ msgid "Import Playlist"
 msgstr "Tuo soittolista"
 
 #, fuzzy
-#| msgid "Waiting for connection"
-msgid "Import from connection"
-msgstr "Odotetaan yhteyttä"
-
-#, fuzzy
 #| msgid "Export"
 msgid "Import preset"
 msgstr "Vie"
@@ -2186,11 +2139,6 @@ msgstr "Vie"
 #| msgid "Export"
 msgid "Import"
 msgstr "Vie"
-
-#, fuzzy
-#| msgid "Home Profile"
-msgid "Importing profile"
-msgstr "Kotiprofiili"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2242,9 +2190,6 @@ msgstr "Jellyfin"
 #| msgid "Home Profile"
 msgid "Join profile"
 msgstr "Kotiprofiili"
-
-msgid "Join using"
-msgstr "Liity käyttäen"
 
 msgid "Join"
 msgstr "Liity"
@@ -2428,9 +2373,6 @@ msgstr[1] ""
 msgid "Local files and folders"
 msgstr "Paikalliset musiikkikansiot"
 
-msgid "Local folder"
-msgstr "Paikallinen kansio"
-
 msgid "Local imports and access"
 msgstr ""
 
@@ -2442,9 +2384,6 @@ msgstr "Paikallinen musiikkikansio ei ole saatavilla"
 
 msgid "Local music folder"
 msgstr "Paikallinen musiikkikansio"
-
-msgid "Local music folders"
-msgstr "Paikalliset musiikkikansiot"
 
 msgid "Local network permission is required for remote connections"
 msgstr ""
@@ -2849,11 +2788,6 @@ msgid "No favorites yet"
 msgstr "Ei suosikkeja vielä"
 
 #, fuzzy
-#| msgid "Connection"
-msgid "No file connections"
-msgstr "Yhteys"
-
-#, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
 msgstr "Kansiota ei ole valittu"
@@ -2983,6 +2917,11 @@ msgstr "Mitään ei toisteta"
 
 msgid "Nothing queued"
 msgstr "Ei mitään jonossa"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Mitään ei ole vielä toistettu"
 
 msgid "Notifications"
 msgstr "Ilmoitukset"
@@ -3374,11 +3313,6 @@ msgstr "Suosi käännöksiä"
 msgid "Preferences"
 msgstr "Asetukset"
 
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Preparing collection"
-msgstr "Odotetaan yhteyttä"
-
 msgid "Preparing library..."
 msgstr "Valmistellaan kirjastoa..."
 
@@ -3446,9 +3380,6 @@ msgstr "Yksityinen tila"
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-
 msgid "Profile up to date"
 msgstr ""
 
@@ -3511,11 +3442,6 @@ msgstr "Tallennetaan..."
 
 msgid "Ready"
 msgstr "Valmis"
-
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Receiving collection"
-msgstr "Odotetaan yhteyttä"
 
 msgid "Receiving profile"
 msgstr ""
@@ -3709,9 +3635,6 @@ msgstr "Poista sääntö"
 msgid "Remove search"
 msgstr "Poista sääntö"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-
 #, fuzzy
 #| msgid "Search is unavailable"
 msgid "Remove unavailable tracks"
@@ -3782,16 +3705,6 @@ msgstr "Vaadi SMB-salaus"
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "Ulkoasu"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database"
-msgstr "Julkaisupäivä"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database?"
-msgstr "Julkaisupäivä"
 
 msgid "Reset to defaults"
 msgstr "Palauta oletusarvot"
@@ -3952,11 +3865,6 @@ msgstr "Tallennettu"
 
 msgid "Saves lyrics to your source"
 msgstr ""
-
-#, fuzzy
-#| msgid "Search in page"
-msgid "Saving changes"
-msgstr "Hae sivulta"
 
 msgid "Saving..."
 msgstr "Tallennetaan..."
@@ -4382,6 +4290,9 @@ msgstr ""
 msgid "Song"
 msgstr "Kappale"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 #, fuzzy
 #| msgid "Sort"
 msgid "Sort by"
@@ -4519,6 +4430,11 @@ msgstr ""
 msgid "Switching library..."
 msgstr "Vaihdetaan kirjastoa..."
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Sync folder"
+msgstr "Lisää kansio"
+
 msgid "Synced lyrics"
 msgstr "Synkronoidut sanoitukset"
 
@@ -4564,6 +4480,9 @@ msgstr "Teksti"
 msgid "The API token was not accepted. Please connect again."
 msgstr "API-polettia ei hyväksytty. Yhdistä uudelleen."
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
@@ -4582,10 +4501,13 @@ msgstr "Nämä emojit vastaavat"
 msgid "This can be turned off after pairing if you want"
 msgstr ""
 
+msgid "This device was removed from the profile"
+msgstr ""
+
 msgid "This device"
 msgstr "Tämä laite"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
@@ -4832,11 +4754,6 @@ msgstr ""
 msgid "Use existing"
 msgstr "Sanoitusten asetukset"
 
-#, fuzzy
-#| msgid "Add folder"
-msgid "Use folder"
-msgstr "Lisää kansio"
-
 msgid "Use for this output"
 msgstr ""
 
@@ -4855,6 +4772,11 @@ msgstr "Vuosi enintään"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Vuosi vähintään"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use sort tags"
+msgstr "Sanoitusten asetukset"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -4928,11 +4850,6 @@ msgstr "Äänenvoimakkuuden asteikko"
 #| msgid "Columns"
 msgid "Volume"
 msgstr "Sarakkeet"
-
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Waiting for a peer"
-msgstr "Odotetaan yhteyttä"
 
 msgid "Waiting for connection"
 msgstr "Odotetaan yhteyttä"
@@ -5131,12 +5048,6 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} vuosi sitten"
 msgstr[1] "{count} vuotta sitten"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr ""
-
-msgid "{current} MiB"
-msgstr ""
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
@@ -5238,6 +5149,99 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "On this device"
+#~ msgid "Another device"
+#~ msgstr "Tällä laitteella"
+
+#~ msgid "Applied"
+#~ msgstr "Toteutettu"
+
+#, fuzzy
+#~| msgid "Home Profile"
+#~ msgid "Applying profile"
+#~ msgstr "Kotiprofiili"
+
+#, fuzzy
+#~| msgid "Change Profile"
+#~ msgid "Checking profile"
+#~ msgstr "Vaihda profiilia"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect file"
+#~ msgstr "Yhteys epäonnistui"
+
+#~ msgid "Existing profile file"
+#~ msgstr "Olemassa oleva profiilitiedosto"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Export to connection"
+#~ msgstr "Yhteys"
+
+#~ msgid "Forget \"{name}\"?"
+#~ msgstr "Unohdetaanko \"{name}\"?"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Import from connection"
+#~ msgstr "Odotetaan yhteyttä"
+
+#, fuzzy
+#~| msgid "Home Profile"
+#~ msgid "Importing profile"
+#~ msgstr "Kotiprofiili"
+
+#~ msgid "Join using"
+#~ msgstr "Liity käyttäen"
+
+#~ msgid "Local folder"
+#~ msgstr "Paikallinen kansio"
+
+#~ msgid "Local music folders"
+#~ msgstr "Paikalliset musiikkikansiot"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "No file connections"
+#~ msgstr "Yhteys"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Preparing collection"
+#~ msgstr "Odotetaan yhteyttä"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Receiving collection"
+#~ msgstr "Odotetaan yhteyttä"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database"
+#~ msgstr "Julkaisupäivä"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database?"
+#~ msgstr "Julkaisupäivä"
+
+#, fuzzy
+#~| msgid "Search in page"
+#~ msgid "Saving changes"
+#~ msgstr "Hae sivulta"
+
+#, fuzzy
+#~| msgid "Add folder"
+#~ msgid "Use folder"
+#~ msgstr "Lisää kansio"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Waiting for a peer"
+#~ msgstr "Odotetaan yhteyttä"
 
 #, fuzzy
 #~| msgid "Show artwork"

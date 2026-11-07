@@ -44,15 +44,6 @@ msgstr ""
 "Wiedergaben wurden übersprungen."
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-"Wähle, wo dieses Gerät lokale Musik speichert, die über Connect empfangen "
-"wird. Bereits im Ordner vorhandene passende Dateien werden wiederverwendet; "
-"fehlende Dateien werden hierher heruntergeladen."
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -153,13 +144,6 @@ msgstr ""
 "können auch absolut sein."
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-"Local und die dazugehörige zwischengespeicherte Bibliothek aus Rufin "
-"entfernen? Deine Musikdateien werden nicht gelöscht."
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -173,6 +157,22 @@ msgid ""
 msgstr ""
 "Alle Rufin-Daten, -Einstellungen und gespeicherten Logins entfernen? Rufin "
 "wird nach dem Löschen der Daten neu gestartet."
+
+#, fuzzy
+#| msgid ""
+#| "Remove Local and its cached library from Rufin? Your music files will not "
+#| "be deleted."
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Local und die dazugehörige zwischengespeicherte Bibliothek aus Rufin "
+"entfernen? Deine Musikdateien werden nicht gelöscht."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
+msgstr ""
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -247,13 +247,6 @@ msgid ""
 msgstr ""
 "Dies wird von Rufin verwaltet. Es kann Einträge aus allen konfigurierten "
 "Quellen enthalten, wird aber nicht mit Remotes synchronisiert."
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr ""
-"Löscht Server, zwischengespeicherte Mediathek-Metadaten, Warteschlangen-"
-"Schnappschuss und gespeichertes Token für"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -503,9 +496,6 @@ msgstr "Anonym (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anonym"
 
-msgid "Another device"
-msgstr "Anderes Gerät"
-
 msgid "Any genre"
 msgstr "Beliebiges Genre"
 
@@ -524,9 +514,6 @@ msgstr "Erscheint auf"
 msgid "Application name"
 msgstr "Anwendungsname"
 
-msgid "Applied"
-msgstr "Angewendet"
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Gilt separat für Seitenleiste und Vollbild"
 
@@ -535,9 +522,6 @@ msgstr "Vorlage anwenden"
 
 msgid "Apply"
 msgstr "Anwenden"
-
-msgid "Applying profile"
-msgstr "Profil wird angewendet"
 
 msgid "Approve sign-in in your browser"
 msgstr "Bestätige die Anmeldung in deinem Browser"
@@ -722,9 +706,6 @@ msgstr "Blau"
 msgid "Brightness (%)"
 msgstr "Helligkeit (%)"
 
-msgid "Browse"
-msgstr "Durchsuchen"
-
 msgid "By Lyrics"
 msgstr "Von Liedtexten"
 
@@ -810,9 +791,6 @@ msgstr "Kanäle"
 
 msgid "Check for updates"
 msgstr "Nach Updates suchen"
-
-msgid "Checking profile"
-msgstr "Profil wird überprüft"
 
 msgid "Choose Folder"
 msgstr "Ordner auswählen"
@@ -998,9 +976,6 @@ msgstr "Bestätigen"
 
 msgid "Connect a device"
 msgstr "Gerät verbinden"
-
-msgid "Connect file"
-msgstr "Datei verbinden"
 
 msgid "Connect is not enabled"
 msgstr "Connect ist nicht aktiviert"
@@ -1563,9 +1538,6 @@ msgstr "Alles, einschließlich neuer Titel"
 msgid "Excluded folders"
 msgstr "Ausgeschlossene Ordner"
 
-msgid "Existing profile file"
-msgstr "Vorhandene Profildatei"
-
 msgid "Expand lyrics and visualizer"
 msgstr "Liedtexte und Visualisierung erweitern"
 
@@ -1595,9 +1567,6 @@ msgstr "Wiedergabeliste exportieren"
 
 msgid "Export preset"
 msgstr "Voreinstellung exportieren"
-
-msgid "Export to connection"
-msgstr "Zu Verbindung exportieren"
 
 msgid "Export your listening history in Rufin"
 msgstr "Hörverlauf aus Rufin exportieren"
@@ -1721,9 +1690,6 @@ msgstr "Finde dein ListenBrainz-Benutzer-Token"
 msgid "Finding lyrics..."
 msgstr "Liedtext wird gesucht …"
 
-msgid "Finishing setup"
-msgstr "Einrichtung wird abgeschlossen"
-
 msgid "Fit to height"
 msgstr "An Höhe anpassen"
 
@@ -1761,9 +1727,6 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Quelle vergessen"
-
-msgid "Forget \"{name}\"?"
-msgstr "„{name}“ vergessen?"
 
 msgid "Format not supported"
 msgstr "Format nicht unterstützt"
@@ -1958,9 +1921,6 @@ msgstr "Sicherung importieren"
 msgid "Import Playlist"
 msgstr "Wiedergabeliste importieren"
 
-msgid "Import from connection"
-msgstr "Aus Verbindung importieren"
-
 msgid "Import preset"
 msgstr "Voreinstellung importieren"
 
@@ -1969,9 +1929,6 @@ msgstr "Design importieren"
 
 msgid "Import"
 msgstr "Importieren"
-
-msgid "Importing profile"
-msgstr "Profil wird importiert"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2019,9 +1976,6 @@ msgstr "Jellyfin"
 
 msgid "Join profile"
 msgstr "Profil beitreten"
-
-msgid "Join using"
-msgstr "Beitreten über"
 
 msgid "Join"
 msgstr "Beitreten"
@@ -2193,9 +2147,6 @@ msgstr[1] ""
 msgid "Local files and folders"
 msgstr "Lokale Dateien und Ordner"
 
-msgid "Local folder"
-msgstr "Lokaler Ordner"
-
 msgid "Local imports and access"
 msgstr "Lokale Importe und Zugriff"
 
@@ -2207,9 +2158,6 @@ msgstr "Lokaler Musikordner ist nicht verfügbar"
 
 msgid "Local music folder"
 msgstr "Lokaler Musikordner"
-
-msgid "Local music folders"
-msgstr "Lokale Musikordner"
 
 msgid "Local network permission is required for remote connections"
 msgstr ""
@@ -2579,9 +2527,6 @@ msgstr "Noch keine Lieblingskünstler"
 msgid "No favorites yet"
 msgstr "Noch keine Favoriten"
 
-msgid "No file connections"
-msgstr "Keine Dateiverbindungen"
-
 msgid "No file linked"
 msgstr "Keine Datei verknüpft"
 
@@ -2691,6 +2636,11 @@ msgstr "Keine Wiedergabe"
 
 msgid "Nothing queued"
 msgstr "Nichts in der Warteschlange"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Noch nichts abgespielt"
 
 msgid "Notifications"
 msgstr "Benachrichtigungen"
@@ -3049,9 +2999,6 @@ msgstr "Übersetzungen bevorzugen"
 msgid "Preferences"
 msgstr "Einstellungen"
 
-msgid "Preparing collection"
-msgstr "Sammlung wird vorbereitet"
-
 msgid "Preparing library..."
 msgstr "Bibliothek wird vorbereitet …"
 
@@ -3110,10 +3057,6 @@ msgstr "Privater Modus"
 msgid "Profile PIN"
 msgstr "Profil-PIN"
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-"Der Profil-Download ist unvollständig. Versuche es erneut, um fortzufahren."
-
 msgid "Profile up to date"
 msgstr "Profil aktuell"
 
@@ -3170,9 +3113,6 @@ msgstr "Tags werden gelesen …"
 
 msgid "Ready"
 msgstr "Bereit"
-
-msgid "Receiving collection"
-msgstr "Sammlung wird empfangen"
 
 msgid "Receiving profile"
 msgstr "Profil wird empfangen"
@@ -3330,11 +3270,6 @@ msgstr "Regel entfernen"
 msgid "Remove search"
 msgstr "Suche entfernen"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-"Die Bibliotheksdatenbank entfernen? Einstellungen und gespeicherte Logins "
-"bleiben erhalten."
-
 msgid "Remove unavailable tracks"
 msgstr "Nicht verfügbare Titel entfernen"
 
@@ -3391,12 +3326,6 @@ msgstr "SMB-Verschlüsselung anfordern"
 
 msgid "Reset appearance"
 msgstr "Darstellung zurücksetzen"
-
-msgid "Reset database"
-msgstr "Datenbank zurücksetzen"
-
-msgid "Reset database?"
-msgstr "Datenbank zurücksetzen?"
 
 msgid "Reset to defaults"
 msgstr "Auf Standardeinstellungen zurücksetzen"
@@ -3545,9 +3474,6 @@ msgstr "Gespeichert …"
 
 msgid "Saves lyrics to your source"
 msgstr "Speichert Liedtexte in deiner Quelle"
-
-msgid "Saving changes"
-msgstr "Änderungen werden gespeichert"
 
 msgid "Saving..."
 msgstr "Wird gespeichert …"
@@ -3921,6 +3847,9 @@ msgstr "Songtitel"
 msgid "Song"
 msgstr "Song"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 msgid "Sort by"
 msgstr "Sortieren nach"
 
@@ -4032,6 +3961,11 @@ msgstr "Bereich wechseln"
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt …"
 
+#, fuzzy
+#| msgid "Save in folder"
+msgid "Sync folder"
+msgstr "In Ordner speichern"
+
 msgid "Synced lyrics"
 msgstr "Synchronisierte Liedtexte"
 
@@ -4071,6 +4005,9 @@ msgstr "Text"
 msgid "The API token was not accepted. Please connect again."
 msgstr "Das API-Token wurde nicht akzeptiert. Bitte erneut verbinden."
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr "Die Verbindung existiert nicht mehr"
 
@@ -4089,10 +4026,18 @@ msgstr "Diese Emojis stimmen überein"
 msgid "This can be turned off after pairing if you want"
 msgstr "Dies kann nach dem Koppeln bei Bedarf deaktiviert werden"
 
+#, fuzzy
+#| msgid "This removes the folder from the Local source."
+msgid "This device was removed from the profile"
+msgstr "Löscht den Ordner aus der lokalen Quelle."
+
 msgid "This device"
 msgstr "Dieses Gerät"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+#, fuzzy
+#| msgid ""
+#| "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 "Dies wird von {source} verwaltet. Normale Wiedergabelisten werden mit deinem "
 "Remote synchronisiert."
@@ -4303,9 +4248,6 @@ msgstr "Eigenes Cover jedes Titels verwenden, sofern verfügbar"
 msgid "Use existing"
 msgstr "Vorhandene verwenden"
 
-msgid "Use folder"
-msgstr "Ordner verwenden"
-
 msgid "Use for this output"
 msgstr "Für diese Ausgabe verwenden"
 
@@ -4322,6 +4264,11 @@ msgstr "Maximales Jahr verwenden"
 
 msgid "Use minimum year"
 msgstr "Minimales Jahr verwenden"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use sort tags"
+msgstr "Quelleneinstellung verwenden"
 
 msgid "Use source setting"
 msgstr "Quelleneinstellung verwenden"
@@ -4386,9 +4333,6 @@ msgstr "Lautstärkeskala"
 
 msgid "Volume"
 msgstr "Lautstärke"
-
-msgid "Waiting for a peer"
-msgstr "Warten auf einen Peer"
 
 msgid "Waiting for connection"
 msgstr "Warten auf Verbindung"
@@ -4575,12 +4519,6 @@ msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr "{current} / {total} MiB ({percent}%)"
-
-msgid "{current} MiB"
-msgstr "{current} MiB"
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] "{field} · Unterschiedlich in {count} Titel"
@@ -4682,6 +4620,107 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid ""
+#~ "Choose where this device stores local music received through Connect. "
+#~ "Matching files already in the folder are reused; missing files are "
+#~ "downloaded here."
+#~ msgstr ""
+#~ "Wähle, wo dieses Gerät lokale Musik speichert, die über Connect empfangen "
+#~ "wird. Bereits im Ordner vorhandene passende Dateien werden "
+#~ "wiederverwendet; fehlende Dateien werden hierher heruntergeladen."
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "Löscht Server, zwischengespeicherte Mediathek-Metadaten, Warteschlangen-"
+#~ "Schnappschuss und gespeichertes Token für"
+
+#~ msgid "Another device"
+#~ msgstr "Anderes Gerät"
+
+#~ msgid "Applied"
+#~ msgstr "Angewendet"
+
+#~ msgid "Applying profile"
+#~ msgstr "Profil wird angewendet"
+
+#~ msgid "Browse"
+#~ msgstr "Durchsuchen"
+
+#~ msgid "Checking profile"
+#~ msgstr "Profil wird überprüft"
+
+#~ msgid "Connect file"
+#~ msgstr "Datei verbinden"
+
+#~ msgid "Existing profile file"
+#~ msgstr "Vorhandene Profildatei"
+
+#~ msgid "Export to connection"
+#~ msgstr "Zu Verbindung exportieren"
+
+#~ msgid "Finishing setup"
+#~ msgstr "Einrichtung wird abgeschlossen"
+
+#~ msgid "Forget \"{name}\"?"
+#~ msgstr "„{name}“ vergessen?"
+
+#~ msgid "Import from connection"
+#~ msgstr "Aus Verbindung importieren"
+
+#~ msgid "Importing profile"
+#~ msgstr "Profil wird importiert"
+
+#~ msgid "Join using"
+#~ msgstr "Beitreten über"
+
+#~ msgid "Local folder"
+#~ msgstr "Lokaler Ordner"
+
+#~ msgid "Local music folders"
+#~ msgstr "Lokale Musikordner"
+
+#~ msgid "No file connections"
+#~ msgstr "Keine Dateiverbindungen"
+
+#~ msgid "Preparing collection"
+#~ msgstr "Sammlung wird vorbereitet"
+
+#~ msgid "Profile download is incomplete. Retry to continue."
+#~ msgstr ""
+#~ "Der Profil-Download ist unvollständig. Versuche es erneut, um "
+#~ "fortzufahren."
+
+#~ msgid "Receiving collection"
+#~ msgstr "Sammlung wird empfangen"
+
+#~ msgid "Remove the library database? Settings and saved logins will be kept."
+#~ msgstr ""
+#~ "Die Bibliotheksdatenbank entfernen? Einstellungen und gespeicherte Logins "
+#~ "bleiben erhalten."
+
+#~ msgid "Reset database"
+#~ msgstr "Datenbank zurücksetzen"
+
+#~ msgid "Reset database?"
+#~ msgstr "Datenbank zurücksetzen?"
+
+#~ msgid "Saving changes"
+#~ msgstr "Änderungen werden gespeichert"
+
+#~ msgid "Use folder"
+#~ msgstr "Ordner verwenden"
+
+#~ msgid "Waiting for a peer"
+#~ msgstr "Warten auf einen Peer"
+
+#~ msgid "{current} / {total} MiB ({percent}%)"
+#~ msgstr "{current} / {total} MiB ({percent}%)"
+
+#~ msgid "{current} MiB"
+#~ msgstr "{current} MiB"
 
 #~ msgid "Download artwork"
 #~ msgstr "Cover herunterladen"
@@ -5224,9 +5263,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "This removes cached library metadata for"
 #~ msgstr "Löscht zwischengespeicherte Mediathek-Metadaten für"
-
-#~ msgid "This removes the folder from the Local source."
-#~ msgstr "Löscht den Ordner aus der lokalen Quelle."
 
 #~ msgid "Timed out waiting for Last.fm authorization."
 #~ msgstr "Zeitüberschreitung beim Warten auf die Last.fm-Autorisierung."

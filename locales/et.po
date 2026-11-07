@@ -44,15 +44,6 @@ msgstr ""
 "kirjet ja {listens} kuulamise märget."
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-"Vali, kuhu see seade salvestab Connect-teenuse kaudu saadud kohaliku "
-"muusika. Kaustas juba olemasolevaid sobivaid faile kasutatakse uuesti ning "
-"puuduvad failid laaditakse siia alla."
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -151,13 +142,6 @@ msgstr ""
 "asukohti."
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-"Kas eemaldad kohaliku kogu ja puhverdatud andmed Rufinist? Sinu muusikafaile "
-"ei kustutata."
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -170,6 +154,22 @@ msgid ""
 msgstr ""
 "Kas eemaldad kõik Rufini andmed, seadistused ja autentimisandmed? Peale "
 "andmete eemaldamist käivitub Rufin uuesti."
+
+#, fuzzy
+#| msgid ""
+#| "Remove Local and its cached library from Rufin? Your music files will not "
+#| "be deleted."
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Kas eemaldad kohaliku kogu ja puhverdatud andmed Rufinist? Sinu muusikafaile "
+"ei kustutata."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
+msgstr ""
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -243,13 +243,6 @@ msgid ""
 msgstr ""
 "Selle omanikuks on Rufin. See võib sisaldada kirjeid kõigist seadistatud "
 "allikatest, kuid seda ei sünkroonita kaugseadmetesse."
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr ""
-"Järgnevaga kustutakse serveriteave, puhverdatud meediumikogu andmed, "
-"esitusjärjekorra hetkvaade ja salvestatud tunnusload teenusest"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -495,9 +488,6 @@ msgstr "Anonüümne (WebDAV / SMB)"
 msgid "Anonymous"
 msgstr "Anonüümne"
 
-msgid "Another device"
-msgstr "Muu seade"
-
 msgid "Any genre"
 msgstr "Iga žanr"
 
@@ -516,9 +506,6 @@ msgstr "Esineb"
 msgid "Application name"
 msgstr "Rakenduse nimi"
 
-msgid "Applied"
-msgstr "Rakendatud"
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Käib eraldi külgpaani ja täisekraani kohta"
 
@@ -527,9 +514,6 @@ msgstr "Rakenda mall"
 
 msgid "Apply"
 msgstr "Rakenda"
-
-msgid "Applying profile"
-msgstr "Rakendan profiili"
 
 msgid "Approve sign-in in your browser"
 msgstr "Kinnita sisselogimine oma veebibrauseris"
@@ -714,9 +698,6 @@ msgstr "Sinine"
 msgid "Brightness (%)"
 msgstr "Eredus (%)"
 
-msgid "Browse"
-msgstr "Sirvi"
-
 msgid "By Lyrics"
 msgstr "Laulusõnade alusel"
 
@@ -802,9 +783,6 @@ msgstr "Kanaleid"
 
 msgid "Check for updates"
 msgstr "Kontrolli uuendusi"
-
-msgid "Checking profile"
-msgstr "Kontrollin profiili"
 
 msgid "Choose Folder"
 msgstr "Vali kaust"
@@ -990,9 +968,6 @@ msgstr "Kinnita"
 
 msgid "Connect a device"
 msgstr "Ühenda seade"
-
-msgid "Connect file"
-msgstr "Ühenda fail"
 
 msgid "Connect is not enabled"
 msgstr "Ühendamine pole sisselülitatud"
@@ -1553,9 +1528,6 @@ msgstr "Kõik, sealhulgas uued lood"
 msgid "Excluded folders"
 msgstr "Välistatud kaustad"
 
-msgid "Existing profile file"
-msgstr "Olemasolev profiilifail"
-
 msgid "Expand lyrics and visualizer"
 msgstr "Laienda laulusõnu ja visualiseerijat"
 
@@ -1585,9 +1557,6 @@ msgstr "Ekspordi esitusloend"
 
 msgid "Export preset"
 msgstr "Ekspordi eelseadistus"
-
-msgid "Export to connection"
-msgstr "Ekspordi ühendusse"
 
 msgid "Export your listening history in Rufin"
 msgstr "Ekspordi Rufinist oma kuulamiste ajalugu"
@@ -1708,9 +1677,6 @@ msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
 msgid "Finding lyrics..."
 msgstr "Otsin laulusõnu…"
 
-msgid "Finishing setup"
-msgstr "Lõpetan valmendust"
-
 msgid "Fit to height"
 msgstr "Sobita kõrgusele"
 
@@ -1748,9 +1714,6 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Unusta allikas"
-
-msgid "Forget \"{name}\"?"
-msgstr "Kas unustad: „{name}“?"
 
 msgid "Format not supported"
 msgstr "Vorming pole toetatud"
@@ -1946,9 +1909,6 @@ msgstr "Impordi varukoopia"
 msgid "Import Playlist"
 msgstr "Impordi esitusloend"
 
-msgid "Import from connection"
-msgstr "Impordi ühendusest"
-
 msgid "Import preset"
 msgstr "Impordi eelseadistus"
 
@@ -1957,9 +1917,6 @@ msgstr "Impordi kujundus"
 
 msgid "Import"
 msgstr "Import"
-
-msgid "Importing profile"
-msgstr "Impordin profiili"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2006,9 +1963,6 @@ msgstr "Jellyfin"
 
 msgid "Join profile"
 msgstr "Liitumisprofiil"
-
-msgid "Join using"
-msgstr "Liitu kasutades teenust"
 
 msgid "Join"
 msgstr "Liitu"
@@ -2178,9 +2132,6 @@ msgstr[1] ""
 msgid "Local files and folders"
 msgstr "Kohalikud muusikafailid ja -kaustad"
 
-msgid "Local folder"
-msgstr "Kohalik kaust"
-
 msgid "Local imports and access"
 msgstr "Kohalik importimine ja ligipääs"
 
@@ -2192,9 +2143,6 @@ msgstr "Kohalik muusikakaust pole saadaval"
 
 msgid "Local music folder"
 msgstr "Kohalik muusikakaust"
-
-msgid "Local music folders"
-msgstr "Kohalikud muusikakaustad"
 
 msgid "Local network permission is required for remote connections"
 msgstr "Kaugühenduste kasutamiseks on vajalik ligipääs kohtvõrgule"
@@ -2561,9 +2509,6 @@ msgstr "Lemmikesitajaid veel pole"
 msgid "No favorites yet"
 msgstr "Lemmikuid veel pole"
 
-msgid "No file connections"
-msgstr "Pole failiühendusi"
-
 msgid "No file linked"
 msgstr "Ühtegi faili pole seotud"
 
@@ -2671,6 +2616,11 @@ msgstr "Mitte midagi pole esitamisel"
 
 msgid "Nothing queued"
 msgstr "Mitte midagi pole lisatud järjekorda"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Mitte midagi pole esitatud"
 
 msgid "Notifications"
 msgstr "Teavitused"
@@ -3028,9 +2978,6 @@ msgstr "Eelista tõlkeid"
 msgid "Preferences"
 msgstr "Eelistused"
 
-msgid "Preparing collection"
-msgstr "Valmistan kogumikku ette"
-
 msgid "Preparing library..."
 msgstr "Valmistan meediumikogu ette…"
 
@@ -3088,9 +3035,6 @@ msgstr "Privaatne režiim"
 msgid "Profile PIN"
 msgstr "Profiili PIN-kood"
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr "Profiili allalaadimine jäi poolikuks. Jätkamiseks proovi uuesti."
-
 msgid "Profile up to date"
 msgstr "Profiil on ajakohane"
 
@@ -3147,9 +3091,6 @@ msgstr "Loen silte…"
 
 msgid "Ready"
 msgstr "Valmis"
-
-msgid "Receiving collection"
-msgstr "Laadin kogumikku alla"
 
 msgid "Receiving profile"
 msgstr "Vastuvõttev profiil"
@@ -3307,11 +3248,6 @@ msgstr "Eemalda reegel"
 msgid "Remove search"
 msgstr "Eemalda otsing"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-"Kas eemaldad oma meediumikogu andmebaasi? Seadistused ja salvestatud "
-"sisselogimised jäävad alles."
-
 msgid "Remove unavailable tracks"
 msgstr "Eemalda lood, mis pole saadaval"
 
@@ -3368,12 +3304,6 @@ msgstr "Eelda SMB puhul krüptimist"
 
 msgid "Reset appearance"
 msgstr "Lähtesta välimus"
-
-msgid "Reset database"
-msgstr "Lähtesta andmebaas"
-
-msgid "Reset database?"
-msgstr "Kas lähtestad andmebaasi?"
 
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
@@ -3520,9 +3450,6 @@ msgstr "Salvestatud..."
 
 msgid "Saves lyrics to your source"
 msgstr "Salvestab laulusõnad sinu andmeallikasse"
-
-msgid "Saving changes"
-msgstr "Salvestan muudatusi"
 
 msgid "Saving..."
 msgstr "Salvestan…"
@@ -3896,6 +3823,9 @@ msgstr "Loo pealkiri"
 msgid "Song"
 msgstr "Lugu"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 msgid "Sort by"
 msgstr "Järjestus"
 
@@ -4008,6 +3938,11 @@ msgstr "Vaheta paani"
 msgid "Switching library..."
 msgstr "Vahetan meediumikogu…"
 
+#, fuzzy
+#| msgid "Save in folder"
+msgid "Sync folder"
+msgstr "Salvesta kausta"
+
 msgid "Synced lyrics"
 msgstr "Sünkroonitud laulusõnad"
 
@@ -4047,6 +3982,9 @@ msgstr "Tekst"
 msgid "The API token was not accepted. Please connect again."
 msgstr "API tunnusluba polnud õige. Palun ühenda uuesti."
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr "Seda ühendust pole enam olemas"
 
@@ -4065,10 +4003,18 @@ msgstr "Need emojid klapivad"
 msgid "This can be turned off after pairing if you want"
 msgstr "Peale paardumist võid selle soovi korral välja lülitada"
 
+#, fuzzy
+#| msgid "This removes the folder from the Local source"
+msgid "This device was removed from the profile"
+msgstr "Järgnevaga eemaldad selle kausta kohalike allikate seast"
+
 msgid "This device"
 msgstr "See seade"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+#, fuzzy
+#| msgid ""
+#| "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 "Selle omanik on {source}. Tavalised esitusloendi sünkroonitakse sinu "
 "kaugseadmesse."
@@ -4278,9 +4224,6 @@ msgstr "Kui igal lool on oma kaanepilt olemas, siis kasuta seda"
 msgid "Use existing"
 msgstr "Kasta olemasolevat"
 
-msgid "Use folder"
-msgstr "Kasuta kausta"
-
 msgid "Use for this output"
 msgstr "Kasuta selle väljundi jaoks"
 
@@ -4297,6 +4240,11 @@ msgstr "Kasuta maksimaalset aastat"
 
 msgid "Use minimum year"
 msgstr "Kasuta minimaalset aastat"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use sort tags"
+msgstr "Kasuta allika seadistust"
 
 msgid "Use source setting"
 msgstr "Kasuta allika seadistust"
@@ -4363,9 +4311,6 @@ msgstr "Helivaljuse skaala"
 
 msgid "Volume"
 msgstr "Helivaljus"
-
-msgid "Waiting for a peer"
-msgstr "Oota ühenduse teise osapoole järgi"
 
 msgid "Waiting for connection"
 msgstr "Oota ühenduse teket"
@@ -4552,12 +4497,6 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr "{current} / {total} MiB ({percent}%)"
-
-msgid "{current} MiB"
-msgstr "{current} MiB"
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] "{field} · {count} raja puhul erinev"
@@ -4658,6 +4597,105 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid ""
+#~ "Choose where this device stores local music received through Connect. "
+#~ "Matching files already in the folder are reused; missing files are "
+#~ "downloaded here."
+#~ msgstr ""
+#~ "Vali, kuhu see seade salvestab Connect-teenuse kaudu saadud kohaliku "
+#~ "muusika. Kaustas juba olemasolevaid sobivaid faile kasutatakse uuesti "
+#~ "ning puuduvad failid laaditakse siia alla."
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "Järgnevaga kustutakse serveriteave, puhverdatud meediumikogu andmed, "
+#~ "esitusjärjekorra hetkvaade ja salvestatud tunnusload teenusest"
+
+#~ msgid "Another device"
+#~ msgstr "Muu seade"
+
+#~ msgid "Applied"
+#~ msgstr "Rakendatud"
+
+#~ msgid "Applying profile"
+#~ msgstr "Rakendan profiili"
+
+#~ msgid "Browse"
+#~ msgstr "Sirvi"
+
+#~ msgid "Checking profile"
+#~ msgstr "Kontrollin profiili"
+
+#~ msgid "Connect file"
+#~ msgstr "Ühenda fail"
+
+#~ msgid "Existing profile file"
+#~ msgstr "Olemasolev profiilifail"
+
+#~ msgid "Export to connection"
+#~ msgstr "Ekspordi ühendusse"
+
+#~ msgid "Finishing setup"
+#~ msgstr "Lõpetan valmendust"
+
+#~ msgid "Forget \"{name}\"?"
+#~ msgstr "Kas unustad: „{name}“?"
+
+#~ msgid "Import from connection"
+#~ msgstr "Impordi ühendusest"
+
+#~ msgid "Importing profile"
+#~ msgstr "Impordin profiili"
+
+#~ msgid "Join using"
+#~ msgstr "Liitu kasutades teenust"
+
+#~ msgid "Local folder"
+#~ msgstr "Kohalik kaust"
+
+#~ msgid "Local music folders"
+#~ msgstr "Kohalikud muusikakaustad"
+
+#~ msgid "No file connections"
+#~ msgstr "Pole failiühendusi"
+
+#~ msgid "Preparing collection"
+#~ msgstr "Valmistan kogumikku ette"
+
+#~ msgid "Profile download is incomplete. Retry to continue."
+#~ msgstr "Profiili allalaadimine jäi poolikuks. Jätkamiseks proovi uuesti."
+
+#~ msgid "Receiving collection"
+#~ msgstr "Laadin kogumikku alla"
+
+#~ msgid "Remove the library database? Settings and saved logins will be kept."
+#~ msgstr ""
+#~ "Kas eemaldad oma meediumikogu andmebaasi? Seadistused ja salvestatud "
+#~ "sisselogimised jäävad alles."
+
+#~ msgid "Reset database"
+#~ msgstr "Lähtesta andmebaas"
+
+#~ msgid "Reset database?"
+#~ msgstr "Kas lähtestad andmebaasi?"
+
+#~ msgid "Saving changes"
+#~ msgstr "Salvestan muudatusi"
+
+#~ msgid "Use folder"
+#~ msgstr "Kasuta kausta"
+
+#~ msgid "Waiting for a peer"
+#~ msgstr "Oota ühenduse teise osapoole järgi"
+
+#~ msgid "{current} / {total} MiB ({percent}%)"
+#~ msgstr "{current} / {total} MiB ({percent}%)"
+
+#~ msgid "{current} MiB"
+#~ msgstr "{current} MiB"
 
 #~ msgid "Download artwork"
 #~ msgstr "Laadi kaanepilt alla"
@@ -5355,9 +5393,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Synchronized + Unsynchronized"
 #~ msgstr "Sünkroonitud + sünkroonimata"
-
-#~ msgid "This removes the folder from the Local source"
-#~ msgstr "Järgnevaga eemaldad selle kausta kohalike allikate seast"
 
 #~ msgid "Try to fetch artwork from internet when server artwork is missing"
 #~ msgstr ""

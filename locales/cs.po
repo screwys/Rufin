@@ -37,12 +37,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -122,11 +116,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -134,6 +123,16 @@ msgstr ""
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
+msgstr ""
+
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
 msgstr ""
 
 msgid ""
@@ -189,13 +188,6 @@ msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
 msgstr ""
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
-msgstr ""
-"Tímto se odstraní server, metadata knihovny uložená v mezipaměti, snímek "
-"fronty a uložený token pro"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
@@ -477,11 +469,6 @@ msgstr ""
 msgid "Anonymous"
 msgstr ""
 
-#, fuzzy
-#| msgid "This device"
-msgid "Another device"
-msgstr "Toto zařízení"
-
 msgid "Any genre"
 msgstr "Všechny žánry"
 
@@ -500,9 +487,6 @@ msgstr "Objevuje se v"
 msgid "Application name"
 msgstr "Název aplikace"
 
-msgid "Applied"
-msgstr ""
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
@@ -513,11 +497,6 @@ msgstr "Šedá"
 
 msgid "Apply"
 msgstr ""
-
-#, fuzzy
-#| msgid "Saved Sources"
-msgid "Applying profile"
-msgstr "Uložené zdroje"
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -752,9 +731,6 @@ msgstr "Modrá"
 msgid "Brightness (%)"
 msgstr ""
 
-msgid "Browse"
-msgstr ""
-
 #, fuzzy
 #| msgid "Lyrics"
 msgid "By Lyrics"
@@ -866,11 +842,6 @@ msgstr "Změnit"
 
 msgid "Check for updates"
 msgstr ""
-
-#, fuzzy
-#| msgid "Saved Sources"
-msgid "Checking profile"
-msgstr "Uložené zdroje"
 
 #, fuzzy
 #| msgid "Locate Folder"
@@ -1110,11 +1081,6 @@ msgstr ""
 #| msgid "Connecting to {device}..."
 msgid "Connect a device"
 msgstr "Připojování k {device}..."
-
-#, fuzzy
-#| msgid "Connection failed"
-msgid "Connect file"
-msgstr "Spojení selhalo"
 
 #, fuzzy
 #| msgid "Connection failed"
@@ -1819,9 +1785,6 @@ msgstr "Vše, včetně nových skladeb"
 msgid "Excluded folders"
 msgstr "Přidat složku"
 
-msgid "Existing profile file"
-msgstr ""
-
 msgid "Expand lyrics and visualizer"
 msgstr ""
 
@@ -1859,11 +1822,6 @@ msgstr "Chytré playlisty"
 #| msgid "Smart playlists"
 msgid "Export preset"
 msgstr "Chytré playlisty"
-
-#, fuzzy
-#| msgid "Connection"
-msgid "Export to connection"
-msgstr "Spojení"
 
 msgid "Export your listening history in Rufin"
 msgstr ""
@@ -2016,9 +1974,6 @@ msgstr "Najděte svůj uživatelský token ListenBrainz"
 msgid "Finding lyrics..."
 msgstr "Skrýt text skladby"
 
-msgid "Finishing setup"
-msgstr ""
-
 msgid "Fit to height"
 msgstr ""
 
@@ -2062,9 +2017,6 @@ msgstr ""
 #| msgid "Forget Server"
 msgid "Forget Source"
 msgstr "Zapomenout server"
-
-msgid "Forget \"{name}\"?"
-msgstr ""
 
 msgid "Format not supported"
 msgstr ""
@@ -2277,11 +2229,6 @@ msgid "Import Playlist"
 msgstr "Chytrý Playlist"
 
 #, fuzzy
-#| msgid "Waiting for connection"
-msgid "Import from connection"
-msgstr "Čekání na připojení"
-
-#, fuzzy
 #| msgid "Support"
 msgid "Import preset"
 msgstr "Uživatelská podpora"
@@ -2295,11 +2242,6 @@ msgstr "Uživatelská podpora"
 #| msgid "Support"
 msgid "Import"
 msgstr "Uživatelská podpora"
-
-#, fuzzy
-#| msgid "Saved Sources"
-msgid "Importing profile"
-msgstr "Uložené zdroje"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2349,9 +2291,6 @@ msgstr "Jellyfin"
 #| msgid "Saved Sources"
 msgid "Join profile"
 msgstr "Uložené zdroje"
-
-msgid "Join using"
-msgstr ""
 
 msgid "Join"
 msgstr ""
@@ -2545,11 +2484,6 @@ msgid "Local files and folders"
 msgstr "Místní hudební složka"
 
 #, fuzzy
-#| msgid "Local Folders"
-msgid "Local folder"
-msgstr "Místní složky"
-
-#, fuzzy
 #| msgid "Local File Access"
 msgid "Local imports and access"
 msgstr "Přístup k místním souborům"
@@ -2561,11 +2495,6 @@ msgid "Local music folder is unavailable"
 msgstr "Místní hudební složka je nedostupná"
 
 msgid "Local music folder"
-msgstr "Místní hudební složka"
-
-#, fuzzy
-#| msgid "Local music folder"
-msgid "Local music folders"
 msgstr "Místní hudební složka"
 
 msgid "Local network permission is required for remote connections"
@@ -2997,11 +2926,6 @@ msgid "No favorites yet"
 msgstr "Zatím žádné oblíbené položky"
 
 #, fuzzy
-#| msgid "Connection"
-msgid "No file connections"
-msgstr "Spojení"
-
-#, fuzzy
 #| msgid "No folder selected"
 msgid "No file linked"
 msgstr "Nebyla vybrána žádná složka"
@@ -3134,6 +3058,11 @@ msgstr "Nic se nepřehrává"
 
 msgid "Nothing queued"
 msgstr "Nic ve frontě"
+
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Nothing to play here"
+msgstr "Zatím nic nepřehráváno"
 
 msgid "Notifications"
 msgstr "Notifikace"
@@ -3553,11 +3482,6 @@ msgstr "Upřednostnit překlady"
 msgid "Preferences"
 msgstr "Nastavení"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Preparing collection"
-msgstr "Výběr"
-
 msgid "Preparing library..."
 msgstr "Příprava knihovny..."
 
@@ -3629,9 +3553,6 @@ msgstr "Soukromý režim"
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-
 msgid "Profile up to date"
 msgstr ""
 
@@ -3696,11 +3617,6 @@ msgstr "Ukládání..."
 
 msgid "Ready"
 msgstr "Připraveno"
-
-#, fuzzy
-#| msgid "Selection"
-msgid "Receiving collection"
-msgstr "Výběr"
 
 msgid "Receiving profile"
 msgstr ""
@@ -3898,9 +3814,6 @@ msgstr "Odebrat pravidlo"
 msgid "Remove search"
 msgstr "Odebrat složku"
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-
 #, fuzzy
 #| msgid "Album title"
 msgid "Remove unavailable tracks"
@@ -3973,16 +3886,6 @@ msgstr ""
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "Vzhled"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database"
-msgstr "Datum vydání"
-
-#, fuzzy
-#| msgid "Release date"
-msgid "Reset database?"
-msgstr "Datum vydání"
 
 msgid "Reset to defaults"
 msgstr "Obnovit výchozí nastavení"
@@ -4152,11 +4055,6 @@ msgstr "Uloženo"
 
 msgid "Saves lyrics to your source"
 msgstr ""
-
-#, fuzzy
-#| msgid "Search Again"
-msgid "Saving changes"
-msgstr "Hledat znovu"
 
 msgid "Saving..."
 msgstr "Ukládání..."
@@ -4600,6 +4498,9 @@ msgstr "Název skladby"
 msgid "Song"
 msgstr "Skladba"
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 #, fuzzy
 #| msgid "Sort"
 msgid "Sort by"
@@ -4741,6 +4642,11 @@ msgstr ""
 msgid "Switching library..."
 msgstr "Přepínání knihovny..."
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Sync folder"
+msgstr "Odebrat složku"
+
 msgid "Synced lyrics"
 msgstr "Synchronizované texty"
 
@@ -4788,6 +4694,9 @@ msgstr "Text"
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
@@ -4808,10 +4717,13 @@ msgstr ""
 msgid "This can be turned off after pairing if you want"
 msgstr ""
 
+msgid "This device was removed from the profile"
+msgstr ""
+
 msgid "This device"
 msgstr "Toto zařízení"
 
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
@@ -5066,11 +4978,6 @@ msgstr ""
 msgid "Use existing"
 msgstr "Nastavení textu skladeb"
 
-#, fuzzy
-#| msgid "Add folder"
-msgid "Use folder"
-msgstr "Přidat složku"
-
 msgid "Use for this output"
 msgstr ""
 
@@ -5091,6 +4998,11 @@ msgstr "Maximální rok"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Minimální rok"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use sort tags"
+msgstr "Nastavení textu skladeb"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5164,11 +5076,6 @@ msgstr "Stupnice hlasitosti"
 #| msgid "Volume Up"
 msgid "Volume"
 msgstr "Zvýšit hlasitost"
-
-#, fuzzy
-#| msgid "Waiting for connection"
-msgid "Waiting for a peer"
-msgstr "Čekání na připojení"
 
 msgid "Waiting for connection"
 msgstr "Čekání na připojení"
@@ -5379,12 +5286,6 @@ msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
 
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr ""
-
-msgid "{current} MiB"
-msgstr ""
-
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
@@ -5475,6 +5376,98 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This removes the server, cached library metadata, queue snapshot, and "
+#~ "saved token for"
+#~ msgstr ""
+#~ "Tímto se odstraní server, metadata knihovny uložená v mezipaměti, snímek "
+#~ "fronty a uložený token pro"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Another device"
+#~ msgstr "Toto zařízení"
+
+#, fuzzy
+#~| msgid "Saved Sources"
+#~ msgid "Applying profile"
+#~ msgstr "Uložené zdroje"
+
+#, fuzzy
+#~| msgid "Saved Sources"
+#~ msgid "Checking profile"
+#~ msgstr "Uložené zdroje"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect file"
+#~ msgstr "Spojení selhalo"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Export to connection"
+#~ msgstr "Spojení"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Import from connection"
+#~ msgstr "Čekání na připojení"
+
+#, fuzzy
+#~| msgid "Saved Sources"
+#~ msgid "Importing profile"
+#~ msgstr "Uložené zdroje"
+
+#, fuzzy
+#~| msgid "Local Folders"
+#~ msgid "Local folder"
+#~ msgstr "Místní složky"
+
+#, fuzzy
+#~| msgid "Local music folder"
+#~ msgid "Local music folders"
+#~ msgstr "Místní hudební složka"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "No file connections"
+#~ msgstr "Spojení"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Preparing collection"
+#~ msgstr "Výběr"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Receiving collection"
+#~ msgstr "Výběr"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database"
+#~ msgstr "Datum vydání"
+
+#, fuzzy
+#~| msgid "Release date"
+#~ msgid "Reset database?"
+#~ msgstr "Datum vydání"
+
+#, fuzzy
+#~| msgid "Search Again"
+#~ msgid "Saving changes"
+#~ msgstr "Hledat znovu"
+
+#, fuzzy
+#~| msgid "Add folder"
+#~ msgid "Use folder"
+#~ msgstr "Přidat složku"
+
+#, fuzzy
+#~| msgid "Waiting for connection"
+#~ msgid "Waiting for a peer"
+#~ msgstr "Čekání na připojení"
 
 #, fuzzy
 #~| msgid "Download started"
