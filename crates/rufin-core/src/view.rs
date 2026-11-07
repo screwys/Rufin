@@ -1662,13 +1662,11 @@ impl View {
         };
         let key = library_list_key(&self.route, self.options.category);
         let changed = match &self.body {
-            Body::Rows {
-                read: Read::List(_) | Read::AlbumTracks(_),
-                ..
-            } => {
+            Body::Rows { .. } | Body::Folders { .. } => {
                 let (read, current) = lists(key);
                 order(key)
-                    || uses_activity(&self.route, &read) != uses_activity(&self.route, &current)
+                    || uses_activity(&self.route, &self.options, &read)
+                        != uses_activity(&self.route, &self.options, &current)
                     || key == LibraryListKey::Albums
                         && (read.layout == LibraryLayout::Detail)
                             != (current.layout == LibraryLayout::Detail)
@@ -2249,7 +2247,9 @@ fn changes(
         let sensitive = match route {
             Route::Search => CollectionCategory::ALL
                 .into_iter()
-                .any(|category| uses_activity(route, &settings.library_list(category.key()))),
+                .any(|category| {
+                    uses_activity(route, options, &settings.library_list(category.key()))
+                }),
             Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
                 [CollectionCategory::Tracks, CollectionCategory::Albums]
                     .into_iter()
@@ -2400,10 +2400,11 @@ pub fn supports_downloaded_filter(route: &Route, category: CollectionCategory) -
 
 /// Whether plays change what an open route shows. An open Smart Playlist keeps the list it
 /// opened with; plays change its members on the next visit.
-fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
+fn uses_activity(route: &Route, options: &OpenOptions, settings: &LibraryListSettings) -> bool {
     if matches!(route, Route::SmartPlaylistDetail(_)) {
         return false;
     }
+    let layout = options.layout.unwrap_or(settings.layout);
     matches!(
         route,
         Route::Home
@@ -2411,12 +2412,12 @@ fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
             | Route::PlaylistFolder { smart: true, .. }
             | Route::History
     ) || settings.sort_key.activity_sensitive()
-        || match settings.layout {
+        || match layout {
             LibraryLayout::Grid => &settings.grid_fields,
             _ => &settings.row_fields,
         }
         .iter()
-        .chain(if settings.layout == LibraryLayout::Detail {
+        .chain(if layout == LibraryLayout::Detail {
             settings.detail_track_fields.as_slice()
         } else {
             &[]
@@ -2436,7 +2437,7 @@ fn read_order(
     (
         sort,
         descending,
-        uses_activity(route, &display) || sort.activity_sensitive(),
+        uses_activity(route, options, &display) || sort.activity_sensitive(),
     )
 }
 

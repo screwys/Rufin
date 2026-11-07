@@ -161,8 +161,10 @@ impl Catalog {
                 album_artist: album_artists,
             }))
             .collect::<Vec<_>>();
-        // Each row counts in music folder `folder` as the one rule narrows its kind.
+        // Each row counts in music folder `folder` as the one rule narrows its kind, with the
+        // plays of every kind, as Search orders by any list's sort.
         let shape = crate::read::Shape {
+            activity: true,
             folder,
             ..crate::read::Shape::of(None)
         };
