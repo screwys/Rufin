@@ -153,7 +153,7 @@ async function connect() {
     initialPage = false;
     if (shown) {
       showPage(shown.dataset);
-      await loadView(true);
+      await loadView(true, null, {}, Number(new URLSearchParams(location.search).get("offset")));
     } else navigate("Home");
   } else await loadView();
   void refreshContinuation();
