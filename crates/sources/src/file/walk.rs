@@ -674,7 +674,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 }
                 return Ok(());
             }
-            if let Some(stored) = &stored
+            if let Some(stored) = stored.as_ref().filter(|_| !self.resync)
                 && stored.file.kind == LocalFileKind::Directory
                 && self.files.unchanged_subtree(&stored.file, &row)
             {

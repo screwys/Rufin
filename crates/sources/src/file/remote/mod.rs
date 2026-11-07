@@ -210,7 +210,7 @@ pub(crate) fn detail_folder_uri(
     Ok(url.into())
 }
 
-const DIRECTORY_VERSION: i64 = 9;
+const DIRECTORY_VERSION: i64 = 9 << 8 | scan::PARSER_VERSION; // A parser change rereads subtrees.
 
 pub struct FileSource {
     source_id: SourceId,
