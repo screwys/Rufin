@@ -148,6 +148,7 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
         while current_lyrics.changed().await.is_ok() {
             let current = current_lyrics.borrow_and_update().clone();
             event_shell.player_ui.apply_current_lyrics(current);
+            event_shell.update_media_controls();
         }
     });
 

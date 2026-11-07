@@ -195,9 +195,13 @@ mod freedesktop {
             self: &Rc<Self>,
             playback: Option<&PlaybackView>,
             art_url: Option<String>,
+            lyrics: Option<String>,
             discontinuity: Option<PositionDiscontinuity>,
         ) {
-            self.queue(mpris_desired_state(playback, art_url), discontinuity);
+            self.queue(
+                mpris_desired_state(playback, art_url, lyrics),
+                discontinuity,
+            );
         }
 
         pub fn observe_position(
@@ -339,6 +343,7 @@ mod freedesktop {
     fn mpris_desired_state(
         playback: Option<&PlaybackView>,
         art_url: Option<String>,
+        lyrics: Option<String>,
     ) -> MprisDesiredState {
         let has_current = playback.is_some_and(|playback| playback.transport.current.is_some());
         let has_active_run = playback.is_some_and(|playback| {
@@ -369,7 +374,7 @@ mod freedesktop {
                 playback.controls.repeat_mode
             })),
             shuffle: playback.is_some_and(|playback| playback.controls.shuffle_enabled),
-            metadata: mpris_metadata(playback, art_url),
+            metadata: mpris_metadata(playback, art_url, lyrics),
             volume: playback.map_or(1.0, |playback| playback.controls.volume.clamp(0.0, 1.0)),
             can_play: has_current,
             can_pause: has_active_run,
@@ -382,7 +387,11 @@ mod freedesktop {
         }
     }
 
-    fn mpris_metadata(playback: Option<&PlaybackView>, art_url: Option<String>) -> Metadata {
+    fn mpris_metadata(
+        playback: Option<&PlaybackView>,
+        art_url: Option<String>,
+        lyrics: Option<String>,
+    ) -> Metadata {
         let Some((transport, entry)) = playback
             .and_then(|playback| Some((&playback.transport, playback.transport.current.as_ref()?)))
         else {
@@ -399,6 +408,9 @@ mod freedesktop {
             ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
+        }
+        if let Some(lyrics) = lyrics {
+            builder = builder.lyrics(lyrics);
         }
         builder.build()
     }
@@ -612,25 +624,29 @@ mod freedesktop {
         #[test]
         fn mpris_capabilities_follow_queue_summary() {
             let mut playback = test_view(1, "Album", TransportStatus::Playing, 0);
-            let exhausted = mpris_desired_state(Some(&playback), None);
+            let exhausted = mpris_desired_state(Some(&playback), None, None);
             assert!(!exhausted.can_go_next);
             assert!(exhausted.can_go_previous);
 
             playback.queue.next_index = Some(1);
             playback.queue.can_next = true;
-            let with_next = mpris_desired_state(Some(&playback), None);
+            let with_next = mpris_desired_state(Some(&playback), None, None);
             assert!(with_next.can_go_next);
 
             playback.queue.next_index = None;
-            assert!(mpris_desired_state(Some(&playback), None).can_go_next);
+            assert!(mpris_desired_state(Some(&playback), None, None).can_go_next);
         }
 
         #[test]
         fn mpris_metadata_updates_when_cached_art_arrives() {
             let playback = test_view(1, "Album", TransportStatus::Paused, 0);
             assert_ne!(
-                mpris_metadata(Some(&playback), None),
-                mpris_metadata(Some(&playback), Some("file:///tmp/cover.png".to_string()))
+                mpris_metadata(Some(&playback), None, None),
+                mpris_metadata(
+                    Some(&playback),
+                    Some("file:///tmp/cover.png".to_string()),
+                    None
+                )
             );
         }
 
@@ -638,7 +654,7 @@ mod freedesktop {
         fn mpris_position_update_preserves_static_desired_state() {
             let playback = test_view(1, "Album", TransportStatus::Playing, 1_000);
             let mut desired =
-                mpris_desired_state(Some(&playback), Some("file:///cover.png".to_string()));
+                mpris_desired_state(Some(&playback), Some("file:///cover.png".to_string()), None);
             let expected = super::MprisDesiredState {
                 position: Some(mpris_time(1_500)),
                 ..desired.clone()
@@ -710,6 +726,7 @@ mod windows {
             self: &Rc<Self>,
             playback: Option<&PlaybackView>,
             art_url: Option<String>,
+            _lyrics: Option<String>,
             _discontinuity: Option<PositionDiscontinuity>,
         ) {
             let Some(manager) = &self.manager else {
@@ -1206,6 +1223,7 @@ mod macos {
             self: &Rc<Self>,
             playback: Option<&PlaybackView>,
             art_url: Option<String>,
+            _lyrics: Option<String>,
             _discontinuity: Option<PositionDiscontinuity>,
         ) {
             let Some(playback) = playback else {
@@ -1487,6 +1505,7 @@ mod unsupported {
             self: &Rc<Self>,
             _playback: Option<&PlaybackView>,
             _art_url: Option<String>,
+            _lyrics: Option<String>,
             _discontinuity: Option<PositionDiscontinuity>,
         ) {
         }
