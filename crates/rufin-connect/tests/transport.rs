@@ -40,7 +40,6 @@ async fn node(name: &str, credentials: Credentials) -> (Arc<ConnectNetwork>, Eve
             name: name.into(),
             nearby: false,
             relay: None,
-            public_relay: false,
         },
         credentials,
     )

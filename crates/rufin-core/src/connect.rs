@@ -37,7 +37,6 @@ pub struct ConnectSettings {
     pub profile: Option<String>,
     pub nearby: bool,
     pub relay: Option<String>,
-    pub public_relay: bool,
     pub folder: Option<SyncFolder>,
 }
 
@@ -67,7 +66,6 @@ struct DeviceConfig {
     identity_ref: Option<String>,
     nearby: bool,
     relay: Option<String>,
-    public_relay: bool,
 }
 
 impl Default for DeviceConfig {
@@ -82,7 +80,6 @@ impl Default for DeviceConfig {
             identity_ref: None,
             nearby: true,
             relay: None,
-            public_relay: false,
         }
     }
 }
@@ -183,8 +180,6 @@ pub enum Action {
     Network {
         nearby: bool,
         relay: Option<String>,
-        #[serde(default)]
-        public_relay: bool,
     },
     Folder {
         folder: Option<SyncFolder>,
@@ -592,7 +587,6 @@ impl ConnectOwner {
                     name: config.name,
                     nearby: config.nearby,
                     relay: config.relay,
-                    public_relay: config.public_relay,
                 },
                 credentials,
             )
@@ -1264,13 +1258,10 @@ impl ConnectOwner {
     }
 
     /// The relay record changed the shared relay choice.
-    async fn relay_changed(self: &Arc<Self>, relay: Option<String>, public: bool) {
+    async fn relay_changed(self: &Arc<Self>, relay: Option<String>) {
         let _action = self.actions.lock().await;
         let result = async {
-            self.save(|config| {
-                config.relay = relay;
-                config.public_relay = public;
-            })?;
+            self.save(|config| config.relay = relay)?;
             self.configure_network().await
         }
         .await;
@@ -1287,7 +1278,7 @@ impl ConnectOwner {
             return Ok(());
         };
         if network
-            .matches_configuration(config.nearby, config.relay.as_deref(), config.public_relay)
+            .matches_configuration(config.nearby, config.relay.as_deref())
             .map_err(string_error)?
         {
             return Ok(());
@@ -1757,18 +1748,13 @@ impl ConnectOwner {
                 self.network().await?;
             }
             Action::TestConnection { peer } => self.meet(&peer).await?,
-            Action::Network {
-                nearby,
-                relay,
-                public_relay,
-            } => {
+            Action::Network { nearby, relay } => {
                 if let Some(relay) = &relay {
                     reqwest::Url::parse(relay).map_err(string_error)?;
                 }
                 self.save(|config| {
                     config.nearby = nearby;
                     config.relay = relay;
-                    config.public_relay = public_relay;
                 })?;
                 self.configure_network().await?;
                 self.settings_changed().await;
@@ -1817,7 +1803,6 @@ fn settings_of(
         profile,
         nearby: config.nearby,
         relay: config.relay.clone(),
-        public_relay: config.public_relay,
         folder,
     }
 }

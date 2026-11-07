@@ -383,18 +383,8 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
     let initial = shell.products.connect.status();
     device_name.set_text(&initial.settings.name);
     nearby.set_active(initial.settings.nearby);
-    relay.set_text(
-        initial
-            .settings
-            .relay
-            .as_deref()
-            .unwrap_or(if initial.settings.public_relay {
-                "https://euc1-1.relay.n0.iroh.link/"
-            } else {
-                ""
-            }),
-    );
-    relay_enabled.set_active(initial.settings.relay.is_some() || initial.settings.public_relay);
+    relay.set_text(initial.settings.relay.as_deref().unwrap_or_default());
+    relay_enabled.set_active(initial.settings.relay.is_some());
     relay.set_visible(relay_enabled.is_active());
     let updating_network = Rc::new(Cell::new(false));
     let accounts = Rc::new(RefCell::new(shell.products.source.file_integrations()));
@@ -724,7 +714,6 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
                 Action::Network {
                     nearby: row.is_active(),
                     relay: settings.relay,
-                    public_relay: settings.public_relay,
                 },
             );
         }
@@ -737,7 +726,6 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
                 Action::Network {
                     nearby: shell.products.connect.status().settings.nearby,
                     relay: Some(row.text().trim().into()),
-                    public_relay: false,
                 },
             );
         }
@@ -759,7 +747,6 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
                 Action::Network {
                     nearby: shell.products.connect.status().settings.nearby,
                     relay: row.is_active().then(|| relay.text().trim().into()),
-                    public_relay: false,
                 },
             );
         }
@@ -837,11 +824,7 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             let mut previous_devices = None;
             let mut completed_pairings = initial.completed_pairings;
-            let mut previous_network = (
-                initial.settings.nearby,
-                initial.settings.relay,
-                initial.settings.public_relay,
-            );
+            let mut previous_network = (initial.settings.nearby, initial.settings.relay);
             let mut previous_folder = initial.settings.folder;
             loop {
                 let state = updates.borrow_and_update().clone();
@@ -855,20 +838,14 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
                     return;
                 }
                 completed_pairings = state.completed_pairings;
-                let network = (
-                    state.settings.nearby,
-                    state.settings.relay.clone(),
-                    state.settings.public_relay,
-                );
+                let network = (state.settings.nearby, state.settings.relay.clone());
                 if previous_network != network {
                     updating_network.set(true);
                     nearby.set_active(network.0);
                     if let Some(address) = network.1.as_deref() {
                         relay.set_text(address);
-                    } else if network.2 {
-                        relay.set_text("https://euc1-1.relay.n0.iroh.link/");
                     }
-                    relay_enabled.set_active(network.1.is_some() || network.2);
+                    relay_enabled.set_active(network.1.is_some());
                     updating_network.set(false);
                     previous_network = network;
                 }

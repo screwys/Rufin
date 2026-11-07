@@ -11,9 +11,7 @@ use futures_util::{
 };
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr, Watcher,
-    address_lookup::{
-        AddressLookup, DnsAddressLookup, EndpointData, Error, Item, PkarrPublisher, PkarrResolver,
-    },
+    address_lookup::{AddressLookup, Error, Item},
     endpoint::{ConnectOptions, Connection, ConnectionError, VarInt, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
@@ -59,38 +57,12 @@ pub fn install_dns_resolver(resolver: fn() -> iroh::dns::DnsResolver) {
     let _ = DNS_RESOLVER.set(resolver);
 }
 
-// Device names are advertised nearby, not in the public address directory.
-#[derive(Debug)]
-struct PublicAddressPublisher(PkarrPublisher);
-
-impl AddressLookup for PublicAddressPublisher {
-    fn publish(&self, data: &EndpointData) {
-        let mut data = data.clone();
-        data.set_user_data(None);
-        self.0.publish(&data);
-    }
-}
-
-fn relay_mode(address: Option<&str>, public: bool) -> Result<RelayMode> {
-    let mode = match address {
-        Some(address) => RelayMode::custom([address.parse::<iroh::RelayUrl>()?]),
-        None if public => RelayMode::Default,
+/// The relay a person entered, the only one Connect uses; none without one.
+fn relay_mode(address: Option<&str>) -> Result<RelayMode> {
+    Ok(match address {
+        Some(address) => RelayMode::custom([canonical_relay(address.parse()?)]),
         None => RelayMode::Disabled,
-    };
-    if matches!(mode, RelayMode::Disabled) {
-        return Ok(mode);
-    }
-    Ok(RelayMode::Custom(
-        mode.relay_map()
-            .relays::<Vec<_>>()
-            .into_iter()
-            .map(|config| {
-                let mut config = (*config).clone();
-                config.url = canonical_relay(config.url);
-                config
-            })
-            .collect(),
-    ))
+    })
 }
 
 pub(super) fn canonical_relay(relay: iroh::RelayUrl) -> iroh::RelayUrl {
@@ -203,60 +175,11 @@ impl AddressLookup for Routes {
     }
 }
 
-// DNS permits a trailing dot, but Iroh keys relay connections by the URL.
-// Normalize lookup results too, so one server cannot receive two connections
-// claiming the same device identity.
-#[derive(Debug)]
-struct CanonicalRelays<T>(T);
-
-impl<T: AddressLookup> AddressLookup for CanonicalRelays<T> {
-    fn publish(&self, data: &EndpointData) {
-        self.0.publish(data);
-    }
-
-    fn resolve(
-        &self,
-        id: EndpointId,
-    ) -> Option<
-        futures_util::stream::BoxStream<
-            'static,
-            std::result::Result<iroh::address_lookup::Item, iroh::address_lookup::Error>,
-        >,
-    > {
-        Some(
-            self.0
-                .resolve(id)?
-                .map(|result| {
-                    result.map(|item| {
-                        let mut info = item.endpoint_info().clone();
-                        let relays = info
-                            .data
-                            .relay_urls()
-                            .cloned()
-                            .map(canonical_relay)
-                            .collect::<Vec<_>>();
-                        info.data.clear_relay_urls();
-                        for relay in relays {
-                            info.data.add_relay_url(relay);
-                        }
-                        iroh::address_lookup::Item::new(
-                            info,
-                            item.provenance(),
-                            item.last_updated(),
-                        )
-                    })
-                })
-                .boxed(),
-        )
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct NetworkConfig {
     pub name: String,
     pub nearby: bool,
     pub relay: Option<String>,
-    pub public_relay: bool,
 }
 
 /// What this device serves while Connect is on.
@@ -357,7 +280,7 @@ impl ConnectNetwork {
         credentials: SecretKey,
     ) -> Result<(Arc<Self>, mpsc::Receiver<NetworkEvent>)> {
         let routes = Routes::default();
-        let relay = relay_mode(config.relay.as_deref(), config.public_relay)?;
+        let relay = relay_mode(config.relay.as_deref())?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(credentials.clone())
             .address_lookup(routes.clone())
@@ -384,24 +307,6 @@ impl ConnectNetwork {
             builder = builder.user_data_for_address_lookup(name);
         }
         let endpoint = builder.bind().await?;
-        // Only the public relay publishes and looks up addresses in n0's directory; without it
-        // Connect contacts no public server.
-        if config.public_relay && config.relay.is_none() {
-            let dns = endpoint.dns_resolver()?.clone();
-            endpoint.address_lookup()?.add(CanonicalRelays(
-                PkarrResolver::n0_dns()
-                    .dns_resolver(dns.clone())
-                    .build(endpoint.tls_config().clone()),
-            ));
-            endpoint.address_lookup()?.add(CanonicalRelays(
-                DnsAddressLookup::n0_dns().dns_resolver(dns.clone()).build(),
-            ));
-            endpoint.address_lookup()?.add(PublicAddressPublisher(
-                PkarrPublisher::n0_dns()
-                    .dns_resolver(dns)
-                    .build(credentials.clone(), endpoint.tls_config().clone()),
-            ));
-        }
         let (events, receiver) = mpsc::channel(64);
         let network = Arc::new(Self {
             endpoint,
@@ -495,13 +400,8 @@ impl ConnectNetwork {
         *self.name.write().await = name;
     }
 
-    pub fn matches_configuration(
-        &self,
-        nearby: bool,
-        relay: Option<&str>,
-        public: bool,
-    ) -> Result<bool> {
-        Ok(self.nearby == nearby && self.relay == relay_mode(relay, public)?)
+    pub fn matches_configuration(&self, nearby: bool, relay: Option<&str>) -> Result<bool> {
+        Ok(self.nearby == nearby && self.relay == relay_mode(relay)?)
     }
 
     pub async fn invitation(&self) -> Result<String> {
@@ -1020,7 +920,6 @@ mod tests {
                 name: "Direct device".into(),
                 nearby: false,
                 relay: None,
-                public_relay: false,
             },
             SecretKey::generate(),
         )
@@ -1041,25 +940,6 @@ mod tests {
             .unwrap();
         let remembered = network.routes.get(peer.id());
         assert_eq!(remembered.relay_urls().count(), 1);
-        let raw_lookup = iroh::address_lookup::memory::MemoryLookup::new();
-        raw_lookup.add_endpoint_info(address);
-        let lookup = CanonicalRelays(raw_lookup);
-        let item = lookup
-            .resolve(peer.id())
-            .unwrap()
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(item.to_endpoint_addr().relay_urls().count(), 1);
-        assert_eq!(
-            item.to_endpoint_addr()
-                .relay_urls()
-                .next()
-                .unwrap()
-                .as_str(),
-            "https://relay.example/"
-        );
         tokio::time::timeout(Duration::from_secs(5), async {
             let (outgoing, incoming) =
                 tokio::join!(network.endpoint.connect(peer.id(), RPC_PROTOCOL), async {

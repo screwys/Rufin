@@ -232,7 +232,6 @@ struct ScrobblingValue {
 #[derive(Serialize, Deserialize)]
 struct RelayValue {
     relay: Option<String>,
-    public_relay: bool,
 }
 
 /// Rows of one pull or one folder read that wait for their parent, by the device they came
@@ -1285,7 +1284,6 @@ impl Records {
             None,
             &RelayValue {
                 relay: config.relay,
-                public_relay: config.public_relay,
             },
         )?);
         Ok(items)
@@ -1842,9 +1840,10 @@ impl Records {
                 "relay" if !row.deleted => {
                     let value: RelayValue = decode(row)?;
                     let owner = Arc::clone(&owner);
-                    owner.runtime.clone().spawn(async move {
-                        owner.relay_changed(value.relay, value.public_relay).await
-                    });
+                    owner
+                        .runtime
+                        .clone()
+                        .spawn(async move { owner.relay_changed(value.relay).await });
                 }
                 _ => {}
             }

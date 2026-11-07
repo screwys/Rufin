@@ -128,7 +128,7 @@ function textNode(tag, text, className = "") {
 }
 function show(value) {
   const pairingChanged = value.pairing?.session !== state?.pairing?.session;
-  const networkChanged = state && (state.settings.nearby !== value.settings.nearby || state.settings.relay !== value.settings.relay || state.settings.public_relay !== value.settings.public_relay);
+  const networkChanged = state && (state.settings.nearby !== value.settings.nearby || state.settings.relay !== value.settings.relay);
   const completed = state && state.completed_pairings !== value.completed_pairings;
   const folderChanged = JSON.stringify(state?.settings.folder) !== JSON.stringify(value.settings.folder);
   state = value;
@@ -136,8 +136,8 @@ function show(value) {
   const counter = showCollectionProgress(value);
   if (networkChanged) {
     element("nearby").checked = value.settings.nearby;
-    element("relay").value = value.settings.relay || (value.settings.public_relay ? "https://euc1-1.relay.n0.iroh.link/" : "");
-    element("relay-enabled").checked = Boolean(value.settings.relay || value.settings.public_relay);
+    element("relay").value = value.settings.relay || "";
+    element("relay-enabled").checked = Boolean(value.settings.relay);
     showRelay();
   }
   if (completed) {
@@ -286,8 +286,8 @@ function showDisableConfirmation() {
 function present(value) {
   element("name").value = value.settings.name;
   element("nearby").checked = value.settings.nearby;
-  element("relay").value = value.settings.relay || (value.settings.public_relay ? "https://euc1-1.relay.n0.iroh.link/" : "");
-  element("relay-enabled").checked = Boolean(value.settings.relay || value.settings.public_relay);
+  element("relay").value = value.settings.relay || "";
+  element("relay-enabled").checked = Boolean(value.settings.relay);
   showRelay();
   updateView();
   element("dialog").showModal();
@@ -393,7 +393,6 @@ export function init() {
   click("network", () => action({
     action: "network", nearby: element("nearby").checked,
     relay: element("relay-enabled").checked ? element("relay").value.trim() : null,
-    public_relay: false,
   }));
   click("folder-save", () => {
     const path = element("folder").value.trim();

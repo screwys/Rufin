@@ -142,11 +142,9 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
         }
         SettingsGroup(translate("Connection settings")) {
             SettingsRow(translate("Nearby discovery"),
-                trailing = { Switch(state.settings.nearby, { connect.action(ConnectAction.Network(it, state.settings.relay, state.settings.publicRelay)) }, enabled = enabled) })
+                trailing = { Switch(state.settings.nearby, { connect.action(ConnectAction.Network(it, state.settings.relay)) }, enabled = enabled) })
             SettingsRow(translate("Relay address"), summary = state.settings.relay ?: translate("Default"),
                 modifier = Modifier.clickable(enabled) { relayEdit = true })
-            SettingsRow(translate("Use a public relay"),
-                trailing = { Switch(state.settings.publicRelay, { connect.action(ConnectAction.Network(state.settings.nearby, state.settings.relay, it)) }, enabled = enabled) })
         }
         }
         if (!progressOnly && state.settings.profile != null) {
@@ -158,7 +156,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
     }
     if (join) ConnectJoinDialog(connect, { join = false }) { connect.join(it); join = false }
     if (relayEdit) ConnectTextDialog(translate("Relay address"), translate("Relay address"), state.settings.relay.orEmpty(), { relayEdit = false }, allowEmpty = true) {
-        connect.action(ConnectAction.Network(state.settings.nearby, it.trim().takeIf(String::isNotEmpty), state.settings.publicRelay)); relayEdit = false
+        connect.action(ConnectAction.Network(state.settings.nearby, it.trim().takeIf(String::isNotEmpty))); relayEdit = false
     }
     if (rename) ConnectTextDialog(translate("Device name"), translate("Name"), state.settings.name, { rename = false }) { connect.action(ConnectAction.Rename(it)); rename = false }
     if (disable) AlertDialog(onDismissRequest = { disable = false }, title = { Text(translate("Rufin Connect")) },
