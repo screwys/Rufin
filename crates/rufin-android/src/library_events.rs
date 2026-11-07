@@ -1,4 +1,4 @@
-use rufin_core::runtime::{SourceEvent, SourceNoticeKind};
+use rufin_core::runtime::SourceEvent;
 
 use crate::host::{AndroidError, error};
 
@@ -33,11 +33,8 @@ impl AndroidLibraryEvents {
                         return Ok(notice);
                     }
                 },
-                event = self.events.recv() => if let SourceEvent::Notice(notice) = event.map_err(error)? {
-                    return Ok(localization::tr(match notice.kind {
-                        SourceNoticeKind::ServerUnreachable => "Server is unreachable",
-                        SourceNoticeKind::FavoriteRejected => "Could not update favorites",
-                    }));
+                event = self.events.recv() => if let SourceEvent::FavoriteRejected = event.map_err(error)? {
+                    return Ok(localization::tr("Could not update favorites"));
                 },
             }
         }

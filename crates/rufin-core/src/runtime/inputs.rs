@@ -29,7 +29,8 @@ impl SelectedLibrary {
 }
 
 pub enum SourceEvent {
-    Notice(SourceNotice),
+    /// A server refused a favorite, so the source's own favorite shows again.
+    FavoriteRejected,
     PlaylistSourceMismatch(sources::SourceId),
 }
 
@@ -37,18 +38,6 @@ pub struct VisualizerPublication {
     pub run: playback::RunId,
     /// Linear amplitudes on the canonical ERB axis; map through the current visualizer preset.
     pub levels: Vec<f64>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SourceNotice {
-    pub source_key: SourceKey,
-    pub kind: SourceNoticeKind,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceNoticeKind {
-    ServerUnreachable,
-    FavoriteRejected,
 }
 
 pub struct RuntimeInputs {

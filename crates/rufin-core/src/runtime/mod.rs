@@ -14,10 +14,7 @@ mod storage;
 mod waveform;
 pub use diagnostics::DiagnosticsHandle;
 pub use events::ProductReceivers;
-pub use inputs::{
-    RuntimeInputs, SelectedLibrary, SourceEvent, SourceNotice, SourceNoticeKind,
-    VisualizerPublication,
-};
+pub use inputs::{RuntimeInputs, SelectedLibrary, SourceEvent, VisualizerPublication};
 pub use release_update::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};
 pub use scrobbling::{
     LastFmPreferences, LibreFmPreferences, ListenBrainzPreferences, ScrobblingConnection,

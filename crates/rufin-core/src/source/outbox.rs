@@ -12,7 +12,7 @@ use tracing::info;
 
 use super::{Shared, SourceOwner, source_error_is_temporary, unix_seconds};
 use crate::features::{Feature, Pass};
-use crate::runtime::{SourceEvent, SourceNotice, SourceNoticeKind};
+use crate::runtime::SourceEvent;
 use crate::settings::StoredSettings;
 
 /// How long a server that could not take a delivery waits before the next try.
@@ -215,30 +215,12 @@ impl SourceOwner {
             .drop_delivery(delivery, refused_favorite.is_none())
             .await
         {
-            Ok(true) => {
-                if let Some(source_id) = refused_favorite {
-                    self.rejected(source_id).await;
-                }
+            Ok(true) if refused_favorite.is_some() => {
+                self.shared.send(SourceEvent::FavoriteRejected).await;
             }
-            Ok(false) => {}
+            Ok(_) => {}
             Err(error) => self.shared.warn_nonfatal(&error.to_string()),
         }
-    }
-
-    async fn rejected(&self, source_id: &SourceId) {
-        let source_key = match self.shared.selected() {
-            Some(selected) => selected.source_key,
-            None => match self.shared.catalog.source_key(source_id) {
-                Some(key) => key,
-                None => return,
-            },
-        };
-        self.shared
-            .send(SourceEvent::Notice(SourceNotice {
-                source_key,
-                kind: SourceNoticeKind::FavoriteRejected,
-            }))
-            .await;
     }
 }
 

@@ -14,9 +14,7 @@ use crate::shell::player::{
 };
 use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{DiscoveryStatus, DiscoveryUpdate, SourceOperation};
-use rufin_core::runtime::{
-    ProductReceivers, SourceEvent, SourceNotice, SourceNoticeKind, WaveformProjection,
-};
+use rufin_core::runtime::{ProductReceivers, SourceEvent, WaveformProjection};
 use rufin_core::source::feed::Changed;
 use sources::SourceProgress;
 
@@ -173,7 +171,9 @@ fn apply_source_configuration(shell: &Rc<Shell>) {
 
 fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
     match event {
-        SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
+        SourceEvent::FavoriteRejected => shell
+            .control_feedback
+            .show_feedback_toast(tr("Could not update favorites")),
         SourceEvent::PlaylistSourceMismatch(source_id) => {
             let source_name = shell
                 .source
@@ -231,22 +231,6 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
         super::navigation::refresh_sidebar_pins(shell);
     }
     shell.apply_to_mounted_route(changed);
-}
-
-fn apply_source_notice(shell: &Rc<Shell>, notice: SourceNotice) {
-    let matches_selected = shell
-        .selected_library()
-        .as_deref()
-        .is_some_and(|selected| selected.source_key == notice.source_key);
-    if !matches_selected {
-        return;
-    }
-    shell
-        .control_feedback
-        .show_feedback_toast(match notice.kind {
-            SourceNoticeKind::ServerUnreachable => tr("Server is unreachable"),
-            SourceNoticeKind::FavoriteRejected => tr("Could not update favorites"),
-        });
 }
 
 fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
