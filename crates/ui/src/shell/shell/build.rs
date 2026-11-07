@@ -350,6 +350,7 @@ pub async fn build(
                 products.source.clone(),
                 products.runtime.clone(),
             )),
+            shown_rows: Default::default(),
             web_controller,
             quitting,
             storage_reset,

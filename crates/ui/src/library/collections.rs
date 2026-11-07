@@ -822,6 +822,9 @@ impl CatalogUi {
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
         let model = Rows::seeded(rows.into_iter().map(Row::Track).collect());
+        self.shown_rows
+            .borrow_mut()
+            .push(model.list_model().downgrade());
         let selection = TrackSelection::new(&model);
         self.register_current_route_track_selection_owner(selection.clone());
         let table = track_table(

@@ -219,6 +219,15 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     }
     shell.search_session.apply_changed(changed);
     shell.show_activity_changes(changed);
+    shell.shown_rows.borrow_mut().retain(|rows| {
+        let Some(rows) = rows.upgrade() else {
+            return false;
+        };
+        crate::widgets::view_model::Rows::<library::Row>::of(&rows)
+            .show_changes(&shell.products.source, changed);
+        true
+    });
+    super::navigation::show_pin_changes(shell, changed);
     if changed.all
         || !changed.sources.is_empty()
         || changed.scope

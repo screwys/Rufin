@@ -36,6 +36,10 @@ use selected_ui::SelectedUiState;
 
 pub(crate) struct Shell {
     pub(crate) search_session: Rc<crate::library::SearchSession>,
+    /// Rows shown outside the mounted route, such as Related and Activity tracks, which show
+    /// committed changes as the route's rows do.
+    pub(crate) shown_rows:
+        std::cell::RefCell<Vec<gtk::glib::WeakRef<crate::widgets::view_model::RowList>>>,
     activity: std::cell::RefCell<Option<Rc<activity::ActivityView>>>,
     pub(crate) quitting: Rc<Cell<bool>>,
     pub(crate) storage_reset: crate::shell::application::StorageResetResult,

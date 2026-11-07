@@ -927,7 +927,8 @@ struct ActivityCollections {
     pub artists: gtk::FlowBox,
     pub albums: gtk::FlowBox,
     catalog: Rc<CatalogUi>,
-    model: gio::ListStore,
+    /// The tracks the table shows, as rows shown outside the route.
+    tracks_model: gtk::NoSelection,
     playing: TrackRowPlayingIndicator,
     artist_cells: RefCell<Vec<ArtistGridCell>>,
     album_cells: RefCell<Vec<AlbumGridCell>>,
@@ -977,9 +978,8 @@ impl ActivityCollections {
     }
 
     pub fn new(catalog: Rc<CatalogUi>) -> Self {
-        let model = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let selection = gtk::NoSelection::new(Some(model.clone()));
-        let table = gtk::ColumnView::new(Some(selection));
+        let tracks_model = gtk::NoSelection::new(None::<gio::ListModel>);
+        let table = gtk::ColumnView::new(Some(tracks_model.clone()));
         table.set_show_row_separators(true);
         table.set_single_click_activate(true);
         let playing = TrackRowPlayingIndicator::new();
@@ -1001,13 +1001,12 @@ impl ActivityCollections {
             table.append_column(&column);
         }
         let weak = Rc::downgrade(&catalog);
-        let rows = model.clone();
+        let rows = tracks_model.clone();
         table.connect_activate(move |_, position| {
             let Some(shell) = weak.upgrade() else {
                 return;
             };
-            if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
-                let row = item.borrow::<TrackRow>();
+            if let Some(row) = crate::widgets::view_model::item_at::<TrackRow>(&rows, position) {
                 crate::menus::media_menus::play_target(
                     &shell.products,
                     &PlayTarget::of_track(&row),
@@ -1060,7 +1059,7 @@ impl ActivityCollections {
             artists,
             albums,
             catalog,
-            model,
+            tracks_model,
             playing,
             artist_cells: RefCell::new(Vec::new()),
             album_cells: RefCell::new(Vec::new()),
@@ -1071,14 +1070,19 @@ impl ActivityCollections {
     }
 
     pub fn apply(&self, data: &ActivityOverview, limit: usize) {
-        let tracks = data
-            .tracks
-            .iter()
-            .take(limit)
-            .cloned()
-            .map(glib::BoxedAnyObject::new)
-            .collect::<Vec<_>>();
-        self.model.splice(0, self.model.n_items(), &tracks);
+        let tracks = crate::widgets::view_model::Rows::seeded(
+            data.tracks
+                .iter()
+                .take(limit)
+                .cloned()
+                .map(library::Row::Track)
+                .collect(),
+        );
+        self.catalog
+            .shown_rows
+            .borrow_mut()
+            .push(tracks.list_model().downgrade());
+        self.tracks_model.set_model(Some(&tracks.list_model()));
         self.artists.remove_all();
         self.albums.remove_all();
         self.artist_cells.borrow_mut().clear();

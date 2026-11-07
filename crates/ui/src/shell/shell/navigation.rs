@@ -50,6 +50,8 @@ pub(crate) struct NavigationState {
     pin_generation: Cell<u64>,
     pin_identity: RefCell<Option<Vec<SidebarPin>>>,
     pin_items: RefCell<Vec<SidebarPinItem>>,
+    /// The committed changes the pins' rows show.
+    pin_changes: rufin_core::shown::ShownChanges,
     pub(super) pin_cancellation: RefCell<Option<library::ReadCancellation>>,
 }
 
@@ -61,6 +63,7 @@ impl NavigationState {
             pin_generation: Cell::new(0),
             pin_identity: RefCell::new(None),
             pin_items: RefCell::new(Vec::new()),
+            pin_changes: Default::default(),
             pin_cancellation: RefCell::new(None),
         }
     }
@@ -544,24 +547,17 @@ impl SidebarPinItem {
         shell: &Rc<Shell>,
         position: Option<(f64, f64)>,
     ) {
-        let source = shell.products.source.clone();
-        let pin = self.pin.clone();
-        let task = shell.products.runtime.spawn(async move {
-            source
-                .pin_rows(&[pin], &library::ReadCancellation::new())
-                .await
-                .map(|mut rows| rows.pop().map(|(_, row)| row))
-        });
-        let target = target.downgrade();
-        let shell = Rc::downgrade(shell);
-        glib::spawn_future_local(async move {
-            let (Ok(Ok(Some(row))), Some(target), Some(shell)) =
-                (task.await, target.upgrade(), shell.upgrade())
-            else {
-                return;
-            };
-            crate::menus::media_menus::present_row_menu(&target, &shell, row, None, position);
-        });
+        // The pin's row as committed changes keep it, not as the widget was built with.
+        let row = shell
+            .navigation
+            .pin_items
+            .borrow()
+            .iter()
+            .find(|item| item.pin == self.pin)
+            .map(|item| item.row.clone());
+        if let Some(row) = row {
+            crate::menus::media_menus::present_row_menu(target, shell, row, None, position);
+        }
     }
 }
 
@@ -679,6 +675,19 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
 
 fn sidebar_pin_publication_is_current(expected_generation: u64, current_generation: u64) -> bool {
     expected_generation == current_generation
+}
+
+/// Shows a committed change in the pins' rows, which their menus act on.
+pub(crate) fn show_pin_changes(shell: &Shell, changed: &rufin_core::source::feed::Changed) {
+    let mut items = shell.navigation.pin_items.borrow_mut();
+    let rows = items.iter().map(|item| &item.row).collect::<Vec<_>>();
+    let shown = shell
+        .navigation
+        .pin_changes
+        .show(&shell.products.source, &rows, changed, None);
+    for (index, row) in shown.states {
+        items[index].row = row;
+    }
 }
 
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
