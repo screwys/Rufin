@@ -669,10 +669,9 @@ async fn rule_media_uris(
                 }));
             }
             let selection = library::MemberSelection::Concat(selections);
-            let mut uris = (catalog.selected_track_uris(&selection, None, &cancellation)).await?;
-            let mut seen = HashSet::new();
-            uris.retain(|uri| seen.insert(uri.clone()));
-            Ok(uris)
+            catalog
+                .selected_track_uris(&selection, None, &cancellation)
+                .await
         }
         DownloadRule::AllPlaylists => {
             catalog
@@ -1632,17 +1631,19 @@ impl Actor {
         attachment_error.map_or(Ok(()), Err)
     }
 
+    /// Adds `owner` to the copy of `media_uri` at `quality`; false when there is none, so it
+    /// downloads. A copy whose quality was not recorded counts as any.
     async fn add_download_owner(
         &self,
         source_id: Option<&SourceId>,
         media_uri: &str,
         owner: &DownloadOwner,
+        quality: DownloadQuality,
     ) -> Result<bool, String> {
-        let Some(mut file) = self
-            .catalog
-            .download_file(media_uri)
-            .await
+        let encoding = library::media_encoding_key(quality.encoding());
+        let Some(mut file) = (self.catalog.download_file(media_uri).await)
             .map_err(|error| error.to_string())?
+            .filter(|file| file.encoding == encoding || file.encoding == "unknown")
         else {
             return Ok(false);
         };
@@ -1695,7 +1696,7 @@ impl Actor {
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(source_id.as_ref(), media_uri, &owner)
+                .add_download_owner(source_id.as_ref(), media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1846,7 +1847,7 @@ impl Actor {
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(Some(&source_id), media_uri, &owner)
+                .add_download_owner(Some(&source_id), media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1946,7 +1947,7 @@ impl Actor {
             let custom_directory = attached.and_then(|attached| attached.directory);
             let owner = DownloadOwner::Subject(subject.clone());
             match self
-                .add_download_owner(source_id.as_ref(), &media_uri, &owner)
+                .add_download_owner(source_id.as_ref(), &media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => {
