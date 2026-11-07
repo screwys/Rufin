@@ -177,7 +177,8 @@ pub(crate) const SYNC_MARGIN: i64 = 60;
 /// What a catalog refresh lists.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Refresh {
-    /// The periodic check: freshness first, a listing only when it changed.
+    /// The periodic check and a lost feed boundary: freshness first, a listing only when it
+    /// changed; a server with dated changes lists what changed since the last sync.
     Check,
     /// A listing of what changed.
     Changed,
@@ -310,14 +311,19 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match change {
-            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => {
-                self.source.catch_up(catalog, self.cancellation()).await
-            }
+            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => self
+                .source
+                .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Check)
+                .await
+                .map(|_| ()),
             SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => {
                 match self.source.apply_changes(catalog, items).await {
                     Err(error) if !matches!(error, SourceError::Cancelled) => {
                         tracing::warn!(%error, "source change failed; catching up");
-                        self.source.catch_up(catalog, self.cancellation()).await
+                        self.source
+                            .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Check)
+                            .await
+                            .map(|_| ())
                     }
                     result => result,
                 }
@@ -1169,9 +1175,6 @@ impl Source {
             return Err(SourceError::Cancelled);
         }
         let check = refresh == Refresh::Check;
-        if check && !self.needs_periodic_refresh() {
-            return Ok(false);
-        }
         let source_id = self.source_id.as_str();
         let freshness = self.freshness().await.ok().flatten();
         let cancelled_fn = || cancelled.load(Ordering::Acquire) || self.is_retired();
@@ -1179,6 +1182,11 @@ impl Source {
             return Err(SourceError::Cancelled);
         }
         self.catalog_operation(catalog, async |changes| {
+            let synced_at = catalog
+                .source_key(&self.source_id)
+                .and_then(|source| catalog.synced_at(source));
+            // A check of a source with dated changes lists what changed since the last sync.
+            let since = synced_at.filter(|_| check);
             if check {
                 let accepted = if let Some(marker) = &freshness {
                     catalog
@@ -1188,16 +1196,13 @@ impl Source {
                     false
                 };
                 // A server without a scan marker lists everything once a day.
-                let daily = catalog
-                    .source_key(&self.source_id)
-                    .and_then(|source| catalog.synced_at(source))
-                    .is_none_or(|at| unix_now() - at >= 24 * 60 * 60);
-                let full = !accepted
-                    && (freshness.is_some()
-                        || daily
-                            && matches!(&self.implementation, Implementation::OpenSubsonic(_)))
-                    || freshness.is_none()
-                        && matches!(&self.implementation, Implementation::Files(_));
+                let daily = synced_at.is_none_or(|at| unix_now() - at >= 24 * 60 * 60);
+                let full = match (&self.implementation, &freshness) {
+                    (Implementation::Plex(_) | Implementation::JellyfinEmby(_), _) => true,
+                    (_, Some(_)) => !accepted,
+                    (Implementation::OpenSubsonic(_), None) => daily,
+                    (implementation, None) => matches!(implementation, Implementation::Files(_)),
+                };
                 if !full {
                     if let Implementation::OpenSubsonic(source) = &self.implementation {
                         source
@@ -1218,7 +1223,7 @@ impl Source {
             let complete = match &self.implementation {
                 Implementation::Plex(source) => {
                     let date = source
-                        .acquire_catalog(changes, &report, &cancelled_fn)
+                        .acquire_catalog(changes, since, &report, &cancelled_fn)
                         .await?;
                     started = date.unwrap_or(started);
                     true
@@ -1247,7 +1252,7 @@ impl Source {
                 }
                 Implementation::JellyfinEmby(source) => {
                     let date = source
-                        .acquire_catalog(changes, &report, &cancelled_fn)
+                        .acquire_catalog(changes, since, &report, &cancelled_fn)
                         .await?;
                     started = date.unwrap_or(started);
                     true
@@ -1257,16 +1262,8 @@ impl Source {
                         .acquire_catalog(changes, &report, &cancelled_fn)
                         .await?
                 }
-                // A changed marker catches up from the last listing; the sync time is the
-                // owner's clock, which its file times are compared with.
+                // The sync time is the owner's clock, which its file times are compared with.
                 Implementation::Peer(source) => {
-                    let since = check
-                        .then(|| {
-                            catalog
-                                .source_key(&self.source_id)
-                                .and_then(|source| catalog.synced_at(source))
-                        })
-                        .flatten();
                     started = source
                         .acquire_catalog(changes, since, &report, &cancelled_fn)
                         .await?;
@@ -1288,42 +1285,6 @@ impl Source {
                 )
                 .await?;
             Ok(changes.playlist_files)
-        })
-        .await
-    }
-
-    /// After a feed gap: what changed since the last sync, through the live apply path, then
-    /// the deletions. A source that never completed a listing lists everything instead.
-    pub async fn catch_up(
-        &self,
-        catalog: &Catalog,
-        cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<()> {
-        catalog.loaded().await;
-        let Some(since) = catalog
-            .source_key(&self.source_id)
-            .and_then(|source| catalog.synced_at(source))
-        else {
-            return self
-                .acquire_catalog(catalog, &|_| {}, cancelled, Refresh::Changed)
-                .await
-                .map(|_| ());
-        };
-        let cancelled = || cancelled.load(Ordering::Acquire) || self.is_retired();
-        self.catalog_operation(catalog, async |changes| {
-            let started = match &self.implementation {
-                Implementation::JellyfinEmby(source) => {
-                    source.catch_up(changes, since, &cancelled).await?
-                }
-                Implementation::Plex(source) => source.catch_up(changes, since, &cancelled).await?,
-                _ => {
-                    return Err(SourceError::InvalidRequest(
-                        "Source has no remote item feed",
-                    ));
-                }
-            };
-            changes.set_synced_at(started).await?;
-            Ok(())
         })
         .await
     }
@@ -2852,74 +2813,6 @@ mod refresh_laws {
             .unwrap()
             .unwrap();
         assert!(weak.upgrade().is_none());
-    }
-
-    #[tokio::test]
-    async fn unsupported_freshness_never_widens_to_a_catalog_acquisition() {
-        let directory = tempfile::tempdir().expect("Store directory");
-        let catalog = Catalog::open(directory.path().join("library.sqlite"))
-            .await
-            .expect("Catalog");
-        let source = Source::open(
-            SourceConfiguration {
-                source_id: SourceId::new("jellyfin:test"),
-                kind: "jellyfin".to_string(),
-                name: "Jellyfin".to_string(),
-                provider_payload: serde_json::json!({
-                    "version": 1,
-                    "base_url": "http://127.0.0.1:9",
-                    "server_id": "test",
-                    "user_id": "user",
-                    "username": "listener",
-                    "trust_invalid_cert": false,
-                    "use_jellyfin_instant_mix": false
-                })
-                .to_string(),
-            },
-            Some("token".to_string()),
-            Some("device".to_string()),
-            None,
-        )
-        .expect("open Jellyfin source");
-
-        let smb = Source::open(
-            crate::FileSourceSettings {
-                excluded_folders: Vec::new(),
-                url: "smb://127.0.0.1:9/Music/".into(),
-                alternate_urls: vec![],
-                folders: vec![],
-                username: String::new(),
-                domain: String::new(),
-                authentication: crate::FileAuthentication::Anonymous,
-                trust_invalid_certificate: false,
-                certificate_pem: None,
-                require_smb_encryption: false,
-            }
-            .configuration(SourceId::new("smb:test"), "smb", "SMB".into())
-            .unwrap(),
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-        for source in [source, smb] {
-            source
-                .acquire_catalog(
-                    &catalog,
-                    &|_| panic!("unsupported freshness started acquisition progress"),
-                    Arc::new(AtomicBool::new(false)),
-                    crate::Refresh::Check,
-                )
-                .await
-                .expect("freshness check");
-            assert!(
-                {
-                    catalog.loaded().await;
-                    catalog.cached_source(source.source_id().as_str())
-                }
-                .is_none()
-            );
-        }
     }
 
     #[test]

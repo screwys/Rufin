@@ -1842,17 +1842,6 @@ impl Observation<'_> {
         Ok(())
     }
 
-    /// A catch-up that is not a listing advances the sync time.
-    pub async fn set_synced_at(&mut self, at: i64) -> LibraryResult<()> {
-        let mut write = self.write().await?;
-        if let Some(mut source) = write.get::<Source>(self.source.raw()).await? {
-            source.synced_at = Some(at);
-            write.put(source);
-        }
-        write.commit().await?;
-        Ok(())
-    }
-
     pub async fn remove_source_items(&mut self, kind: &str, ids: &[String]) -> LibraryResult<()> {
         for page in ids.chunks(PAGE) {
             let mut write = self.write().await?;

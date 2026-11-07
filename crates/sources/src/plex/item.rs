@@ -46,13 +46,7 @@ pub(super) fn read_items<'a>(
                     )
                 })
                 .transpose()?;
-            let rating = (matches!(response, ItemResponse::Complete)
-                || item.get("userRating").is_some())
-            .then(|| {
-                field::<f64>(item, "userRating")
-                    .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
-                    .map(|v| (v.round() as i64) * 10)
-            });
+            let rating = rating(item, matches!(response, ItemResponse::Complete));
             let year = field::<i64>(item, "year").filter(|v| *v > 0).or_else(|| {
                 if kind == "track" {
                     field::<i64>(item, "parentYear").filter(|v| *v > 0)
@@ -300,6 +294,15 @@ pub(super) fn read_items<'a>(
         }
     }
     Ok(batches)
+}
+
+/// A row's rating in tenths; a `rated` row clears one it does not carry.
+pub(super) fn rating(item: &Value, rated: bool) -> Option<Option<i64>> {
+    (rated || item.get("userRating").is_some()).then(|| {
+        field::<f64>(item, "userRating")
+            .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
+            .map(|v| (v.round() as i64) * 10)
+    })
 }
 
 fn genres(item: &Value) -> Vec<library::TagReference> {

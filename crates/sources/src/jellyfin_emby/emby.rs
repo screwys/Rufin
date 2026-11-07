@@ -310,7 +310,7 @@ mod tests {
         observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut observation, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
             .await
             .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
@@ -336,7 +336,7 @@ mod tests {
         observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut observation, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
             .await
             .unwrap();
         let rated = catalog
@@ -409,7 +409,7 @@ mod tests {
         observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut observation, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
             .await
             .unwrap();
         for (entity, object) in [
