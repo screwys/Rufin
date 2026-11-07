@@ -328,17 +328,15 @@ impl PlexSource {
         source_id: &str,
         query: &str,
         limit: usize,
+        section: Option<&str>,
     ) -> SourceResult<library::CatalogBatch> {
-        let response = self
-            .get(
-                "/hubs/search",
-                &[
-                    ("query", query.into()),
-                    ("limit", limit.clamp(1, 100).to_string()),
-                    ("includeCollections", "0".into()),
-                ],
-            )
-            .await?;
+        let mut parameters = vec![
+            ("query", query.into()),
+            ("limit", limit.clamp(1, 100).to_string()),
+            ("includeCollections", "0".into()),
+        ];
+        parameters.extend(section.map(|section| ("sectionId", raw_item_id(section).into())));
+        let response = self.get("/hubs/search", &parameters).await?;
         let native = items(&response["MediaContainer"]["Hub"])
             .iter()
             .flat_map(|hub| items(&hub["Metadata"]).iter().take(limit.clamp(1, 100)))

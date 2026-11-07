@@ -1454,24 +1454,24 @@ impl Source {
         }
         self.catalog_operation(catalog, async |changes| {
             let source_id = self.source_id.as_str();
+            // The server searches the selected music folder.
             let folder_id = music_folder.map(|(_, id)| id);
-            // Plex searches every section; its rows name theirs, which the Catalog narrows by.
-            let (batch, kept) = match &self.implementation {
+            let batch = match &self.implementation {
                 Implementation::Plex(source) => {
-                    (source.live_search(source_id, query, limit).await?, false)
+                    source
+                        .live_search(source_id, query, limit, folder_id)
+                        .await?
                 }
-                Implementation::JellyfinEmby(source) => (
+                Implementation::JellyfinEmby(source) => {
                     source
                         .live_search(source_id, query, limit, folder_id)
-                        .await?,
-                    true,
-                ),
-                Implementation::OpenSubsonic(source) => (
+                        .await?
+                }
+                Implementation::OpenSubsonic(source) => {
                     source
                         .live_search(source_id, query, limit, folder_id)
-                        .await?,
-                    true,
-                ),
+                        .await?
+                }
                 _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
             };
             let tracks = batch
@@ -1503,7 +1503,6 @@ impl Source {
                 .search_rows_by_objects(
                     source,
                     music_folder.map(|(key, _)| key),
-                    kept,
                     false,
                     &tracks,
                     &albums,
