@@ -264,9 +264,10 @@ impl super::Observation<'_> {
             merge_local_file_uris_on(&mut write, &aliases, &mut touched).await?;
         }
         if !batch.renames.is_empty() {
+            // A renamed file's track, or a renamed sheet's track of the same number.
             let aliases: Vec<(String, String, String)> = sqlx::query_as("SELECT old.media_uri,new.media_uri,new.object_id FROM json_each(?2) rename
-                CROSS JOIN track_details old_details ON old_details.source_path=json_extract(rename.value,'$[0]') AND old_details.cue_path IS NULL CROSS JOIN tracks old ON old.track_key=old_details.track_key AND(old.source_key=?1 OR old.source_key IS NULL)
-                CROSS JOIN track_details new_details ON new_details.source_path=json_extract(rename.value,'$[1]') AND new_details.cue_path IS NULL CROSS JOIN tracks new ON new.track_key=new_details.track_key AND new.source_key=?1 AND new.indexed=1
+                CROSS JOIN track_details old_details ON old_details.cue_path=json_extract(rename.value,'$[0]') OR old_details.source_path=json_extract(rename.value,'$[0]') AND old_details.cue_path IS NULL CROSS JOIN tracks old ON old.track_key=old_details.track_key AND(old.source_key=?1 OR old.source_key IS NULL)
+                CROSS JOIN track_details new_details ON new_details.cue_path=json_extract(rename.value,'$[1]') AND old_details.cue_path IS NOT NULL OR new_details.source_path=json_extract(rename.value,'$[1]') AND new_details.cue_path IS NULL AND old_details.cue_path IS NULL CROSS JOIN tracks new ON new.track_key=new_details.track_key AND new.source_key=?1 AND new.indexed=1 AND(old_details.cue_path IS NULL OR new.track_number=old.track_number)
                 WHERE old.media_uri<>new.media_uri AND new.object_id IS NOT NULL")
                 .bind(source).bind(serde_json::to_string(&batch.renames)?).fetch_all(write.connection().await?).await?;
             merge_local_file_uris_on(&mut write, &aliases, &mut touched).await?;
