@@ -507,6 +507,7 @@ impl CatalogUi {
             let refresh_section = mounted.clone();
             header.refresh().connect_clicked(move |_| {
                 refresh_section.page_start.set(0);
+                refresh_section.render();
                 shell.refresh_home_section(kind);
             });
         } else {
