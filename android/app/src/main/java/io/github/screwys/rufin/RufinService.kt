@@ -412,8 +412,8 @@ class RufinService : MediaSessionService() {
         true
     }.await()
 
+    /** Runs a play or queue request; focus and the foreground service come as playback starts. */
     internal suspend fun playRequest(action: suspend () -> Unit) {
-        preparePlayback()
         try { action() }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) {
