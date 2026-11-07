@@ -2,19 +2,25 @@
 
 ## Security Stance
 
-Rufin is a desktop music player, officially supported as Flatpak, Fedora RPM, nixpkgs/scoop/brew/AUR packages, and Windows/MacOS executables. Data security is taken seriously within the expectations of a music player. If you find a security or privacy issue, you can email to `screwygit@proton.me` [(PGP)](https://raw.githubusercontent.com/screwys/screwys/refs/heads/main/screwygit-pgp-key.asc).
+Rufin is officially supported as APK, Flatpak, Fedora RPM, nixpkgs/scoop/brew/AUR packages, and Windows/MacOS executables. Data security is taken seriously within the expectations of a music player. If you find a security or privacy issue, you can email to me@screwy.dev. You can also encrypt it with my [public key](https://screwy.dev/pgp.asc) if your mail client does not find the key automatically.
 
-Memory unsafe code is strictly forbidden, and Rufin does not compile it. Rust dependencies are checked with cargo-deny, including advisories, license policy and source policy. Dependency updates are held for 7 days before our own Renovate bot opens them, generated Flatpak and Nix dependency artifacts are checked when dependencies change.
+Rust dependencies are checked with cargo-deny, including advisories, license policy and source policy. Dependency updates are held for 7 days before our own Renovate bot opens them.
 
-Release tags are signed via maintainer GPG key. Release builds verify the tag signature against the public key in `.github/release-gpg.pub` before building packages.
+Release tags are signed via maintainer GPG key.
 
 CI caches are only used to speed up builds. PRs can restore the Rust build cache, but cache writes are limited to pushes to `main`, and cached binaries are disabled. Nix/Cachix cache write is limited to `main` or releases, with releases verifying the signed release tag first.
-
-Right now there is one allowed RustSec advisory for `paste`, a dependency of `lofty`. This does not mean the package is malicious, but it is just not maintained anymore, as it is considered feature-complete ([see](https://github.com/rustsec/advisory-db/pull/2215#issuecomment-2709315704)).
 
 ## Stored Secrets
 
 Rufin stores server tokens and service credentials on system keyring if possible, and falls back to a secrets file with owner only permissions on non-UNIX/unsupported systems or if the user deliberately picks legacy storage. Secrets file is still a reasonable choice for this app, that is the default in most clients since these are not considered as high-risk secrets. Secure storage exists as a good foundation, and useful in the case we need to store higher-value secrets in the future.
+
+## Rufin Connect
+
+Rufin Connect syncs a profile between your own devices. Devices talk to each other directly over QUIC with TLS 1.3, preferring post-quantum key exchange, and each one is identified by its own key, kept in the default secret storage (keyring by default). 
+
+Server and scrobbling credentials belong to a profile key before they leave a device, and a sync folder only holds data encrypted to that key. Paired devices can read them, as with any synced setting.
+
+Relay is disabled by default. A relay is used only after you enter its address, and Connect then contacts no other server for it; no public address directory is used. Once a relay is configured, the relay sees each device's IP address and forwards encrypted traffic it can not read. The relay address applies to every device in the profile.
 
 ## External Requests
 
