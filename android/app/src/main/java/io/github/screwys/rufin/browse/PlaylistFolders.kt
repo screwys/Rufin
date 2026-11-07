@@ -62,7 +62,6 @@ internal fun Modifier.playlistFolderDrop(item: BrowseItem, model: RufinConnectio
                 model.runAction {
                     val source = model.sourceOwner ?: return@runAction
                     movePlaylistToFolder(source, drag.member, folder.folderKey)
-                    model.browse.refresh()
                 }
                 return true
             }
@@ -76,7 +75,7 @@ internal fun Modifier.playlistFolderDrop(item: BrowseItem, model: RufinConnectio
 
 @Composable
 internal fun PlaylistFolderNameDialog(
-    model: RufinConnection, browse: BrowseConnection, smart: Boolean, onDismiss: () -> Unit,
+    model: RufinConnection, smart: Boolean, onDismiss: () -> Unit,
     folder: PlaylistFolderRow? = null,
 ) {
     var name by remember(folder?.folderKey) { mutableStateOf(folder?.name.orEmpty()) }
@@ -86,7 +85,6 @@ internal fun PlaylistFolderNameDialog(
             val source = model.sourceOwner ?: return@runAction
             if (folder == null) createPlaylistFolder(source, name.trim(), smart)
             else renamePlaylistFolder(source, folder.folderKey, name.trim())
-            browse.refresh()
             onDismiss()
         } }, enabled = name.isNotBlank() && model.pendingActions == 0) {
             Text(translate(if (folder == null) "Create" else "Save"))

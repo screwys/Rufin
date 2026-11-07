@@ -297,7 +297,6 @@ internal fun BrowseMenuSheet(
                     if (inFolder && folderMember != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
                         val source = model.sourceOwner ?: return@runAction
                         movePlaylistToFolder(source, folderMember, null)
-                        browse.refresh()
                         onDismiss()
                     } }
                 }
@@ -343,7 +342,7 @@ internal fun BrowseMenuSheet(
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
         folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
     if (rename) {
-        if (playlistFolder != null) PlaylistFolderNameDialog(model, browse, playlistFolder.smart,
+        if (playlistFolder != null) PlaylistFolderNameDialog(model, playlistFolder.smart,
             { rename = false; onDismiss() }, playlistFolder)
         else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
         else browse.library?.let { library ->
@@ -362,7 +361,6 @@ internal fun BrowseMenuSheet(
             else model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                 deletePlaylist(source, (item.row.route as Route.PlaylistDetail).v1)
             }
-            browse.refresh()
             delete = false
             onDismiss()
         } }) { Text(translate("Delete")) } },
@@ -548,7 +546,6 @@ internal fun PlaylistPickerSheet(
                                     }
                                 }
                             }
-                            browse.refresh()
                             onDismiss()
                         }
                     })
@@ -562,7 +559,7 @@ internal fun PlaylistPickerSheet(
             } }
         }
     }
-    if (create && folderKind != null) PlaylistFolderNameDialog(model, browse, folderKind, {
+    if (create && folderKind != null) PlaylistFolderNameDialog(model, folderKind, {
         create = false
         pages.refresh()
     })
@@ -574,7 +571,6 @@ internal fun PlaylistPickerSheet(
                 }
             }
         }
-        browse.refresh()
         create = false
         onDismiss()
     }

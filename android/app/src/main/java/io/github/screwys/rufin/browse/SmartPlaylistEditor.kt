@@ -70,7 +70,6 @@ internal fun SmartPlaylistEditor(
                 TextButton({ model.runAction {
                     library.saveSmartPlaylist(playlist?.smartPlaylistKey, name.trim(), definition.copy(
                         matchAll = all.map { it.second }, matchAny = any.map { it.second }, limit = limit.toULongOrNull()), folder)
-                    browse.refresh()
                     onDismiss()
                 } }, enabled = name.isNotBlank() && validLimit && invalid.values.none { it } && model.pendingActions == 0) {
                     Text(translate(if (playlist == null) "Create" else "Save"))

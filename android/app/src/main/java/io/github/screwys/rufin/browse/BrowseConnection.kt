@@ -335,8 +335,5 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             labelsVersion++
         }
     }
-    fun refreshSection(block: HomeBlockKind) = connection.runAction {
-        library?.refreshHome(block)
-        refresh()
-    }
+    fun refreshSection(block: HomeBlockKind) = connection.runAction { library?.refreshHome(block) }
 }

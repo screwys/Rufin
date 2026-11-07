@@ -212,7 +212,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     browse.open(BrowseItem(imported.row, 0UL, null))
                     if (imported.skipped > 0UL) model.showFeedback(translate("Some playlist entries could not be imported"))
                 }
-                browse.refresh()
             }
         }
     }
@@ -535,10 +534,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 created.settingsError?.let { error(it) }
             }
         }
-        browse.refresh()
         createPlaylist = false
     }
-    if (createFolder) PlaylistFolderNameDialog(model, browse, smartPlaylistList, { createFolder = false })
+    if (createFolder) PlaylistFolderNameDialog(model, smartPlaylistList, { createFolder = false })
     if (createSmartPlaylist) SmartPlaylistEditor(model, browse, { createSmartPlaylist = false }, folder = playlistFolder?.key)
     metadata?.row?.metadataItem?.let { item -> MetadataEditorScreen(model, item) { metadata = null } }
     if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !random) {
