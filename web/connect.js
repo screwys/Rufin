@@ -370,7 +370,7 @@ export function init() {
     const field = element("invitation");
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(field.value);
-      flashSuccess(element("copy"), "copy");
+      flashSuccess(element("copy"), "rufin-edit-copy-symbolic");
     } else {
       field.hidden = false;
       field.focus();

@@ -129,7 +129,7 @@ nav :is(button, a):hover,
   height: 12px;
   flex-shrink: 0;
 }
-.pin-metadata [data-icon="duration"] {
+.pin-metadata [data-icon="rufin-preferences-system-time-symbolic"] {
   margin-left: 5px;
 }
 .pin-metadata .source-icon {
