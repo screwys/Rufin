@@ -755,7 +755,7 @@ fn artist_from_navidrome(
         object_id: source.id("artist", raw_id),
         artwork_binding: Some(crate::native_artwork_binding(
             source_id,
-            &navidrome_image_ref(source, "ar", raw_id, None),
+            &navidrome_image_ref(source, "ar", raw_id, field(artist, "updatedAt")),
         )?),
     })
 }
