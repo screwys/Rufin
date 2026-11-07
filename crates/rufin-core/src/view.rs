@@ -1116,6 +1116,10 @@ impl View {
             &self.options,
             changed,
         );
+        // A missing page has nothing to read again; it opens again.
+        if matches!(self.body, Body::Missing) && refresh == Refresh::Reread {
+            return Refresh::Reopen;
+        }
         if !changed.items.is_empty() && self.states_reorder() {
             return refresh.max(Refresh::Reread);
         }

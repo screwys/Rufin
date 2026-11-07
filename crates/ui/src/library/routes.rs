@@ -192,10 +192,13 @@ pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reads: &PageReads) 
 }
 
 impl CatalogUi {
+    /// The page `read` opened, which keeps its View: a page without rows of its own, such as
+    /// one whose collection is missing, hears from it what a committed change means for it.
     pub fn opened_collection_view(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let route = read.view.route().clone();
         let category = read.view.options().category;
-        match route {
+        let view = std::sync::Arc::clone(&read.view);
+        let mounted = match route {
             Route::History => self.history_route(read),
             Route::Favorites if category == CollectionCategory::Tracks => self.root_track_route(
                 LibraryListKey::FavoriteTracks,
@@ -247,11 +250,10 @@ impl CatalogUi {
                 self.library_smart_playlists_route(read)
             }
             Route::Folders { path } => self.folders_route(path, read),
-            Route::Home => self
-                .home_route(read.view.home_sections().unwrap_or_default())
-                .with_view(read.view),
-            Route::Search => self.search_route(),
-        }
+            Route::Home => self.home_route(read.view.home_sections().unwrap_or_default()),
+            Route::Search => return self.search_route(),
+        };
+        mounted.with_view(view)
     }
 
     pub fn scrolling_track_projection(
