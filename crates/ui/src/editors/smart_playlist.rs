@@ -523,8 +523,13 @@ fn append_value_editor(
             container.append(&label);
         }
         SmartPlaylistRuleValueKind::Text => {
+            // A whole value picks one the library has; a part of one is typed.
             if let Some(suggestions) = suggestions_for(&value_suggestions, rule.field)
                 && !suggestions.is_empty()
+                && !matches!(
+                    rule.operator,
+                    SmartPlaylistRuleOperator::Contains | SmartPlaylistRuleOperator::NotContains
+                )
             {
                 let (labels, selected) = rule_value_labels(suggestions, rule);
                 let dropdown = searchable_dropdown_from_labels(&labels, selected);

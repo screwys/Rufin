@@ -482,10 +482,7 @@ impl Catalog {
                 })
                 .collect::<Vec<_>>();
             tags.sort();
-            tags.into_iter()
-                .take(100)
-                .map(|(.., name)| name)
-                .collect::<Vec<_>>()
+            tags.into_iter().map(|(.., name)| name).collect::<Vec<_>>()
         };
         Ok(SmartPlaylistValueSuggestions {
             genres: names(crate::TagKind::Genre),
