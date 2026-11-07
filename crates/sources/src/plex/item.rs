@@ -241,9 +241,7 @@ pub(super) fn read_items<'a>(
                     tracks.push(input);
                 }
                 "playlist" => {
-                    let smart = crate::remote_json::boolean(&item["smart"])
-                        .or_else(|| field::<i64>(item, "smart").map(|v| v != 0))
-                        .unwrap_or(false);
+                    let smart = smart(item);
                     playlists.push(library::PlaylistObservation {
                         object_id: object,
                         name: title.to_owned(),
@@ -294,6 +292,12 @@ pub(super) fn read_items<'a>(
         }
     }
     Ok(batches)
+}
+
+pub(super) fn smart(playlist: &Value) -> bool {
+    crate::remote_json::boolean(&playlist["smart"])
+        .or_else(|| field::<i64>(playlist, "smart").map(|v| v != 0))
+        .unwrap_or(false)
 }
 
 /// A row's rating in tenths; a `rated` row clears one it does not carry.

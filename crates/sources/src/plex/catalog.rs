@@ -1,4 +1,4 @@
-use super::item::{ItemResponse, rating, read_items};
+use super::item::{ItemResponse, rating, read_items, smart};
 use super::{PlexSource, plex_id};
 use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
@@ -350,7 +350,8 @@ impl PlexSource {
                 }
             };
 
-            // Entries are read again only when the playlist's revision changed.
+            // Entries are read again only when the playlist's revision changed; a smart
+            // playlist's entries change without it.
             for item in playlists {
                 let Some(raw) = id(&item["ratingKey"]) else {
                     continue;
@@ -361,10 +362,11 @@ impl PlexSource {
                     field::<i64>(item, "updatedAt").unwrap_or_default(),
                     field::<i64>(item, "leafCount").unwrap_or_default()
                 );
-                if observation
-                    .catalog
-                    .source_playlist_is_fresh(source_id, &playlist, Some(&revision), 0)
-                    .await?
+                if !smart(item)
+                    && observation
+                        .catalog
+                        .source_playlist_is_fresh(source_id, &playlist, Some(&revision), 0)
+                        .await?
                 {
                     continue;
                 }
