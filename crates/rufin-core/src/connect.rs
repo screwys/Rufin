@@ -351,6 +351,8 @@ struct Session {
     records: Arc<Records>,
     stop: CancellationToken,
     folder: folder::State,
+    /// Pulls run one at a time, so each starts from where the one before ended.
+    pulling: tokio::sync::Mutex<()>,
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
@@ -658,6 +660,7 @@ impl ConnectOwner {
             records,
             stop: CancellationToken::new(),
             folder: folder::State::default(),
+            pulling: tokio::sync::Mutex::new(()),
         });
         *self.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&session));
         let config = self.device_config();
@@ -826,15 +829,17 @@ impl ConnectOwner {
         });
     }
 
+    /// Pulls a device's records when its sequence is past this device's cursor. A pull ends
+    /// with its session.
     async fn pull_when_behind(self: &Arc<Self>, session: &Arc<Session>, peer: &str, sequence: i64) {
-        let behind = match session.records.pulled(peer).await {
-            Ok(pulled) => sequence > pulled,
-            Err(error) => {
-                tracing::warn!(%error, "Connect could not read its cursor");
-                return;
+        let pulled = async {
+            let _pulling = session.pulling.lock().await;
+            if sequence > session.records.pulled(peer).await? {
+                self.pull(session, peer).await?;
             }
+            Ok::<_, String>(())
         };
-        if behind && let Err(error) = self.pull(session, peer).await {
+        if let Some(Err(error)) = session.stop.run_until_cancelled(pulled).await {
             tracing::warn!(%error, peer, "Connect could not pull records");
         }
     }
