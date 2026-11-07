@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
-    onNavigate: (Route, String, String?) -> Unit = { route, title, source -> player.model.browse.openLinkedRoute(route, title, source) },
+    onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
 ) {
     val sheet = rememberModalBottomSheetState()
     val list = rememberLazyListState()

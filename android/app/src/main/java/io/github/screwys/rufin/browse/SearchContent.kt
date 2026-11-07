@@ -186,7 +186,7 @@ private fun SearchResults(
         BrowseMenuSheet(player.model, browse, item, player, { selected = null },
             { selected = null; onPlaylist(item) }, { metadata = item; selected = null },
             { browse.removeRecentSearch(item); selected = null },
-            onNavigate = { route, title, source -> selected = null; browse.openLinkedRoute(route, title, source) })
+            onNavigate = { route, title, _ -> selected = null; browse.openRoute(route, title) })
     }
     metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(player.model, item) { metadata = null } }
 }

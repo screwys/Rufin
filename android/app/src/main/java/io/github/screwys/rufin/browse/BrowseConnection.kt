@@ -241,25 +241,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val options = BrowseOptions().also { it.category = if (route.showsReleases) CollectionCategory.ALBUMS else CollectionCategory.TRACKS }
         details = details + BrowseLocation(route, title, options, playbackTitle)
     }
-    fun openLinkedRoute(route: Route, title: String, sourceId: String?) {
-        if (sourceId == null || sourceId == connection.sources?.selectedSourceId) {
-            openRoute(route, title)
-        } else connection.runAction {
-            connection.sourceOwner?.selectSource(sourceId)
-            openRoute(route, title)
-        }
-    }
     fun open(item: BrowseItem) {
-        val route = item.row.route ?: return play(item)
-        connection.runAction {
-            item.row.sourceId?.takeIf { it != connection.sources?.selectedSourceId }?.let { source -> connection.sourceOwner?.selectSource(source) }
-            section = AppSection.Browse
-            val options = BrowseOptions().also {
-                it.category = if (route.showsReleases) CollectionCategory.ALBUMS else CollectionCategory.TRACKS
-            }
-            details = details + BrowseLocation(route, item.row.title, options)
-            rememberSearchResult(item)
-        }
+        openRoute(item.row.route ?: return play(item), item.row.title)
+        rememberSearchResult(item)
     }
 
     private suspend fun loadRecentSearches(bridge: AndroidLibrary): List<BrowseItem> =

@@ -506,9 +506,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }
     }
     AnimatedVisibility(fullPlayer, enter = slideInVertically(tween(if (reduceMotion) 0 else 220)) { it }, exit = slideOutVertically(tween(if (reduceMotion) 0 else 180)) { it }) {
-        PlayerScreen(player, preferences, onNavigate = { route, title, source ->
+        PlayerScreen(player, preferences, onNavigate = { route, title, _ ->
             fullPlayer = false
-            browse.openLinkedRoute(route, title, source)
+            browse.openRoute(route, title)
         }, onMore = {
             player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
         }) { fullPlayer = false }
@@ -517,7 +517,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
     if (random) RandomPlaySheet(model, browse) { random = false }
     menu?.let { item -> BrowseMenuSheet(model, browse, item, player, { menu = null }, { playlist = item; menu = null }, { metadata = item; menu = null },
-        onNavigate = { route, title, source -> menu = null; fullPlayer = false; browse.openLinkedRoute(route, title, source) }) }
+        onNavigate = { route, title, _ -> menu = null; fullPlayer = false; browse.openRoute(route, title) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false }) { name, sourceId, public ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
