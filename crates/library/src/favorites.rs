@@ -7,7 +7,7 @@ use crate::catalog::families::Row;
 use crate::catalog::records::{Album, Artist, NativeState, Track};
 use crate::catalog::write::{STATE_DELETED, STATE_RETURNING, StateRow, Write};
 
-use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, SourceId};
 
 /// Sparse source facts. An absent field leaves the stored value alone.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -272,22 +272,22 @@ impl Catalog {
         Ok(true)
     }
 
-    /// The server could not take a delivery now; it waits until `next_attempt_at`.
-    pub async fn defer_delivery(
+    /// The server of `source` could not take a delivery now; every one it waits for waits
+    /// until `next_attempt_at`.
+    pub async fn defer_deliveries(
         &self,
-        delivery: &Delivery,
+        source: &SourceId,
         next_attempt_at: i64,
     ) -> LibraryResult<()> {
+        let prefixes = crate::keys::source_entity_kinds()
+            .map(|kind| crate::keys::source_entity_prefix(source, kind))
+            .collect::<Vec<_>>();
         let mut write = self.write().await?;
-        sqlx::query(
-            "UPDATE outbox SET next_attempt_at=?4 WHERE media_uri=?1 AND kind=?2 AND value IS ?3",
-        )
-        .bind(&delivery.media_uri)
-        .bind(delivery.kind.as_str())
-        .bind(delivery.value)
-        .bind(next_attempt_at)
-        .execute(write.connection().await?)
-        .await?;
+        sqlx::query("UPDATE outbox SET next_attempt_at=?2 WHERE next_attempt_at<?2 AND EXISTS(SELECT 1 FROM json_each(?1) prefix WHERE substr(media_uri,1,length(prefix.value))=prefix.value)")
+            .bind(serde_json::to_string(&prefixes)?)
+            .bind(next_attempt_at)
+            .execute(write.connection().await?)
+            .await?;
         write.commit().await?;
         Ok(())
     }

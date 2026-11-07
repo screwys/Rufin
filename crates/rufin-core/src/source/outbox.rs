@@ -27,6 +27,8 @@ pub(crate) struct Outbox {
     shared: Weak<Shared>,
     /// The pass that runs when the next deferred delivery is due.
     retry: Mutex<Option<tokio::task::AbortHandle>>,
+    /// Held by the one pass that delivers, so an older value never lands after a newer one.
+    delivering: tokio::sync::Mutex<()>,
 }
 
 impl Outbox {
@@ -34,6 +36,7 @@ impl Outbox {
         Self {
             shared,
             retry: Mutex::new(None),
+            delivering: tokio::sync::Mutex::new(()),
         }
     }
 }
@@ -61,6 +64,7 @@ impl Feature for Outbox {
     /// Delivers what is due, then waits for the next due time.
     fn apply(self: Arc<Self>, _: Option<Vec<Arc<Change>>>) -> Pass {
         Box::pin(async move {
+            let _delivering = self.delivering.lock().await;
             loop {
                 let Some(owner) = self.shared.upgrade().map(|shared| SourceOwner { shared }) else {
                     return;
@@ -130,7 +134,6 @@ impl SourceOwner {
                 continue;
             };
             if unavailable.contains(&source_id) {
-                self.defer(&delivery).await;
                 continue;
             }
             match self.send(&source_id, entity, &object_id, &delivery).await {
@@ -146,8 +149,12 @@ impl SourceOwner {
                     }
                 }
                 Sent::Later => {
+                    info!(kind = ?delivery.kind, "Deliveries deferred");
+                    let at = unix_seconds().saturating_add(RETRY_SECONDS);
+                    if let Err(error) = self.shared.catalog.defer_deliveries(&source_id, at).await {
+                        self.shared.warn_nonfatal(&error.to_string());
+                    }
                     unavailable.insert(source_id);
-                    self.defer(&delivery).await;
                 }
                 Sent::Refused => self.drop_delivery(&delivery, Some(&source_id)).await,
                 Sent::Undeliverable => self.drop_delivery(&delivery, None).await,
@@ -215,18 +222,6 @@ impl SourceOwner {
             }
             Ok(false) => {}
             Err(error) => self.shared.warn_nonfatal(&error.to_string()),
-        }
-    }
-
-    async fn defer(&self, delivery: &Delivery) {
-        info!(kind = ?delivery.kind, "Delivery deferred");
-        if let Err(error) = self
-            .shared
-            .catalog
-            .defer_delivery(delivery, unix_seconds().saturating_add(RETRY_SECONDS))
-            .await
-        {
-            self.shared.warn_nonfatal(&error.to_string());
         }
     }
 

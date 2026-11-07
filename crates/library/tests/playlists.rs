@@ -419,7 +419,12 @@ async fn deliveries_wait_until_accepted_and_then_drop_rufins_copy() {
     // A deferred delivery waits for its time, across a restart.
     fixture
         .catalog
-        .defer_delivery(&track_delivery, now + 300)
+        .defer_deliveries(
+            &library::source_entity_parts(&track_delivery.media_uri)
+                .unwrap()
+                .0,
+            now + 300,
+        )
         .await
         .unwrap();
     fixture.catalog.clone().close().await.unwrap();
