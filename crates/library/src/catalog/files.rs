@@ -304,15 +304,12 @@ impl super::Observation<'_> {
         configured: &[String],
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        let inserted = sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri)
+        sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri)
             SELECT ?1,track.media_uri,'import',details.source_path,file.root,file.relative_path,file.path FROM playlist_entries entry CROSS JOIN tracks track USING(track_key) CROSS JOIN track_details details USING(track_key)
             CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
             WHERE entry.playlist_key=?2 AND track.source_key=?1 AND track.indexed=1 AND file.root NOT IN(SELECT value FROM json_each(?3))
             ON CONFLICT(media_uri,origin) DO NOTHING")
-            .bind(self.source).bind(playlist).bind(serde_json::to_string(configured)?).execute(write.connection().await?).await?.rows_affected();
-        if inserted != 0 {
-            // Import locators are read by key only, so clients hear nothing of them.
-        }
+            .bind(self.source).bind(playlist).bind(serde_json::to_string(configured)?).execute(write.connection().await?).await?;
         self.commit(write).await
     }
 }
