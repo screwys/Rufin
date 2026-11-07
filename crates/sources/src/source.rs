@@ -1947,27 +1947,16 @@ impl Source {
                 match change {
                     RemoteItemUpdate::Remove => removals.push(id),
                     RemoteItemUpdate::Metadata => upserts.push(id),
+                    // User data applies to what the Catalog holds; new items arrive as
+                    // library changes, and other ids (videos) are not music.
                     RemoteItemUpdate::UserData(facts) => {
-                        let mut known = false;
                         if let Implementation::JellyfinEmby(provider) = &self.implementation {
                             for kind in ["track", "album", "artist"] {
-                                let object = provider.kind.object_id(kind, &id);
-                                known |= catalog
-                                    .source_contains_entity(
-                                        self.source_id.as_str(),
-                                        kind,
-                                        &object,
-                                        true,
-                                    )
-                                    .await?;
                                 user_data
                                     .entry(kind)
                                     .or_default()
-                                    .push((object, facts.clone()));
+                                    .push((provider.kind.object_id(kind, &id), facts.clone()));
                             }
-                        }
-                        if !known {
-                            upserts.push(id);
                         }
                     }
                 }
