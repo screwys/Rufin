@@ -233,14 +233,17 @@ impl JellyfinEmbySource {
                     .await?
             }
             Some(after) => {
-                // A saved track belongs to the views whose listing since then holds it.
+                // A saved track belongs to the views whose listing since then holds it, and the
+                // catch-up dates from their first page so a track saved meanwhile lists again.
                 let mut member_of = HashMap::<String, Vec<String>>::new();
+                let mut started = None;
                 for folder in folders.iter().filter(|folder| known.contains(*folder)) {
                     let mut pages = PageState::default();
                     loop {
-                        let (tracks, finished) = self
+                        let (tracks, finished, date) = self
                             .music_folder_tracks(folder, Some(after), &mut pages, cancelled)
                             .await?;
+                        started = started.or(date);
                         for track in tracks {
                             member_of.entry(track).or_default().push(folder.clone());
                         }
@@ -249,10 +252,10 @@ impl JellyfinEmbySource {
                         }
                     }
                 }
-                let started = self
-                    .acquire_saved_since(observation, after, &mut member_of, cancelled)
+                let saved = self
+                    .acquire_saved_since(observation, after, &member_of, cancelled)
                     .await?;
-                (started, Vec::new())
+                (started.or(saved), Vec::new())
             }
         };
         // Artists that albums and tracks credit but the listings left out.
@@ -263,7 +266,7 @@ impl JellyfinEmbySource {
         {
             let mut pages = PageState::default();
             loop {
-                let (tracks, finished) = self
+                let (tracks, finished, _) = self
                     .music_folder_tracks(folder, None, &mut pages, cancelled)
                     .await?;
                 let batch = library::CatalogBatch {
@@ -416,7 +419,7 @@ impl JellyfinEmbySource {
         &self,
         observation: &mut library::Observation<'_>,
         after: &str,
-        member_of: &mut HashMap<String, Vec<String>>,
+        member_of: &HashMap<String, Vec<String>>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<Option<i64>> {
         let source_id = observation.source_id;
@@ -442,16 +445,11 @@ impl JellyfinEmbySource {
                         .albums
                         .extend(album_from_item(self.kind, source_id, item)?),
                     "Audio" => {
-                        batch
-                            .tracks
-                            .extend(track_from_item(self.kind, source_id, item)?.map(
-                                |mut track| {
-                                    track.folders = Some(
-                                        member_of.remove(&track.object_id).unwrap_or_default(),
-                                    );
-                                    track
-                                },
-                            ))
+                        if let Some(mut track) = track_from_item(self.kind, source_id, item)? {
+                            track.folders =
+                                Some(member_of.get(&track.object_id).cloned().unwrap_or_default());
+                            batch.tracks.push(track);
+                        }
                     }
                     "MusicArtist" => batch
                         .artists
@@ -648,15 +646,15 @@ impl JellyfinEmbySource {
             .collect())
     }
 
-    /// A page of a music view's track ids, and whether it was the last; `saved_after` keeps
-    /// those saved since then.
+    /// A page of a music view's track ids, whether it was the last and the server's clock;
+    /// `saved_after` keeps those saved since then.
     async fn music_folder_tracks(
         &self,
         folder_id: &str,
         saved_after: Option<&str>,
         pages: &mut PageState,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<(Vec<String>, bool)> {
+    ) -> SourceResult<(Vec<String>, bool, Option<i64>)> {
         check_cancelled(cancelled)?;
         let mut url = self.items_url(pages.offset(), COLLECTION_PAGE_SIZE, "Audio", "")?;
         url.query_pairs_mut()
@@ -665,14 +663,14 @@ impl JellyfinEmbySource {
         if let Some(after) = saved_after {
             url.query_pairs_mut().append_pair("MinDateLastSaved", after);
         }
-        let response = self.get_json::<Value>(url).await?;
+        let (response, date) = self.get_json_dated::<Value>(url).await?;
         let rows = items(&response["Items"]);
         let finished = pages.advance(rows.len(), field(&response, "TotalRecordCount"))?;
         let tracks = rows
             .iter()
             .filter_map(|item| id(&item["Id"]).map(|raw| self.kind.object_id("track", &raw)))
             .collect();
-        Ok((tracks, finished))
+        Ok((tracks, finished, date))
     }
 
     async fn acquire_playlists(
