@@ -37,10 +37,10 @@ internal data class BrowseLocation(
     val options: BrowseOptions = BrowseOptions(),
     val playbackTitle: String = title,
 )
-/** A row and where it shows: its place in `view`, or in Home's `section`, or among search results.
+/** A row and where it shows: its place in `view`, in its Home section, or among search results.
  *  `downloads` is how many download changes the page had when it read it. */
 internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val view: AndroidView?,
-    val displaySettings: AndroidBrowseDisplay? = null, val section: ULong? = null,
+    val displaySettings: AndroidBrowseDisplay? = null,
     val searchResult: Boolean = false, val contextTitle: String? = null,
     val downloads: Int = 0)
 

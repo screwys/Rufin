@@ -41,7 +41,6 @@ private val AndroidBrowseRow.playlistListRow: PlaylistListRow? get() = (row as? 
 internal val AndroidBrowseRow.playlist: PlaylistRow? get() = (playlistListRow as? PlaylistListRow.Playlist)?.v1
 internal val AndroidBrowseRow.smartPlaylist: SmartPlaylistRow? get() = (playlistListRow as? PlaylistListRow.SmartPlaylist)?.v1
 internal val AndroidBrowseRow.playlistFolder: PlaylistFolderRow? get() = (playlistListRow as? PlaylistListRow.Folder)?.v1
-internal val AndroidBrowseRow.isAlbumTrack: Boolean get() = row is Row.AlbumTrack
 
 /** The track, album or artist the row shows, which it favorites, rates and edits. */
 internal val AndroidBrowseRow.target: FavoriteTarget?
@@ -88,10 +87,6 @@ internal val AndroidBrowseRow.subtitle: String
     get() = track?.let { "${it.artist} · ${it.album}" }
         ?: albumRow?.artist
         ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · $durationText" } ?: ""
-
-/** The key of the track, album or artist whose favorite and rating the row shows. */
-internal val AndroidBrowseRow.stateKey: Long?
-    get() = track?.trackKey ?: albumRow?.albumKey ?: artistRow?.artistKey
 
 internal val AndroidBrowseRow.favorite: Boolean
     get() = (track?.state ?: albumRow?.state ?: artistRow?.state)?.favorite == true

@@ -342,10 +342,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         finally { selection.destroy() }
         connection.showFeedback(translate("Saved"))
     }
-    suspend fun queueFavorite(mediaUri: String, favorite: Boolean): Boolean? {
-        if (connection.debugLogging) Log.d("Rufin", "Queue favorite clicked run=${currentId?.run} current=${currentId?.mediaUri == mediaUri} requested=$favorite")
-        return sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(mediaUri), favorite)
-    }
     fun activateQueue(position: ULong) = action { playbackOwner?.activate(position) }
     fun removeQueue(position: ULong) = action { playbackOwner?.remove(position) }
     suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {

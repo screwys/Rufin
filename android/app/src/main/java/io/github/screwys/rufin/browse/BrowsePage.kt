@@ -266,7 +266,7 @@ internal class BrowsePage(
         revision: Int) =
         sections.mapIndexed { section, home ->
             HomeSectionItems(section.toULong(), home.title, home.kind, home.refresh, home.rows.mapIndexed { index, row ->
-                BrowseItem(row, index.toULong(), view, display, section = section.toULong(), contextTitle = home.title,
+                BrowseItem(row, index.toULong(), view, display, contextTitle = home.title,
                     downloads = revision)
             })
         }

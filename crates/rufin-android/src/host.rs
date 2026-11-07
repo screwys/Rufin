@@ -189,10 +189,6 @@ impl AndroidRuntime {
         }))
     }
 
-    pub fn application_name(&self) -> String {
-        app_identity::DISPLAY_NAME.to_string()
-    }
-
     pub fn debug_logging(&self) -> bool {
         self.diagnostics.debug_enabled()
     }
