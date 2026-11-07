@@ -513,8 +513,12 @@ impl Records {
             .map(|object| format!("{kind}:{object}"))
             .collect::<Vec<_>>();
         let items = self.items(kind, Some(&objects)).await?;
-        self.diff(items, Select::Ids(&ids), kind != "analysis")
-            .await
+        self.diff(
+            items,
+            Select::Ids(&ids),
+            !matches!(kind, "analysis" | "album-loudness"),
+        )
+        .await
     }
 
     /// One diff pass: everything when `changes` is None, otherwise what they name.
@@ -548,6 +552,7 @@ impl Records {
         let mut lyrics = Vec::new();
         let mut entries = Vec::new();
         let mut hashes = Vec::new();
+        let mut albums = Vec::new();
         let mut heard = false;
         let mut queue = false;
         for scope in scopes {
@@ -569,6 +574,7 @@ impl Records {
                 Scope::Smart { object, .. } => smart.push(object.clone()),
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Analysis { hash } => hashes.push(*hash),
+                Scope::AlbumLoudness { members } => albums.push(members.clone()),
                 Scope::Queue => queue = true,
                 _ => {}
             }
@@ -622,12 +628,11 @@ impl Records {
         if !hashes.is_empty() {
             let objects = hashes.iter().map(|hash| hex(hash)).collect::<Vec<_>>();
             let items = self.items("analysis", Some(&objects)).await?;
-            // A hash without results names an album's members key.
-            if items.len() < objects.len() {
-                written.extend(self.compare("album-loudness", false).await?);
-            }
             let ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
             written.extend(self.diff(items, Select::Ids(&ids), false).await?);
+        }
+        if !albums.is_empty() {
+            written.extend(self.compare_ids("album-loudness", albums).await?);
         }
         let mut listened = None;
         if heard {
@@ -816,7 +821,7 @@ impl Records {
                     .collect::<Vec<[u8; 32]>>();
                 self.analysis_items(&hashes).await?
             }
-            "album-loudness" => self.album_loudness_items().await?,
+            "album-loudness" => self.album_loudness_items(objects).await?,
             "setting" => self.settings_items().await?,
             _ => Vec::new(),
         };
@@ -1246,9 +1251,9 @@ impl Records {
             .collect()
     }
 
-    async fn album_loudness_items(&self) -> Result<Vec<Item>, String> {
+    async fn album_loudness_items(&self, members: Option<&[String]>) -> Result<Vec<Item>, String> {
         self.catalog
-            .album_loudness_rows()
+            .album_loudness_rows(members)
             .await
             .map_err(string_error)?
             .into_iter()

@@ -342,14 +342,18 @@ impl Catalog {
         Ok(any)
     }
 
-    /// Every stored album loudness by its members key: integrated loudness and true peak.
+    /// The stored album loudness by members key, all of it or of these members keys:
+    /// integrated loudness and true peak.
     pub async fn album_loudness_rows(
         &self,
+        members: Option<&[String]>,
     ) -> LibraryResult<Vec<(String, Option<f64>, Option<f64>)>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
-            "SELECT members,integrated_lufs,true_peak FROM album_loudness ORDER BY members",
+            "SELECT members,integrated_lufs,true_peak FROM album_loudness
+             WHERE ?1 IS NULL OR members IN(SELECT value FROM json_each(?1)) ORDER BY members",
         )
+        .bind(members.map(serde_json::to_string).transpose()?)
         .fetch_all(&mut *connection)
         .await?)
     }
@@ -366,7 +370,8 @@ impl Catalog {
     }
 }
 
-/// The one album loudness statement, by members key; a changed row raises `Scope::Analysis`.
+/// The one album loudness statement, by members key; a changed row raises
+/// `Scope::AlbumLoudness`.
 /// Whether one changed.
 async fn write_album_loudness(
     write: &mut crate::catalog::write::Write<'_>,
@@ -388,12 +393,11 @@ async fn write_album_loudness(
     .bind(serde_json::to_string(rows)?)
     .fetch_all(write.connection().await?)
     .await?;
-    for members in &changed {
-        write.changed(Scope::Analysis {
-            hash: *blake3::hash(members.as_bytes()).as_bytes(),
-        });
+    let any = !changed.is_empty();
+    for members in changed {
+        write.changed(Scope::AlbumLoudness { members });
     }
-    Ok(!changed.is_empty())
+    Ok(any)
 }
 
 fn valid(value: &LoudnessMeasurement) -> LibraryResult<()> {

@@ -115,6 +115,10 @@ pub enum Scope {
     Analysis {
         hash: [u8; 32],
     },
+    /// An album's loudness, by its members key.
+    AlbumLoudness {
+        members: String,
+    },
 }
 
 /// A track whose downloaded copy was added or removed.

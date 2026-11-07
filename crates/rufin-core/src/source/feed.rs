@@ -193,7 +193,8 @@ impl Pending {
                 Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Held { .. }
-                | Scope::Analysis { .. } => {}
+                | Scope::Analysis { .. }
+                | Scope::AlbumLoudness { .. } => {}
             }
         }
     }
