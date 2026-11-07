@@ -119,44 +119,51 @@ impl AndroidLibrary {
         .await
     }
 
-    /// The remembered search results, each showing whether it is downloaded.
+    /// The remembered search results the library still holds, as its rows show them in search.
     pub async fn recent_search_results(&self) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
-        let recent = self.settings.load().recent_search_results.clone();
+        let settings = self.settings.load();
+        let recent = settings.recent_search_results.clone();
+        let fields = CollectionCategory::ALL
+            .map(|category| settings.library_list(category.key()).row_fields);
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             catalog.loaded().await;
-            let uris = recent.iter().map(|row| row.media_uri.as_str());
-            let items = (catalog.items(&uris.collect::<Vec<_>>()).into_iter())
-                .flatten()
+            let uris = recent
+                .iter()
+                .map(|row| row.media_uri.clone())
                 .collect::<Vec<_>>();
-            let downloaded = catalog
+            let tracks = catalog
+                .tracks_by_uris(&uris, &cancel)
+                .await
+                .map_err(error)?;
+            let collections = catalog.items(&uris.iter().map(String::as_str).collect::<Vec<_>>());
+            let items = uris
+                .iter()
+                .zip(collections)
+                .filter_map(|(uri, item)| {
+                    item.or_else(|| {
+                        let track = tracks.iter().find(|track| track.media_uri == *uri)?;
+                        Some(library::Item::Track {
+                            key: track.track_key,
+                            entry: None,
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
+            let rows = catalog
                 .rows_of(&items, false, &cancel)
                 .await
-                .map_err(error)?
+                .map_err(error)?;
+            Ok(rows
                 .into_iter()
-                .filter_map(|row| {
-                    let uri = match &row {
-                        Row::Track(track) => track.media_uri.clone(),
-                        Row::Album(album) => album.media_uri.clone(),
-                        Row::Artist(artist) => artist.media_uri.clone(),
-                        _ => return None,
+                .enumerate()
+                .map(|(index, row)| {
+                    let category = match row {
+                        Row::Track(_) => 0,
+                        Row::Album(_) => 1,
+                        _ => 2,
                     };
-                    row.downloaded().then_some(uri)
-                })
-                .collect::<std::collections::HashSet<_>>();
-            Ok(recent
-                .into_iter()
-                .map(|row| {
-                    let route = Route::of_uri(&row.media_uri);
-                    let shown = downloaded.contains(&row.media_uri);
-                    let item = AndroidBrowseItem::Recent { row };
-                    AndroidBrowseRow {
-                        downloaded: shown,
-                        ..match route {
-                            Some(route) => AndroidBrowseRow::opening(item, route),
-                            None => AndroidBrowseRow::new(item),
-                        }
-                    }
+                    shown_row(row, &fields[category], index)
                 })
                 .collect())
         })

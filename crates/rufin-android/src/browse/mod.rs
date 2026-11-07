@@ -5,11 +5,11 @@ mod records;
 mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
-    AndroidBrowseItem, AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink,
-    AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
-    AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
-    AndroidPinPage, AndroidPlaylistImport, AndroidReading, AndroidRouteDescriptor,
-    AndroidRouteSetting, AndroidRows, AndroidScrollSection, AndroidSortField,
+    AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink, AndroidDetailSummary,
+    AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection, AndroidHomeSectionKind,
+    AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened, AndroidPinPage,
+    AndroidPlaylistImport, AndroidReading, AndroidRouteDescriptor, AndroidRouteSetting,
+    AndroidRows, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
@@ -110,25 +110,20 @@ fn row_caption(
     page_title: Option<String>,
 ) -> Option<Arc<library::QueueContextTitle>> {
     use rufin_core::settings::presentation::row_field;
-    match &row.item {
-        AndroidBrowseItem::Library {
-            row: Row::AlbumTrack { track, .. },
-        } => caption(
+    match &row.row {
+        Row::AlbumTrack { track, .. } => caption(
             Some(CollectionTarget::Album(String::new())),
             Some(track.album.clone()),
         ),
-        AndroidBrowseItem::Library { row: Row::Track(_) } => caption(
+        Row::Track(_) => caption(
             view.and_then(|view| CollectionTarget::for_route(view.view.route())),
             page_title,
         ),
-        item => caption(
+        library => caption(
             row.route.as_ref().and_then(CollectionTarget::for_route),
-            row.display_title.clone().or_else(|| match item {
-                AndroidBrowseItem::Library {
-                    row: Row::Folder(_),
-                } => None,
-                AndroidBrowseItem::Library { row } => Some(row_field(row, LibraryField::Title)),
-                AndroidBrowseItem::Recent { row } => Some(row.title.clone()),
+            row.display_title.clone().or_else(|| match library {
+                Row::Folder(_) => None,
+                library => Some(row_field(library, LibraryField::Title)),
             }),
         ),
     }
@@ -203,10 +198,8 @@ impl AndroidView {
                 Row::AlbumTrack { index, .. } => shown_row(row, &self.fields, index as usize),
                 // A child folder opens the folder core names, and shows no fields.
                 row @ Row::Folder(_) => match self.view.row_route(&row) {
-                    Some(route) => {
-                        AndroidBrowseRow::opening(AndroidBrowseItem::Library { row }, route)
-                    }
-                    None => AndroidBrowseRow::new(AndroidBrowseItem::Library { row }),
+                    Some(route) => AndroidBrowseRow::opening(row, route),
+                    None => AndroidBrowseRow::new(row),
                 },
                 row => shown_row(row, &self.fields, position),
             })
@@ -625,25 +618,17 @@ impl AndroidLibrary {
         let selected = source.selected_library();
         let request = run_read(&self.runtime, move |cancel| async move {
             let selected = selected.as_ref();
-            match (&row.item, &view) {
-                (AndroidBrowseItem::Library { row }, Some(view)) => {
+            match (&view, PlayTarget::of_row(&row.row)) {
+                (Some(view), _) => {
                     view.view
-                        .play(row, index, placement, shuffled, &cancel)
+                        .play(&row.row, index, placement, shuffled, &cancel)
                         .await
                 }
-                (AndroidBrowseItem::Recent { row }, _) => source
-                    .play_uri(&row.media_uri, selected, placement, shuffled, &cancel)
+                (None, Some(target)) => source
+                    .play_target(&target, selected, placement, shuffled, &cancel)
                     .await
                     .map(Some),
-                (AndroidBrowseItem::Library { row: library }, None) => {
-                    match PlayTarget::of_row(library) {
-                        Some(target) => source
-                            .play_target(&target, selected, placement, shuffled, &cancel)
-                            .await
-                            .map(Some),
-                        None => Ok(None),
-                    }
-                }
+                (None, None) => Ok(None),
             }
             .map_err(error)
         })

@@ -271,12 +271,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         if (!item.searchResult) return
         val bridge = library ?: return
         connection.runAction {
-            val kind = when (item.row.target) {
-                is FavoriteTarget.Track -> RecentSearchKind.TRACK
-                is FavoriteTarget.Album -> RecentSearchKind.ALBUM
-                is FavoriteTarget.Artist -> RecentSearchKind.ARTIST
-                null -> return@runAction
-            }
+            val kind = recentKind(item) ?: return@runAction
             if (withContext(Dispatchers.IO) { bridge.rememberSearchResult(io.github.screwys.rufin.shared.rufin_core.RecentSearchResult(
                 kind, item.row.mediaUri, item.row.title, item.row.subtitle, item.row.artworkIdentity)) }) {
                 recentSearchRows = loadRecentSearches(bridge)
@@ -284,10 +279,17 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
     }
 
+    private fun recentKind(item: BrowseItem) = when (item.row.target) {
+        is FavoriteTarget.Track -> RecentSearchKind.TRACK
+        is FavoriteTarget.Album -> RecentSearchKind.ALBUM
+        is FavoriteTarget.Artist -> RecentSearchKind.ARTIST
+        null -> null
+    }
+
     fun removeRecentSearch(item: BrowseItem) = connection.runAction {
         val bridge = library ?: return@runAction
-        val recent = item.row.recent ?: return@runAction
-        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(recent.kind, recent.mediaUri) }) {
+        val kind = recentKind(item) ?: return@runAction
+        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(kind, item.row.mediaUri) }) {
             recentSearchRows = loadRecentSearches(bridge)
         }
     }

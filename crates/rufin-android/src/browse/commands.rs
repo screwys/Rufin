@@ -15,35 +15,9 @@ fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    /// The row's menu, as core's Menu offers it under the saved menu settings. A remembered
-    /// search result has its library row's menu.
-    pub async fn menu(
-        &self,
-        row: AndroidBrowseRow,
-    ) -> Result<rufin_core::menu::Menu, AndroidError> {
-        let settings = self.settings.load();
-        let row = match row.item {
-            AndroidBrowseItem::Library { row } => row,
-            AndroidBrowseItem::Recent { row } => {
-                let catalog = self.catalog.clone();
-                let read = run_read(&self.runtime, move |cancel| async move {
-                    catalog.loaded().await;
-                    let Some(item) = catalog.item(&row.media_uri) else {
-                        return Ok(None);
-                    };
-                    Ok(catalog
-                        .rows_of(&[item], false, &cancel)
-                        .await
-                        .map_err(error)?
-                        .pop())
-                });
-                match read.await? {
-                    Some(row) => row,
-                    None => return Ok(rufin_core::menu::Menu::default()),
-                }
-            }
-        };
-        Ok(rufin_core::menu::menu(&self.source, &settings, &row))
+    /// The row's menu, as core's Menu offers it under the saved menu settings.
+    pub fn menu(&self, row: AndroidBrowseRow) -> rufin_core::menu::Menu {
+        rufin_core::menu::menu(&self.source, &self.settings.load(), &row.row)
     }
 
     pub async fn download_target(
@@ -387,47 +361,6 @@ impl AndroidLibrary {
             .into_iter()
             .map(route_descriptor)
             .collect()
-    }
-
-    pub async fn rating(
-        &self,
-        target: library::FavoriteTarget,
-    ) -> Result<Option<u8>, AndroidError> {
-        let catalog = self.catalog.clone();
-        self.runtime
-            .spawn(async move {
-                let cancellation = ReadCancellation::new();
-                let user_rating = catalog
-                    .user_state(target.media_uri(), &cancellation)
-                    .await
-                    .map_err(error)?
-                    .and_then(|(_, rating)| rating);
-                let value = if user_rating.is_some() {
-                    user_rating
-                } else {
-                    let rating = match &target {
-                        library::FavoriteTarget::Track(uri) => catalog
-                            .track(uri, &cancellation)
-                            .await
-                            .map_err(error)?
-                            .and_then(|row| row.state.rating),
-                        library::FavoriteTarget::Album(uri) => catalog
-                            .album(uri, false, &cancellation)
-                            .await
-                            .map_err(error)?
-                            .and_then(|row| row.row.state.rating),
-                        library::FavoriteTarget::Artist(uri) => catalog
-                            .artist(uri, false, false, &cancellation)
-                            .await
-                            .map_err(error)?
-                            .and_then(|row| row.row.state.rating),
-                    };
-                    rating.and_then(|value| u8::try_from(value).ok())
-                };
-                Ok(value)
-            })
-            .await
-            .map_err(error)?
     }
 
     pub async fn import_playlist(

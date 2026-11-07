@@ -154,7 +154,7 @@ private fun SearchResults(
                 if (browse.recentSearchRows.isNotEmpty()) TextButton(browse::clearRecentSearches) { Text(translate("Clear")) }
             }
         }
-        items(browse.recentSearchRows, key = { "${it.row.recent?.kind}:${it.row.mediaUri}" }) { item ->
+        items(browse.recentSearchRows, key = { it.row.mediaUri }) { item ->
             val pixels = with(LocalDensity.current) { 50.dp.roundToPx() }
             val artwork = rememberArtwork(item.row.artworkIdentity, player, pixels)
             BrowseSwipeActions(item, true) {

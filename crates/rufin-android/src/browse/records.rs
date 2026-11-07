@@ -1,6 +1,5 @@
 use super::*;
 use library::PlaylistListRow;
-use rufin_core::settings::app::RecentSearchResult;
 
 #[derive(uniffi::Record)]
 pub struct AndroidPlaylistImport {
@@ -234,19 +233,9 @@ pub struct AndroidPinPage {
     pub total: u64,
 }
 
-#[derive(Clone, uniffi::Enum)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "nearly every row is a library row"
-)]
-pub enum AndroidBrowseItem {
-    Library { row: library::Row },
-    Recent { row: RecentSearchResult },
-}
-
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidBrowseRow {
-    pub item: AndroidBrowseItem,
+    pub row: library::Row,
     pub fields: Vec<AndroidFieldValue>,
     pub display_title: Option<String>,
     pub lyrics_snippet: Option<library::LyricsSnippet>,
@@ -265,20 +254,16 @@ pub struct AndroidBrowseRow {
 }
 
 impl AndroidBrowseRow {
-    pub(crate) fn new(item: AndroidBrowseItem) -> Self {
+    pub(crate) fn new(row: Row) -> Self {
         use rufin_core::settings::presentation::{format_duration, format_duration_units};
-        let (track_count, duration_millis, duration_text, artwork_identity) = match &item {
-            AndroidBrowseItem::Library {
-                row: Row::Track(track) | Row::AlbumTrack { track, .. },
-            } => {
+        let (track_count, duration_millis, duration_text, artwork_identity) = match &row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => {
                 let millis = track.duration_millis.max(0) as u64;
                 let text = format_duration((millis / 1_000) as u32);
                 (1, millis, text, track.artwork_binding.clone())
             }
-            AndroidBrowseItem::Library {
-                row: Row::Folder(folder),
-            } => (0, 0, String::new(), folder.artwork_binding.clone()),
-            AndroidBrowseItem::Library { row } => row.collection().map_or_else(
+            Row::Folder(folder) => (0, 0, String::new(), folder.artwork_binding.clone()),
+            row => row.collection().map_or_else(
                 || (0, 0, String::new(), None),
                 |shown| {
                     let millis = shown.duration_millis.max(0) as u64;
@@ -290,14 +275,13 @@ impl AndroidBrowseRow {
                     )
                 },
             ),
-            AndroidBrowseItem::Recent { row } => (0, 0, String::new(), row.artwork_binding.clone()),
         };
         Self {
             track_count,
             duration_millis,
             duration_text,
             artwork_identity,
-            item,
+            row,
             fields: Vec::new(),
             display_title: None,
             lyrics_snippet: None,
@@ -309,12 +293,12 @@ impl AndroidBrowseRow {
     }
 
     /// A row that opens `route`.
-    pub(crate) fn opening(item: AndroidBrowseItem, route: Route) -> Self {
+    pub(crate) fn opening(row: Row, route: Route) -> Self {
         Self {
             context_id: rufin_core::collection_context::CollectionTarget::for_route(&route)
                 .map(|target| target.context_id()),
             route: Some(route),
-            ..Self::new(item)
+            ..Self::new(row)
         }
     }
 }
@@ -333,14 +317,13 @@ impl From<Row> for AndroidBrowseRow {
         };
         let route = Route::of_row(&row);
         let downloaded = row.downloaded();
-        let item = AndroidBrowseItem::Library { row };
         Self {
             pin,
             display_title,
             downloaded,
             ..match route {
-                Some(route) => Self::opening(item, route),
-                None => Self::new(item),
+                Some(route) => Self::opening(row, route),
+                None => Self::new(row),
             }
         }
     }
@@ -380,8 +363,8 @@ type DownloadRead = std::pin::Pin<
 #[derive(uniffi::Object)]
 pub struct AndroidDownloads {
     read: std::sync::Mutex<Option<DownloadRead>>,
-    /// The rows passed, by the index core reads them at.
-    rows: Vec<(usize, AndroidBrowseRow)>,
+    /// The rows passed.
+    rows: Vec<AndroidBrowseRow>,
 }
 
 #[uniffi::export]
@@ -401,18 +384,15 @@ impl AndroidDownloads {
         read.await
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|(at, read)| {
+            .map(|(at, read)| {
                 use library::ShowsState;
-                let (index, row) = &self.rows[at];
-                let AndroidBrowseItem::Library { row: library } = &row.item else {
-                    return None;
-                };
-                let mut library = library.clone();
+                let row = &self.rows[at];
+                let mut library = row.row.clone();
                 library.show_downloads(read);
-                Some(AndroidShownRow {
-                    index: *index as u64,
+                AndroidShownRow {
+                    index: at as u64,
                     row: row.showing(library),
-                })
+                }
             })
             .collect()
     }
@@ -428,7 +408,7 @@ impl AndroidBrowseRow {
             }
         }
         row.downloaded = library.downloaded();
-        row.item = AndroidBrowseItem::Library { row: library };
+        row.row = library;
         row
     }
 }
@@ -445,18 +425,7 @@ impl AndroidLibrary {
         changed: rufin_core::source::feed::Changed,
         view: Option<Arc<super::AndroidView>>,
     ) -> AndroidShowing {
-        let library = rows
-            .into_iter()
-            .enumerate()
-            .filter(|(_, row)| matches!(row.item, AndroidBrowseItem::Library { .. }))
-            .collect::<Vec<_>>();
-        let shown = library
-            .iter()
-            .filter_map(|(_, row)| match &row.item {
-                AndroidBrowseItem::Library { row } => Some(row),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let shown = rows.iter().map(|row| &row.row).collect::<Vec<_>>();
         let changes = view
             .as_ref()
             .map_or_else(|| self.changes.clone(), |view| view.changes.clone());
@@ -470,18 +439,15 @@ impl AndroidLibrary {
             states: showing
                 .states
                 .into_iter()
-                .map(|(at, row)| {
-                    let (index, shown) = &library[at];
-                    AndroidShownRow {
-                        index: *index as u64,
-                        row: shown.showing(row),
-                    }
+                .map(|(at, row)| AndroidShownRow {
+                    index: at as u64,
+                    row: rows[at].showing(row),
                 })
                 .collect(),
             downloads: showing.downloads.map(|read| {
                 Arc::new(AndroidDownloads {
                     read: std::sync::Mutex::new(Some(Box::pin(read))),
-                    rows: library,
+                    rows,
                 })
             }),
         }
@@ -495,14 +461,9 @@ impl AndroidLibrary {
         read: AndroidBrowseRow,
     ) -> Option<AndroidBrowseRow> {
         use library::ShowsState;
-        let (AndroidBrowseItem::Library { row: shown }, AndroidBrowseItem::Library { row: read }) =
-            (&row.item, read.item)
-        else {
-            return None;
-        };
-        let mut shown = shown.clone();
+        let mut shown = row.row.clone();
         shown
-            .show_downloads(read.downloads()?)
+            .show_downloads(read.row.downloads()?)
             .then(|| row.showing(shown))
     }
 }

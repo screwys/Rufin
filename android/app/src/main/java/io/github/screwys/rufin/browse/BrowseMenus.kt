@@ -12,9 +12,7 @@ import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
 import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
-import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.shared.library.RadioSeed
-import io.github.screwys.rufin.shared.rufin_core.Menu
 import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
@@ -208,23 +206,11 @@ internal fun BrowseMenuSheet(
     val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
     // What the menu offers, as GTK's menus do, under the saved menu settings.
-    var menu by remember(item.row, browse.library) { mutableStateOf<Menu?>(null) }
-    LaunchedEffect(item.row, browse.library) {
-        try { menu = browse.library?.menu(item.row) }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { model.runAction { throw error } }
-    }
+    val menu = remember(item.row, browse.library) { browse.library?.menu(item.row) }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
-    var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
+    var rating by remember(item.row.row) { mutableStateOf(item.row.rating) }
     val halfStars = model.sources?.let { sourceHalfStarsEnabled(it, item.row.mediaUri, item.row.sourceId) } == true
-    LaunchedEffect(item.row.item, browse.library) {
-        if (item.row.item is AndroidBrowseItem.Recent) {
-            try { rating = item.row.target?.let { browse.library?.rating(it) } }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.runAction { throw error } }
-        }
-    }
     if (details) {
         MediaDetailsDialog(model, browse, item, player) { details = false }
         return

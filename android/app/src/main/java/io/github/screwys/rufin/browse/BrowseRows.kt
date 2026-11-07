@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.core.AndroidBrowseRow
 import io.github.screwys.rufin.shared.library.AlbumRow
 import io.github.screwys.rufin.shared.library.ArtistRow
@@ -11,7 +10,6 @@ import io.github.screwys.rufin.shared.library.Row
 import io.github.screwys.rufin.shared.library.SmartPlaylistRow
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
-import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.library.TagKind
 import io.github.screwys.rufin.shared.library.TagRow
 import io.github.screwys.rufin.shared.library.TrackRow
@@ -23,50 +21,41 @@ internal val Route.showsReleases: Boolean
     get() = this is Route.ArtistDetail || this is Route.AlbumArtistDetail ||
         this is Route.ArtistDiscography || this is Route.AlbumArtistDiscography
 
-internal val AndroidBrowseRow.libraryRow: Row? get() = (item as? AndroidBrowseItem.Library)?.row
-internal val AndroidBrowseRow.recent get() = (item as? AndroidBrowseItem.Recent)?.row
-private val AndroidBrowseRow.folder get() = (libraryRow as? Row.Folder)?.v1
+private val AndroidBrowseRow.folder get() = (row as? Row.Folder)?.v1
 internal val AndroidBrowseRow.track: TrackRow?
-    get() = when (val row = libraryRow) {
+    get() = when (val row = row) {
         is Row.Track -> row.v1
         is Row.AlbumTrack -> row.track
         else -> null
     }
 internal val AndroidBrowseRow.albumRow: AlbumRow?
-    get() = when (val row = libraryRow) {
+    get() = when (val row = row) {
         is Row.Album -> row.v1
         is Row.AlbumHeading -> row.v1
         else -> null
     }
-internal val AndroidBrowseRow.artistRow: ArtistRow? get() = (libraryRow as? Row.Artist)?.v1
-internal val AndroidBrowseRow.tag: TagRow? get() = (libraryRow as? Row.Tag)?.v1
+internal val AndroidBrowseRow.artistRow: ArtistRow? get() = (row as? Row.Artist)?.v1
+internal val AndroidBrowseRow.tag: TagRow? get() = (row as? Row.Tag)?.v1
 internal val AndroidBrowseRow.genre: TagRow? get() = tag?.takeIf { it.kind == TagKind.GENRE }
-private val AndroidBrowseRow.playlistListRow: PlaylistListRow? get() = (libraryRow as? Row.Playlist)?.v1
+private val AndroidBrowseRow.playlistListRow: PlaylistListRow? get() = (row as? Row.Playlist)?.v1
 internal val AndroidBrowseRow.playlist: PlaylistRow? get() = (playlistListRow as? PlaylistListRow.Playlist)?.v1
 internal val AndroidBrowseRow.smartPlaylist: SmartPlaylistRow? get() = (playlistListRow as? PlaylistListRow.SmartPlaylist)?.v1
 internal val AndroidBrowseRow.playlistFolder: PlaylistFolderRow? get() = (playlistListRow as? PlaylistListRow.Folder)?.v1
-internal val AndroidBrowseRow.isAlbumTrack: Boolean get() = libraryRow is Row.AlbumTrack
+internal val AndroidBrowseRow.isAlbumTrack: Boolean get() = row is Row.AlbumTrack
 
 /** The track, album or artist the row shows, which it favorites, rates and edits. */
 internal val AndroidBrowseRow.target: FavoriteTarget?
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Library -> when (val row = item.row) {
-            is Row.Track -> FavoriteTarget.Track(row.v1.mediaUri)
-            is Row.AlbumTrack -> FavoriteTarget.Track(row.track.mediaUri)
-            is Row.Album -> FavoriteTarget.Album(row.v1.mediaUri)
-            is Row.AlbumHeading -> FavoriteTarget.Album(row.v1.mediaUri)
-            is Row.Artist -> FavoriteTarget.Artist(row.v1.mediaUri)
-            else -> null
-        }
-        is AndroidBrowseItem.Recent -> when (item.row.kind) {
-            RecentSearchKind.TRACK -> FavoriteTarget.Track(item.row.mediaUri)
-            RecentSearchKind.ALBUM -> FavoriteTarget.Album(item.row.mediaUri)
-            RecentSearchKind.ARTIST -> FavoriteTarget.Artist(item.row.mediaUri)
-        }
+    get() = when (val row = row) {
+        is Row.Track -> FavoriteTarget.Track(row.v1.mediaUri)
+        is Row.AlbumTrack -> FavoriteTarget.Track(row.track.mediaUri)
+        is Row.Album -> FavoriteTarget.Album(row.v1.mediaUri)
+        is Row.AlbumHeading -> FavoriteTarget.Album(row.v1.mediaUri)
+        is Row.Artist -> FavoriteTarget.Artist(row.v1.mediaUri)
+        else -> null
     }
 
 internal val AndroidBrowseRow.isTrack: Boolean get() = target is FavoriteTarget.Track
-internal val AndroidBrowseRow.isFolder: Boolean get() = libraryRow is Row.Folder
+internal val AndroidBrowseRow.isFolder: Boolean get() = row is Row.Folder
 
 /** The editor of the row's track, album or artist. */
 internal val AndroidBrowseRow.metadataItem: MetadataItemId?
@@ -80,14 +69,14 @@ internal val AndroidBrowseRow.metadataItem: MetadataItemId?
 internal val AndroidBrowseRow.key: String
     get() = track?.let { it.entry?.key?.toString() ?: it.mediaUri } ?: albumRow?.objectId ?: artistRow?.objectId
         ?: genre?.objectId ?: tag?.key?.toString() ?: playlist?.objectId ?: smartPlaylist?.objectId
-        ?: playlistFolder?.let { "playlist-folder:${it.objectId}" } ?: recent?.mediaUri ?: folder?.objectId.orEmpty()
+        ?: playlistFolder?.let { "playlist-folder:${it.objectId}" } ?: folder?.objectId.orEmpty()
 
 internal val AndroidBrowseRow.mediaUri: String
-    get() = track?.mediaUri ?: albumRow?.mediaUri ?: artistRow?.mediaUri ?: recent?.mediaUri ?: ""
+    get() = track?.mediaUri ?: albumRow?.mediaUri ?: artistRow?.mediaUri ?: ""
 
 internal val AndroidBrowseRow.title: String
     get() = displayTitle ?: track?.title ?: albumRow?.title ?: artistRow?.name ?: tag?.name ?: playlist?.name
-        ?: smartPlaylist?.name ?: playlistFolder?.name ?: recent?.title ?: folder?.name.orEmpty()
+        ?: smartPlaylist?.name ?: playlistFolder?.name ?: folder?.name.orEmpty()
 
 internal val AndroidBrowseRow.artist: String
     get() = track?.artist ?: albumRow?.artist ?: artistRow?.name ?: ""
@@ -98,8 +87,7 @@ internal val AndroidBrowseRow.album: String
 internal val AndroidBrowseRow.subtitle: String
     get() = track?.let { "${it.artist} · ${it.album}" }
         ?: albumRow?.artist
-        ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · $durationText" }
-        ?: recent?.subtitle ?: ""
+        ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · $durationText" } ?: ""
 
 /** The key of the track, album or artist whose favorite and rating the row shows. */
 internal val AndroidBrowseRow.stateKey: Long?
@@ -113,7 +101,7 @@ internal val AndroidBrowseRow.year: Long?
 
 internal val AndroidBrowseRow.sourceId: String?
     get() = track?.sourceId ?: genre?.sourceId ?: playlist?.sourceId
-        ?: (albumRow?.mediaUri ?: artistRow?.mediaUri ?: recent?.mediaUri)?.let(::sourceIdForUri)
+        ?: (albumRow?.mediaUri ?: artistRow?.mediaUri)?.let(::sourceIdForUri)
 
 internal val AndroidBrowseRow.rating: UByte?
     get() = (track?.state ?: albumRow?.state ?: artistRow?.state)?.rating?.takeIf { it in 0..255 }?.toUByte()

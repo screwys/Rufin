@@ -164,7 +164,7 @@ internal fun BrowseContent(
                 items(items.itemCount, key = items.itemKey(::browseItemKey)) { index ->
                     val item = items[index]
                     if (item == null) Spacer(Modifier.fillMaxWidth().height(60.dp))
-                    else if (item.row.libraryRow is LibraryRow.AlbumHeading) HomeShowcase(item, player, onActivate, onMenu, onFavorite,
+                    else if (item.row.row is LibraryRow.AlbumHeading) HomeShowcase(item, player, onActivate, onMenu, onFavorite,
                         { shuffled -> onPlayItem(item, shuffled) }, onRadio)
                     else if (item.row.fields.isNotEmpty()) {
                         // A list without a header (search) shows each row's own fields.
