@@ -1,6 +1,6 @@
 //! Download queue ownership, command handling, and bounded transfer execution.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -123,12 +123,6 @@ struct RuleIntent {
     source_key: SourceKey,
     folder: Option<FolderKey>,
     rules: DownloadRules,
-}
-
-impl RuleIntent {
-    fn same_context(&self, other: &Self) -> bool {
-        self.source_key == other.source_key && self.folder == other.folder
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -891,8 +885,9 @@ struct Actor {
     source: Weak<crate::source::SourceOwner>,
     attached: HashMap<SourceId, AttachedSource>,
     settings: SettingsFile,
-    running_rules: Option<RuleIntent>,
-    pending_rules: Option<RuleIntent>,
+    /// The source whose rules prepare now, and each source's newest intent after it.
+    running_rules: Option<(SourceId, RuleIntent)>,
+    pending_rules: BTreeMap<SourceId, RuleIntent>,
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
     paused: bool,
     next_job: u64,
@@ -974,7 +969,7 @@ impl Downloads {
                 attached: HashMap::new(),
                 settings,
                 running_rules: None,
-                pending_rules: None,
+                pending_rules: BTreeMap::new(),
                 jobs: HashMap::new(),
                 paused: false,
                 next_job: 0,
@@ -1299,7 +1294,7 @@ impl Actor {
                 self.move_job(&source_id, &job_id, movement).await;
             }
             Command::Clear { source_id, notify } => {
-                self.schedule_rules(&source_id, DownloadRules::default(), true);
+                self.schedule_rules(&source_id, DownloadRules::default());
                 self.abort_matching(active, false, |download| {
                     download.source_id.as_ref() == Some(&source_id)
                 })
@@ -1415,39 +1410,22 @@ impl Actor {
 
     fn reconcile_all_rules(&mut self, source_id: &SourceId) {
         let rules = self.settings_for(source_id).rules;
-        self.schedule_rules(source_id, rules, true);
+        self.schedule_rules(source_id, rules);
     }
 
-    fn schedule_rules(&mut self, source_id: &SourceId, rules: DownloadRules, authoritative: bool) {
-        let Some(attached) = self.attached.get(source_id).cloned() else {
+    /// Prepares `rules` for `source_id` after what prepares now, in place of an older intent
+    /// of the same source.
+    fn schedule_rules(&mut self, source_id: &SourceId, rules: DownloadRules) {
+        let Some(attached) = self.attached.get(source_id) else {
             return;
         };
-        let mut intent = RuleIntent {
+        let intent = RuleIntent {
             catalog: self.catalog.clone(),
             source_key: attached.source_key,
             folder: attached.folder,
             rules,
         };
-        if let Some(pending) = self.pending_rules.as_mut() {
-            if authoritative || !pending.same_context(&intent) {
-                *pending = intent;
-            } else {
-                for rule in intent.rules.active() {
-                    pending.rules.set(rule, true);
-                }
-            }
-        } else {
-            if !authoritative
-                && let Some(running) = self.running_rules.as_ref()
-                && running.source_key == attached.source_key
-                && running.same_context(&intent)
-            {
-                for rule in running.rules.active() {
-                    intent.rules.set(rule, true);
-                }
-            }
-            self.pending_rules = Some(intent);
-        }
+        self.pending_rules.insert(source_id.clone(), intent);
         self.start_rule_preparation();
     }
 
@@ -1455,15 +1433,13 @@ impl Actor {
         if self.running_rules.is_some() {
             return;
         }
-        let Some(intent) = self
-            .pending_rules
-            .take()
-            .filter(|intent| !intent.rules.is_empty())
-        else {
-            return;
-        };
-        self.running_rules = Some(intent.clone());
-        prepare_rules(intent, self.prepared_rules.clone());
+        while let Some((source_id, intent)) = self.pending_rules.pop_first() {
+            if !intent.rules.is_empty() {
+                self.running_rules = Some((source_id, intent.clone()));
+                prepare_rules(intent, self.prepared_rules.clone());
+                return;
+            }
+        }
     }
 
     async fn apply_prepared_rules(
@@ -1471,24 +1447,29 @@ impl Actor {
         prepared: PreparedRules,
         active: &mut Vec<ActiveDownload>,
     ) {
-        let Some(intent) = self.running_rules.take() else {
+        let Some((source_id, intent)) = self.running_rules.take() else {
             return;
         };
-        let Some(source_id) = self.attached.iter().find_map(|(id, attached)| {
-            (attached.source_key == intent.source_key).then(|| id.clone())
-        }) else {
-            self.start_rule_preparation();
-            return;
-        };
-        let superseded = self.pending_rules.is_some();
-        let same_context = self.attached[&source_id].folder == intent.folder;
-        if !superseded && same_context {
+        // A newer intent of the source, or a folder or rule changed since, prepares again.
+        let current = self.attached.get(&source_id).is_some_and(|attached| {
+            attached.source_key == intent.source_key && attached.folder == intent.folder
+        });
+        if current && !self.pending_rules.contains_key(&source_id) {
             match prepared {
                 Ok(prepared) => {
-                    let quality = self.settings_for(&source_id).quality;
+                    let settings = self.settings_for(&source_id);
                     for (rule, media_uris) in prepared {
-                        self.reconcile_rule(source_id.clone(), rule, quality, media_uris, active)
+                        if settings.rules.contains(rule) {
+                            let quality = settings.quality;
+                            (self.reconcile_rule(
+                                source_id.clone(),
+                                rule,
+                                quality,
+                                media_uris,
+                                active,
+                            ))
                             .await;
+                        }
                     }
                 }
                 Err(error) => {
@@ -3744,7 +3725,7 @@ mod tests {
             )]),
             settings: SettingsFile::memory(),
             running_rules: None,
-            pending_rules: None,
+            pending_rules: BTreeMap::new(),
             jobs: HashMap::new(),
             paused: false,
             next_job: 0,
@@ -3958,14 +3939,17 @@ mod tests {
         let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let mut first = DownloadRules::default();
         first.set(DownloadRule::Favorites, true);
-        actor.schedule_rules(&source_id, first, true);
+        actor.schedule_rules(&source_id, first);
         assert!(actor.running_rules.is_some());
         let mut replacement = DownloadRules::default();
         replacement.set(DownloadRule::LatestFiveAlbums, true);
-        actor.schedule_rules(&source_id, replacement, true);
+        actor.schedule_rules(&source_id, replacement);
 
         assert_eq!(
-            actor.pending_rules.as_ref().map(|intent| intent.rules),
+            actor
+                .pending_rules
+                .get(&source_id)
+                .map(|intent| intent.rules),
             Some(replacement)
         );
     }
