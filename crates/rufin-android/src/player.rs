@@ -153,6 +153,11 @@ impl AndroidPlayer {
             waveform: tokio::sync::Mutex::new(waveform),
         }
     }
+
+    fn artwork_request(&self, binding: &[u8], size: u32) -> artwork::ArtworkRequest {
+        artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(binding), size)
+            .with_external(self.products.settings.load().artwork_policy())
+    }
 }
 
 #[uniffi::export]
@@ -501,10 +506,12 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
+    /// The image `binding` shows now, under the artwork policy and invalidations.
     pub fn artwork_identity(&self, binding: Vec<u8>) -> String {
-        artwork::ArtworkBinding::opaque(&binding)
-            .stable_identity()
-            .to_owned()
+        self.products
+            .artwork
+            .key(&self.artwork_request(&binding, 0))
+            .image()
     }
 
     pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<AndroidArtwork> {
@@ -526,10 +533,7 @@ impl AndroidPlayer {
         identity: Vec<u8>,
         size: u32,
     ) -> Result<Option<AndroidArtwork>, AndroidError> {
-        let stored = self.products.settings.load();
-        let request =
-            artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size)
-                .with_external(stored.artwork_policy());
+        let request = self.artwork_request(&identity, size);
         let artwork = self.products.artwork.clone();
         self.products
             .runtime

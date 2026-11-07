@@ -142,6 +142,11 @@ impl ArtworkKey {
             && (self.fetch_size == ImageSize::Original) == (other.fetch_size == ImageSize::Original)
     }
 
+    /// The image this key names at every display size: its revision and source policy.
+    pub fn image(&self) -> String {
+        format!("{}\0{}", self.binding, self.variant)
+    }
+
     /// Whether an existing image can stay visible while this request refreshes it.
     pub fn same_asset(&self, other: &Self) -> bool {
         self.asset == other.asset && self.variant == other.variant
