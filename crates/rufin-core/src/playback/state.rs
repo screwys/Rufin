@@ -1751,7 +1751,7 @@ impl Player {
         self.cancel_queue_read();
         self.queue_loading = false;
         self.deferred_queue.clear();
-        let removing_current = include_current || self.current_run.is_none();
+        let removing_current = include_current || self.sequence.selected_index().is_none();
         self.edit_queue(|sequence| sequence.clear(removing_current));
         self.changed_queue(removing_current && previous.is_some(), true, sample);
     }
