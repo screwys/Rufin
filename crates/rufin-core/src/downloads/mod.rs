@@ -27,6 +27,7 @@ pub use quality::{
 };
 mod storage;
 mod track_download;
+use storage::DownloadAudio;
 pub use storage::DownloadDirectory;
 
 use track_download::*;
@@ -540,7 +541,8 @@ struct ActiveDownload {
     paths: DownloadPaths,
     quality: DownloadQuality,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
-    task: tokio::task::JoinHandle<Result<(), DownloadFailure>>,
+    /// The transfer, which returns where the audio goes.
+    task: tokio::task::JoinHandle<Result<DownloadAudio, DownloadFailure>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -1137,7 +1139,7 @@ async fn wait_for_finished(
     active: &mut [ActiveDownload],
 ) -> (
     usize,
-    Result<Result<(), DownloadFailure>, tokio::task::JoinError>,
+    Result<Result<DownloadAudio, DownloadFailure>, tokio::task::JoinError>,
 ) {
     std::future::poll_fn(|context| {
         for (index, download) in active.iter_mut().enumerate() {
@@ -1924,9 +1926,7 @@ impl Actor {
                 self.publish(source_id.as_ref()).await;
                 continue;
             }
-            let custom_directory = attached
-                .as_ref()
-                .and_then(|attached| attached.directory.as_ref());
+            let custom_directory = attached.and_then(|attached| attached.directory);
             let owner = DownloadOwner::Subject(subject.clone());
             match self
                 .add_download_owner(source_id.as_ref(), &media_uri, &owner)
@@ -1947,58 +1947,67 @@ impl Actor {
                     continue;
                 }
             }
-            let playable = playable(&self.catalog, &media_uri).await;
-            let resolved = if let Some(source) = source.as_ref() {
-                match &playable {
-                    Ok(playable) => source.resolve_download(playable, quality).await,
-                    Err(_) => Err(SourceError::NotFound),
-                }
-            } else {
-                Some(media_uri.as_str())
-                    .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
-                    .map(|uri| ResolvedDownload::Ready {
-                        stream: ResolvedStream::new(uri),
-                        codec: None,
-                    })
-                    .ok_or(SourceError::InvalidRequest(
-                        "Direct media is not downloadable",
-                    ))
-            };
-            let transcoded_extension = match &resolved {
-                Ok(ResolvedDownload::Ready { codec, .. }) => codec.map(|codec| codec.extension()),
-                Ok(ResolvedDownload::Encode { encoding, .. }) => Some(encoding.codec.extension()),
-                Err(_) => None,
-            };
-            let paths = new_download_paths(
-                &self.root,
-                source_id.as_ref(),
-                &media_uri,
-                playable.as_ref().ok(),
-                custom_directory,
-                transcoded_extension,
-            );
-            if let Some(folder) = paths.audio.folder_in_place().await {
-                let error = format!("A folder is in the download's place: {}", folder.display());
-                warn!(%error, source_id=?source_id, %media_uri, "could not download track");
-                self.mark_subject_incomplete(&subject).await;
-                self.remove_job_track(&source_id, &job_id, &media_uri, false);
-                self.persist_and_publish(source_id.as_ref()).await;
-                continue;
-            }
             if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                 job.state = DownloadQueueState::Downloading;
             }
             self.publish(source_id.as_ref()).await;
-            let task_paths = paths.clone();
+            let paths = staging_paths(
+                &self.root,
+                source_id.as_ref(),
+                &media_uri,
+                custom_directory.as_ref(),
+            );
+            let root = self.root.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
             let uri = media_uri.clone();
             let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
             let task_source_id = source_id.clone();
+            // The transfer resolves its stream, so commands never wait for a server.
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;
-                match resolved.map_err(download_source_failure)? {
+                let playable = playable(&catalog, &uri).await;
+                let resolve = async {
+                    match (&source, &playable) {
+                        (Some(source), Ok(playable)) => {
+                            source.resolve_download(playable, quality).await
+                        }
+                        (Some(_), Err(_)) => Err(SourceError::NotFound),
+                        (None, _) => Some(uri.as_str())
+                            .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
+                            .map(|uri| ResolvedDownload::Ready {
+                                stream: ResolvedStream::new(uri),
+                                codec: None,
+                            })
+                            .ok_or(SourceError::InvalidRequest(
+                                "Direct media is not downloadable",
+                            )),
+                    }
+                };
+                let resolved = tokio::select! {
+                    resolved = resolve => resolved.map_err(download_source_failure)?,
+                    _ = &mut cancelled => return Err(download_source_failure(SourceError::Cancelled)),
+                };
+                let transcoded_extension = match &resolved {
+                    ResolvedDownload::Ready { codec, .. } => codec.map(|codec| codec.extension()),
+                    ResolvedDownload::Encode { encoding, .. } => Some(encoding.codec.extension()),
+                };
+                let task_paths = new_download_paths(
+                    &root,
+                    task_source_id.as_ref(),
+                    &uri,
+                    playable.as_ref().ok(),
+                    custom_directory.as_ref(),
+                    transcoded_extension,
+                );
+                if let Some(folder) = task_paths.audio.folder_in_place().await {
+                    return Err(DownloadFailure::Item(format!(
+                        "A folder is in the download's place: {}",
+                        folder.display()
+                    )));
+                }
+                match resolved {
                     ResolvedDownload::Encode { stream, encoding } => {
                         encode_download(stream, encoding, &task_paths, &mut cancelled)
                             .await
@@ -2075,7 +2084,7 @@ impl Actor {
                     _ = &mut cancelled => {},
                     _ = cache_track_assets(&catalog, &artwork, source.as_deref(), &uri) => {},
                 }
-                Ok(())
+                Ok(task_paths.audio)
             });
             return Some(ActiveDownload {
                 source_id,
@@ -2135,7 +2144,7 @@ impl Actor {
     async fn finish(
         &mut self,
         active: ActiveDownload,
-        joined: Result<Result<(), DownloadFailure>, tokio::task::JoinError>,
+        joined: Result<Result<DownloadAudio, DownloadFailure>, tokio::task::JoinError>,
         remaining_active: &mut Vec<ActiveDownload>,
     ) {
         if self
@@ -2149,15 +2158,17 @@ impl Actor {
             job_id,
             media_uri,
             subject,
-            paths,
+            mut paths,
             quality,
             ..
         } = active;
         let result = match joined {
-            Ok(Ok(())) => self
-                .commit_transfer(&source_id, &media_uri, &subject, &paths, quality)
-                .await
-                .map(|_| ()),
+            Ok(Ok(audio)) => {
+                paths.audio = audio;
+                self.commit_transfer(&source_id, &media_uri, &subject, &paths, quality)
+                    .await
+                    .map(|_| ())
+            }
             Ok(Err(error)) => Err(error),
             Err(error) => Err(DownloadFailure::NeedsAttention(format!(
                 "download task failed: {error}"
@@ -2351,10 +2362,11 @@ impl Actor {
 
         let mut affected = HashSet::new();
         let mut completed_tracks = Vec::new();
-        for download in settling {
-            let joined = download.task.await;
-            let completed = matches!(joined, Ok(Ok(())));
-            if completed && commit_completed {
+        for mut download in settling {
+            if let Ok(Ok(audio)) = (&mut download.task).await
+                && commit_completed
+            {
+                download.paths.audio = audio;
                 match self
                     .commit_transfer(
                         &download.source_id,
