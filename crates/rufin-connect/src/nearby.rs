@@ -40,8 +40,11 @@ impl fmt::Debug for Nearby {
 }
 
 impl Nearby {
-    pub(crate) fn new(id: EndpointId, routes: Routes) -> Result<(Self, mpsc::Receiver<Discovery>)> {
-        let (found, receiver) = mpsc::channel(64);
+    pub(crate) fn new(
+        id: EndpointId,
+        routes: Routes,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<Discovery>)> {
+        let (found, receiver) = mpsc::unbounded_channel();
         let (changes, _) = broadcast::channel(64);
         let discovered = changes.clone();
         let interfaces = multicast_interfaces();
@@ -91,10 +94,7 @@ impl Nearby {
                 let _ = discovered.send(info.clone());
                 Discovery::Found(info)
             };
-            let found = found.clone();
-            tokio::spawn(async move {
-                let _ = found.send(event).await;
-            });
+            let _ = found.send(event);
         })
         .spawn(&tokio::runtime::Handle::current())?;
         Ok((

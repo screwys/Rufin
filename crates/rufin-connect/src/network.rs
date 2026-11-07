@@ -452,7 +452,7 @@ impl ConnectNetwork {
         Ok((network, receiver))
     }
 
-    fn run_nearby(self: &Arc<Self>, mut discoveries: mpsc::Receiver<Discovery>) {
+    fn run_nearby(self: &Arc<Self>, mut discoveries: mpsc::UnboundedReceiver<Discovery>) {
         let weak = Arc::downgrade(self);
         let stop = self.stop.clone();
         tokio::spawn(async move {
