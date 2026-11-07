@@ -33,8 +33,8 @@ pub struct FileBatch {
     /// An accepted CUE's path and its input paths, in sheet order.
     pub inputs: Vec<(String, Vec<String>)>,
     pub removed: Vec<LocalFileWrite>,
-    /// Media paths whose whole-file tracks hide: an accepted CUE took them over, or the
-    /// imported file is gone.
+    /// Paths whose tracks hide: media whose whole-file tracks an accepted CUE took over, or
+    /// an imported file or CUE sheet that is gone.
     pub hidden: Vec<String>,
     pub tracks: Vec<TrackObservation>,
     /// A vanished media path and the new path the same file was listed at.
@@ -215,7 +215,7 @@ impl super::Observation<'_> {
                 SELECT details.track_key FROM owners CROSS JOIN track_details details ON details.cue_path=owners.path
                 UNION SELECT details.track_key FROM owners CROSS JOIN track_details details ON details.source_path=owners.path WHERE details.cue_path IS NULL
                 UNION SELECT details.track_key FROM removed CROSS JOIN track_details details ON details.source_path=removed.path
-                UNION SELECT details.track_key FROM hidden CROSS JOIN track_details details ON details.source_path=hidden.path WHERE details.cue_path IS NULL)
+                UNION SELECT details.track_key FROM hidden CROSS JOIN track_details details ON details.cue_path=hidden.path OR details.source_path=hidden.path AND details.cue_path IS NULL)
                 SELECT track.track_key FROM candidates CROSS JOIN tracks track USING(track_key) WHERE track.source_key=?1 AND track.indexed=1 AND track.object_id NOT IN(SELECT value FROM json_each(?5)) ORDER BY track.track_key")
                 .bind(source).bind(serde_json::to_string(&owners)?).bind(serde_json::to_string(&removed)?).bind(serde_json::to_string(&batch.hidden)?).bind(serde_json::to_string(&incoming)?)
                 .fetch_all(write.connection().await?).await?;
