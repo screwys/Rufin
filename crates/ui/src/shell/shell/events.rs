@@ -40,6 +40,10 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
         }
     });
 
+    // The selection at hand is installed here; each later one comes with the change it makes.
+    if let Some(selected) = shell.products.source.selected_library() {
+        install_selected(shell, selected);
+    }
     let event_shell = Rc::clone(shell);
     glib::spawn_future_local(async move {
         while let Some(changed) = changes.next().await {
@@ -162,9 +166,8 @@ fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
-    match shell.products.source.selected_library() {
-        Some(selected) => install_selected(shell, selected),
-        None => shell.refresh_playlist_picker(),
+    if shell.products.source.selected_library().is_none() {
+        shell.refresh_playlist_picker();
     }
     shell.player_ui.update_bottom_player();
 }
@@ -209,8 +212,7 @@ fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLi
 }
 
 fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
-    // The reads below run in the selection as it is now, which the configuration event may
-    // not have installed yet.
+    // The reads below run in the selection as it is now.
     if changed.all || changed.scope || !changed.sources.is_empty() {
         match shell.products.source.selected_library() {
             Some(selected) => install_selected(shell, selected),
