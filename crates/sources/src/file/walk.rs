@@ -182,7 +182,9 @@ pub(crate) async fn walk<F: FileSource>(
 #[derive(Clone, Eq, Hash, PartialEq)]
 enum Identity {
     /// Device, inode and the inode's birth time: a freed inode a new file reuses is born again.
-    Inode(i64, i64, i64),
+    Born(i64, i64, i64),
+    /// Device, inode, size and modification time where the filesystem keeps no birth time.
+    Inode(i64, i64, Option<i64>, i64),
     Native(String),
 }
 
@@ -191,7 +193,8 @@ fn identity(file: &LocalFileWrite) -> Option<Identity> {
         return None;
     }
     match (file.device_id, file.inode, file.birth_ns, &file.native_id) {
-        (Some(device), Some(inode), Some(birth), _) => Some(Identity::Inode(device, inode, birth)),
+        (Some(d), Some(i), Some(birth), _) => Some(Identity::Born(d, i, birth)),
+        (Some(d), Some(i), None, _) => Some(Identity::Inode(d, i, file.size_bytes, file.mtime_ns)),
         (_, _, _, Some(id)) => Some(Identity::Native(id.clone())),
         _ => None,
     }
