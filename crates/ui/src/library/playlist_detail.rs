@@ -4,7 +4,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
-use library::{PlaylistKey, PlaylistRow, SmartPlaylistKey, SmartPlaylistRow};
+use library::{PlaylistKey, PlaylistRow, SmartPlaylistRow};
 use localization::{msgid, track_count_text};
 
 use crate::library::CatalogUi;
@@ -39,9 +39,6 @@ enum PlaylistDetailOwner {
         summary: PlaylistRow,
     },
     Smart {
-        key: SmartPlaylistKey,
-        /// When the page opened the playlist: its rows and totals stay as of then.
-        now: i64,
         summary: SmartPlaylistRow,
     },
 }
@@ -134,11 +131,9 @@ impl PlaylistDetailOwner {
                 key: *key,
                 summary: *summary,
             },
-            (Self::Smart { key, now, .. }, library::Header::Smart(summary)) => Self::Smart {
-                key: *key,
-                now: *now,
-                summary: *summary,
-            },
+            (Self::Smart { .. }, library::Header::Smart(summary)) => {
+                Self::Smart { summary: *summary }
+            }
             _ => return None,
         })
     }
@@ -165,11 +160,7 @@ impl PlaylistDetailOwner {
 }
 
 impl CatalogUi {
-    pub fn smart_playlist_detail_route(
-        self: &Rc<Self>,
-        key: SmartPlaylistKey,
-        mut read: Opened,
-    ) -> MountedRoute {
+    pub fn smart_playlist_detail_route(self: &Rc<Self>, mut read: Opened) -> MountedRoute {
         let (false, Some(library::Header::Smart(summary))) =
             (read.view.is_missing(), read.header.take())
         else {
@@ -179,18 +170,7 @@ impl CatalogUi {
             ));
         };
         self.update_smart_playlist_pin(&summary);
-        let Some(library::Collection::Smart { now, .. }) = read
-            .view
-            .members()
-            .map(|members| members.collection.clone())
-        else {
-            unreachable!("Smart Playlist pages read their playlist")
-        };
-        let owner = PlaylistDetailOwner::Smart {
-            key,
-            now,
-            summary: *summary,
-        };
+        let owner = PlaylistDetailOwner::Smart { summary: *summary };
         let list_key = owner.key();
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let play_rows = rows.clone();
