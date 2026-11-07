@@ -318,8 +318,8 @@ impl PlayTarget {
 }
 
 impl SourceOwner {
-    /// What playing `target` at `placement` queues, read in `selected`. None when its page
-    /// lists nothing.
+    /// What playing `target` at `placement` queues, read in `selected`; playing it refuses a
+    /// page that lists nothing.
     pub async fn play_target(
         &self,
         target: &PlayTarget,
@@ -327,11 +327,9 @@ impl SourceOwner {
         placement: QueuePlacement,
         shuffled: bool,
         cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
+    ) -> LibraryResult<PlayRequest> {
         match target {
-            PlayTarget::Track(key) => {
-                Ok(Some(PlayRequest::track(*key, placement).shuffled(shuffled)))
-            }
+            PlayTarget::Track(key) => Ok(PlayRequest::track(*key, placement).shuffled(shuffled)),
             PlayTarget::Route(route) => {
                 self.play_route(
                     route,
@@ -356,7 +354,7 @@ impl SourceOwner {
         placement: QueuePlacement,
         shuffled: bool,
         cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
+    ) -> LibraryResult<PlayRequest> {
         match Route::of_uri(uri) {
             Some(route) => {
                 self.play_target(
@@ -368,9 +366,7 @@ impl SourceOwner {
                 )
                 .await
             }
-            None => Ok(Some(
-                PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
-            )),
+            None => Ok(PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled)),
         }
     }
 
@@ -494,8 +490,9 @@ impl SourceOwner {
 
     /// What playing `route` whole queues, as its page's header Play does: everything it lists
     /// in its saved list sort, or the order and filter `options` ask, from a random track when
-    /// shuffled. A collection row's card, pin and menu Play play the page the row opens. None
-    /// when the route lists nothing or its collection is gone or empty.
+    /// shuffled. A collection row's card, pin and menu Play play the page the row opens. A
+    /// route that lists nothing or whose collection is gone or empty queues no tracks, which
+    /// playing refuses.
     pub async fn play_route(
         &self,
         route: &Route,
@@ -504,17 +501,16 @@ impl SourceOwner {
         placement: QueuePlacement,
         shuffled: bool,
         cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
-        let Some(selection) = self.selection(route, selected, options, cancel).await? else {
-            return Ok(None);
-        };
+    ) -> LibraryResult<PlayRequest> {
+        let selection = (self.selection(route, selected, options, cancel).await?)
+            .unwrap_or_else(|| MemberSelection::Uris(Arc::from([])));
         let (sort, descending, _) = read_order(route, options, &self.shared.settings.committed());
-        Ok(Some(play_whole(
+        Ok(play_whole(
             selection,
             context_id(route, selected, options, sort, descending).into(),
             placement,
             shuffled,
-        )))
+        ))
     }
 
     /// Fetches the album or artist `route` shows whole first when a live search admitted only
@@ -1216,12 +1212,11 @@ impl View {
                 self.play_album_track(track, placement, shuffled, result)
             }
             row => match self.row_target(row) {
-                Some(target) => {
-                    return self
-                        .owner
+                Some(target) => Some(
+                    (self.owner)
                         .play_target(&target, self.selected.as_ref(), placement, shuffled, cancel)
-                        .await;
-                }
+                        .await?,
+                ),
                 None => None,
             },
         })
@@ -1717,7 +1712,9 @@ impl View {
                     || orders(read.sort)
                     || matches!(read.kind, ListKind::SmartPlaylists { .. })
             }
-            Body::Releases { favorites: Some(_), .. } => true,
+            Body::Releases {
+                favorites: Some(_), ..
+            } => true,
             Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
             Body::Search(..) => search_sorts(&self.settings)
                 .into_iter()
@@ -2252,11 +2249,9 @@ fn changes(
     if changed.listened {
         let settings = owner.shared.settings.committed();
         let sensitive = match route {
-            Route::Search => CollectionCategory::ALL
-                .into_iter()
-                .any(|category| {
-                    uses_activity(route, options, &settings.library_list(category.key()))
-                }),
+            Route::Search => CollectionCategory::ALL.into_iter().any(|category| {
+                uses_activity(route, options, &settings.library_list(category.key()))
+            }),
             Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
                 [CollectionCategory::Tracks, CollectionCategory::Albums]
                     .into_iter()

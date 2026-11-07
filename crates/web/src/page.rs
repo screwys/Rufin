@@ -172,7 +172,7 @@ pub(super) async fn play(
     products: &ProductHandles,
     token: &PageToken,
     placement: rufin_core::playback::QueuePlacement,
-) -> Result<Option<rufin_core::playback::PlayRequest>, Error> {
+) -> Result<rufin_core::playback::PlayRequest, Error> {
     let selected = scope(products, token.source.as_ref(), token.folder.as_deref()).await?;
     products
         .source

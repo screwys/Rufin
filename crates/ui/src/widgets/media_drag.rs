@@ -544,11 +544,8 @@ impl MediaDragSource {
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<PlayRequest, String> {
         let placement = rufin_core::playback::QueuePlacement::Now;
-        let gone = || "Nothing to play here".to_string();
         Ok(match self {
-            Self::Target { target } => target_request(source, target, placement)
-                .await?
-                .ok_or_else(gone)?,
+            Self::Target { target } => target_request(source, target, placement).await?,
             Self::Targets { .. } => PlayRequest::tracks(
                 self.track_selection(source, rufin_core::view::SelectionScope::Page)
                     .await?,
@@ -571,7 +568,7 @@ async fn target_request(
     source: &rufin_core::runtime::SourceHandle,
     target: &PlayTarget,
     placement: rufin_core::playback::QueuePlacement,
-) -> Result<Option<PlayRequest>, String> {
+) -> Result<PlayRequest, String> {
     let selected = source.selected_library();
     source
         .play_target(

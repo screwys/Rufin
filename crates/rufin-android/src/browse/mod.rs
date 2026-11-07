@@ -620,18 +620,16 @@ impl AndroidLibrary {
                         .play(row, index, placement, shuffled, None, &cancel)
                         .await
                 }
-                (AndroidBrowseItem::Recent { row }, _) => {
-                    source
-                        .play_uri(&row.media_uri, selected, placement, shuffled, &cancel)
-                        .await
-                }
+                (AndroidBrowseItem::Recent { row }, _) => source
+                    .play_uri(&row.media_uri, selected, placement, shuffled, &cancel)
+                    .await
+                    .map(Some),
                 (AndroidBrowseItem::Library { row: library }, None) => {
                     match PlayTarget::of_row(library) {
-                        Some(target) => {
-                            source
-                                .play_target(&target, selected, placement, shuffled, &cancel)
-                                .await
-                        }
+                        Some(target) => source
+                            .play_target(&target, selected, placement, shuffled, &cancel)
+                            .await
+                            .map(Some),
                         None => Ok(None),
                     }
                 }
@@ -665,8 +663,7 @@ impl AndroidLibrary {
                 .await
                 .map_err(error)
         })
-        .await?
-        .ok_or_else(|| error("Nothing to play here"))?;
+        .await?;
         self.playback
             .play_selection(request.with_context_title(caption(None, title)));
         Ok(())

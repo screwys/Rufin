@@ -404,7 +404,7 @@ async fn queue_play(
         };
         match anchor {
             // A page without a track plays whole, as its header and the card that opens it do.
-            None => page::play(products, &token, placement).await?,
+            None => Some(page::play(products, &token, placement).await?),
             Some((key, entry)) => page::open(products, token, 0, 0).await?.view.play_track(
                 key,
                 entry,

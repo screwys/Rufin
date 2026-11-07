@@ -177,8 +177,7 @@ impl SearchSession {
                 .play_uri(&media_uri, selected.as_ref(), placement, false, &cancel)
                 .await
             {
-                Ok(Some(request)) => playback.play_selection(request),
-                Ok(None) => {}
+                Ok(request) => playback.play_selection(request),
                 Err(error) => tracing::warn!(%error, "could not play the recent search"),
             }
         });

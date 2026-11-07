@@ -87,8 +87,7 @@ pub(crate) fn play_target(
             .play_target(&target, selected.as_ref(), placement, shuffled, &cancel)
             .await
         {
-            Ok(Some(request)) => playback.play_selection(request),
-            Ok(None) => {}
+            Ok(request) => playback.play_selection(request),
             Err(error) => tracing::warn!(%error, "could not play the collection"),
         }
     });
