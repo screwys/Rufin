@@ -821,11 +821,9 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
 
     /// Takes a new order of `len` rows and its rows from `first`. A `refresh` reads the same
     /// list again, so its items and the rows they show stay by position until their windows
-    /// are read again, and only its tail changes; another list keeps its items when its length
-    /// stays.
+    /// are read again, and only its tail changes; another order changes every item.
     pub fn replace(&self, len: usize, first: usize, rows: Vec<T>, refresh: bool) {
         let old_len = self.list.n_items() as usize;
-        let keep = refresh || old_len == len;
         let updates = self.with(|state| {
             state.reset_reads();
             let previous = std::mem::take(&mut state.ready);
@@ -833,21 +831,19 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
             state.stale.clear();
             state.len = len;
             let seeded = state.seed(first, rows);
-            if !keep {
+            if !refresh {
                 state.objects.clear();
                 return Vec::new();
             }
-            if refresh {
-                for (position, row) in previous {
-                    let window = window_first(position);
-                    if position >= len || seeded.contains(&position) || !state.live(window) {
-                        continue;
-                    }
-                    if state.stale.insert(window) {
-                        state.touch(window);
-                    }
-                    state.ready.insert(position, row);
+            for (position, row) in previous {
+                let window = window_first(position);
+                if position >= len || seeded.contains(&position) || !state.live(window) {
+                    continue;
                 }
+                if state.stale.insert(window) {
+                    state.touch(window);
+                }
+                state.ready.insert(position, row);
             }
             state
                 .objects
@@ -863,7 +859,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                 })
                 .collect::<Vec<_>>()
         });
-        if !keep {
+        if !refresh {
             self.list.items_changed(0, old_len as u32, len as u32);
             return;
         }

@@ -202,8 +202,19 @@ impl PositionSelectionModel {
             let Some(selection) = weak.upgrade() else {
                 return;
             };
-            selection.clear_for_model_change();
+            // A model change clears the selection, and the rows it drew selected redraw.
+            let cleared = selection
+                .imp()
+                .selected
+                .replace(Some(gtk::Bitset::new_empty()))
+                .filter(|cleared| !cleared.is_empty());
             selection.items_changed(position, removed, added);
+            let n_items = selection.n_items();
+            if let Some(cleared) = cleared.filter(|cleared| cleared.minimum() < n_items) {
+                let first = cleared.minimum();
+                let last = cleared.maximum().min(n_items - 1);
+                selection.selection_changed(first, last - first + 1);
+            }
         });
         selection.imp().model_handler.replace(Some(handler));
         if let Some(model) = model.downcast_ref::<crate::widgets::view_model::RowList>() {
@@ -218,11 +229,6 @@ impl PositionSelectionModel {
         selection
     }
 
-    pub fn clear_for_model_change(&self) {
-        use glib::subclass::types::ObjectSubclassIsExt;
-
-        self.imp().selected.replace(Some(gtk::Bitset::new_empty()));
-    }
     pub fn set_collection_selection(&self, capture: CollectionSelection) {
         self.imp().collection_selection.replace(Some(capture));
     }
