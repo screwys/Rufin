@@ -24,6 +24,7 @@
           {% call m::menu_button(row, "icon-button") %}{% endcall %}
           {% call m::media_menu(row) %}{% endcall %}
         </form></td>
+        {% else if column.field == LibraryField::UserRating %}<td role="gridcell" data-rating-uri="{{ row.uri() }}">{{ row.cell(column.field) }}</td>
         {% else %}<td role="gridcell">{{ row.cell(column.field) }}</td>{% endif %}{% endfor %}
       </tr>
     {% endfor %}</tbody>

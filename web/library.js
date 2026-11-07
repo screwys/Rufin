@@ -392,9 +392,14 @@ async function loadView(initial = false, extra = {}, at = null) {
 }
 
 // Shows what a committed change means for the page: the favorites that changed on the rows
-// and hearts showing them, then the page read again when the change asks.
+// and hearts showing them, and ratings on the cells showing them, then the page read again when
+// the change asks.
 function showChanged(value) {
-  for (const changed of value.states || []) showState(changed.uri, changed.favorite);
+  for (const changed of value.states || []) {
+    showState(changed.uri, changed.favorite);
+    for (const node of document.querySelectorAll("[data-rating-uri]"))
+      if (node.dataset.ratingUri === changed.uri) node.textContent = changed.rating_text;
+  }
   if (value.page_refresh) run(() => refreshPage(value.page_refresh));
 }
 

@@ -303,11 +303,11 @@ impl<'a> Shown<'a> {
             .map_or("", |(_, text)| text.as_str())
     }
 
-    /// The fields with text, in its list's order.
+    /// The fields with text, in its list's order, and its rating, which a change can fill.
     fn labels(&self) -> Vec<(LibraryField, &str)> {
         self.fields
             .iter()
-            .filter(|(_, text)| !text.is_empty())
+            .filter(|(field, text)| !text.is_empty() || *field == LibraryField::UserRating)
             .map(|(field, text)| (*field, text.as_str()))
             .collect()
     }

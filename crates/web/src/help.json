@@ -183,7 +183,7 @@
     "POST /api/queue/next": {
       "position": 0
     },
-    "GET /api/events": "Follow playback, source progress, catalog changes and lyrics together on one connection. The first update names the stream as stream. Pass page=TOKEN to follow that page; a library read sent with the header X-Rufin-Events: STREAM becomes the page the stream follows. A catalog change then carries page_refresh (reread: read the page again where it is; reopen: open it again) when it changes what the page shows, and states [{uri,favorite,rating}] for tracks, albums and artists whose favorite or rating changed, which rows that show them can patch in.",
+    "GET /api/events": "Follow playback, source progress, catalog changes and lyrics together on one connection. The first update names the stream as stream. Pass page=TOKEN to follow that page; a library read sent with the header X-Rufin-Events: STREAM becomes the page the stream follows. A catalog change then carries page_refresh (reread: read the page again where it is; reopen: open it again) when it changes what the page shows, and states [{uri,favorite,rating,rating_text}] for tracks, albums and artists whose favorite or rating changed, which rows that show them can patch in.",
     "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",
     "GET /api/artists/tracks?id=...": "Browse an artist’s tracks, up to 256 at a time. Use q, sort, descending and album_artists.",
     "GET /api/genres/tracks?id=...": "Browse tracks in a genre. Use q, sort, descending, offset and limit, and source and folder as music_folders describes.",

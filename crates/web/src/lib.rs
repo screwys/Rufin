@@ -1179,17 +1179,6 @@ fn show_changed(
         Some(Refresh::Reopen) => value["page_refresh"] = json!("reopen"),
         Some(Refresh::Nothing) | None => {}
     }
-    // Ratings show as text the page renders, so a page that shows them reads again.
-    let fields = |view: &rufin_core::view::View| {
-        let key = rufin_core::view::library_list_key(view.route(), view.options().category);
-        let list = products.settings.load().library_list(key);
-        [list.row_fields, list.grid_fields].concat()
-    };
-    if !changed.items.is_empty()
-        && shown.is_some_and(|view| fields(view).contains(&LibraryField::UserRating))
-    {
-        value["page_refresh"] = json!(value["page_refresh"].as_str().unwrap_or("reread"));
-    }
     if !changed.items.is_empty() {
         value["states"] = changed
             .items
@@ -1198,7 +1187,10 @@ fn show_changed(
                 let (library::FavoriteTarget::Track(uri)
                 | library::FavoriteTarget::Album(uri)
                 | library::FavoriteTarget::Artist(uri)) = &state.target;
-                json!({"uri":uri,"favorite":state.favorite,"rating":state.rating})
+                let mut shown = library::TrackState::default();
+                state.show_in(&mut shown);
+                let text = rufin_core::settings::presentation::stored_rating(shown.rating);
+                json!({"uri":uri,"favorite":shown.favorite,"rating":shown.rating,"rating_text":text})
             })
             .collect();
     }
