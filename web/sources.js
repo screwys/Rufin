@@ -115,8 +115,8 @@ function renderSources(configured) {
     card.append(sourceIcon(item.kind), label, edit, actions);
     const quality = el("fieldset", "source-actions");
     quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
-    qualityControls(quality, item.download_quality, async (current, edit) => {
-      const result = await api("/downloads/quality", "POST", { source: item.id, quality: current, edit });
+    qualityControls(quality, item.download_quality, async (edit) => {
+      const result = await api("/downloads/quality", "POST", { source: item.id, edit });
       item.download_quality = result.download_quality;
       return result.download_quality;
     });

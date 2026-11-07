@@ -74,10 +74,11 @@ async fn download_quality(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
-    /// One change to the quality the control shows.
+    /// A whole quality, or one change to the saved one, so edits sent one after another hold.
     #[derive(Deserialize)]
     #[serde(rename_all = "snake_case")]
     enum Edit {
+        Quality(sources::DownloadQuality),
         Codec(Option<library::AudioCodec>),
         BitrateKbps(u32),
         Channels(library::AudioChannels),
@@ -85,23 +86,26 @@ async fn download_quality(
     #[derive(Deserialize)]
     struct Input {
         source: sources::SourceId,
-        quality: sources::DownloadQuality,
-        edit: Option<Edit>,
+        edit: Edit,
     }
     let input: Input = body(request).await?;
     use rufin_core::downloads::{
         download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
     };
-    let quality = match input.edit {
-        None => input.quality,
-        Some(Edit::Codec(codec)) => download_quality_with_codec(input.quality, codec),
-        Some(Edit::BitrateKbps(kbps)) => download_quality_with_bitrate(input.quality, kbps),
-        Some(Edit::Channels(channels)) => download_quality_with_channels(input.quality, channels),
+    let mut quality = sources::DownloadQuality::Original;
+    let edit = |ui: &mut rufin_core::settings::Settings| {
+        let saved = ui.download_settings(&input.source).quality;
+        quality = match input.edit {
+            Edit::Quality(quality) => quality,
+            Edit::Codec(codec) => download_quality_with_codec(saved, codec),
+            Edit::BitrateKbps(kbps) => download_quality_with_bitrate(saved, kbps),
+            Edit::Channels(channels) => download_quality_with_channels(saved, channels),
+        };
+        ui.set_download_quality(input.source.clone(), quality);
+        Ok(())
     };
-    products
-        .settings
-        .set_download_quality(input.source, quality)
-        .map_err(bad_request)?;
+    let settings = &products.settings;
+    settings.update_preferences(edit).map_err(bad_request)?;
     Ok(json_response(
         StatusCode::ACCEPTED,
         json!({"accepted":true,"quality":quality,"download_quality":quality_view(quality)}),

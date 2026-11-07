@@ -1,7 +1,7 @@
 import { run, tr } from "./ui.js";
 
 // Shows a download quality as the app offers it ({value, bitrate, channels}) and posts each
-// edit; `change(quality, edit)` returns what the app made of it.
+// edit; `change(edit)` returns what the app made of it.
 export function qualityControls(root, initial, change) {
   const format = root.querySelector('[data-quality="format"]');
   const bitrate = root.querySelector('[data-quality="bitrate"]');
@@ -33,7 +33,7 @@ export function qualityControls(root, initial, change) {
     [channels, () => ({ channels: channels.value })],
   ];
   for (const [field, edit] of edits) field.addEventListener("change", () => run(async () => {
-    try { set(await change(current.value, edit())); }
+    try { set(await change(edit())); }
     catch (error) { set(current); throw error; }
   }));
   set(initial);
