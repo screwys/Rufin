@@ -9,6 +9,7 @@ import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.library.HomeBlockKind
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
+import io.github.screwys.rufin.shared.rufin_core.RecentSearchResult
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -43,6 +44,8 @@ internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val 
     val displaySettings: AndroidBrowseDisplay? = null,
     val searchResult: Boolean = false, val contextTitle: String? = null,
     val downloads: Int = 0, val favorite: Boolean = false)
+/** A remembered search result as saved, and its library row while the library holds it. */
+internal class RecentSearch(val result: RecentSearchResult, val item: BrowseItem?, val route: Route?)
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -68,7 +71,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     @Volatile private var searchView: AndroidView? = null
     var searchRows by mutableStateOf<List<BrowseItem>>(emptyList())
         private set
-    var recentSearchRows by mutableStateOf<List<BrowseItem>>(emptyList())
+    var recentSearchRows by mutableStateOf<List<RecentSearch>>(emptyList())
         private set
     var library by mutableStateOf<AndroidLibrary?>(null)
         private set
@@ -249,20 +252,31 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         rememberSearchResult(item)
     }
 
-    private suspend fun loadRecentSearches(bridge: AndroidLibrary): List<BrowseItem> =
-        bridge.recentSearchResults().mapIndexed { index, row ->
-            BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = translate("Recent searches"))
+    /** Opens a remembered result, or plays its track, and remembers it again. */
+    fun openRecent(recent: RecentSearch) {
+        val route = recent.item?.row?.route ?: recent.route
+        if (route == null) { recent.item?.let { play(it) }; return }
+        openRoute(route, recent.result.title)
+        remember(recent.result)
+    }
+
+    private suspend fun loadRecentSearches(bridge: AndroidLibrary): List<RecentSearch> =
+        bridge.recentSearchResults().mapIndexed { index, recent ->
+            RecentSearch(recent.result, recent.row?.let { row ->
+                BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = translate("Recent searches"))
+            }, recent.route)
         }
 
     private fun rememberSearchResult(item: BrowseItem) {
         if (!item.searchResult) return
+        val kind = recentKind(item) ?: return
+        remember(RecentSearchResult(kind, item.row.mediaUri, item.row.title, item.row.subtitle, item.row.artworkIdentity))
+    }
+
+    private fun remember(result: RecentSearchResult) {
         val bridge = library ?: return
         connection.runAction {
-            val kind = recentKind(item) ?: return@runAction
-            if (withContext(Dispatchers.IO) { bridge.rememberSearchResult(io.github.screwys.rufin.shared.rufin_core.RecentSearchResult(
-                kind, item.row.mediaUri, item.row.title, item.row.subtitle, item.row.artworkIdentity)) }) {
-                recentSearchRows = loadRecentSearches(bridge)
-            }
+            if (withContext(Dispatchers.IO) { bridge.rememberSearchResult(result) }) recentSearchRows = loadRecentSearches(bridge)
         }
     }
 
@@ -273,10 +287,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         null -> null
     }
 
-    fun removeRecentSearch(item: BrowseItem) = connection.runAction {
+    fun removeRecentSearch(result: RecentSearchResult) = connection.runAction {
         val bridge = library ?: return@runAction
-        val kind = recentKind(item) ?: return@runAction
-        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(kind, item.row.mediaUri) }) {
+        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(result.kind, result.mediaUri) }) {
             recentSearchRows = loadRecentSearches(bridge)
         }
     }

@@ -120,12 +120,10 @@ impl AndroidLibrary {
         .await
     }
 
-    /// The remembered search results the library still holds, as its rows show them in search.
-    pub async fn recent_search_results(&self) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
-        let settings = self.settings.load();
-        let recent = settings.recent_search_results.clone();
-        let fields = CollectionCategory::ALL
-            .map(|category| settings.library_list(category.key()).row_fields);
+    /// The remembered search results as saved, each with the library row it names while the
+    /// library holds it.
+    pub async fn recent_search_results(&self) -> Result<Vec<AndroidRecentResult>, AndroidError> {
+        let recent = self.settings.load().recent_search_results.clone();
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             catalog.loaded().await;
@@ -151,20 +149,24 @@ impl AndroidLibrary {
                     })
                 })
                 .collect::<Vec<_>>();
-            let rows = catalog
+            let mut rows = catalog
                 .rows_of(&items, true, &cancel)
                 .await
                 .map_err(error)?;
-            Ok(rows
+            Ok(recent
                 .into_iter()
-                .enumerate()
-                .map(|(index, row)| {
-                    let category = match row {
-                        Row::Track(_) => 0,
-                        Row::Album(_) => 1,
-                        _ => 2,
-                    };
-                    shown_row(row, &fields[category], index)
+                .map(|result| {
+                    let row = rows.iter().position(|row| match row {
+                        Row::Track(track) => track.media_uri == result.media_uri,
+                        Row::Album(album) => album.media_uri == result.media_uri,
+                        Row::Artist(artist) => artist.media_uri == result.media_uri,
+                        _ => false,
+                    });
+                    AndroidRecentResult {
+                        route: Route::of_uri(&result.media_uri),
+                        row: row.map(|at| rows.swap_remove(at).into()),
+                        result,
+                    }
                 })
                 .collect())
         })

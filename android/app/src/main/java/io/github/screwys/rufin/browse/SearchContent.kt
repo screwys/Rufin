@@ -3,7 +3,7 @@ package io.github.screwys.rufin.browse
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.library.SearchMode
-import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.rufin_core.showsLyricsCachePrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -141,7 +141,7 @@ private fun SearchResults(
         return
     }
     val state = rememberLazyListState()
-    var selected by remember { mutableStateOf<BrowseItem?>(null) }
+    var selected by remember { mutableStateOf<RecentSearch?>(null) }
     var metadata by remember { mutableStateOf<BrowseItem?>(null) }
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }
@@ -154,26 +154,31 @@ private fun SearchResults(
                 if (browse.recentSearchRows.isNotEmpty()) TextButton(browse::clearRecentSearches) { Text(translate("Clear")) }
             }
         }
-        items(browse.recentSearchRows, key = { it.row.mediaUri }) { item ->
+        items(browse.recentSearchRows, key = { "${it.result.kind}:${it.result.mediaUri}" }) { recent ->
+            // Drawn as saved, as GTK's search popup does; states, badge and menu come from its row.
+            val (result, item) = recent.result to recent.item
             val pixels = with(LocalDensity.current) { 50.dp.roundToPx() }
-            val artwork = rememberArtwork(item.row.artworkIdentity, player, pixels)
-            BrowseSwipeActions(item, true) {
+            val artwork = rememberArtwork(result.artworkBinding, player, pixels)
+            val row = @Composable {
             ListItem(
-                headlineContent = { BrowseTitle(favoriteItem(player.model, item), player = player) },
+                headlineContent = { if (item != null) BrowseTitle(favoriteItem(player.model, item), player = player, title = result.title)
+                    else Text(result.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = {
-                    Text(listOf(item.row.subtitle, translate(when (item.row.target) {
-                        is FavoriteTarget.Album -> "Album"
-                        is FavoriteTarget.Artist -> "Artist"
-                        else -> "Track"
+                    Text(listOf(result.subtitle, translate(when (result.kind) {
+                        RecentSearchKind.ALBUM -> "Album"
+                        RecentSearchKind.ARTIST -> "Artist"
+                        RecentSearchKind.TRACK -> "Track"
                     })).filter(String::isNotBlank).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
                 trailingContent = {
-                    PlayerIconButton("rufin-view-more-symbolic", "More", { selected = item })
+                    if (item != null) PlayerIconButton("rufin-view-more-symbolic", "More", { selected = recent })
+                    else PlayerIconButton("rufin-user-trash-symbolic", "Remove", { browse.removeRecentSearch(result) })
                 },
-                modifier = Modifier.combinedClickable(onClick = { browse.open(item) }, onLongClick = { selected = item }),
+                modifier = Modifier.combinedClickable(onClick = { browse.openRecent(recent) }, onLongClick = { selected = recent }),
             )
             }
+            if (item != null) BrowseSwipeActions(item, true, row) else row()
         }
         if (browse.recentSearchRows.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -182,12 +187,12 @@ private fun SearchResults(
             }
         }
     }
-    selected?.let { item ->
+    selected?.let { recent -> recent.item?.let { item ->
         BrowseMenuSheet(player.model, browse, item, player, { selected = null },
             { selected = null; onPlaylist(item) }, { metadata = item; selected = null },
-            { browse.removeRecentSearch(item); selected = null },
+            { browse.removeRecentSearch(recent.result); selected = null },
             onNavigate = { route, title, _ -> selected = null; browse.openRoute(route, title) })
-    }
+    } }
     metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(player.model, item) { metadata = null } }
 }
 

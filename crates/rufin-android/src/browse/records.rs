@@ -234,6 +234,16 @@ pub struct AndroidPinPage {
     pub total: u64,
 }
 
+/// A remembered search result as saved, which draws it as GTK does, and the library row it
+/// names while the library holds it, which its states, badge, pin and menu come from.
+#[derive(uniffi::Record)]
+pub struct AndroidRecentResult {
+    pub result: rufin_core::settings::app::RecentSearchResult,
+    pub row: Option<AndroidBrowseRow>,
+    /// The page the result opens.
+    pub route: Option<Route>,
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidBrowseRow {
     pub row: library::Row,

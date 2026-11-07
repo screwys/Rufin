@@ -8,8 +8,8 @@ pub use records::{
     AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink, AndroidDetailSummary,
     AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection, AndroidHomeSectionKind,
     AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened, AndroidPinPage,
-    AndroidPlaylistImport, AndroidReading, AndroidRouteDescriptor, AndroidRouteSetting,
-    AndroidRows, AndroidScrollSection, AndroidSortField,
+    AndroidPlaylistImport, AndroidReading, AndroidRecentResult, AndroidRouteDescriptor,
+    AndroidRouteSetting, AndroidRows, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
