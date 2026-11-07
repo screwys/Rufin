@@ -897,13 +897,11 @@ struct Actor {
 /// them.
 struct Rules(async_channel::WeakSender<Command>);
 
+/// Library changes reach the rules of the sources that have them; rule edits reach them
+/// through the settings alone.
 impl Feature for Rules {
-    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
-        settings
-            .ui
-            .downloads
-            .iter()
-            .any(|source| !source.rules.is_empty())
+    fn wanted(&self, _: &StoredSettings, _: &Catalog) -> bool {
+        true
     }
 
     fn hears(&self, scope: &Scope) -> bool {
@@ -1372,39 +1370,49 @@ impl Actor {
                 .collect::<Vec<_>>();
             self.catalog.state_sources(&items)
         });
-        let sources =
-            self.attached
-                .iter()
-                .filter(|(source_id, attached)| {
-                    let rules = self.settings_for(source_id).rules;
-                    !rules.is_empty()
-                        && changes.is_none_or(|changes| {
-                            changes.iter().flat_map(|change| &change.scopes).any(
-                                |scope| match scope {
-                                    Scope::Reload => true,
-                                    Scope::Tracks {
-                                        source: Some(source),
-                                        ..
-                                    }
-                                    | Scope::Collections { source }
-                                    | Scope::Source { key: source, .. } => {
-                                        *source == attached.source_key
-                                    }
-                                    Scope::State { .. } => {
-                                        rules.favorites && stated.contains(&attached.source_key)
-                                    }
-                                    Scope::Playlist { entries: true, .. } | Scope::Playlists => {
-                                        rules.all_playlists
-                                    }
-                                    _ => false,
-                                },
-                            )
-                        })
-                })
-                .map(|(source_id, _)| source_id.clone())
-                .collect::<Vec<_>>();
-        for source_id in sources {
-            self.reconcile_all_rules(&source_id);
+        // Each source reconciles the rules a change concerns: every rule for its tracks, the
+        // Favorites rule for favorites and the playlists rule for playlists.
+        let mut favorites = DownloadRules::default();
+        favorites.set(DownloadRule::Favorites, true);
+        let mut playlists = DownloadRules::default();
+        playlists.set(DownloadRule::AllPlaylists, true);
+        let sources = self
+            .attached
+            .iter()
+            .map(|(source_id, attached)| {
+                let rules = self.settings_for(source_id).rules;
+                let concerned = |scope: &Scope| match scope {
+                    Scope::Reload => rules,
+                    Scope::Tracks {
+                        source: Some(source),
+                        ..
+                    }
+                    | Scope::Collections { source }
+                    | Scope::Source { key: source, .. }
+                        if *source == attached.source_key =>
+                    {
+                        rules
+                    }
+                    Scope::State { .. } if stated.contains(&attached.source_key) => favorites,
+                    Scope::Playlist { entries: true, .. } | Scope::Playlists => playlists,
+                    _ => DownloadRules::default(),
+                };
+                let mut wanted = DownloadRules::default();
+                match changes {
+                    None => wanted = rules,
+                    Some(changes) => {
+                        let scopes = changes.iter().flat_map(|change| &change.scopes);
+                        for rule in scopes.flat_map(|scope| concerned(scope).active()) {
+                            wanted.set(rule, rules.contains(rule));
+                        }
+                    }
+                }
+                (source_id.clone(), wanted)
+            })
+            .filter(|(_, wanted)| !wanted.is_empty())
+            .collect::<Vec<_>>();
+        for (source_id, wanted) in sources {
+            self.schedule_rules(&source_id, wanted);
         }
     }
 
@@ -1413,19 +1421,24 @@ impl Actor {
         self.schedule_rules(source_id, rules);
     }
 
-    /// Prepares `rules` for `source_id` after what prepares now, in place of an older intent
-    /// of the same source.
+    /// Prepares `rules` for `source_id` after what prepares now, with the rules a waiting
+    /// intent of the source holds; it supersedes what prepares now for the source.
     fn schedule_rules(&mut self, source_id: &SourceId, rules: DownloadRules) {
         let Some(attached) = self.attached.get(source_id) else {
             return;
         };
-        let intent = RuleIntent {
-            catalog: self.catalog.clone(),
-            source_key: attached.source_key,
-            folder: attached.folder,
-            rules,
-        };
-        self.pending_rules.insert(source_id.clone(), intent);
+        let intent = self
+            .pending_rules
+            .entry(source_id.clone())
+            .or_insert_with(|| RuleIntent {
+                catalog: self.catalog.clone(),
+                source_key: attached.source_key,
+                folder: attached.folder,
+                rules: DownloadRules::default(),
+            });
+        for rule in rules.active() {
+            intent.rules.set(rule, true);
+        }
         self.start_rule_preparation();
     }
 
@@ -1789,6 +1802,9 @@ impl Actor {
         let owner = DownloadOwner::Subject(subject.clone());
 
         let owner_key = serde_json::to_string(&owner).expect("download ownership can be stored");
+        let encoding = library::media_encoding_key(quality.encoding());
+        // Copies the rule owns at its quality stay without looking again.
+        let mut owned = HashSet::new();
         let mut after = String::new();
         loop {
             let records = match self
@@ -1807,6 +1823,9 @@ impl Actor {
             after = last.media_uri.clone();
             for mut record in records {
                 if desired.contains(&record.media_uri) {
+                    if record.encoding == encoding {
+                        owned.insert(record.media_uri);
+                    }
                     continue;
                 }
                 let Ok(mut owners) = download_owners(&record) else {
@@ -1827,6 +1846,10 @@ impl Actor {
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
+            if owned.contains(media_uri) {
+                completed.push(media_uri.clone());
+                continue;
+            }
             match self
                 .add_download_owner(Some(&source_id), media_uri, &owner, quality)
                 .await
