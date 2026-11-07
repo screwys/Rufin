@@ -931,19 +931,11 @@ impl Player {
             Command::Next => Ok(self.next(sample)),
             Command::Previous => Ok(self.previous(sample)),
             Command::Seek(position_millis) => Ok(self.seek(position_millis)),
-            Command::SetVolume(volume) => Ok(self.set_volume(volume)),
-            Command::SetMuted(muted) => Ok(self.set_muted(muted)),
-            // The volume set since is saved as it is now, muted or not.
-            Command::PersistVolume(_) => {
-                if self.playback_output.is_local() {
-                    self.owner().persist_output(
-                        self.settings.volume,
-                        self.settings.muted,
-                        self.settings.audio_output.clone(),
-                    );
-                }
-                Ok(())
-            }
+            Command::SetVolume(volume) => Ok(self.set_output(volume, false)),
+            // A mute is saved, and so is a volume committed after it settled, which keeps a mute
+            // set since.
+            Command::SetMuted(muted) => Ok(self.save_output(self.output_volume, muted)),
+            Command::PersistVolume(volume) => Ok(self.save_output(volume, self.output_muted)),
             Command::SetRepeat(repeat) => Ok(self.set_repeat(repeat)),
             Command::SetShuffle { enabled, seed } => Ok(self.set_shuffle(enabled, seed)),
             Command::SetAutoDj {
@@ -1961,52 +1953,36 @@ impl Player {
         self.dirty = true;
     }
 
-    fn set_volume(&mut self, volume: f64) {
+    fn set_output(&mut self, volume: f64, muted: bool) {
         let volume = if volume.is_finite() {
             volume.clamp(0.0, 1.0)
         } else {
             1.0
         };
-        if self.output_volume == volume && !self.output_muted {
+        if (self.output_volume, self.output_muted) == (volume, muted) {
             return;
         }
-        self.output_volume = volume;
-        self.output_muted = false;
+        (self.output_volume, self.output_muted) = (volume, muted);
         if self.playback_output.is_local() {
-            self.settings.volume = volume;
-            self.settings.muted = false;
+            (self.settings.volume, self.settings.muted) = (volume, muted);
         }
-
         self.send_backend(BackendCommand::SetOutputVolume {
             volume,
             volume_scale: self.settings.volume_scale,
-            muted: false,
+            muted,
         });
         self.dirty = true;
     }
 
-    fn set_muted(&mut self, muted: bool) {
-        if self.output_muted == muted {
-            return;
-        }
-        self.output_muted = muted;
-        if self.playback_output.is_local() {
-            self.settings.muted = muted;
-        }
-        self.send_backend(BackendCommand::SetOutputVolume {
-            volume: self.output_volume,
-            volume_scale: self.settings.volume_scale,
-            muted,
-        });
+    fn save_output(&mut self, volume: f64, muted: bool) {
+        self.set_output(volume, muted);
         if self.playback_output.is_local() {
             self.owner().persist_output(
                 self.settings.volume,
-                muted,
+                self.settings.muted,
                 self.settings.audio_output.clone(),
             );
         }
-
-        self.dirty = true;
     }
 
     fn set_repeat(&mut self, repeat: QueueRepeatMode) {
