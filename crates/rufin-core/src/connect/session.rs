@@ -77,6 +77,8 @@ pub(super) struct QueuePage {
 pub(crate) struct Observed {
     pub(crate) current: Option<usize>,
     pub(crate) state: playback::TransportStatus,
+    /// Whether the receiver is to play, also while its track buffers.
+    pub(crate) playing: bool,
     pub(crate) position_ms: u64,
     pub(crate) duration_ms: u64,
     pub(crate) volume: f64,

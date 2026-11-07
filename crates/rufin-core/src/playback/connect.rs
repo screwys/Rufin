@@ -127,8 +127,7 @@ impl RufinPlayback {
             .map_err(string_error)?;
         *self.window.lock().unwrap_or_else(|p| p.into_inner()) =
             Some((frame.revision, frame.current, offset));
-        self.playing
-            .store(frame.state == TransportStatus::Playing, Ordering::Release);
+        self.playing.store(frame.playing, Ordering::Release);
         Ok(())
     }
 
@@ -282,6 +281,7 @@ impl PlaybackOwner {
         Observed {
             current: view.queue.current_index,
             state: transport.state,
+            playing: view.transport.desired_playing,
             position_ms: position,
             duration_ms: transport.duration_millis,
             volume: view.controls.volume,
