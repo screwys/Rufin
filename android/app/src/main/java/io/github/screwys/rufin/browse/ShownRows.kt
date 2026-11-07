@@ -23,6 +23,8 @@ internal open class ShownRows(private val browse: BrowseConnection, protected va
     private val held = object : LinkedHashMap<String, BrowseItem>(HELD_ROWS, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BrowseItem>): Boolean = size > HELD_ROWS
     }
+    /** The changes the rows the surface read with no View show, its own as each View's is. */
+    private val viewless = AndroidShownChanges()
     /** A page's header row and View, which a change shows with the rows of that View. */
     protected open val header: AndroidBrowseRow? get() = null
     protected open val pageView: AndroidView? get() = null
@@ -78,7 +80,7 @@ internal open class ShownRows(private val browse: BrowseConnection, protected va
     private fun showRead(changed: Changed, revision: Int, view: AndroidView?, header: AndroidBrowseRow?, items: List<BrowseItem>) {
         val library = browse.library ?: return
         val offset = if (header != null) 1 else 0
-        val showing = library.showChanges(listOfNotNull(header) + items.map(::current), changed, view)
+        val showing = library.showChanges(listOfNotNull(header) + items.map(::current), changed, view, viewless)
         Snapshot.withMutableSnapshot {
             for (shown in showing.states) {
                 val index = shown.index.toInt() - offset

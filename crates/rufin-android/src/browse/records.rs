@@ -368,6 +368,18 @@ pub struct AndroidDownloads {
     rows: Vec<AndroidBrowseRow>,
 }
 
+/// The committed changes the rows one holder read with no View show.
+#[derive(uniffi::Object, Default)]
+pub struct AndroidShownChanges(rufin_core::shown::ShownChanges);
+
+#[uniffi::export]
+impl AndroidShownChanges {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::default()
+    }
+}
+
 #[uniffi::export]
 impl AndroidDownloads {
     /// The rows whose downloads changed, showing them as the Catalog counts them; nothing when
@@ -419,17 +431,17 @@ impl AndroidLibrary {
     /// Shows `changed` in `rows`, the rows a page holds now, through core's
     /// [`rufin_core::shown::ShownChanges`]: the rows whose favorites and ratings it changes at
     /// once, and the downloads to read. `view` is the page that read them; a newer change of
-    /// the same page supersedes the download read of an older one.
+    /// the same page supersedes the download read of an older one. Rows read with no View show
+    /// `viewless`, their holder's own.
     pub fn show_changes(
         &self,
         rows: Vec<AndroidBrowseRow>,
         changed: rufin_core::source::feed::Changed,
         view: Option<Arc<super::AndroidView>>,
+        viewless: Arc<AndroidShownChanges>,
     ) -> AndroidShowing {
         let shown = rows.iter().map(|row| &row.row).collect::<Vec<_>>();
-        let changes = view
-            .as_ref()
-            .map_or_else(|| self.changes.clone(), |view| view.changes.clone());
+        let changes = view.as_ref().map_or(&viewless.0, |view| &view.changes);
         let showing = changes.show(
             &self.source,
             &shown,

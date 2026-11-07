@@ -9,8 +9,6 @@ pub struct AndroidLibrary {
     pub(crate) settings: rufin_core::SettingsHandle,
     pub(crate) catalog: Arc<library::Catalog>,
     pub(crate) runtime: tokio::runtime::Handle,
-    /// The committed changes the rows of pages without a View show.
-    pub(crate) changes: rufin_core::shown::ShownChanges,
 }
 
 impl AndroidLibrary {
@@ -21,7 +19,6 @@ impl AndroidLibrary {
             settings: products.settings.clone(),
             catalog: products.library.clone(),
             runtime: products.runtime.clone(),
-            changes: Default::default(),
         }
     }
 }
