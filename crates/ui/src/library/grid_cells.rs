@@ -6,6 +6,7 @@ use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
 use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
+use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
 use crate::widgets::view_model::{item_at, item_at_from_item};
 use ::library::{AlbumRow, ArtistRow, FavoriteTarget};
 use adw::prelude::*;
@@ -610,16 +611,21 @@ pub struct TrackGridCell<T: crate::widgets::library_fields::TrackPresentation = 
     current: Rc<RefCell<Option<T>>>,
     position: Rc<Cell<u32>>,
     field: Rc<dyn Fn(u32, &T, LibraryField) -> DetailLinks>,
+    /// The page's indicator, which places the current track among the page's rows.
+    playing: Option<TrackRowPlayingIndicator>,
 }
 
 impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
+    /// A card of a page's tracks when `page` gives its selection and playing indicator, else
+    /// a card of one track.
     pub fn new(
         shell: &Rc<CatalogUi>,
         fields: &[LibraryField],
         play: Rc<dyn Fn(u32, QueuePlacement)>,
         field: Rc<dyn Fn(u32, &T, LibraryField) -> DetailLinks>,
-        selection: Option<TrackSelection>,
+        page: Option<(TrackSelection, TrackRowPlayingIndicator)>,
     ) -> Self {
+        let (selection, playing) = page.unzip();
         let current = Rc::new(RefCell::new(None::<T>));
         let position = Rc::new(Cell::new(0));
         let controls = cards::CollectionGridCoverView::new(msgid("Play track"));
@@ -687,6 +693,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             current,
             position,
             field,
+            playing,
         }
     }
 }
@@ -708,9 +715,14 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
         );
         self.body
             .bind(row.title(), |value| (self.field)(position, &row, value));
-        if let Some(track) = row.track_row() {
-            self.body
-                .bind_playing_target(&shell, PlayTarget::of_track(track));
+        match (&self.playing, row.track_row()) {
+            (Some(playing), _) => {
+                playing.bind(self.body.title.upcast_ref(), position, row.media_uri())
+            }
+            (None, Some(track)) => self
+                .body
+                .bind_playing_target(&shell, PlayTarget::of_track(track)),
+            (None, None) => {}
         }
         self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
@@ -721,6 +733,9 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
         if let Some(shell) = self.shell.upgrade() {
             shell.artwork.clear_artwork_tile(&self.cover);
             self.body.clear(&shell);
+        }
+        if let Some(playing) = &self.playing {
+            playing.unbind(self.body.title.upcast_ref());
         }
         set_grid_favorite(&self.favorite, None);
         self.current.take();

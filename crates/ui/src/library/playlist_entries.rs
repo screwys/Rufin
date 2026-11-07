@@ -44,32 +44,6 @@ fn entry_key(row: &TrackRow) -> Option<library::PlaylistEntryKey> {
     row.entry.as_ref().map(|entry| entry.key)
 }
 
-/// Where the current entry shows: at its rank of a play from these rows, or by its index in
-/// the playlist for a play of the whole playlist.
-fn entry_position(
-    rows: &Rows<Row>,
-    playlist: PlaylistKey,
-    media_uri: &str,
-    context_id: &str,
-    rank: usize,
-) -> Option<u32> {
-    if context_id == rows.context_ids().1 {
-        return rows
-            .ready(rank)
-            .filter(|row| matches!(row.as_ref(), Row::Track(track) if track.media_uri == media_uri))
-            .map(|_| rank as u32);
-    }
-    if context_id
-        != rufin_core::collection_context::CollectionTarget::Playlist(playlist).context_id()
-    {
-        return None;
-    }
-    rows.ready_position(|row| {
-        matches!(row, Row::Track(track) if track.media_uri == media_uri
-            && track.entry.as_ref().is_some_and(|entry| entry.position as usize == rank))
-    })
-}
-
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
     widget: gtk::Widget,
@@ -195,25 +169,7 @@ fn playlist_entry_collection(
     let playing = TrackRowPlayingIndicator::new();
     let selection = PlaylistEntrySelection::new(&model, playlist, playlist_name, writable);
     shell.set_current_playlist_entry_selection(selection.clone());
-    let current_model = model.clone();
-    let current_playing = playing.clone();
-    shell.register_current_route_track_selection(Rc::new(move |current| {
-        let position = current
-            .and_then(|current| {
-                let context = current.context.as_ref()?;
-                entry_position(
-                    &current_model,
-                    playlist,
-                    &current.media_uri,
-                    &context.context_id,
-                    context.source_rank,
-                )
-            })
-            .unwrap_or(gtk::INVALID_LIST_POSITION);
-        current_playing.set_current(current.map(|current| current.media_uri.as_str()), position);
-        current_playing.set_paused(current.is_some_and(|current| current.paused));
-        true
-    }));
+    shell.register_playing_rows(&model, &playing);
     let shell = Rc::clone(shell);
     LibraryCollectionProjection::new(
         settings,

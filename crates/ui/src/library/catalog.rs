@@ -114,6 +114,22 @@ impl CatalogUi {
         }
     }
 
+    /// Shows the current track in `rows` on `indicator` while the rows are shown.
+    pub fn register_playing_rows(
+        &self,
+        rows: &crate::widgets::view_model::Rows<library::Row>,
+        indicator: &crate::widgets::recycled_cells::TrackRowPlayingIndicator,
+    ) {
+        let (list, indicator) = (rows.list_model().downgrade(), indicator.clone());
+        self.register_current_route_track_selection(Rc::new(move |current| {
+            let Some(list) = list.upgrade() else {
+                return false;
+            };
+            crate::widgets::view_model::Rows::of(&list).show_playing(&indicator, current);
+            true
+        }));
+    }
+
     pub fn register_current_route_track_selection_owner(
         self: &Rc<Self>,
         selection: TrackSelection,

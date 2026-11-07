@@ -1,8 +1,5 @@
 use crate::widgets::view_model::{Rows, item_at, item_at_from_item};
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 use ::library::{AlbumRow, ArtistRow, Row, TrackRow};
 use adw::prelude::*;
@@ -29,20 +26,6 @@ use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
 use crate::widgets::table_header::{ColumnViewHeader, TableFrame};
 use crate::widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
 use rufin_core::route::Route;
-
-struct TrackTablePlayingStateInner {
-    model: Rows<Row>,
-    handler_model: crate::widgets::view_model::RowList,
-    model_handler: RefCell<Option<glib::SignalHandlerId>>,
-    track_id: RefCell<Option<String>>,
-    position: Cell<u32>,
-    indicator: TrackRowPlayingIndicator,
-}
-
-#[derive(Clone)]
-pub struct TrackTablePlayingState {
-    inner: Rc<TrackTablePlayingStateInner>,
-}
 
 #[derive(Clone)]
 pub struct CollectionTableProjection {
@@ -445,89 +428,6 @@ fn collection_presentation_needs_rebuild(
             && current.layout == LibraryLayout::Detail)
 }
 
-fn matching_context_rank(
-    context: Option<&crate::widgets::mounted_route::RouteCurrentTrackContext>,
-    base: &str,
-    visible: &str,
-) -> Option<usize> {
-    context
-        .filter(|context| context.context_id == base || context.context_id == visible)
-        .map(|context| context.source_rank)
-}
-
-impl TrackTablePlayingState {
-    pub fn new(model: &Rows<Row>, indicator: TrackRowPlayingIndicator) -> Self {
-        let handler_model = model.list_model();
-        let inner = Rc::new(TrackTablePlayingStateInner {
-            model: model.clone(),
-            handler_model: handler_model.clone(),
-            model_handler: RefCell::new(None),
-            track_id: RefCell::new(None),
-            position: Cell::new(gtk::INVALID_LIST_POSITION),
-            indicator,
-        });
-        let weak_inner = Rc::downgrade(&inner);
-        let handler = handler_model.connect_items_changed(move |_, _, _, _| {
-            let Some(inner) = weak_inner.upgrade() else {
-                return;
-            };
-            let track_id = inner.track_id.borrow();
-            let position = track_id
-                .as_ref()
-                .and_then(|track_id| {
-                    inner
-                        .model
-                        .position_of(track_id, Some(inner.position.get() as usize))
-                })
-                .unwrap_or(gtk::INVALID_LIST_POSITION);
-            inner.position.set(position);
-            inner.indicator.set_current(track_id.as_deref(), position);
-        });
-        inner.model_handler.replace(Some(handler));
-        Self { inner }
-    }
-
-    fn set_position(&self, position: u32) {
-        self.inner.position.set(position);
-        self.inner
-            .indicator
-            .set_current(self.inner.track_id.borrow().as_deref(), position);
-    }
-
-    fn clear_now_playing(&self) {
-        self.inner.track_id.borrow_mut().take();
-        self.set_position(gtk::INVALID_LIST_POSITION);
-    }
-
-    fn set_track_id(&self, media_uri: &str, position: Option<u32>) {
-        *self.inner.track_id.borrow_mut() = Some(media_uri.to_string());
-        let position = position
-            .or_else(|| self.inner.model.position_of(media_uri, None))
-            .unwrap_or(gtk::INVALID_LIST_POSITION);
-        self.set_position(position);
-    }
-
-    pub fn set_now_playing_track(&self, media_uri: Option<&str>, position: Option<u32>) {
-        if let Some(media_uri) = media_uri {
-            self.set_track_id(media_uri, position);
-        } else {
-            self.clear_now_playing();
-        }
-    }
-
-    pub fn set_paused(&self, paused: bool) {
-        self.inner.indicator.set_paused(paused);
-    }
-}
-
-impl Drop for TrackTablePlayingStateInner {
-    fn drop(&mut self) {
-        if let Some(handler) = self.model_handler.take() {
-            self.handler_model.disconnect(handler);
-        }
-    }
-}
-
 pub fn library_route_inset(child: gtk::Widget) -> gtk::Widget {
     child.set_margin_start(PRIMARY_ROUTE_MARGIN_START);
     child.set_margin_end(PRIMARY_ROUTE_MARGIN_END);
@@ -687,6 +587,8 @@ pub fn track_grid(
     play_from_collection: Rc<dyn Fn(u32, rufin_core::playback::QueuePlacement)>,
     selection: TrackSelection,
 ) -> CollectionGridProjection {
+    let playing = TrackRowPlayingIndicator::new();
+    shell.register_playing_rows(&model, &playing);
     let model = model.list_model();
     let fields = shell
         .settings
@@ -708,7 +610,7 @@ pub fn track_grid(
                 fields,
                 Rc::clone(&cell_play),
                 field.clone(),
-                Some(selection.clone()),
+                Some((selection.clone(), playing.clone())),
             )
         },
         move |position, _: TrackRow| activate(position, rufin_core::playback::QueuePlacement::Now),
@@ -969,24 +871,7 @@ pub fn track_table(
     selection: TrackSelection,
 ) -> CollectionTableProjection {
     let playing_indicator = TrackRowPlayingIndicator::new();
-    let playing_state = TrackTablePlayingState::new(&model, playing_indicator.clone());
-    let current_playing_state = Rc::downgrade(&playing_state.inner);
-    shell.register_current_route_track_selection(Rc::new(move |current| {
-        let Some(inner) = current_playing_state.upgrade() else {
-            return false;
-        };
-        let current_playing_state = TrackTablePlayingState { inner };
-        let selection_model = &current_playing_state.inner.model;
-        let position = current.and_then(|current| {
-            let (base, visible) = selection_model.context_ids();
-            let source_rank = matching_context_rank(current.context.as_ref(), &base, &visible);
-            selection_model.position_of(&current.media_uri, source_rank)
-        });
-        current_playing_state
-            .set_now_playing_track(current.map(|current| current.media_uri.as_str()), position);
-        current_playing_state.set_paused(current.is_some_and(|current| current.paused));
-        true
-    }));
+    shell.register_playing_rows(&model, &playing_indicator);
     let fields = if let Some(fields) = options.fields {
         fields
     } else if options.detail {
@@ -1042,9 +927,6 @@ pub fn track_table(
         shell.table_initial_width(options.content_inset),
     );
     table.table.add_css_class("track-list");
-    let _ = table
-        .table
-        .add_weak_ref_notify_local(move || drop(playing_state));
     if key == LibraryListKey::AlbumDetailTracks {
         table.table.add_css_class("album-track-table");
         let factory = gtk::SignalListItemFactory::new();

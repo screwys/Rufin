@@ -454,6 +454,8 @@ mod imp {
         /// Handles what a read of its rows missed, as the page that shows them handles any
         /// committed change.
         pub(super) missed: RefCell<Option<Rc<dyn Fn(&rufin_core::source::feed::Changed)>>>,
+        /// Shows the current track again where each new order places it.
+        pub(super) playing: RefCell<Option<Rc<dyn Fn()>>>,
     }
 
     #[glib::object_subclass]
@@ -485,6 +487,7 @@ mod imp {
                 task.abort();
             }
             self.start.borrow_mut().take();
+            self.playing.borrow_mut().take();
             self.collection_selection.borrow_mut().take();
         }
     }
@@ -606,6 +609,14 @@ impl RowList {
         let handler = self.imp().missed.borrow().clone();
         if let Some(handler) = handler {
             handler(missed);
+        }
+    }
+
+    fn show_playing(&self) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let playing = self.imp().playing.borrow().clone();
+        if let Some(playing) = playing {
+            playing();
         }
     }
 
@@ -853,6 +864,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
         });
         if !refresh {
             self.list.items_changed(0, old_len as u32, len as u32);
+            self.list.show_playing();
             return;
         }
         let common = old_len.min(len);
@@ -870,6 +882,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
             }
             self.list.emit_ready_changed(position, 1);
         }
+        self.list.show_playing();
         self.start();
     }
 
@@ -1059,30 +1072,6 @@ impl Rows<Row> {
         })
     }
 
-    /// The context id a play of the collection these rows list carries from elsewhere, and the
-    /// one plays from these rows carry, tied to their order.
-    pub fn context_ids(&self) -> (String, String) {
-        self.with(|state| match &state.source {
-            Source::View {
-                view,
-                favorites: true,
-                ..
-            } => {
-                let context = view.favorites_context_id().unwrap_or_default();
-                let base = context
-                    .split_once("|query=")
-                    .map_or(context.as_str(), |(base, _)| base)
-                    .to_owned();
-                (base, view.with_read(context))
-            }
-            Source::View { view, .. } => (
-                rufin_core::view::context_base(view.route()),
-                view.play_context(),
-            ),
-            Source::Seeded | Source::Pages(_) => (String::new(), String::new()),
-        })
-    }
-
     /// Plays row `index` as core's row rule decides: on a page through [`View::play`], else
     /// what [`PlayTarget::of_row`] plays outside a page.
     ///
@@ -1144,20 +1133,44 @@ impl Rows<Row> {
         }
     }
 
-    /// Where the current track shows: at `rank` when it is there, or where it is read.
-    pub fn position_of(&self, media_uri: &str, rank: Option<usize>) -> Option<u32> {
-        fn uri(row: &Row) -> Option<&str> {
-            match row {
-                Row::Track(track) | Row::AlbumTrack { track, .. } => Some(&track.media_uri),
+    /// Shows `current` on `indicator` at the row core places it, now and after every new
+    /// order. Rows without a page order light every row of the track.
+    pub fn show_playing(
+        &self,
+        indicator: &crate::widgets::recycled_cells::TrackRowPlayingIndicator,
+        current: Option<&crate::widgets::mounted_route::RouteCurrentTrack>,
+    ) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let (list, indicator, current) =
+            (self.list.downgrade(), indicator.clone(), current.cloned());
+        let show: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(list) = list.upgrade() else { return };
+            let rows = Self::from_list(&list);
+            let page = rows.with(|state| match &state.source {
+                Source::View {
+                    view,
+                    favorites: false,
+                    ..
+                } => Some(Arc::clone(view)),
                 _ => None,
-            }
-        }
-        rank.filter(|rank| {
-            self.ready(*rank)
-                .is_some_and(|row| uri(&row) == Some(media_uri))
-        })
-        .map(|rank| rank as u32)
-        .or_else(|| self.ready_position(|row| uri(row) == Some(media_uri)))
+            });
+            let position = current.as_ref().and_then(|current| {
+                page?.playing_position(
+                    current.track_key?,
+                    current
+                        .context
+                        .as_ref()
+                        .map(|context| (context.context_id.as_str(), context.source_rank)),
+                )
+            });
+            indicator.set_current(
+                current.as_ref().map(|current| current.media_uri.as_str()),
+                position.map_or(gtk::INVALID_LIST_POSITION, |position| position as u32),
+            );
+            indicator.set_paused(current.as_ref().is_some_and(|current| current.paused));
+        });
+        show();
+        self.list.imp().playing.replace(Some(show));
     }
 
     /// Takes the View `read` read again over the one shown, and its rows.

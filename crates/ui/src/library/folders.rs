@@ -168,15 +168,7 @@ fn folder_table(
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
     let playing = crate::widgets::recycled_cells::TrackRowPlayingIndicator::new();
-    let current_playing = playing.clone();
-    shell.register_current_route_track_selection(Rc::new(move |current| {
-        current_playing.set_current(
-            current.map(|current| current.media_uri.as_str()),
-            gtk::INVALID_LIST_POSITION,
-        );
-        current_playing.set_paused(current.is_some_and(|current| current.paused));
-        true
-    }));
+    shell.register_playing_rows(&rows, &playing);
     let column_shell = Rc::clone(shell);
     let column_rows = rows.clone();
     let activate_shell = Rc::clone(shell);

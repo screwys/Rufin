@@ -158,6 +158,33 @@ impl Order {
         self.len() == 0
     }
 
+    /// The track at `position` of a track order.
+    pub fn track_at(&self, position: usize) -> Option<TrackKey> {
+        let raw = match &self.0.members {
+            Members::Tracks(keys) => *keys.get(position)?,
+            Members::Entries(entries) => entries.get(position)?.0,
+            Members::History(listens) => return listens.get(position)?.track,
+            _ => return None,
+        };
+        Some(TrackKey::from_raw(i64::from(raw)))
+    }
+
+    /// Where the track `key` is: its first row, or with `entry` the row of the playlist entry
+    /// at that index.
+    pub fn track_position(&self, key: TrackKey, entry: Option<u32>) -> Option<usize> {
+        let raw = u32::try_from(key.raw()).ok()?;
+        match &self.0.members {
+            Members::Tracks(keys) => keys.iter().position(|track| *track == raw),
+            Members::Entries(entries) => entries.iter().position(|(track, _, index)| {
+                *track == raw && entry.is_none_or(|entry| entry == *index)
+            }),
+            Members::History(listens) => {
+                listens.iter().position(|listen| listen.track == Some(key))
+            }
+            _ => None,
+        }
+    }
+
     /// The items at these positions: anchors, drags and plays by index.
     pub fn items(&self, range: Range<usize>) -> Vec<Item> {
         let range = range.start.min(self.len())..range.end.min(self.len());

@@ -1002,6 +1002,36 @@ impl View {
         self.with_read(self.context_id())
     }
 
+    /// Where the track `key`, playing from `context` at its rank there, shows among the rows:
+    /// at that rank when it plays from this page and is still there, at its entry for a play
+    /// of the whole playlist, else at its first row. None where it is not listed.
+    pub fn playing_position(
+        &self,
+        key: library::TrackKey,
+        context: Option<(&str, usize)>,
+    ) -> Option<usize> {
+        let from_page = context
+            .filter(|(context, _)| {
+                context
+                    .split_once("|result=")
+                    .is_some_and(|(page, _)| page == self.context_id())
+            })
+            .map(|(_, rank)| self.folder_len().unwrap_or(0) + rank);
+        let Body::Rows { order, .. } = &self.body else {
+            return from_page;
+        };
+        if let Some(rank) = from_page.filter(|rank| order.track_at(*rank) == Some(key)) {
+            return Some(rank);
+        }
+        let entry = context
+            .filter(|(context, _)| {
+                matches!(self.route, Route::PlaylistDetail(_))
+                    && *context == context_base(&self.route)
+            })
+            .map(|(_, rank)| rank as u32);
+        order.track_position(key, entry)
+    }
+
     /// `context` tied to this read, as `|result=`.
     pub fn with_read(&self, context: String) -> String {
         format!("{context}|result={}", self.read)
