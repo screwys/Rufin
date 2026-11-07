@@ -59,10 +59,12 @@ impl PlaybackOwner {
             .first()
             .cloned()
             .ok_or("The current track is unavailable")?;
-        let request = StreamRequest::new(
+        let mut request = StreamRequest::new(
             (&occurrence.track).media_uri.clone(),
             self.settings.playback_stream_quality(),
         );
+        // The stream reports under the listen it continues.
+        request.session_identifier = listen.as_ref().map(|listen| listen.play_id.clone());
         let backend =
             (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         let active = self.active().ok_or("Playback is unavailable")?;
