@@ -6,13 +6,10 @@ const pinType = "application/x-rufin-collection";
 let current = null;
 let preview = null;
 
-// What dragging or playing a row carries: the page core says it plays, else its track's URI.
+// What dragging or playing a row carries: the page core says it plays, else its track's URI;
+// a playlist folder carries neither.
 function mediaSelection(kind, row) {
-  return {
-    kind,
-    row,
-    ...(row.play ? { page: row.play } : { uris: [row.uri] }),
-  };
+  return { kind, row, ...(row.play ? { page: row.play } : row.uri ? { uris: [row.uri] } : {}) };
 }
 
 function bindDrag(node, read, pinnable = true) {
@@ -20,7 +17,7 @@ function bindDrag(node, read, pinnable = true) {
   node.addEventListener("dragstart", (event) => {
     const media = read();
     current = Promise.resolve(media);
-    event.dataTransfer.setData(mediaType, "");
+    if (media.page || media.uris) event.dataTransfer.setData(mediaType, "");
     if (pinnable) event.dataTransfer.setData(pinType, "");
     event.dataTransfer.effectAllowed = "copyMove";
     preview?.remove();

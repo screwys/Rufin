@@ -134,7 +134,7 @@ function render() {
       run(async () => {
         const media = await payload;
         if (media.pin) await move(media.pin, item.pin);
-        else if (item.kind === "playlist") {
+        else if (item.kind === "playlist" && (media.page || media.uris)) {
           await playlistMedia(item.id, media);
           await refreshPins();
         } else await addPin(media, item.pin);
