@@ -151,7 +151,7 @@ impl AndroidLibrary {
                 })
                 .collect::<Vec<_>>();
             let rows = catalog
-                .rows_of(&items, false, &cancel)
+                .rows_of(&items, true, &cancel)
                 .await
                 .map_err(error)?;
             Ok(rows
