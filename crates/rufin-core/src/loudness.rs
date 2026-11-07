@@ -58,6 +58,21 @@ impl Feature for Normalization {
         settings.ui.playback.loudness_normalization == playback::LoudnessNormalization::EbuR128
     }
 
+    /// A pass measures for the scope and tag writing it starts with.
+    fn restarts(&self, previous: &StoredSettings, current: &StoredSettings) -> bool {
+        let (before, now) = (&previous.ui.playback, &current.ui.playback);
+        (
+            before.loudness_normalization_scope,
+            before.write_ebu_r128_tags,
+        ) != (now.loudness_normalization_scope, now.write_ebu_r128_tags)
+    }
+
+    fn stopped(&self) {
+        if let Some(playback) = self.0.upgrade() {
+            playback.loudness.cancel();
+        }
+    }
+
     fn hears(&self, scope: &Scope) -> bool {
         matches!(
             scope,

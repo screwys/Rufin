@@ -604,7 +604,7 @@ impl PlaybackOwner {
             ..previous.playback.clone()
         };
         if edited != current.playback {
-            self.playback_settings_changed(&previous.playback, current.playback.clone());
+            self.playback_settings_changed(current.playback.clone());
         }
         if previous.application.cast_proxy_enabled != current.application.cast_proxy_enabled {
             self.cast
@@ -624,26 +624,8 @@ impl PlaybackOwner {
         }
     }
 
-    fn playback_settings_changed(
-        &self,
-        previous: &playback::PlaybackSettings,
-        settings: playback::PlaybackSettings,
-    ) {
+    fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
         self.equalizer_output_changed(settings.audio_output.as_deref());
-        if (
-            previous.loudness_normalization,
-            previous.loudness_normalization_scope,
-            previous.write_ebu_r128_tags,
-        ) != (
-            settings.loudness_normalization,
-            settings.loudness_normalization_scope,
-            settings.write_ebu_r128_tags,
-        ) {
-            self.loudness.cancel();
-            if self.ebu_r128() {
-                self.loudness.start();
-            }
-        }
         self.send(Command::UpdateSettings(settings));
     }
     pub(crate) fn stream_inputs_changed(&self) -> Result<(), String> {
