@@ -581,10 +581,9 @@ impl AndroidLibrary {
                 .collect();
             let shown = !view.view.is_missing() && !embedded;
             let header = opened.header.filter(|_| shown);
-            let summary = match header {
-                Some(header) => Some(self.detail_summary(&view, header).await?),
-                None => None,
-            };
+            let summary = header
+                .map(|header| self.detail_summary(&view, header))
+                .transpose()?;
             Ok(AndroidOpened {
                 count: view.view.len() as u64,
                 rows,

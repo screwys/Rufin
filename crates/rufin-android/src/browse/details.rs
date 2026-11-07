@@ -3,7 +3,7 @@ use super::*;
 
 impl AndroidLibrary {
     /// What a detail page's header shows of `header`.
-    pub(super) async fn detail_summary(
+    pub(super) fn detail_summary(
         &self,
         view: &AndroidView,
         header: library::Header,
@@ -18,35 +18,15 @@ impl AndroidLibrary {
             links,
             favorite_total: view.view.favorites_len().unwrap_or(0) as u64,
         };
-        let (uri, album_artist) = detail_identity(view.view.route()).unwrap_or_default();
+        let (uri, _) = detail_identity(view.view.route()).unwrap_or_default();
         let link_settings = self.settings.load().application.external_site_links.clone();
         let configuration = library::source_entity_parts(uri)
             .and_then(|(source_id, _, _)| self.source.configuration(&source_id));
-        // A local folder link resolves when the page opens; without a folder it goes.
-        let local = link_settings.enabled
-            && link_settings.server
-            && configuration
-                .as_ref()
-                .is_some_and(|source| source.is_local());
-        let folder_uri = if local {
-            self.source
-                .collection_folder_uri(uri.to_owned(), album_artist)
-                .recv()
-                .await
-                .map_err(error)?
-                .ok()
-        } else {
-            None
-        };
+        // A local folder link resolves when it is chosen, through the page's folder_uri.
         let links = |links: Vec<rufin_core::detail_links::DetailLink>| {
             links
                 .into_iter()
-                .filter_map(|mut link| {
-                    if local && link.url.is_none() {
-                        link.url = Some(folder_uri.clone()?);
-                    }
-                    Some(link.into())
-                })
+                .map(Into::into)
                 .collect::<Vec<AndroidDetailLink>>()
         };
         Ok(match header {
