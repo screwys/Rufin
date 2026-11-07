@@ -157,18 +157,18 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             }
         }
         scope.launch {
-            var submitted = 0
+            // The last submission and its text, which searches again whatever its length.
+            var submitted = 0 to ""
             var searched: SearchContext? = null
             snapshotFlow { SearchContext(section, searchText, searchMode, library, searchChanges, searchSubmission, searchRereads) }
-                .debounce { if (it.submission != submitted) 0L else 250L }.collectLatest { context ->
-                    val explicit = context.submission != submitted
-                    submitted = context.submission
+                .debounce { if (it.submission != submitted.first) 0L else 250L }.collectLatest { context ->
+                    if (context.submission != submitted.first) submitted = context.submission to context.text
                     // Only a reread asked: the Search page reads its results again.
                     val again = searchView.takeIf { searched?.copy(rereads = context.rereads) == context }
                     searched = context
                     val query = context.text.trim()
                     if (context.section != AppSection.Search || query.isEmpty() || context.library == null ||
-                        context.mode == SearchMode.LYRICS && !explicit && query.codePointCount(0, query.length) < 2) {
+                        context.mode == SearchMode.LYRICS && context.text != submitted.second && query.codePointCount(0, query.length) < 2) {
                         searchRows = emptyList()
                         searchView = null
                         searchLoading = false
