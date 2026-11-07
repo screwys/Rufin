@@ -158,7 +158,10 @@ impl CatalogUi {
             open_cover: {
                 let shell = Rc::clone(self);
                 let artwork = Rc::clone(&artwork);
-                Rc::new(move || shell.present_full_artwork_group(artwork.borrow().clone()))
+                Rc::new(move || {
+                    let bindings = artwork.borrow().clone();
+                    shell.present_full_artwork_group(bindings);
+                })
             },
         });
         wrapper.append(&library_route_inset(showcase));
