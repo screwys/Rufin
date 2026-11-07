@@ -197,9 +197,13 @@ impl Shell {
                 .as_ref()
                 .and_then(|media| self.current_art_url(media))
         });
+        let lyrics = self
+            .player_ui
+            .selected_lyrics()
+            .and_then(|lyrics| lyrics.projection.borrow().text(0));
         self.desktop
             .media_controls
-            .observe(playback.as_deref(), art_url, discontinuity);
+            .observe(playback.as_deref(), art_url, lyrics, discontinuity);
     }
 
     pub(crate) fn update_media_controls_position_after(
