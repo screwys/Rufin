@@ -452,7 +452,7 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
                 choices.set_visible(!has_profile && !busy);
             }
             if let Some(button) = cancel_pairing.upgrade() {
-                button.set_visible(state.connecting);
+                button.set_visible(state.connecting && !state.receiving_collection);
             }
             if let Some(invite) = invite_section.upgrade() {
                 invite.set_visible(!joining && !busy);

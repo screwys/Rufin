@@ -74,7 +74,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
             Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 ConnectProgress(state)
-                if (state.connecting) TextButton({ connect.action(ConnectAction.CancelPairing) }) {
+                if (state.connecting && !state.receivingCollection) TextButton({ connect.action(ConnectAction.CancelPairing) }) {
                     Text(translate("Cancel"))
                 }
             }
