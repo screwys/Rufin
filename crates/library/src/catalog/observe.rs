@@ -1,10 +1,12 @@
 //! A source's tracks as another installation observes them, read by key.
+use crate::catalog::views::Owner;
 use crate::{Catalog, Freshness, LibraryResult, SourceId, TrackObservation};
 
 const SOURCE_KEY: &str = "(SELECT source_key FROM sources WHERE object_id=?1)";
 
 #[derive(sqlx::FromRow)]
 struct ObservedTrack {
+    track_key: i64,
     object_id: String,
     album_object_id: Option<String>,
     metadata: String,
@@ -57,8 +59,8 @@ impl Catalog {
         .await?)
     }
 
-    /// The source's indexed tracks whose file, CUE sheet or source lyrics changed after
-    /// `since`, in unix seconds.
+    /// The source's indexed tracks whose file, CUE sheet, a picture beside their file, or source
+    /// lyrics changed after `since`, in unix seconds.
     pub async fn source_changed_since(
         &self,
         source: &SourceId,
@@ -69,6 +71,13 @@ impl Catalog {
             "SELECT track.object_id FROM tracks track JOIN track_details details USING(track_key)
              JOIN files file ON file.source_key=track.source_key AND file.path IN(details.source_path,details.cue_path)
              WHERE track.source_key={SOURCE_KEY} AND track.indexed=1 AND track.object_id IS NOT NULL AND file.mtime_ns>?2
+             UNION
+             SELECT track.object_id FROM (SELECT DISTINCT root,rtrim(relative_path,replace(relative_path,'/','')) directory FROM files
+                 WHERE source_key={SOURCE_KEY} AND kind='image' AND mtime_ns>?2) image
+             JOIN files file ON file.source_key={SOURCE_KEY} AND file.kind='media' AND file.root=image.root
+                 AND rtrim(file.relative_path,replace(file.relative_path,'/',''))=image.directory
+             JOIN track_details details ON details.source_path=file.path JOIN tracks track USING(track_key)
+             WHERE track.indexed=1 AND track.object_id IS NOT NULL
              UNION
              SELECT track.object_id FROM lyrics_cache lyrics JOIN tracks track ON track.media_uri=lyrics.media_uri
              WHERE lyrics.authority='source' AND lyrics.updated_at>?3 AND track.source_key={SOURCE_KEY}
@@ -82,8 +91,8 @@ impl Catalog {
     }
 
     /// The source's indexed tracks of `ids` as observations: object ids, metadata,
-    /// root-relative paths, the CUE window, audio keys and source lyrics. They name no media
-    /// URI, picture or user state.
+    /// root-relative paths, the CUE window, audio keys, the picture shown here and source
+    /// lyrics. They name no media URI or user state.
     pub async fn source_observations(
         &self,
         source: &SourceId,
@@ -91,7 +100,7 @@ impl Catalog {
     ) -> LibraryResult<Vec<TrackObservation>> {
         let mut connection = self.acquire_reader().await?;
         let rows: Vec<ObservedTrack> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT track.object_id,album.object_id album_object_id,{} metadata,
+            "SELECT track.track_key,track.object_id,album.object_id album_object_id,{} metadata,
                 file.relative_path source_path,cue.relative_path cue_path,details.cue_start_millis,details.cue_end_millis,
                 track.first_seen_at,details.audio_revision,details.audio_hash,
                 (SELECT lyrics FROM lyrics_cache WHERE media_uri=track.media_uri AND authority='source' AND role='original' AND language='' AND script='') source_lyrics
@@ -108,9 +117,12 @@ impl Catalog {
         .bind(serde_json::to_string(ids)?)
         .fetch_all(&mut *connection)
         .await?;
+        let arts = self.arts(rows.iter().map(|row| Some(Owner::Track(row.track_key))));
+        let pictures = crate::catalog::fetch::bindings(&mut connection, &arts).await?;
         let hash = |bytes: Option<Vec<u8>>| bytes.and_then(|bytes| bytes.try_into().ok());
         rows.into_iter()
-            .map(|row| {
+            .zip(pictures)
+            .map(|(row, artwork_binding)| {
                 Ok(TrackObservation {
                     object_id: row.object_id,
                     album_object_id: row.album_object_id,
@@ -123,6 +135,7 @@ impl Catalog {
                     audio_revision: hash(row.audio_revision),
                     audio_hash: hash(row.audio_hash),
                     source_lyrics: row.source_lyrics,
+                    artwork_binding,
                     ..Default::default()
                 })
             })
