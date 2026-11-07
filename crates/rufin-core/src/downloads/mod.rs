@@ -956,7 +956,7 @@ impl Downloads {
                 events: DownloadEvents {
                     sender: events,
                     status,
-                    counts_dirty: Mutex::new(HashSet::new()),
+                    counts: Mutex::new(HashMap::new()),
                 },
                 transfers: Arc::new(TransferClients::default()),
                 prepared_rules,
@@ -1568,11 +1568,7 @@ impl Actor {
         {
             attachment_error = Some(error);
         }
-        self.events
-            .counts_dirty
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(group.clone());
+        (self.events.counts.lock().unwrap_or_else(|p| p.into_inner())).insert(group.clone(), None);
         let mut jobs = if let Some(jobs) = self.jobs.get(&group) {
             jobs.clone()
         } else {
@@ -1675,6 +1671,7 @@ impl Actor {
             .save_download(&file)
             .await
             .map_err(|error| error.to_string())?;
+        self.events.counted(previous.as_ref(), Some(&file));
         self.retire_previous_files(&mut file).await?;
         Ok(true)
     }
@@ -2317,11 +2314,7 @@ impl Actor {
             .save_download(&file)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
-        self.events
-            .counts_dirty
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(source_id.clone());
+        self.events.counted(previous.as_ref(), Some(&file));
         if let Err(error) = self.retire_previous_files(&mut file).await {
             let _ = self.events.send(DownloadEvent::Notice(error)).await;
         }
@@ -2656,15 +2649,9 @@ impl Actor {
         let mut file = file.clone();
         self.retire_previous_files(&mut file).await?;
         let removed = self.remove_representation_bytes(&file).await?;
-        self.catalog
-            .forget_download(&file)
-            .await
-            .map_err(|error| error.to_string())?;
-        self.events
-            .counts_dirty
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(file.source_id.clone().map(SourceId::new));
+        if (self.catalog.forget_download(&file).await).map_err(|error| error.to_string())? {
+            self.events.counted(Some(&file), None);
+        }
         Ok(removed)
     }
 
@@ -2948,19 +2935,15 @@ impl Actor {
             .iter()
             .find(|queue| queue.source_id == group)
             .map(|queue| queue.downloaded_tracks);
-        let changed = self
-            .events
-            .counts_dirty
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&group);
-        let downloaded_tracks = if changed || previous.is_none() {
-            self.catalog
+        let change = (self.events.counts.lock().unwrap_or_else(|p| p.into_inner())).remove(&group);
+        let downloaded_tracks = match (previous, change) {
+            (Some(previous), None) => previous,
+            (Some(previous), Some(Some(change))) => previous.saturating_add_signed(change),
+            _ => self
+                .catalog
                 .downloaded_count(source_id.map(SourceId::as_str))
                 .await
-                .unwrap_or_default() as u64
-        } else {
-            previous.unwrap()
+                .unwrap_or_default() as u64,
         };
         let _ = self
             .events
@@ -3682,7 +3665,7 @@ mod tests {
             events: DownloadEvents {
                 sender: events,
                 status: tokio::sync::watch::channel(DownloadStatus::default()).0,
-                counts_dirty: Mutex::new(HashSet::new()),
+                counts: Mutex::new(HashMap::new()),
             },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
@@ -3953,10 +3936,30 @@ pub struct DownloadPage {
 struct DownloadEvents {
     sender: Sender<DownloadEvent>,
     status: tokio::sync::watch::Sender<DownloadStatus>,
-    counts_dirty: Mutex<HashSet<Option<SourceId>>>,
+    /// Per source, downloaded tracks gained or lost since the last publish; None counts again.
+    counts: Mutex<HashMap<Option<SourceId>, Option<i64>>>,
 }
 
 impl DownloadEvents {
+    /// Counts a record that went and one that came, at the source each one keeps.
+    fn counted(
+        &self,
+        before: Option<&library::DownloadFile>,
+        after: Option<&library::DownloadFile>,
+    ) {
+        let before = before.map(|file| file.source_id.clone());
+        // A record saved without a source keeps the one it had.
+        let after = after.map(|file| file.source_id.clone().or(before.clone().flatten()));
+        let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+        for (source, change) in [(before, -1), (after, 1)] {
+            if let Some(source) = source
+                && let Some(count) = counts.entry(source.map(SourceId::new)).or_insert(Some(0))
+            {
+                *count += change;
+            }
+        }
+    }
+
     fn update(&self, event: &DownloadEvent) {
         self.status.send_if_modified(|state| {
             match event {

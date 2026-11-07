@@ -82,8 +82,8 @@ impl Catalog {
         Ok(())
     }
 
-    /// Forgets the record of a copy.
-    pub async fn forget_download(&self, file: &DownloadFile) -> LibraryResult<()> {
+    /// Forgets the record of a copy; false when it had none.
+    pub async fn forget_download(&self, file: &DownloadFile) -> LibraryResult<bool> {
         let mut write = self.write().await?;
         let removed = sqlx::query("DELETE FROM downloads WHERE media_uri=?1 AND path=?2")
             .bind(&file.media_uri)
@@ -96,7 +96,7 @@ impl Catalog {
             write.read_downloads(&[&file.media_uri]).await?;
         }
         write.commit().await?;
-        Ok(())
+        Ok(removed)
     }
 
     pub async fn download_files_page(
