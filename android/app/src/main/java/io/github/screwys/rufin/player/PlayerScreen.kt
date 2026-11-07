@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
@@ -288,7 +289,7 @@ private fun PlayerCover(player: PlayerConnection, artwork: PlayerArtwork?, modif
         binding?.let { player.bridge?.artworkIdentity(it.toByteArray()) }
     }
     val cover = identity to artwork
-    updateTransition(cover, label = "playerArtwork").Crossfade(modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)),
+    updateTransition(cover, label = "playerArtwork").Crossfade(modifier.aspectRatio(1f).clip(CoverShape),
         animationSpec = tween(if (duration == 0) 0 else 220), contentKey = { it.first }) { (_, artwork) ->
         Artwork(artwork, Modifier.fillMaxSize())
     }

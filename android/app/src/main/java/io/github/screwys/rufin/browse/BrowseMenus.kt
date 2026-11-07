@@ -31,6 +31,7 @@ import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalDensity
@@ -377,7 +378,7 @@ internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, favo
         contentColor = MaterialTheme.colorScheme.onSurface) {
     Row(Modifier.fillMaxWidth().padding(12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Artwork(artwork, Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)))
+        Artwork(artwork, Modifier.size(64.dp).clip(CoverShape))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             title()
             if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
@@ -518,7 +519,7 @@ internal fun PlaylistPickerSheet(
                     val artwork = rememberArtwork(playlist.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
                     ListItem(headlineContent = { BrowseTitle(favoriteItem(model, choice), player = player) },
                         supportingContent = { Text(playlist.subtitle, maxLines = 1) },
-                        leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
+                        leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(CoverShape)) },
                         modifier = Modifier.clickable {
                         model.runAction {
                             if (folderKind != null) {

@@ -6,7 +6,7 @@ import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
@@ -51,7 +51,7 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
                 ListItem(headlineContent = { BrowseTitle(page.shown(item), player = player) },
                     supportingContent = { if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     leadingContent = {
-                        Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))
+                        Artwork(artwork, Modifier.size(50.dp).clip(CoverShape))
                     },
                     trailingContent = {
                         item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }

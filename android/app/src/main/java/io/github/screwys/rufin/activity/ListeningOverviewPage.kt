@@ -17,7 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -196,7 +196,7 @@ private fun OverviewSwitch(more: MoreConnection, label: String, checked: Boolean
 private fun OverviewRow(title: String, subtitle: String, plays: Long, binding: ByteArray?, player: PlayerConnection, open: () -> Unit) {
     val artwork = rememberArtwork(binding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
     ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) }, trailingContent = { Text(plays.toString()) },
-        leadingContent = { Artwork(artwork, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) },
+        leadingContent = { Artwork(artwork, Modifier.size(48.dp).clip(CoverShape)) },
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         modifier = Modifier.clickable(onClick = open))
 }

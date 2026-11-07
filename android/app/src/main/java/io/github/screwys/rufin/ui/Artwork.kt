@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -132,6 +133,8 @@ internal fun playerArtwork(image: AndroidArtwork): PlayerArtwork {
     )
     return PlayerArtwork(bitmap, color)
 }
+
+internal val CoverShape = RoundedCornerShape(8.dp)
 
 @Composable
 internal fun Artwork(artwork: PlayerArtwork?, modifier: Modifier = Modifier, description: String? = null) {
