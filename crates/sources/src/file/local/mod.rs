@@ -664,7 +664,9 @@ impl walk::FileSource for LocalFiles<'_> {
                 .contains(&path.to_owned())
                 .then(|| (path.to_owned(), String::new(), String::new()));
         }
-        let path = std::path::Path::new(path);
+        // Roots are canonical, so a path given through a symlink (macOS /var) is too.
+        let path = scan::normalize_observed_path(std::path::Path::new(path));
+        let path = path.as_path();
         let root = self
             .walked()
             .filter(|root| path.starts_with(root))
