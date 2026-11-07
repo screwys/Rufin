@@ -33,7 +33,8 @@ pub struct FileBatch {
     /// An accepted CUE's path and its input paths, in sheet order.
     pub inputs: Vec<(String, Vec<String>)>,
     pub removed: Vec<LocalFileWrite>,
-    /// Media paths whose whole-file tracks hide: an accepted CUE took them over.
+    /// Media paths whose whole-file tracks hide: an accepted CUE took them over, or the
+    /// imported file is gone.
     pub hidden: Vec<String>,
     pub tracks: Vec<TrackObservation>,
     /// A vanished media path and the new path the same file was listed at.
@@ -193,12 +194,13 @@ impl super::Observation<'_> {
                 .bind(source).bind(serde_json::to_string(&released)?).fetch_all(write.connection().await?).await?.into_iter().collect();
             released.retain(|path| !owned.contains(path));
         }
-        // A staged file's tracks it no longer yields hide, as do the tracks of vanished files
-        // and the whole-file tracks a CUE sheet took over.
+        // A read file's tracks it no longer yields hide, as do the tracks of vanished files
+        // and the whole-file tracks a CUE sheet took over. A failed read replaces nothing.
         let owners = batch
             .files
             .iter()
             .filter(|file| matches!(file.kind, LocalFileKind::Media | LocalFileKind::Cue))
+            .filter(|file| file.state != LocalFileState::Unreadable)
             .map(|file| file.path.as_str())
             .chain(removed.iter().map(String::as_str))
             .collect::<Vec<_>>();

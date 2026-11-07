@@ -695,8 +695,11 @@ impl walk::FileSource for LocalFiles<'_> {
                 if !kind.is_file() && !kind.is_dir() {
                     continue;
                 }
-                let Ok(metadata) = entry.metadata() else {
-                    continue;
+                // An entry removed since the listing is gone; one that cannot be read fails it.
+                let metadata = match entry.metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(SourceError::Other(error.to_string())),
                 };
                 entries.push(self::entry(name, &metadata));
             }

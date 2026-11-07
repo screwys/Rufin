@@ -1012,6 +1012,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
                     let mut file = row.file;
                     file.state = LocalFileState::Unreadable;
                     self.directories.extend(parent_directory(&file.path));
+                    self.batch.hidden.push(file.path.clone());
                     self.batch.files.push(file);
                 }
             }
