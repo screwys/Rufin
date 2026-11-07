@@ -717,8 +717,10 @@ fn track_json(
     include_preview: bool,
 ) -> Value {
     let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite});
-    let links = library::Row::Track(library::TrackRow::from(track.clone()));
-    page::links(products, scope, &links, &mut row);
+    let shown = library::Row::Track(library::TrackRow::from(track.clone()));
+    page::links(products, scope, &shown, &mut row);
+    let settings = products.settings.load();
+    row["menu"] = json!(rufin_core::menu::menu(&products.source, &settings, &shown));
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }

@@ -178,40 +178,23 @@ function showQueue(value) {
   }
 }
 
+// A queue entry's menu: core's track menu, with its plays moving the entry.
 function showQueueMenu(row, anchor, event) {
-  const track = row.track, destination = goToMenu(track);
-  showMenu(
-    [
-      [tr("Play"), () => api("/queue/activate", "POST", { position: row.position })],
-      [tr("Play Next"), () => api("/queue/next", "POST", { position: row.position })],
-      [
-        tr("Play Later"),
-        () =>
-          api("/queue/reorder", "POST", { positions: [row.position], before: null }),
-      ],
-      radioMenu({ kind: "track", uri: track.uri }),
-      null,
-      playlistMenu({ uris: [track.uri] }),
-      [
-        track.favorite
-          ? tr("Remove from Favorites")
-          : tr("Add to Favorites"),
-        () => setFavorite(track),
-      ],
-
-      [
-        tr("Remove from Queue"),
-        () =>
-          api(
-            `/queue/item?${new URLSearchParams({ position: row.position })}`,
-            "DELETE",
-          ),
-      ],
-      ...(destination ? [null, destination] : []),
-    ],
-    anchor,
-    event,
-  );
+  const track = row.track, menu = track.menu, actions = [];
+  const position = { position: row.position };
+  if (menu.play) actions.push([tr("Play"), () => api("/queue/activate", "POST", position)]);
+  if (menu.play_next) actions.push([tr("Play Next"), () => api("/queue/next", "POST", position)]);
+  if (menu.play_later)
+    actions.push([tr("Play Later"), () => api("/queue/reorder", "POST", { positions: [row.position], before: null })]);
+  if (menu.radio) actions.push(radioMenu(menu.radio));
+  actions.push(null);
+  if (menu.add_to_playlist) actions.push(playlistMenu({ uris: [track.uri] }));
+  if (menu.favorite)
+    actions.push([track.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"), () => setFavorite(track)]);
+  actions.push([tr("Remove from Queue"), () => api(`/queue/item?${new URLSearchParams(position)}`, "DELETE")]);
+  const destination = menu.go_to && goToMenu(track);
+  if (destination) actions.push(null, destination);
+  showMenu(actions, anchor, event);
 }
 
 function init() {
