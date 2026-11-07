@@ -945,8 +945,8 @@ impl Player {
             Command::Seek(position_millis) => Ok(self.seek(position_millis)),
             Command::SetVolume(volume) => Ok(self.set_volume(volume)),
             Command::SetMuted(muted) => Ok(self.set_muted(muted)),
-            Command::PersistVolume(volume) => {
-                self.set_volume(volume);
+            // The volume set since is saved as it is now, muted or not.
+            Command::PersistVolume(_) => {
                 if self.playback_output.is_local() {
                     self.owner().persist_output(
                         self.settings.volume,
