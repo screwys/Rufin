@@ -2,7 +2,7 @@
 //! queue; "Continue from" restores another device's queue here, and casting sends this
 //! device's queue to another device, which streams its playback state back.
 use super::{
-    ConnectOwner, Control, Presence, Request, Session, Stream,
+    ConnectOwner, Control, Request, Session, Stream,
     records::{Copy as TrackCopy, Item, Records},
 };
 use crate::playback::state::ContinuedListen;
@@ -14,11 +14,8 @@ use rufin_connect::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{pin::Pin, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt};
-
-/// How long Continue waits for a playing device to record where it paused.
-const PAUSED: Duration = Duration::from_secs(3);
 
 /// A queue entry as it leaves this device.
 #[derive(Clone, Serialize, Deserialize)]
@@ -339,17 +336,12 @@ impl Records {
 
     /// The queue another device recorded, at its session's position; none when it recorded
     /// no current entry.
-    #[allow(clippy::type_complexity)]
-    async fn queue_of(
-        &self,
-        device: &str,
-    ) -> Result<Option<(library::QueueRestore, bool, Option<ContinuedListen>)>, String> {
-        let Some(session) = self
+    async fn queue_of(&self, device: &str) -> Result<Option<Cast>, String> {
+        let Some((current, session)) = self
             .sessions
             .borrow()
             .get(device)
-            .cloned()
-            .filter(|session| session.current.is_some())
+            .and_then(|session| Some((session.current.as_ref()?.0, session.clone())))
         else {
             return Ok(None);
         };
@@ -364,20 +356,19 @@ impl Records {
         else {
             return Ok(None);
         };
-        let entries = self.entries(queue.items).await?;
-        Ok(Some((
-            library::QueueRestore {
-                entries: entries.into(),
-                order: queue.order.into(),
-                current_index: session.current.map(|(position, _)| position),
-                progress_millis: session.position_ms,
-                repeat_mode: queue.repeat,
-                shuffled: queue.shuffle,
-                ..Default::default()
-            },
-            queue.auto_dj,
-            session.listen,
-        )))
+        Ok(Some(Cast {
+            items: queue.items,
+            order: queue.order,
+            current,
+            position_ms: session.position_ms,
+            playing: false,
+            repeat: queue.repeat,
+            shuffle: queue.shuffle,
+            auto_dj: queue.auto_dj,
+            placement: None,
+            target: None,
+            listen: session.listen,
+        }))
     }
 }
 
@@ -468,51 +459,31 @@ impl ConnectOwner {
         });
     }
 
-    /// Takes over another device's queue at its position. A device that plays is paused first,
-    /// so its session records where it stopped; an unreachable one is continued from its
-    /// records here. False when that device recorded nothing to continue.
-    pub(crate) async fn continue_from(
-        self: &Arc<Self>,
-        peer: &str,
-        playing: bool,
-    ) -> Result<bool, String> {
-        let session = self.active()?;
-        let records = &session.records;
-        let presence = self
-            .request(peer, Request::Presence)
-            .await
-            .ok()
-            .and_then(|answer| serde_json::from_value::<Presence>(answer).ok());
-        if let Some(presence) = presence {
-            if presence.playing {
-                let before = records.sessions.borrow().get(peer).map(|value| value.at);
-                let mut sessions = records.sessions.subscribe();
-                self.request(
-                    peer,
-                    Request::Control {
-                        command: Control::Pause,
-                    },
-                )
-                .await?;
-                let _ = tokio::time::timeout(
-                    PAUSED,
-                    sessions.wait_for(|sessions| sessions.get(peer).map(|value| value.at) > before),
-                )
-                .await;
-            } else {
-                self.pull_when_behind(&session, peer, presence.sequence)
-                    .await;
-            }
-        }
-        let Some((queue, auto_dj, listen)) = records.queue_of(peer).await? else {
+    /// Takes over another device's queue at its position. A device online pauses and hands
+    /// its playback over as it stopped; one away is continued from its records here. False
+    /// when that device has nothing to continue.
+    pub(crate) async fn continue_from(&self, peer: &str, playing: bool) -> Result<bool, String> {
+        let records = Arc::clone(&self.active()?.records);
+        let cast = match self.request(peer, Request::Handoff).await {
+            Ok(answer) => serde_json::from_value::<Option<Cast>>(answer).map_err(string_error)?,
+            Err(_) => records.queue_of(peer).await?,
+        };
+        let Some(cast) = cast else {
             return Ok(false);
         };
-        self.playback.continue_queue(queue, playing, listen).await?;
-        let playback = Arc::clone(&self.playback);
-        tokio::task::spawn_blocking(move || playback.send_cast_auto_dj(auto_dj))
-            .await
-            .map_err(string_error)?;
+        self.receive_cast(Cast { playing, ..cast }).await?;
         Ok(true)
+    }
+
+    pub(super) async fn answer_handoff(&self) -> Result<Option<Cast>, String> {
+        let playback = Arc::clone(&self.playback);
+        let queue = tokio::task::spawn_blocking(move || playback.hand_off())
+            .await
+            .map_err(string_error)??;
+        if queue.current_index.is_none() || queue.entries.is_empty() {
+            return Ok(None);
+        }
+        self.cast_of(&queue, false, None).await.map(Some)
     }
 
     /// Plays `queue` on another device: from its current entry at its position, or at
@@ -524,6 +495,16 @@ impl ConnectOwner {
         playing: bool,
         placement: Option<(QueuePlacement, Option<QueueReorderTarget>)>,
     ) -> Result<(), String> {
+        let cast = self.cast_of(queue, playing, placement).await?;
+        self.request(peer, Request::Cast(cast)).await.map(drop)
+    }
+
+    async fn cast_of(
+        &self,
+        queue: &library::QueueRestore,
+        playing: bool,
+        placement: Option<(QueuePlacement, Option<QueueReorderTarget>)>,
+    ) -> Result<Cast, String> {
         let records = Arc::clone(&self.active()?.records);
         let (placement, target) = placement.unzip();
         // The receiver that takes the queue over at its position carries on its listen.
@@ -531,7 +512,7 @@ impl ConnectOwner {
             None => self.playback.current_listen().await,
             Some(_) => None,
         };
-        let cast = Cast {
+        Ok(Cast {
             items: records.queue_items(&queue.entries).await?,
             order: queue.order.to_vec(),
             current: queue.current_index.unwrap_or_default(),
@@ -543,8 +524,7 @@ impl ConnectOwner {
             placement,
             target: target.flatten(),
             listen,
-        };
-        self.request(peer, Request::Cast(cast)).await.map(drop)
+        })
     }
 
     pub(super) async fn receive_cast(&self, cast: Cast) -> Result<(), String> {

@@ -301,6 +301,8 @@ enum Request {
         command: Control,
     },
     Cast(session::Cast),
+    /// Pause, and answer the queue where it stopped, for this device to continue it.
+    Handoff,
     /// The whole queue, for a selection of it.
     Queue,
     QueuePage {
@@ -338,7 +340,6 @@ enum Stream {
 #[derive(Serialize, Deserialize)]
 struct Presence {
     sequence: i64,
-    playing: bool,
     /// The routes the device knows to the profile's devices, so devices that joined through
     /// it reach each other.
     addresses: Vec<rufin_connect::EndpointAddr>,
@@ -1327,8 +1328,6 @@ impl ConnectOwner {
         let answer = match serde_json::from_slice(body).map_err(string_error)? {
             Request::Presence => {
                 let session = self.active()?;
-                let playing = (self.playback.current_projection())
-                    .is_some_and(|projection| projection.view.transport.desired_playing);
                 let addresses = self
                     .network
                     .lock()
@@ -1343,7 +1342,6 @@ impl ConnectOwner {
                         .sequence()
                         .await
                         .map_err(string_error)?,
-                    playing,
                     addresses,
                 })
                 .map_err(string_error)?
@@ -1382,6 +1380,9 @@ impl ConnectOwner {
             Request::Cast(cast) => {
                 self.receive_cast(cast).await?;
                 serde_json::Value::Null
+            }
+            Request::Handoff => {
+                serde_json::to_value(self.answer_handoff().await?).map_err(string_error)?
             }
             Request::Queue => {
                 serde_json::to_value(self.answer_queue().await?).map_err(string_error)?

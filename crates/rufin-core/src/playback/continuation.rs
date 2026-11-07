@@ -143,6 +143,13 @@ impl PlaybackOwner {
         .map_err(string_error)
     }
 
+    /// Pauses, and returns the queue where it stopped, for a device that continues it.
+    pub(crate) fn hand_off(&self) -> Result<library::QueueRestore, String> {
+        self.pause();
+        let active = self.active().ok_or("Playback is unavailable")?;
+        Ok(active.handoff_snapshot().map_err(string_error)?.0)
+    }
+
     /// The listen of the track this device plays, for a device that continues it.
     pub(crate) async fn current_listen(&self) -> Option<ContinuedListen> {
         let active = self.active()?;
