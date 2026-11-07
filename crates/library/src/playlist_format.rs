@@ -277,7 +277,7 @@ impl PlaylistFileEntry {
             .preserved
             .clone()
             .unwrap_or_else(|| PlaylistEntryWrite {
-                object_id: format!("playlist:{position}"),
+                object_id: String::new(),
                 position,
                 track: crate::TrackReference {
                     media_uri: self.locator.clone(),
@@ -463,9 +463,6 @@ pub(crate) async fn import_playlist_on(
         }
         let mut entry = item.to_entry(entries.len() as i64);
         entry.track.media_uri = uri;
-        if entry.object_id.is_empty() {
-            entry.object_id = format!("playlist:{}", entries.len());
-        }
         entries.push(entry);
     }
     let imported = entries.len() as u64;

@@ -1028,6 +1028,8 @@ async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
                 "(SELECT track_key FROM tracks WHERE media_uri=old.media_uri)",
             ),
             ("rank", rank.as_str()),
+            // An imported entry was numbered within its playlist; ids are global.
+            ("object_id", "CASE WHEN old.object_id GLOB 'playlist:[0-9]*' THEN 'rufin:entry:'||lower(hex(randomblob(16))) ELSE old.object_id END"),
         ],
         "true",
     )
