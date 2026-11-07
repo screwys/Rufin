@@ -415,11 +415,11 @@ impl PlexSource {
                 if item["type"].as_str() != Some("track") {
                     continue;
                 }
-                let (Some(raw), Some(entry)) =
-                    (id(&item["ratingKey"]), id(&item["playlistItemID"]))
-                else {
+                // A smart playlist's items carry no playlistItemID; each track appears once.
+                let Some(raw) = id(&item["ratingKey"]) else {
                     continue;
                 };
+                let entry = id(&item["playlistItemID"]).unwrap_or_else(|| raw.clone());
                 native.push((item, ItemResponse::Summary));
                 entries.push(library::PlaylistEntryObservation {
                     object_id: entry,
