@@ -420,54 +420,33 @@ impl Catalog {
                 "Playlist name cannot be empty".into(),
             ));
         }
-        let image = artwork.flatten();
-        let revision = image.map(|(bytes, _)| blake3::hash(bytes).to_hex().to_string());
         let mut write = self.write().await?;
         let transaction = write.connection().await?;
-        let binding = match &revision {
-            Some(revision) => {
-                let (source_id, object_id): (Option<String>, String) = sqlx::query_as("SELECT source.object_id,playlist.object_id FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist_key=?1").bind(playlist).fetch_one(&mut *transaction).await?;
-                Some(crate::artwork::playlist_binding(
-                    false,
-                    source_id,
-                    object_id,
-                    revision.clone(),
-                ))
-            }
-            None => None,
-        };
-        let row: Option<crate::catalog::write::PlaylistRow> =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "UPDATE main.playlists SET name=COALESCE(?2,name),
-             artwork_bytes=CASE WHEN ?3 THEN ?4 ELSE artwork_bytes END,
-             artwork_mime=CASE WHEN ?3 THEN ?5 ELSE artwork_mime END,
-             artwork_revision=CASE WHEN ?3 THEN ?6 ELSE artwork_revision END,
-             artwork_binding=CASE WHEN ?3 THEN ?7 ELSE artwork_binding END
-             WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable
-               AND ((?2 IS NOT NULL AND name IS NOT ?2) OR (?3 AND artwork_revision IS NOT ?6))
-             RETURNING {}",
-                crate::catalog::write::PLAYLIST_COLUMNS
-            )))
-            .bind(playlist)
-            .bind(name)
-            .bind(artwork.is_some())
-            .bind(image.map(|(bytes, _)| bytes))
-            .bind(image.and_then(|(_, mime)| mime))
-            .bind(revision)
-            .bind(binding)
-            .fetch_optional(&mut *transaction)
-            .await?;
-        let changed = row.is_some();
-        if changed && name.is_some() {
-            crate::playlist_links::mark_dirty_on(self, transaction, playlist).await?;
-        }
+        let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE main.playlists SET name=?2 WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable AND ?2 IS NOT NULL AND name IS NOT ?2 RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
+            .bind(playlist).bind(name).fetch_optional(&mut *transaction).await?;
+        let mut changed = row.is_some();
         if let Some(row) = row {
+            crate::playlist_links::mark_dirty_on(self, transaction, playlist).await?;
             write.put_playlist(row);
-            // The image itself is read by key.
             write.changed(Scope::Playlist {
                 key: playlist,
                 entries: false,
             });
+        }
+        if let Some(image) = artwork {
+            let object: Option<String> = sqlx::query_scalar("SELECT object_id FROM playlists WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable").bind(playlist).fetch_optional(write.connection().await?).await?;
+            if let Some(object_id) = object {
+                let (bytes, content_type) = image.unzip();
+                let image = PlaylistArtworkRecord {
+                    source_id: None,
+                    object_id,
+                    bytes: bytes.map(<[u8]>::to_vec),
+                    content_type: content_type.flatten().map(str::to_owned),
+                    artwork_binding: None,
+                    mosaic: None,
+                };
+                changed |= write_playlist_artwork(&mut write, &image).await?;
+            }
         }
         write.commit().await?;
         Ok(changed)
@@ -1469,11 +1448,11 @@ pub(crate) async fn import_playlists_jsonl_on(
 
 /// The one image writer of playlists and smart playlists by object id: a playlist of the
 /// record's source, else, for a record with no source, the smart playlist. A missing mosaic keeps
-/// the stored one.
+/// the stored one. Returns whether it changed one.
 pub(crate) async fn write_playlist_artwork(
     write: &mut Write<'_>,
     image: &PlaylistArtworkRecord,
-) -> LibraryResult<()> {
+) -> LibraryResult<bool> {
     let matched = "object_id=?1 AND (owner='rufin' OR source_key IS (SELECT source_key FROM sources WHERE object_id=?2))";
     let revision = image
         .bytes
@@ -1509,13 +1488,14 @@ pub(crate) async fn write_playlist_artwork(
             key,
             entries: false,
         });
-        return Ok(());
+        return Ok(true);
     }
     if image.source_id.is_some() {
-        return Ok(());
+        return Ok(false);
     }
     let smart: Option<crate::catalog::write::SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE smart_playlists SET artwork_bytes=?2,artwork_revision=?3,artwork_binding=?4,mosaic=coalesce(?5,mosaic) WHERE object_id=?1 AND (artwork_bytes,artwork_revision,artwork_binding,mosaic) IS NOT (?2,?3,?4,coalesce(?5,mosaic)) RETURNING {}", crate::catalog::write::SMART_COLUMNS)))
         .bind(&image.object_id).bind(&image.bytes).bind(&revision).bind(binding(true)).bind(&image.mosaic).fetch_optional(write.connection().await?).await?;
+    let changed = smart.is_some();
     if let Some(row) = smart {
         let key = crate::SmartPlaylistKey::from_raw(row.0);
         write.put_smart(row);
@@ -1524,7 +1504,7 @@ pub(crate) async fn write_playlist_artwork(
             object: image.object_id.clone(),
         });
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// Whether a playlist or playlist folder name holds `filter`, ignoring case: the one filter of

@@ -572,50 +572,29 @@ impl Catalog {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
         let mut write = self.write().await?;
-        let transaction = write.connection().await?;
-        let revision = artwork
-            .flatten()
-            .map(|bytes| blake3::hash(bytes).to_hex().to_string());
-        let binding = match &revision {
-            Some(revision) => {
-                let object: String = sqlx::query_scalar(
-                    "SELECT object_id FROM smart_playlists WHERE smart_playlist_key=?1",
-                )
-                .bind(key)
-                .fetch_one(&mut *transaction)
-                .await?;
-                Some(crate::artwork::playlist_binding(
-                    true,
-                    None,
-                    object,
-                    revision.clone(),
-                ))
-            }
-            None => None,
-        };
         let row: Option<crate::catalog::write::SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE smart_playlists
-             SET name=?2, normalized_name=lower(?2), definition_json=?3,
-                 artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
-                 artwork_revision=CASE WHEN ?4 THEN ?6 ELSE artwork_revision END, artwork_binding=CASE WHEN ?4 THEN ?7 ELSE artwork_binding END
-             WHERE smart_playlist_key=?1 RETURNING {}",
+            "UPDATE smart_playlists SET name=?2, normalized_name=lower(?2), definition_json=?3 WHERE smart_playlist_key=?1 RETURNING {}",
             crate::catalog::write::SMART_COLUMNS
         )))
         .bind(key)
         .bind(name)
         .bind(definition)
-        .bind(artwork.is_some())
-        .bind(artwork.flatten())
-        .bind(revision).bind(binding)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(write.connection().await?)
         .await?;
         let changed = row.is_some();
         if let Some(row) = row {
-            let object = row.5.clone();
+            let object_id = row.5.clone();
             write.put_smart(row);
-            // The image itself is read by key.
-            if artwork.is_some() {
-                write.changed(crate::catalog::write::Scope::Smart { key, object });
+            if let Some(bytes) = artwork {
+                let image = crate::playlists::PlaylistArtworkRecord {
+                    source_id: None,
+                    object_id,
+                    bytes: bytes.map(<[u8]>::to_vec),
+                    content_type: None,
+                    artwork_binding: None,
+                    mosaic: None,
+                };
+                crate::playlists::write_playlist_artwork(&mut write, &image).await?;
             }
         }
         write.commit().await?;
