@@ -139,8 +139,6 @@ struct DownloadJob {
     quality: DownloadQuality,
     #[serde(default)]
     completed: Vec<String>,
-    #[serde(default)]
-    failed: bool,
     remaining: VecDeque<String>,
     state: DownloadQueueState,
 }
@@ -303,7 +301,6 @@ async fn load_queue(
                     subject,
                     quality: job.quality,
                     completed,
-                    failed: false,
                     remaining: remaining.into(),
                     state: job.state,
                 });
@@ -1183,7 +1180,6 @@ impl Actor {
                 subject,
                 media_uris,
             } => {
-                let mut skipped = false;
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
                     grouped
@@ -1197,7 +1193,6 @@ impl Actor {
                         .is_some_and(|source_id| !self.attached.contains_key(source_id))
                     {
                         warn!(source_id=?source_id, "ignored a download for an unattached source");
-                        skipped = true;
                         continue;
                     }
                     let quality = source_id
@@ -1211,9 +1206,6 @@ impl Actor {
                     {
                         let _ = self.events.send(DownloadEvent::Feedback(feedback)).await;
                     }
-                }
-                if skipped {
-                    self.mark_subject_incomplete(&subject).await;
                 }
             }
             Command::LibraryChanged(changes) => self.library_changed(changes.as_deref()),
@@ -1710,7 +1702,6 @@ impl Actor {
                 .position(|job| job.subject == subject && job.quality == quality)
             {
                 let existing = &mut jobs[existing_index];
-                existing.failed = false;
                 let completed_now = completed.iter().collect::<HashSet<_>>();
                 existing
                     .remaining
@@ -1746,7 +1737,6 @@ impl Actor {
                     subject: subject.clone(),
                     quality,
                     completed,
-                    failed: false,
                     remaining: remaining.into(),
                     state: DownloadQueueState::Queued,
                 });
@@ -1892,7 +1882,6 @@ impl Actor {
                 subject: subject.clone(),
                 quality,
                 completed,
-                failed: false,
                 remaining: remaining.into(),
                 state,
             };
@@ -2204,7 +2193,6 @@ impl Actor {
             Ok(()) => self.remove_job_track(&source_id, &job_id, &media_uri, true),
             Err(DownloadFailure::Item(error)) => {
                 warn!(%error, source_id=?source_id, %media_uri, "could not download track");
-                self.mark_subject_incomplete(&subject).await;
                 self.remove_job_track(&source_id, &job_id, &media_uri, false);
                 true
             }
@@ -2552,22 +2540,6 @@ impl Actor {
         false
     }
 
-    async fn mark_subject_incomplete(&mut self, subject: &DownloadSubject) {
-        for (source, jobs) in &mut self.jobs {
-            let mut changed = false;
-            for job in jobs
-                .iter_mut()
-                .filter(|job| &job.subject == subject && !job.failed)
-            {
-                job.failed = true;
-                changed = true;
-            }
-            if changed && let Err(error) = persist_queue(&self.root, source.as_ref(), jobs).await {
-                warn!(%error, "could not save download progress");
-            }
-        }
-    }
-
     /// Lets the first waiting job of each queue try again; starting it asks for the source.
     fn retry_waiting(&mut self) {
         for jobs in self.jobs.values_mut() {
@@ -2595,22 +2567,6 @@ impl Actor {
     ) {
         let group = source_id.cloned();
         let remove = media_uris.iter().collect::<HashSet<_>>();
-        let subjects = self
-            .jobs
-            .get(&group)
-            .into_iter()
-            .flatten()
-            .filter(|job| {
-                job.remaining
-                    .iter()
-                    .chain(&job.completed)
-                    .any(|uri| remove.contains(uri))
-            })
-            .map(|job| job.subject.clone())
-            .collect::<HashSet<_>>();
-        for subject in subjects {
-            self.mark_subject_incomplete(&subject).await;
-        }
         for job in self.jobs.entry(group.clone()).or_default().iter_mut() {
             job.remaining
                 .retain(|media_uri| !remove.contains(media_uri));
@@ -2726,13 +2682,9 @@ impl Actor {
         active: &mut Vec<ActiveDownload>,
     ) {
         let group = source_id.cloned();
-        let subject = self
-            .jobs
-            .get(&group)
-            .and_then(|jobs| jobs.iter().find(|job| job.id == job_id))
-            .map(|job| job.subject.clone());
-        let Some(subject) = subject else { return };
-        self.mark_subject_incomplete(&subject).await;
+        if !(self.jobs.get(&group)).is_some_and(|jobs| jobs.iter().any(|job| job.id == job_id)) {
+            return;
+        }
         self.abort_matching(active, true, |download| {
             download.source_id.as_ref() == source_id && download.job_id == job_id
         })
@@ -2760,7 +2712,6 @@ impl Actor {
         else {
             return;
         };
-        self.mark_subject_incomplete(&job.subject).await;
         let completed = job
             .completed
             .into_iter()
@@ -2875,16 +2826,6 @@ impl Actor {
     }
 
     async fn clear(&mut self, source_id: &SourceId, notify: bool) {
-        let subjects = self
-            .jobs
-            .get(&Some(source_id.clone()))
-            .into_iter()
-            .flatten()
-            .map(|job| job.subject.clone())
-            .collect::<HashSet<_>>();
-        for subject in subjects {
-            self.mark_subject_incomplete(&subject).await;
-        }
         let staging_directory = self
             .attached
             .get(source_id)
@@ -3201,7 +3142,6 @@ mod tests {
                 ),
                 quality: DownloadQuality::Original,
                 completed: Vec::new(),
-                failed: false,
                 remaining: vec![media_uri.clone(), direct.clone()].into(),
                 state: DownloadQueueState::Queued,
             }],
@@ -3541,17 +3481,6 @@ mod tests {
                     task: tokio::spawn(std::future::pending()),
                 };
                 actor.finish(active, Ok(result), &mut Vec::new()).await;
-                if index == 0 && fail_first {
-                    let saved: QueueFile = serde_json::from_slice(
-                        &std::fs::read(source_directory(root.path(), None).join(QUEUE_FILE))
-                            .unwrap(),
-                    )
-                    .unwrap();
-                    assert!(
-                        saved.jobs[0].failed,
-                        "failure remains part of the pending download after restart"
-                    );
-                }
             }
         }
     }
@@ -3769,7 +3698,6 @@ mod tests {
             ),
             quality: DownloadQuality::Original,
             completed: Vec::new(),
-            failed: false,
             remaining: vec![media_uri].into(),
             state: DownloadQueueState::Downloading,
         }
