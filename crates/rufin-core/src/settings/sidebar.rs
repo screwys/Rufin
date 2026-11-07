@@ -198,6 +198,17 @@ impl SidebarSettings {
             home.visible = true;
         }
         self.route_items = sanitized;
+        // A Rufin playlist belongs to no source, whatever source a release saved its pin with.
+        for pin in &mut self.pins {
+            if let SidebarPin::Playlist {
+                source_id,
+                playlist_id,
+            } = pin
+                && playlist_id.starts_with("rufin:playlist:")
+            {
+                *source_id = None;
+            }
+        }
         let mut seen = HashSet::new();
         self.pins.retain(|pin| seen.insert(pin.clone()));
         let mut seen = HashSet::new();
@@ -427,4 +438,108 @@ mod tests {
         assert_eq!(settings.pin_drop_after(&second, &second), None);
         assert_eq!(settings.pin_drop_after(&pin("missing"), &second), None);
     }
+}
+
+/// A Home block as the block editor lists it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct HomeBlockRow {
+    pub block: library::HomeBlockKind,
+    /// Its title, untranslated.
+    pub title: String,
+    pub visible: bool,
+    /// Whether it can be shown or hidden: the last visible block stays.
+    pub can_toggle: bool,
+}
+
+/// The visible blocks in their order, then the hidden ones in their default order.
+pub(crate) fn home_block_rows(visible: &[library::HomeBlockKind]) -> Vec<HomeBlockRow> {
+    let order = home_block_order(visible);
+    order
+        .into_iter()
+        .map(|block| {
+            let shown = visible.contains(&block);
+            HomeBlockRow {
+                block,
+                title: super::presentation::home_block_title(block).into(),
+                visible: shown,
+                can_toggle: !shown || visible.len() > 1,
+            }
+        })
+        .collect()
+}
+
+fn home_block_order(visible: &[library::HomeBlockKind]) -> Vec<library::HomeBlockKind> {
+    let mut order = visible.to_vec();
+    order.extend(
+        library::HomeBlockKind::all()
+            .into_iter()
+            .filter(|block| !visible.contains(block)),
+    );
+    order
+}
+
+/// Shows a block where the rows list it, or hides it; hiding the last visible block is
+/// refused.
+pub(crate) fn set_home_block_visible(
+    blocks: &mut Vec<library::HomeBlockKind>,
+    block: library::HomeBlockKind,
+    visible: bool,
+) -> bool {
+    if visible == blocks.contains(&block) || (!visible && blocks.len() <= 1) {
+        return false;
+    }
+    if !visible {
+        blocks.retain(|shown| *shown != block);
+        return true;
+    }
+    let order = home_block_order(blocks);
+    let rank = |block: &library::HomeBlockKind| order.iter().position(|ordered| ordered == block);
+    let at = blocks
+        .iter()
+        .position(|shown| rank(shown) > rank(&block))
+        .unwrap_or(blocks.len());
+    blocks.insert(at, block);
+    true
+}
+
+/// Moves a visible block one place up (`delta` below zero) or down.
+pub(crate) fn move_home_block(
+    blocks: &mut [library::HomeBlockKind],
+    block: library::HomeBlockKind,
+    delta: isize,
+) -> bool {
+    let Some(index) = blocks.iter().position(|shown| *shown == block) else {
+        return false;
+    };
+    let next = if delta < 0 {
+        index.saturating_sub(1)
+    } else {
+        (index + 1).min(blocks.len().saturating_sub(1))
+    };
+    blocks.swap(index, next);
+    index != next
+}
+
+/// Moves a visible block before or after another.
+pub(crate) fn reorder_home_block(
+    blocks: &mut Vec<library::HomeBlockKind>,
+    source: library::HomeBlockKind,
+    target: library::HomeBlockKind,
+    after: bool,
+) -> bool {
+    if source == target || !blocks.contains(&target) {
+        return false;
+    }
+    let Some(index) = blocks.iter().position(|shown| *shown == source) else {
+        return false;
+    };
+    let before = blocks.clone();
+    let block = blocks.remove(index);
+    let target = blocks
+        .iter()
+        .position(|shown| *shown == target)
+        .map_or(blocks.len(), |at| at + usize::from(after));
+    blocks.insert(target, block);
+    *blocks != before
 }

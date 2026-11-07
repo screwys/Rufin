@@ -7,7 +7,7 @@ pub struct AndroidLibrary {
     pub(crate) source: SourceHandle,
     pub(crate) playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub(crate) settings: rufin_core::SettingsHandle,
-    pub(crate) database: Arc<library::Database>,
+    pub(crate) catalog: Arc<library::Catalog>,
     pub(crate) runtime: tokio::runtime::Handle,
 }
 
@@ -17,7 +17,7 @@ impl AndroidLibrary {
             source: products.source.clone(),
             playback: products.playback.clone(),
             settings: products.settings.clone(),
-            database: products.library.clone(),
+            catalog: products.library.clone(),
             runtime: products.runtime.clone(),
         }
     }
@@ -34,7 +34,8 @@ impl AndroidLibrary {
             .map_err(crate::host::error)
     }
 
-    pub fn track_item(&self, song: library::TrackView) -> crate::browse::AndroidBrowseRow {
-        song.into()
+    /// A queue track as a menu row. Menus show no columns.
+    pub fn track_item(&self, track: library::TrackView) -> crate::browse::AndroidBrowseRow {
+        library::Row::Track(track.into()).into()
     }
 }

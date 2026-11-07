@@ -10,38 +10,20 @@ pub struct AndroidPlaybackUpdate {
     pub queue_loading: bool,
     pub notices: Vec<playback::PlaybackNotice>,
     pub favorite: bool,
-    pub artwork_revision: u64,
     pub source_labels: Vec<String>,
 }
 
 #[derive(uniffi::Object)]
 pub struct AndroidPlaybackSubscription {
-    subscription: tokio::sync::Mutex<PlaybackChanges>,
+    subscription: tokio::sync::Mutex<playback::PlaybackSubscription>,
     settings: SettingsHandle,
-    updates: playback::PlaybackUpdates,
-    intents: std::sync::Arc<rufin_core::favorites::FavoriteIntents>,
-    artwork: artwork::Artwork,
-}
-
-struct PlaybackChanges {
-    playback: playback::PlaybackSubscription,
-    intents: tokio::sync::watch::Receiver<u64>,
 }
 
 impl AndroidPlaybackSubscription {
-    pub(crate) fn new(
-        products: &rufin_core::runtime::ProductHandles,
-        intents: std::sync::Arc<rufin_core::favorites::FavoriteIntents>,
-    ) -> Self {
+    pub(crate) fn new(products: &rufin_core::runtime::ProductHandles) -> Self {
         Self {
-            subscription: tokio::sync::Mutex::new(PlaybackChanges {
-                playback: products.playback.updates.subscribe(),
-                intents: intents.subscribe(),
-            }),
+            subscription: tokio::sync::Mutex::new(products.playback.updates.subscribe()),
             settings: products.settings.clone(),
-            updates: products.playback.updates.clone(),
-            artwork: products.artwork.clone(),
-            intents,
         }
     }
 }
@@ -49,27 +31,14 @@ impl AndroidPlaybackSubscription {
 #[uniffi::export]
 impl AndroidPlaybackSubscription {
     pub async fn next(&self) -> Result<AndroidPlaybackUpdate, AndroidError> {
-        let mut changes = self.subscription.lock().await;
-        let PlaybackChanges { playback, intents } = &mut *changes;
-        let (view, notices) = tokio::select! {
-            projection = playback.recv() => {
-                let projection = projection.map_err(error)?;
-                let (view, notices) = projection.map_or((None, Vec::new()), |p| (Some(std::sync::Arc::new(p.view)), p.notices));
-                (view, notices)
-            },
-            changed = intents.changed() => { changed.map_err(error)?; (self.updates.current(), Vec::new()) },
-        };
-        let mut favorite = false;
-        if let Some(current) = view
+        let projection = self.subscription.lock().await.recv().await.map_err(error)?;
+        let (view, notices) = projection.map_or((None, Vec::new()), |p| {
+            (Some(std::sync::Arc::new(p.view)), p.notices)
+        });
+        let favorite = view
             .as_ref()
             .and_then(|view| view.transport.current.as_ref())
-        {
-            let track = &current.row.track;
-            favorite = self.intents.projected_item_favorite(
-                &library::FavoriteTarget::Track(track.media_uri.clone()),
-                track.state.favorite,
-            );
-        }
+            .is_some_and(|current| current.row.track.state.favorite);
         let (transport, controls, queue, queue_loading) = view.as_ref().map_or_else(
             || {
                 let settings = self.settings.load();
@@ -113,7 +82,6 @@ impl AndroidPlaybackSubscription {
             queue_loading,
             notices,
             favorite,
-            artwork_revision: self.artwork.cache_revision(),
             source_labels,
         })
     }

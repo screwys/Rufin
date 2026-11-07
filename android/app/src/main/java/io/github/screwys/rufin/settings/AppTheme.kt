@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import io.github.screwys.rufin.ui.LocalShowDownloadedBadges
+import io.github.screwys.rufin.shared.rufin_core.AccentPreference
+import io.github.screwys.rufin.shared.rufin_core.ThemePreference
 
 internal val LocalTranslationRevision = staticCompositionLocalOf { 0 }
 internal val LocalReduceMotion = staticCompositionLocalOf { false }
@@ -20,10 +22,10 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
     LaunchedEffect(localeTags) { preferences.refreshSystemLanguage() }
     val state = preferences.state
     val systemDark = isSystemInDarkTheme()
-    val selected = state?.themes?.find { it.id == state.themeId }
-    val dark = selected?.dark ?: when (state?.themeId) { "light" -> false; "dark" -> true; else -> systemDark }
+    val selected = (state?.theme as? ThemePreference.Named)?.let { named -> state.themes.find { it.id == named.v1 } }
+    val dark = selected?.dark ?: when (state?.theme) { ThemePreference.Light -> false; ThemePreference.Dark -> true; else -> systemDark }
     val theme = selected ?: state?.themes?.find { it.id == if (dark) "builtin:dark" else "builtin:light" }
-    val systemAccent = selected == null && (state == null || state.accentId == "System")
+    val systemAccent = selected == null && (state == null || state.accent == AccentPreference.SYSTEM)
     val defaults = themeDefaults(dark, systemAccent)
     val colors = theme?.colors.orEmpty()
     val resolver = remember(colors) { ThemeColors(colors) }

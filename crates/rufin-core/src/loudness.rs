@@ -1,25 +1,31 @@
-//! Sequential bounded loudness analysis for one missing Track or Album.
+//! Sequential bounded loudness analysis for one missing Track or Album. While normalization
+//! is EBU R128 it follows the change feed: tracks added to the selected source, or a listing
+//! of it that changed something, start a pass over what is missing.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-use audio_processing::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
-use library::{Database, LoudnessMeasurement, ReadCancellation, SourceKey};
-use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
+use audio_processing::{
+    AnalyzedLoudness, DecodeError, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
+};
+use library::{
+    Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, SourcePhase, TrackKey,
+};
+use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use crate::playback::prepare_stream;
+use crate::features::{Feature, Pass};
+use crate::playback::{PlaybackOwner, prepare_stream};
+use crate::settings::{SettingsFile, StoredSettings};
 use crate::source::SourceOwner;
 
 struct ActiveAnalysis {
     source_key: SourceKey,
-    source_owner: Weak<SourceOwner>,
     cancelled: Arc<AtomicBool>,
     task: Option<tokio::task::AbortHandle>,
     restart: bool,
-    scope: LoudnessNormalizationScope,
-    write_tags: bool,
 }
 
 impl ActiveAnalysis {
@@ -33,51 +39,105 @@ impl ActiveAnalysis {
 
 pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
+    settings: SettingsFile,
+    source: Arc<SourceOwner>,
     active: Mutex<Option<ActiveAnalysis>>,
-    blocked: Mutex<AnalysisFailureBlock>,
+    /// Tracks whose audio itself could not be decoded, at the audio revision that failed: a
+    /// pass skips them until their audio changes.
+    failed: Arc<Failed>,
 }
 
-#[derive(Default)]
-struct AnalysisFailureBlock(Option<SourceKey>);
+type Failed = Mutex<HashMap<TrackKey, Option<[u8; 32]>>>;
 
-impl AnalysisFailureBlock {
-    fn blocks(&self, source: SourceKey) -> bool {
-        self.0 == Some(source)
+/// Analysis while normalization is EBU R128: tracks added to the selected source, or a listing
+/// of it that changed something, start a pass over what is missing.
+pub(crate) struct Normalization(pub(crate) Weak<PlaybackOwner>);
+
+impl Feature for Normalization {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        settings.ui.playback.loudness_normalization == playback::LoudnessNormalization::EbuR128
     }
 
-    fn record(&mut self, source: SourceKey) {
-        self.0 = Some(source);
+    /// A pass measures for the scope and tag writing it starts with.
+    fn restarts(&self, previous: &StoredSettings, current: &StoredSettings) -> bool {
+        let (before, now) = (&previous.ui.playback, &current.ui.playback);
+        (
+            before.loudness_normalization_scope,
+            before.write_ebu_r128_tags,
+        ) != (now.loudness_normalization_scope, now.write_ebu_r128_tags)
     }
 
-    fn clear(&mut self) {
-        self.0 = None;
+    fn stopped(&self) {
+        if let Some(playback) = self.0.upgrade() {
+            playback.loudness.cancel();
+        }
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Tracks { .. }
+                | Scope::Source {
+                    phase: SourcePhase::Completed,
+                    ..
+                }
+        )
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            let Some(playback) = self.0.upgrade() else {
+                return;
+            };
+            let Some(changes) = changes else {
+                playback.loudness.start();
+                return;
+            };
+            let selected = playback
+                .source
+                .selected_library()
+                .map(|selected| selected.source_key);
+            let changed =
+                changes
+                    .iter()
+                    .flat_map(|change| &change.scopes)
+                    .any(|scope| match scope {
+                        Scope::Reload => true,
+                        Scope::Tracks {
+                            source: Some(source),
+                            added: tracks,
+                            ..
+                        } => !tracks.is_empty() && Some(*source) == selected,
+                        // A listing that changed tracks may have given them new audio hashes.
+                        Scope::Source { key, .. } => Some(*key) == selected,
+                        _ => false,
+                    });
+            if changed {
+                playback.loudness.library_changed();
+            }
+        })
     }
 }
 
 impl LoudnessAnalysisOwner {
-    pub(crate) fn new(runtime: tokio::runtime::Handle) -> Arc<Self> {
+    pub(crate) fn new(
+        runtime: tokio::runtime::Handle,
+        settings: SettingsFile,
+        source: Arc<SourceOwner>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             runtime,
+            settings,
+            source,
             active: Mutex::new(None),
-            blocked: Mutex::new(AnalysisFailureBlock::default()),
+            failed: Arc::default(),
         })
     }
 
-    pub(crate) fn settings_changed(
-        self: &Arc<Self>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        source_owner: Option<Arc<SourceOwner>>,
-    ) {
-        if normalization != LoudnessNormalization::EbuR128 {
-            self.cancel();
-            return;
-        }
-        let Some(source_owner) = source_owner else {
-            self.cancel();
-            return;
-        };
+    /// Analyzes what the selected source misses, unless that runs already.
+    pub(crate) fn start(self: &Arc<Self>) {
+        let source_owner = Arc::clone(&self.source);
         let Some(selected) = source_owner.selected_library() else {
             self.cancel();
             return;
@@ -87,22 +147,19 @@ impl LoudnessAnalysisOwner {
             self.cancel();
             return;
         };
-        if self
-            .blocked
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .blocks(source_key)
-        {
-            return;
-        }
+        let stored = self.settings.load();
+        let playback = &stored.ui.playback;
+        let (scope, write_tags) = (
+            playback.loudness_normalization_scope,
+            playback.write_ebu_r128_tags,
+        );
         let cancelled = Arc::new(AtomicBool::new(false));
         {
             let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-            if active.as_ref().is_some_and(|current| {
-                current.source_key == source_key
-                    && current.scope == scope
-                    && current.write_tags == write_tags
-            }) {
+            if active
+                .as_ref()
+                .is_some_and(|current| current.source_key == source_key)
+            {
                 return;
             }
             if let Some(previous) = active.take() {
@@ -110,29 +167,28 @@ impl LoudnessAnalysisOwner {
             }
             *active = Some(ActiveAnalysis {
                 source_key,
-                source_owner: Arc::downgrade(&source_owner),
                 cancelled: Arc::clone(&cancelled),
                 task: None,
                 restart: false,
-                scope,
-                write_tags,
             });
         }
         let owner = Arc::downgrade(self);
         let task_cancelled = Arc::clone(&cancelled);
+        let failed = Arc::clone(&self.failed);
         let task = self.runtime.spawn(async move {
             info!(%source_key, "analyzing missing loudness data");
-            let failed = analyze_selected(
+            analyze_selected(
                 source_owner,
                 source_key,
                 configuration,
                 scope,
                 write_tags,
                 Arc::clone(&task_cancelled),
+                &failed,
             )
             .await;
             if let Some(owner) = owner.upgrade() {
-                owner.finish(&task_cancelled, normalization, scope, write_tags, failed);
+                owner.finish(&task_cancelled);
             }
         });
         let abort = task.abort_handle();
@@ -147,25 +203,13 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    pub(crate) fn library_changed(
-        self: &Arc<Self>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        source_owner: Option<Arc<SourceOwner>>,
-    ) {
-        let Some(source_owner) = source_owner else {
+    /// A source was selected, tracks were added to it or a listing changed it: a pass starts,
+    /// or the running one runs again when it ends.
+    pub(crate) fn library_changed(self: &Arc<Self>) {
+        let Some(selected) = self.source.selected_library() else {
             self.cancel();
             return;
         };
-        let Some(selected) = source_owner.selected_library() else {
-            self.cancel();
-            return;
-        };
-        self.blocked
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(current) = active
             .as_mut()
@@ -175,7 +219,7 @@ impl LoudnessAnalysisOwner {
             return;
         }
         drop(active);
-        self.settings_changed(normalization, scope, write_tags, Some(source_owner));
+        self.start();
     }
 
     pub(crate) fn cancel(&self) {
@@ -184,35 +228,17 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    fn finish(
-        self: &Arc<Self>,
-        cancelled: &Arc<AtomicBool>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        failed: bool,
-    ) {
+    fn finish(self: &Arc<Self>, cancelled: &Arc<AtomicBool>) {
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         let completed = active
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(&current.cancelled, cancelled))
             .then(|| active.take())
             .flatten();
-        let restart = completed.as_ref().and_then(|current| {
-            current
-                .restart
-                .then(|| current.source_owner.upgrade())
-                .flatten()
-        });
-        if failed && let Some(current) = completed.as_ref() {
-            self.blocked
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .record(current.source_key);
-        }
+        let restart = completed.is_some_and(|current| current.restart);
         drop(active);
-        if !failed && let Some(source_owner) = restart {
-            self.settings_changed(normalization, scope, write_tags, Some(source_owner));
+        if restart {
+            self.start();
         }
     }
 }
@@ -224,16 +250,17 @@ async fn analyze_selected(
     scope: LoudnessNormalizationScope,
     write_tags: bool,
     cancelled: Arc<AtomicBool>,
-) -> bool {
-    let database = Arc::clone(&source_owner.shared.database);
-    if write_tags && configuration.is_file_library() {
+    failed: &Failed,
+) {
+    let catalog = Arc::clone(&source_owner.shared.catalog);
+    if write_tags && configuration.is(library::SourceKind::file_library) {
         let owner = Arc::clone(&source_owner);
         let source_id = configuration.source_id.clone();
         let source = tokio::task::spawn_blocking(move || owner.client(&source_id)).await;
         if let Ok(Ok(source)) = source {
             let result = async {
                 source
-                    .backfill_file_r128_tags(&database, source_key)
+                    .backfill_file_r128_tags(&catalog, source_key)
                     .await
                     .map_err(|error| error.to_string())
             }
@@ -243,248 +270,319 @@ async fn analyze_selected(
             }
         }
     }
-    let mut album_after = None;
-    let mut track_after = None;
-    let mut albums_done = scope != LoudnessNormalizationScope::Album;
-    loop {
-        if cancelled.load(Ordering::Acquire) {
-            return false;
+    let analysis = Analysis {
+        source_owner: &source_owner,
+        catalog: &catalog,
+        configuration: &configuration,
+        source_key,
+        write_tags,
+        cancelled: &cancelled,
+        failed,
+    };
+    let result = async {
+        if scope == LoudnessNormalizationScope::Album {
+            analysis.albums().await?;
         }
-        if !albums_done {
-            match database
-                .next_missing_album_loudness(source_key, album_after, &ReadCancellation::new())
+        analysis.tracks().await
+    };
+    if let Err(error) = result.await {
+        warn!(%error, "loudness analysis stopped");
+    }
+}
+
+struct Analysis<'a> {
+    source_owner: &'a Arc<SourceOwner>,
+    catalog: &'a Catalog,
+    configuration: &'a SourceConfiguration,
+    source_key: SourceKey,
+    write_tags: bool,
+    cancelled: &'a Arc<AtomicBool>,
+    failed: &'a Failed,
+}
+
+impl Analysis<'_> {
+    /// Albums whose members' loudness is not stored: every member is decoded, unless hashing
+    /// the members finds the album stored.
+    async fn albums(&self) -> Result<(), String> {
+        let mut after = None;
+        loop {
+            let page = self
+                .catalog
+                .album_loudness_work(self.source_key, after, 16)
                 .await
-            {
-                Ok(Some(work)) => {
-                    let mut analyses = Vec::with_capacity(work.tracks.len());
-                    let mut track_tags = Vec::with_capacity(work.tracks.len());
-                    for track in &work.tracks {
-                        match analyze_uri(
-                            &source_owner,
-                            &database,
-                            &configuration,
-                            &track.media_uri,
-                            &cancelled,
-                        )
-                        .await
-                        {
-                            Ok(analysis) => {
-                                let value = analysis.measurement();
-                                let measurement = LoudnessMeasurement {
-                                    analysis_key: track.expected_analysis_key,
-                                    integrated_lufs: value.integrated_lufs,
-                                    true_peak: value.true_peak,
-                                    replay_gain_db: None,
-                                    replay_gain_peak: None,
-                                };
-                                if let Err(error) = database
-                                    .write_track_analyzed_loudness(
-                                        source_key,
-                                        track.track_key,
-                                        &measurement,
-                                    )
-                                    .await
-                                {
-                                    warn!(%error, "could not store Track loudness");
-                                    return true;
-                                }
-                                track_tags.push((track.track_key, value.integrated_lufs));
-                                analyses.push(analysis);
-                            }
-                            Err(error) => {
-                                warn!(%error, track_key=%track.track_key, "could not analyze Track loudness");
-                                analyses.clear();
-                                return true;
-                            }
+                .map_err(|error| format!("could not select Album loudness work: {error}"))?;
+            let Some(last) = page.last() else {
+                return Ok(());
+            };
+            after = Some(last.0);
+            for (_, tracks) in page {
+                if self.cancelled.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                let mut playables = Vec::with_capacity(tracks.len());
+                for track in tracks {
+                    match self.playable(track).await {
+                        Ok(playable) => playables.extend(playable),
+                        Err(()) => {
+                            playables.clear();
+                            break;
                         }
                     }
-                    if !analyses.is_empty() {
-                        match album_loudness(&analyses) {
-                            Ok(value) => {
-                                let measurement = LoudnessMeasurement {
-                                    analysis_key: work.expected_analysis_key,
-                                    integrated_lufs: value.integrated_lufs,
-                                    true_peak: value.true_peak,
-                                    replay_gain_db: None,
-                                    replay_gain_peak: None,
-                                };
-                                if let Err(error) = database
-                                    .write_album_analyzed_loudness(
-                                        source_key,
-                                        work.album_key,
-                                        &measurement,
-                                    )
-                                    .await
-                                {
-                                    warn!(%error, "could not store Album loudness");
-                                    return true;
-                                }
-                                if write_tags {
-                                    let measurements = track_tags
-                                        .iter()
-                                        .map(|(track, track_lufs)| {
-                                            (*track, *track_lufs, value.integrated_lufs)
-                                        })
-                                        .collect::<Vec<_>>();
-                                    if let Err(error) = write_local_tags(
-                                        &source_owner,
-                                        &database,
-                                        source_key,
-                                        &configuration,
-                                        &measurements,
-                                    )
-                                    .await
-                                    {
-                                        warn!(%error, "could not write EBU R128 tags");
-                                    }
-                                }
-                            }
-                            Err(error) => warn!(%error, "could not combine Album loudness"),
-                        }
-                    }
-                    album_after = Some(work.album_key);
+                }
+                // The last read saw every hash recorded before it.
+                if playables
+                    .last()
+                    .is_none_or(|playable| playable.gains.album_analysed.is_some())
+                {
                     continue;
                 }
-                Ok(None) => albums_done = true,
-                Err(error) => {
-                    warn!(%error, "could not select Album loudness work");
-                    return true;
-                }
-            }
-        }
-        match database
-            .next_missing_track_loudness(source_key, track_after, &ReadCancellation::new())
-            .await
-        {
-            Ok(Some(work)) => match analyze_uri(
-                &source_owner,
-                &database,
-                &configuration,
-                &work.media_uri,
-                &cancelled,
-            )
-            .await
-            {
-                Ok(analysis) => {
-                    let value = analysis.measurement();
-                    let measurement = LoudnessMeasurement {
-                        analysis_key: work.expected_analysis_key,
-                        integrated_lufs: value.integrated_lufs,
-                        true_peak: value.true_peak,
-                        replay_gain_db: None,
-                        replay_gain_peak: None,
+                let Some(hashes) = playables
+                    .iter()
+                    .map(|playable| playable.audio_hash)
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    continue;
+                };
+                let mut analyses = Vec::with_capacity(playables.len());
+                let mut track_tags = Vec::with_capacity(playables.len());
+                for (playable, hash) in playables.iter().zip(&hashes) {
+                    let Some(analysis) = self.analyze(playable).await else {
+                        break;
                     };
-                    if let Err(error) = database
-                        .write_track_analyzed_loudness(source_key, work.track_key, &measurement)
-                        .await
-                    {
-                        warn!(%error, "could not store Track loudness");
-                        return true;
+                    let value = analysis.measurement();
+                    self.store_track(*hash, value).await?;
+                    track_tags.push((playable.track, value.integrated_lufs));
+                    analyses.push(analysis);
+                }
+                // One member that cannot be decoded leaves the album without a value.
+                if analyses.len() < playables.len() {
+                    continue;
+                }
+                let value = match album_loudness(&analyses) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        warn!(%error, "could not combine Album loudness");
+                        continue;
                     }
-                    if write_tags {
-                        let measurements = [(work.track_key, value.integrated_lufs, None)];
-                        if let Err(error) = write_local_tags(
-                            &source_owner,
-                            &database,
-                            source_key,
-                            &configuration,
-                            &measurements,
-                        )
-                        .await
-                        {
-                            warn!(%error, "could not write EBU R128 tags");
-                        }
-                    }
-                    track_after = Some(work.track_key);
-                }
-                Err(error) => {
-                    warn!(%error, track_key=%work.track_key, "could not analyze Track loudness");
-                    return true;
-                }
-            },
-            Ok(None) => {
-                if album_after.is_none() && track_after.is_none() {
-                    return false;
-                }
-                // Access and metadata changes can invalidate already visited keys.
-                // Recheck from the beginning once both forward passes are exhausted.
-                album_after = None;
-                track_after = None;
-                albums_done = scope != LoudnessNormalizationScope::Album;
-            }
-            Err(error) => {
-                warn!(%error, "could not select Track loudness work");
-                return true;
+                };
+                self.catalog
+                    .put_album_loudness(&hashes, &measurement(value))
+                    .await
+                    .map_err(|error| format!("could not store Album loudness: {error}"))?;
+                let tags = track_tags
+                    .into_iter()
+                    .map(|(track, lufs)| (track, lufs, value.integrated_lufs))
+                    .collect::<Vec<_>>();
+                self.write_tags(&tags).await;
             }
         }
+    }
+
+    /// Tracks whose loudness is not stored for their audio.
+    async fn tracks(&self) -> Result<(), String> {
+        let mut after = None;
+        loop {
+            let page = self
+                .catalog
+                .loudness_work(self.source_key, after, 64)
+                .await
+                .map_err(|error| format!("could not select Track loudness work: {error}"))?;
+            let Some(&last) = page.last() else {
+                return Ok(());
+            };
+            after = Some(last);
+            for track in page {
+                if self.cancelled.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                let Ok(playable) = self.playable(track).await else {
+                    continue;
+                };
+                let Some(playable) = playable.filter(|playable| playable.gains.analysed.is_none())
+                else {
+                    continue;
+                };
+                let Some(hash) = playable.audio_hash else {
+                    continue;
+                };
+                let Some(analysis) = self.analyze(&playable).await else {
+                    continue;
+                };
+                let value = analysis.measurement();
+                self.store_track(hash, value).await?;
+                self.write_tags(&[(track, value.integrated_lufs, None)])
+                    .await;
+            }
+        }
+    }
+
+    /// The track's playable with its audio hash, None when it is gone. Err when its audio
+    /// could not be decoded at this audio revision, or its hash cannot be read now.
+    async fn playable(&self, track: TrackKey) -> Result<Option<Playable>, ()> {
+        let playable = match self.catalog.playable(track).await {
+            Ok(Some(playable)) => playable,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                warn!(%error, %track, "could not read Track for loudness");
+                return Err(());
+            }
+        };
+        let revision = playable.audio_revision;
+        if self
+            .failed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&track)
+            == Some(&revision)
+        {
+            return Err(());
+        }
+        with_audio_hash(self.catalog, playable)
+            .await
+            .map_err(|error| warn!(%error, "skipping loudness"))
+    }
+
+    async fn store_track(&self, hash: [u8; 32], value: AnalyzedLoudness) -> Result<(), String> {
+        self.catalog
+            .put_loudness(hash, &measurement(value))
+            .await
+            .map(drop)
+            .map_err(|error| format!("could not store Track loudness: {error}"))
+    }
+
+    async fn write_tags(&self, measurements: &[(TrackKey, Option<f64>, Option<f64>)]) {
+        if !self.write_tags || !self.configuration.is(library::SourceKind::file_library) {
+            return;
+        }
+        let owner = Arc::clone(self.source_owner);
+        let source_id = self.configuration.source_id.clone();
+        let result = async {
+            let source = tokio::task::spawn_blocking(move || owner.client(&source_id))
+                .await
+                .map_err(|error| error.to_string())??;
+            source
+                .write_file_r128_tags(self.catalog, self.source_key, measurements)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        .await;
+        if let Err(error) = result {
+            warn!(%error, "could not write EBU R128 tags");
+        }
+    }
+
+    /// The track's loudness, or None when its audio cannot be read or decoded; the pass goes on
+    /// without it. Audio that itself cannot be decoded is remembered at its audio revision.
+    async fn analyze(&self, playable: &Playable) -> Option<LoudnessAnalysis> {
+        debug!(track = %playable.track, "decoding for loudness");
+        let owner = Arc::clone(self.source_owner);
+        let stream = prepare_stream(
+            playable,
+            StreamRequest::new(&playable.media_uri, StreamQuality::Original),
+            Some(self.configuration),
+            Some(self.source_owner.downloads()),
+            move |source_id| async move {
+                tokio::task::spawn_blocking(move || owner.client(&source_id))
+                    .await
+                    .map_err(|error| error.to_string())?
+            },
+        )
+        .await;
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                warn!(track = %playable.track, %error, "could not open Track audio for loudness");
+                return None;
+            }
+        };
+        let cancelled = Arc::clone(self.cancelled);
+        let analysis = tokio::task::spawn_blocking(move || {
+            analyze_loudness_cancellable(&stream, || cancelled.load(Ordering::Acquire))
+        })
+        .await;
+        let error = match analysis {
+            Ok(Ok(analysis)) => return Some(analysis),
+            Ok(Err(error)) => error,
+            Err(error) => {
+                warn!(track = %playable.track, %error, "loudness worker stopped");
+                return None;
+            }
+        };
+        warn!(track = %playable.track, %error, "could not analyze Track loudness");
+        if let DecodeError::Content(_) = error {
+            self.failed
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(playable.track, playable.audio_revision);
+        }
+        None
     }
 }
 
-async fn write_local_tags(
-    source_owner: &Arc<SourceOwner>,
-    database: &Database,
-    source_key: SourceKey,
-    configuration: &SourceConfiguration,
-    measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
-) -> Result<(), String> {
-    if !configuration.is_file_library() {
-        return Ok(());
+fn measurement(value: AnalyzedLoudness) -> LoudnessMeasurement {
+    LoudnessMeasurement {
+        integrated_lufs: value.integrated_lufs,
+        true_peak: value.true_peak,
+        replay_gain_db: None,
+        replay_gain_peak: None,
     }
-    let owner = Arc::clone(source_owner);
-    let source_id = configuration.source_id.clone();
-    let source = tokio::task::spawn_blocking(move || owner.client(&source_id))
+}
+
+/// A track's playable with its audio hash.
+pub(crate) async fn hashed_playable(
+    catalog: &Catalog,
+    track: TrackKey,
+) -> Result<Option<Playable>, String> {
+    match catalog
+        .playable(track)
         .await
-        .map_err(|error| error.to_string())??;
-    source
-        .write_file_r128_tags(database, source_key, measurements)
+        .map_err(|error| error.to_string())?
+    {
+        Some(playable) => with_audio_hash(catalog, playable).await,
+        None => Ok(None),
+    }
+}
+
+/// `playable` with its audio hash. A Local file whose hash is not known is read once: its
+/// payload hash, with the CUE window, is recorded against the audio revision, and the playable
+/// is read again so it carries what is stored for that audio.
+async fn with_audio_hash(
+    catalog: &Catalog,
+    playable: Playable,
+) -> Result<Option<Playable>, String> {
+    let Some((revision, path, window)) = Some(&playable).and_then(|playable| {
+        let path = url::Url::parse(&playable.local_uri()?)
+            .ok()?
+            .to_file_path()
+            .ok()?;
+        playable
+            .audio_hash
+            .is_none()
+            .then_some((playable.audio_revision?, path, playable.window))
+    }) else {
+        return Ok(Some(playable));
+    };
+    let track = playable.track;
+    let payload = tokio::task::spawn_blocking(move || audio_processing::payload_hash(&path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("could not read the audio of Track {track}: {error}"))?;
+    let hash = match window {
+        Some((start, end)) => *blake3::Hasher::new()
+            .update(&payload)
+            .update(&start.to_le_bytes())
+            .update(&end.to_le_bytes())
+            .finalize()
+            .as_bytes(),
+        None => payload,
+    };
+    info!(%track, "read the audio payload for its hash");
+    catalog
+        .put_audio_hash(track, revision, hash)
+        .await
+        .map_err(|error| error.to_string())?;
+    catalog
+        .playable(track)
         .await
         .map_err(|error| error.to_string())
-}
-
-async fn analyze_uri(
-    source_owner: &Arc<SourceOwner>,
-    database: &Database,
-    configuration: &SourceConfiguration,
-    media_uri: &str,
-    cancelled: &Arc<AtomicBool>,
-) -> Result<LoudnessAnalysis, String> {
-    let request = StreamRequest::new(media_uri, StreamQuality::Original);
-    let owner = Arc::clone(source_owner);
-    let stream = prepare_stream(
-        database,
-        request,
-        Some(configuration),
-        None,
-        move |source_id| async move {
-            tokio::task::spawn_blocking(move || owner.client(&source_id))
-                .await
-                .map_err(|error| error.to_string())?
-        },
-    )
-    .await?;
-    let cancelled = Arc::clone(cancelled);
-    tokio::task::spawn_blocking(move || {
-        analyze_loudness_cancellable(&stream, || cancelled.load(Ordering::Acquire))
-    })
-    .await
-    .map_err(|_| "loudness analysis worker stopped".to_string())?
-}
-
-#[cfg(test)]
-mod tests {
-    use super::AnalysisFailureBlock;
-    use library::SourceKey;
-
-    #[test]
-    fn one_failed_analysis_blocks_immediate_restart_until_library_change() {
-        let source = SourceKey::from_raw(1);
-        let mut blocked = AnalysisFailureBlock::default();
-        assert!(!blocked.blocks(source));
-        blocked.record(source);
-        for _ in 0..10_000 {
-            assert!(blocked.blocks(source));
-        }
-        blocked.clear();
-        assert!(!blocked.blocks(source));
-    }
 }

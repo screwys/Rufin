@@ -111,6 +111,7 @@ button[aria-pressed="true"] {
   mask-position: center;
   mask-repeat: no-repeat;
   mask-size: contain;
+  mask-image: var(--icon);
 }
 
 input:not([type="range"], [type="checkbox"]),
@@ -589,7 +590,7 @@ html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls button
 html:not(.enhanced) #navigation:target { display: flex; }
 html:not(.enhanced) #login-dialog[open] { position: fixed; inset: 15vh 0 auto; }
 #transport-form { display: none; }
-.track-list .actions form { display: inline; }
+.track-list .actions form { display: inline-flex; vertical-align: middle; }
 a { color: inherit; text-decoration: none; }
 
 .track-list .favorite form { display: inline; }

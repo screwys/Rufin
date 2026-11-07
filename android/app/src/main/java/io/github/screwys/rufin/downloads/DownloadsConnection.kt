@@ -4,9 +4,10 @@ import androidx.compose.runtime.*
 import androidx.paging.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
-import io.github.screwys.rufin.shared.downloads.*
+import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
+import io.github.screwys.rufin.shared.rufin_core.SourceOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceSummary
 import io.github.screwys.rufin.shared.sources.DownloadQuality
 import kotlinx.coroutines.*
@@ -14,22 +15,6 @@ import kotlinx.coroutines.flow.*
 
 internal data class DownloadRow(val job: DownloadQueueItem, val preview: TrackView?)
 internal data class DownloadSource(val source: SourceSummary, val settings: SourceDownloadSettings)
-internal fun DownloadRule.title() = translate(when (this) {
-    DownloadRule.ENTIRE_LIBRARY -> "Entire Library"
-    DownloadRule.FAVORITES -> "Favorites"
-    DownloadRule.ALL_PLAYLISTS -> "All Playlists"
-    DownloadRule.LATEST_FIVE_ALBUMS -> "5 Latest Albums"
-})
-internal fun DownloadRules.enabled(rule: DownloadRule) = when (rule) {
-    DownloadRule.ENTIRE_LIBRARY -> entireLibrary
-    DownloadRule.FAVORITES -> favorites
-    DownloadRule.ALL_PLAYLISTS -> allPlaylists
-    DownloadRule.LATEST_FIVE_ALBUMS -> latestFiveAlbums
-}
-internal fun DownloadSubject.title() = when (this) {
-    is DownloadSubject.Rule -> v1.title()
-    is DownloadSubject.Prepared -> title ?: translate("Downloads")
-}
 internal fun DownloadQueueState.title() = translate(when (this) {
     DownloadQueueState.QUEUED -> "Queued"
     DownloadQueueState.DOWNLOADING -> "Downloading"
@@ -100,6 +85,9 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
     private suspend fun <T> withSettings(action: (SettingsOwner) -> T) = withContext(Dispatchers.IO) {
         model.connectedService().runtime.value!!.getOrThrow().settings().use(action)
     }
+    private suspend fun <T> withSource(action: (SourceOwner) -> T) = withContext(Dispatchers.IO) {
+        model.connectedService().runtime.value!!.getOrThrow().source().use(action)
+    }
     suspend fun refreshSources() {
         if (bridge == null) return
         sources = withSettings { settings ->
@@ -110,12 +98,12 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
     fun pause(paused: Boolean) = model.runAction { bridge?.setPaused(paused) }
     fun cancel(job: DownloadQueueItem) = model.runAction { bridge?.cancelJob(job.sourceId, job.id) }
     fun rule(source: String, rule: DownloadRule, enabled: Boolean, deleteDownloads: Boolean = false) = model.runAction {
-        withSettings { it.setDownloadRule(source, rule, enabled) }; if (!enabled) bridge?.removeRule(source, rule, deleteDownloads); refreshSources()
+        withSource { it.setDownloadRule(source, rule, enabled, deleteDownloads) }; refreshSources()
     }
     fun quality(source: String, quality: DownloadQuality) = model.runAction { withSettings { it.setDownloadQuality(source, quality) }; refreshSources() }
     fun directory(source: String, uri: String?) = model.runAction {
         withSettings { it.setDownloadLocation(source, uri?.let { value -> DownloadDirectory.Document(value) }) }
         refreshSources()
     }
-    fun clear(source: String) = model.runAction { withSettings { it.clearDownloadRules(source) }; bridge?.clear(source, true); refreshSources() }
+    fun clear(source: String) = model.runAction { withSource { it.clearDownloadRules(source) }; refreshSources() }
 }

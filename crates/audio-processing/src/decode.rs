@@ -1,9 +1,82 @@
 use crate::{ResolvedStream, configure_sources, ensure_gstreamer_initialized};
+use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app::AppSink;
+use std::fmt;
 
 pub(crate) const SAMPLE_POLL: gst::ClockTime = gst::ClockTime::from_mseconds(100);
+
+/// Why decoding a stream failed.
+#[derive(Debug)]
+pub enum DecodeError {
+    /// The audio itself cannot be decoded, so every read of the same audio fails this way.
+    Content(String),
+    /// Anything else: the source, network or pipeline failed, the stream ended before its
+    /// window, or the job was cancelled or stopped making progress.
+    Stopped(String),
+}
+
+impl DecodeError {
+    fn from_bus(error: &gst::message::Error) -> Self {
+        let cause = error.error();
+        let element = error
+            .src()
+            .and_then(|source| source.downcast_ref::<gst::Element>());
+        match content_failure(&cause, element) {
+            Some(_) => Self::Content(cause.to_string()),
+            None => Self::Stopped(cause.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (Self::Content(message) | Self::Stopped(message)) = self;
+        formatter.write_str(message)
+    }
+}
+
+impl From<DecodeError> for String {
+    fn from(error: DecodeError) -> Self {
+        error.to_string()
+    }
+}
+
+/// A GStreamer error that the audio itself causes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentFailure {
+    /// No installed element can read this audio's container or codec.
+    Unsupported,
+    /// The audio's data is broken.
+    Corrupt,
+}
+
+/// What `error`, posted by `element`, says about the audio itself: a stream error or a missing
+/// plugin. None for everything else, and for anything a network source posts: it stops its
+/// stream when the connection fails.
+pub fn content_failure(
+    error: &glib::Error,
+    element: Option<&gst::Element>,
+) -> Option<ContentFailure> {
+    let network = element
+        .and_then(|element| element.factory())
+        .is_some_and(|factory| factory.klass().split('/').any(|part| part == "Network"));
+    if network {
+        return None;
+    }
+    if let Some(error) = error.kind::<gst::StreamError>() {
+        return Some(match error {
+            gst::StreamError::CodecNotFound
+            | gst::StreamError::TypeNotFound
+            | gst::StreamError::WrongType
+            | gst::StreamError::Format => ContentFailure::Unsupported,
+            _ => ContentFailure::Corrupt,
+        });
+    }
+    (error.kind::<gst::CoreError>() == Some(gst::CoreError::MissingPlugin))
+        .then_some(ContentFailure::Unsupported)
+}
 
 pub(crate) struct DecodePipeline {
     pub pipeline: gst::Element,
@@ -19,12 +92,12 @@ impl Drop for DecodePipeline {
 }
 
 impl DecodePipeline {
-    pub fn new(stream: &ResolvedStream, output: &str) -> Result<Self, String> {
-        ensure_gstreamer_initialized()?;
+    pub fn new(stream: &ResolvedStream, output: &str) -> Result<Self, DecodeError> {
+        ensure_gstreamer_initialized().map_err(DecodeError::Stopped)?;
         let pipeline = gst::parse::launch(&format!(
             "uridecodebin name=decoder ! audioconvert ! {output}"
         ))
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| DecodeError::Stopped(error.to_string()))?;
         let bin = pipeline
             .downcast_ref::<gst::Bin>()
             .expect("analysis pipeline");
@@ -42,7 +115,8 @@ impl DecodePipeline {
         })
     }
 
-    pub fn start(&self, check: impl Fn() -> Result<(), String>) -> Result<(), String> {
+    pub fn start(&self, check: impl Fn() -> Result<(), String>) -> Result<(), DecodeError> {
+        let check = || check().map_err(DecodeError::Stopped);
         check()?;
         self.pipeline
             .set_state(if self.window.is_some() {
@@ -50,7 +124,7 @@ impl DecodePipeline {
             } else {
                 gst::State::Playing
             })
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| DecodeError::Stopped(error.to_string()))?;
         if let Some(window) = &self.window {
             loop {
                 check()?;
@@ -59,9 +133,11 @@ impl DecodePipeline {
                 };
                 match message.view() {
                     gst::MessageView::AsyncDone(..) => break,
-                    gst::MessageView::Error(error) => return Err(error.error().to_string()),
+                    gst::MessageView::Error(error) => return Err(DecodeError::from_bus(error)),
                     gst::MessageView::Eos(..) => {
-                        return Err("audio source ended before its requested window".into());
+                        return Err(DecodeError::Stopped(
+                            "audio source ended before its requested window".into(),
+                        ));
                     }
                     _ => {}
                 }
@@ -78,10 +154,10 @@ impl DecodePipeline {
                     gst::SeekType::Set,
                     gst::ClockTime::from_mseconds(window.end_millis),
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| DecodeError::Stopped(error.to_string()))?;
             self.pipeline
                 .set_state(gst::State::Playing)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| DecodeError::Stopped(error.to_string()))?;
         }
         Ok(())
     }
@@ -90,15 +166,15 @@ impl DecodePipeline {
         &self,
         sink: &AppSink,
         check: impl Fn() -> Result<(), String>,
-    ) -> Result<Option<gst::Sample>, String> {
+    ) -> Result<Option<gst::Sample>, DecodeError> {
         loop {
-            check()?;
+            check().map_err(DecodeError::Stopped)?;
             if let Some(sample) = sink.try_pull_sample(SAMPLE_POLL) {
                 return Ok(Some(sample));
             }
             while let Some(message) = self.bus.pop() {
                 if let gst::MessageView::Error(error) = message.view() {
-                    return Err(error.error().to_string());
+                    return Err(DecodeError::from_bus(error));
                 }
             }
             if sink.is_eos() {

@@ -1,4 +1,4 @@
-use library::Database;
+use library::Catalog;
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Handle;
@@ -11,7 +11,7 @@ pub enum CacheMode {
 }
 
 pub struct LookupCache {
-    database: Database,
+    catalog: Catalog,
     runtime: Handle,
     pub mode: CacheMode,
     network_used: AtomicBool,
@@ -33,9 +33,9 @@ pub(crate) fn cache_key(kind: &str, input: &impl Serialize) -> String {
 }
 
 impl LookupCache {
-    pub fn new(database: Database, runtime: Handle, mode: CacheMode) -> Self {
+    pub fn new(catalog: Catalog, runtime: Handle, mode: CacheMode) -> Self {
         Self {
-            database,
+            catalog,
             runtime,
             mode,
             network_used: AtomicBool::new(false),
@@ -59,7 +59,7 @@ impl LookupCache {
         if self.mode != CacheMode::Refresh {
             let payload = self
                 .runtime
-                .block_on(self.database.metadata_lookup_cache(key, cache_time()))
+                .block_on(self.catalog.metadata_lookup_cache(key, cache_time()))
                 .map_err(|e| e.to_string())?;
             if let Some(payload) = payload
                 && let Ok(value) = serde_json::from_slice(&payload)
@@ -76,7 +76,7 @@ impl LookupCache {
         let payload = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
         self.runtime
             .block_on(
-                self.database
+                self.catalog
                     .write_metadata_lookup_cache(key, &payload, cache_time()),
             )
             .map_err(|e| e.to_string())?;
@@ -85,7 +85,7 @@ impl LookupCache {
 
     pub(crate) fn link_fingerprint(&self, uri: &str, key: &str) -> Result<(), String> {
         self.runtime
-            .block_on(self.database.link_fingerprint_lookup(uri, key))
+            .block_on(self.catalog.link_fingerprint_lookup(uri, key))
             .map_err(|e| e.to_string())
     }
 }

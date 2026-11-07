@@ -2,11 +2,45 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use secrets::{
-    ConfigSecretStore, SecretError, SecretKey, SecretResult, SecretStorageMode, SecretStore,
-};
+use secrets::{ConfigSecretStore, SecretError, SecretKey, SecretResult, SecretStore};
+use serde::{Deserialize, Serialize};
 
 use super::{SettingsFile, system_keyring_secret_store};
+
+/// Where saved passwords and tokens are kept.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum SecretStorageMode {
+    ConfigFile,
+    SystemKeyring,
+}
+
+impl Default for SecretStorageMode {
+    fn default() -> Self {
+        default_secret_storage_mode()
+    }
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    all(unix, not(any(target_os = "android", target_vendor = "apple")))
+))]
+fn default_secret_storage_mode() -> SecretStorageMode {
+    SecretStorageMode::SystemKeyring
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    all(unix, not(any(target_os = "android", target_vendor = "apple")))
+)))]
+fn default_secret_storage_mode() -> SecretStorageMode {
+    SecretStorageMode::ConfigFile
+}
 
 /// Keep working when the system keyring is refused, unavailable, or times out.
 #[derive(Clone)]
@@ -21,7 +55,7 @@ pub struct KeyringSecretStore {
 
 impl KeyringSecretStore {
     pub(super) fn new(settings: SettingsFile) -> Self {
-        let scope = settings.load().secret_scope_id;
+        let scope = settings.load().secret_scope_id.clone();
         Self {
             keyring: system_keyring_secret_store(&scope),
             file: ConfigSecretStore::with_scope(settings.config_dir().join("secrets.json"), &scope),
@@ -101,7 +135,6 @@ impl KeyringSecretStore {
                         *session = false;
                     }
                 }
-                stored.shared_settings.persist_credentials();
                 Ok(())
             })
             .map_err(SecretError::Config)
@@ -142,5 +175,41 @@ impl SecretStore for KeyringSecretStore {
             Ok(None)
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SecretStorageMode;
+
+    #[test]
+    fn secret_storage_mode_preserves_stored_names() {
+        assert_eq!(
+            serde_json::to_string(&SecretStorageMode::ConfigFile)
+                .expect("serialize config-file mode"),
+            "\"config-file\""
+        );
+        assert_eq!(
+            serde_json::from_str::<SecretStorageMode>("\"system-keyring\"")
+                .expect("deserialize system-keyring mode"),
+            SecretStorageMode::SystemKeyring
+        );
+        #[cfg(any(
+            target_os = "android",
+            target_os = "macos",
+            target_os = "windows",
+            all(unix, not(any(target_os = "android", target_vendor = "apple")))
+        ))]
+        assert_eq!(
+            SecretStorageMode::default(),
+            SecretStorageMode::SystemKeyring
+        );
+        #[cfg(not(any(
+            target_os = "android",
+            target_os = "macos",
+            target_os = "windows",
+            all(unix, not(any(target_os = "android", target_vendor = "apple")))
+        )))]
+        assert_eq!(SecretStorageMode::default(), SecretStorageMode::ConfigFile);
     }
 }

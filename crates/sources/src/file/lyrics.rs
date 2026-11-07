@@ -29,10 +29,6 @@ pub(crate) fn read_local(track: &mut ScannedTrack) {
         title: track.track.metadata.title.clone(),
         cue_track: track.track.cue_path.is_some(),
     };
-    track.lyrics_paths = lyrics::local_sidecar_candidates(&input)
-        .into_iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
     let embedded = track
         .lyrics
         .take()

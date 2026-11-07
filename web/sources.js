@@ -2,7 +2,7 @@ import { qualityControls } from "./download-quality.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { loadView, navigate, route } from "./library.js";
+import { loadView, navigate, reopen } from "./library.js";
 
 import { $, button, el, icon, notice, openPopup, run } from "./ui.js";
 
@@ -23,7 +23,12 @@ function updateSources(configured) {
 
 function sourceIcon(kind) {
   if (kind === "local") {
-    const node = icon("cover-fallback");
+    const node = icon("rufin-symbolic");
+    node.classList.add("source-icon");
+    return node;
+  }
+  if (kind === "peer") {
+    const node = icon("rufin-phonelink-symbolic");
     node.classList.add("source-icon");
     return node;
   }
@@ -38,7 +43,7 @@ function sourceIcon(kind) {
       "smb",
     ].includes(kind)
   )
-    return icon("server");
+    return icon("rufin-network-server-symbolic");
   const image = el("img", "source-icon");
   image.alt = "";
   image.src = `/source-icons/${kind}`;
@@ -61,7 +66,7 @@ function renderSources(configured) {
     const edit = button(
       tr("Edit"),
       () => openSource(item),
-      "edit",
+      "rufin-document-edit-symbolic",
       "source-edit",
     );
     edit.append(el("span", "", tr("Edit")));
@@ -73,20 +78,27 @@ function renderSources(configured) {
           await api("/sources/select", "POST", { id: item.id });
           state.source = item.id;
           updateSources(await api("/sources"));
-          navigate("tracks");
+          navigate("Tracks");
         },
-        "check",
+        "rufin-object-select-symbolic",
         "",
       ),
       button(
         tr("Resync Library"),
         () => api("/sources/refresh", "POST", { id: item.id }),
-        "refresh",
+        "rufin-view-refresh-symbolic",
       ),
       button(
         tr("Forget Source"),
         async () => {
-          if (confirm(tr('Forget "{name}"?', { name: item.name }))) {
+          if (
+            confirm(
+              tr(
+                "Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?",
+                { name: item.name },
+              ),
+            )
+          ) {
             await api(
               `/sources?${new URLSearchParams({ id: item.id })}`,
               "DELETE",
@@ -94,7 +106,7 @@ function renderSources(configured) {
             await loadView();
           }
         },
-        "close",
+        "rufin-window-close-symbolic",
       ),
     );
     for (const action of actions.children)
@@ -103,32 +115,32 @@ function renderSources(configured) {
     card.append(sourceIcon(item.kind), label, edit, actions);
     const quality = el("fieldset", "source-actions");
     quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
-    qualityControls(quality, item.quality, async (value) => {
-      await api("/downloads/quality", "POST", { source: item.id, quality: value });
-      item.quality = value;
-      return value;
+    qualityControls(quality, item.download_quality, async (edit) => {
+      const result = await api("/downloads/quality", "POST", { source: item.id, edit });
+      item.download_quality = result.download_quality;
+      return result.download_quality;
     });
     card.append(quality);
     $("content").append(card);
   }
-  const cache = $("cache-settings-template").content.firstElementChild.cloneNode(true);
-  $("content").append(cache);
+  const settings = $("cache-settings-template").content.cloneNode(true);
+  const cache = settings.firstElementChild, choices = settings.querySelectorAll("select");
+  $("content").append(settings);
   run(async () => {
     let current = await api("/downloads/cache-settings");
     if (!cache.isConnected) return;
-    const choices = cache.querySelectorAll("select");
     for (const choice of choices) {
-      choice.value = String(current[choice.dataset.cache]);
+      choice.value = String(current[choice.dataset.setting]);
       choice.disabled = false;
       choice.onchange = () => run(async () => {
         for (const select of choices) select.disabled = true;
         try {
           current = await api("/downloads/cache-settings", "POST", {
-            ...current, [choice.dataset.cache]: choice.value === "true",
+            ...current, [choice.dataset.setting]: choice.value === "true",
           });
         } finally {
           for (const select of choices) {
-            select.value = String(current[select.dataset.cache]);
+            select.value = String(current[select.dataset.setting]);
             select.disabled = false;
           }
         }
@@ -196,12 +208,16 @@ function showSourceProgress(value) {
     previousOperation !== "idle" &&
     previousOperation !== "downloading"
   )
-    run(async () => {
-      const source = state.source, library = state.selectedLibrary;
-      updateSources(await api("/sources"));
-      if (state.source !== source || state.selectedLibrary !== library) await loadView();
-    });
+    run(async () => updateSources(await api("/sources")));
   previousOperation = value.state;
+}
+
+// Selects `source` or one of its music folders; a page that reads them opens again in them
+// when the change reaches the events stream.
+async function select(path, body, source = state.source) {
+  await api(path, "POST", body);
+  state.source = source;
+  updateSources(await api("/sources"));
 }
 
 let editingSource = null;
@@ -220,9 +236,10 @@ async function openSource(item = null, integration = null) {
   $("source-title").textContent = integration ? tr("File connection") : item ? tr("Edit Source") : tr("Add Source");
   $("source-submit").textContent = item ? tr("Save") : integration ? tr("Connect") : tr("Add Source");
   $("source-label").placeholder = integration ? tr("Connection name") : tr("My music");
-  $("source-kind").querySelector('[value="plex"]')?.remove();
-  if (editingSource?.kind === "plex")
-    $("source-kind").append(new Option(tr("Plex"), "plex"));
+  for (const [kind, title] of [["plex", tr("Plex")], ["peer", tr("Rufin Connect")]]) {
+    $("source-kind").querySelector(`[value="${kind}"]`)?.remove();
+    if (editingSource?.kind === kind) $("source-kind").append(new Option(title, kind));
+  }
   $("source-kind").value = editingSource
     ? { webdav: "web_dav", subsonic: "open_subsonic" }[editingSource.kind] ||
       editingSource.kind
@@ -277,7 +294,7 @@ async function renderIntegrations(host) {
   host.append(actions);
   for (const item of connections) {
     const card = el("div", "list-card");
-    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "edit"));
+    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "rufin-document-edit-symbolic"));
     host.append(card);
   }
 }
@@ -285,10 +302,11 @@ async function renderIntegrations(host) {
 function sourceFields() {
   const kind = $("source-kind").value;
   const local = kind === "local";
+  const peer = kind === "peer";
   $("local-fields").hidden = !local;
-  $("remote-fields").hidden = local;
+  $("remote-fields").hidden = local || peer;
   $("source-paths").required = local;
-  $("server-url").required = !local && kind !== "plex";
+  $("server-url").required = !local && !peer && kind !== "plex";
   for (const id of ["username", "password"]) {
     $(id).hidden = kind === "plex";
     document.querySelector(`label[for="${id}"]`).hidden = kind === "plex";
@@ -326,10 +344,7 @@ function init() {
           item.name,
           async () => {
             menu.hidePopover();
-            await api("/sources/select", "POST", { id: item.id });
-            state.source = item.id;
-            updateSources(await api("/sources"));
-            navigate(route === "genres" ? "home" : route);
+            await select("/sources/select", { id: item.id }, item.id);
           },
           null,
           "menu-item",
@@ -338,7 +353,7 @@ function init() {
           sourceIcon(item.kind),
           document.createTextNode(item.name),
         );
-        if (item.id === state.source) choose.append(icon("check"));
+        if (item.id === state.source) choose.append(icon("rufin-object-select-symbolic"));
         choose.setAttribute("role", "menuitemradio");
         choose.setAttribute("aria-checked", String(item.id === state.source));
         menu.append(choose);
@@ -349,7 +364,7 @@ function init() {
           menu.hidePopover();
           navigate("sources");
         },
-        "edit",
+        "rufin-document-edit-symbolic",
         "menu-item",
       );
       manage.append(document.createTextNode(tr("Manage")));
@@ -359,7 +374,7 @@ function init() {
           menu.hidePopover();
           openSource();
         },
-        "add",
+        "rufin-list-add-symbolic",
         "menu-item",
       );
       add.append(document.createTextNode(tr("Add a new source")));
@@ -374,18 +389,16 @@ function init() {
             library.name,
             async () => {
               menu.hidePopover();
-              await api("/sources/library", "POST", {
+              await select("/sources/library", {
                 source: state.source,
                 library: library.id,
               });
-              updateSources(await api("/sources"));
-              navigate(route === "genres" ? "home" : route);
             },
             null,
             "menu-item",
           );
           if (library.id === state.selectedLibrary)
-            choose.append(icon("check"));
+            choose.append(icon("rufin-object-select-symbolic"));
           choose.setAttribute("role", "menuitemradio");
           choose.setAttribute(
             "aria-checked",
@@ -436,7 +449,7 @@ function init() {
       $("source-dialog").close();
       $("password").value = "";
       updateSources(await api("/sources"));
-      navigate(editingSource ? "sources" : "home");
+      navigate(editingSource ? "sources" : "Home");
     }),
   );
 }
@@ -467,16 +480,12 @@ function sourceInput() {
       data: {
         name: name || (integrationSaved ? (kind === "smb" ? tr("SMB / Samba") : tr("WebDAV")) : "My music"),
         settings: {
+          ...(editingSource?.preset?.file_settings || { alternate_urls: [], folders: [], domain: "", certificate_pem: null, require_smb_encryption: false }),
           url,
-          alternate_urls: [],
-          folders: [],
           excluded_folders: excludedFolders,
           username,
-          domain: "",
           authentication: $("authentication").value,
           trust_invalid_certificate: trust,
-          certificate_pem: null,
-          require_smb_encryption: false,
         },
         credentials: { secret, headers: [] },
       },
@@ -505,7 +514,8 @@ function sourceInput() {
   }
   if (editingSource) {
     const preset = editingSource.preset;
-    if (kind === "plex")
+    if (kind === "peer") input = { type: "peer", data: { name } };
+    else if (kind === "plex")
       input = {
         type: "plex",
         data: {

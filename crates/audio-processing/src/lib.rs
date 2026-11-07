@@ -5,12 +5,15 @@ use gstreamer as gst;
 use std::sync::OnceLock;
 
 mod decode;
+pub use decode::{ContentFailure, DecodeError, content_failure};
 pub mod effects;
 mod fingerprint;
 pub use fingerprint::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 mod loudness;
 mod media_input;
+mod payload_hash;
 pub use media_input::{ResolvedStream, StreamWindow};
+pub use payload_hash::payload_hash;
 #[cfg(target_os = "macos")]
 mod tls;
 mod transcode;

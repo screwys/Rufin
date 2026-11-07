@@ -118,7 +118,7 @@ impl PlaybackSubscription {
 mod tests {
     use super::*;
     use crate::{
-        ControlsView, PlaybackNotice, PlaybackOutput, QueueSummaryView, RepeatMode, RunId,
+        ControlsView, PlaybackNotice, PlaybackOutput, QueueRepeatMode, QueueSummaryView, RunId,
         TransportStatus, TransportView,
     };
 
@@ -150,7 +150,7 @@ mod tests {
                 error: None,
             },
             controls: ControlsView {
-                repeat_mode: RepeatMode::Off,
+                repeat_mode: QueueRepeatMode::Off,
                 shuffle_enabled: false,
                 auto_dj_enabled: false,
                 volume: 1.0,

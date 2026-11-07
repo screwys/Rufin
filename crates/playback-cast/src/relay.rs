@@ -23,8 +23,6 @@ use url::Url;
 
 const PREFERRED_RELAY_PORT: u16 = 9_876;
 
-pub(crate) type ArtworkResolver = Arc<dyn Fn(&PreparedStream) -> Option<PathBuf> + Send + Sync>;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RelayRepresentation {
     Source,
@@ -89,7 +87,6 @@ pub(crate) struct RelayServer {
     target_is_local: bool,
     proxy_media: Arc<AtomicBool>,
     resources: Arc<Mutex<HashMap<String, RelayResource>>>,
-    artwork_resolver: Option<ArtworkResolver>,
     shutdown: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -151,15 +148,9 @@ impl RelayServer {
             target_is_local: target_is_local(target),
             proxy_media,
             resources,
-            artwork_resolver: None,
             shutdown: Some(shutdown),
             thread: Some(thread),
         })
-    }
-
-    pub(crate) fn with_artwork_resolver(mut self, resolver: ArtworkResolver) -> Self {
-        self.artwork_resolver = Some(resolver);
-        self
     }
 
     pub(crate) fn publish(
@@ -167,10 +158,7 @@ impl RelayServer {
         stream: &PreparedStream,
         request: PublishRequest,
     ) -> Result<PublishedResource, String> {
-        let artwork_path = stream.artwork_path.as_deref().cloned().or_else(|| {
-            let resolver = self.artwork_resolver.as_ref()?;
-            resolver(stream)
-        });
+        let artwork_path = stream.artwork_path.as_deref().cloned();
         let original_content_type = source_content_type(stream);
         let encoding = match request.representation {
             RelayRepresentation::Generated(encoding) => Some(encoding),
@@ -1394,7 +1382,6 @@ pub(crate) fn directly_supported(content_type: &str) -> bool {
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use std::sync::atomic::AtomicUsize;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -1598,7 +1585,6 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("track.mp3");
         let artwork_path = directory.path().join("cover.img");
-        let artwork_resolutions = Arc::new(AtomicUsize::new(0));
         let audio = b"0123456789".repeat(4_000);
         File::create(&path)
             .expect("create track")
@@ -1609,23 +1595,17 @@ mod tests {
             .write_all(b"\x89PNG\r\n\x1a\ncover")
             .expect("write artwork");
         let uri = Url::from_file_path(&path).expect("file URL").to_string();
-        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(uri));
-        let resolver_count = Arc::clone(&artwork_resolutions);
+        let mut stream = PreparedStream::from(audio_processing::ResolvedStream::new(uri));
+        stream.artwork_path = Some(Arc::new(artwork_path));
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::new(AtomicBool::new(false)),
             None,
         )
-        .expect("start relay")
-        .with_artwork_resolver(Arc::new(move |_| {
-            resolver_count.fetch_add(1, Ordering::Relaxed);
-            Some(artwork_path.clone())
-        }));
-        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 0);
+        .expect("start relay");
         let published = relay
             .publish(&stream, PublishRequest::default())
             .expect("publish stream");
-        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 1);
         let artwork_uri = published.artwork_uri.expect("artwork URL");
         let first = published.uri;
         let client = reqwest::blocking::Client::new();

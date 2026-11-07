@@ -2,21 +2,75 @@
 use std::{
     future::Future,
     path::{Path, PathBuf},
+    sync::{Arc, Weak},
+    time::Duration,
 };
 
 use async_channel::Receiver;
 use gio::prelude::*;
-use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation, SourceId};
+use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, Scope, SourceId};
 
-use crate::{
-    runtime::{CatalogChange, CatalogPublication, SourceEvent},
-    source::{SourceOwner, string_error},
-};
+use crate::features::{Feature, Pass};
+use crate::settings::StoredSettings;
+use crate::source::{Shared, SourceOwner};
+use crate::string_error;
 
 const LOCAL_CONFLICT: &str =
     "Both the playlist and its file have changed. Reload the file or save the Rufin version.";
 pub(crate) const FILE_CONFLICT: &str =
     "The playlist file has changed. Reload the file or replace it with the Rufin version.";
+
+/// How often linked files are checked for changes made outside Rufin.
+const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Linked playlist files while there are any. Linked playlists an edit touched are saved when
+/// their links are marked changed and save automatically; the edit itself marks its link
+/// changed. Files are checked for changes made outside Rufin when it starts and every five
+/// minutes.
+pub(crate) struct Links(pub(crate) Weak<Shared>);
+
+impl Feature for Links {
+    fn wanted(&self, _: &StoredSettings, catalog: &library::Catalog) -> bool {
+        catalog.has_linked_playlists()
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload | Scope::Playlist { .. } | Scope::PlaylistLink { .. }
+        )
+    }
+
+    fn period(&self) -> Option<Duration> {
+        Some(CHECK_INTERVAL)
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<library::Change>>>) -> Pass {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return;
+            };
+            let Some(changes) = changes else {
+                refresh_links(&SourceOwner { shared }, None).await;
+                return;
+            };
+            // A link's settings change saves edits that waited for automatic saving.
+            let edited = changes
+                .iter()
+                .flat_map(|change| &change.scopes)
+                .filter_map(|scope| match scope {
+                    Scope::Playlist { key, .. } | Scope::PlaylistLink { key } => Some(*key),
+                    _ => None,
+                })
+                .filter(|key| shared.catalog.is_linked(*key))
+                .collect::<std::collections::BTreeSet<_>>();
+            let owner = SourceOwner { shared };
+            for playlist in edited {
+                after_edit(&owner, playlist).await;
+            }
+        })
+    }
+}
 
 pub fn is_conflict(error: &str) -> bool {
     matches!(error, LOCAL_CONFLICT | FILE_CONFLICT)
@@ -40,7 +94,9 @@ where
     Work: Future<Output = Result<T, String>> + Send + 'static,
 {
     let (sender, receiver) = async_channel::bounded(1);
-    owner.spawn_serialized(move |owner| async move {
+    let task = owner.clone();
+    owner.shared.runtime.spawn(async move {
+        let owner = task;
         let result = work(owner.clone()).await;
         if let Err(error) = &result {
             owner.shared.warn_nonfatal(error);
@@ -54,8 +110,8 @@ pub fn settings(
     owner: &SourceOwner,
     playlist: PlaylistKey,
 ) -> Receiver<Result<PlaylistFileSettings, String>> {
-    owner.reply(move |owner, database| async move {
-        let link = database
+    owner.reply(move |owner, catalog| async move {
+        let link = catalog
             .get_playlist_file_link(playlist)
             .await
             .map_err(string_error)?;
@@ -79,11 +135,11 @@ pub fn settings(
         } else {
             None
         };
-        let source_auto_save = database
+        let source_auto_save = catalog
             .playlist_file_auto_save(link.as_ref().and_then(|link| link.source_id.as_ref()))
             .await
             .map_err(string_error)?;
-        let can_link = database
+        let can_link = catalog
             .playlist_file_linkable(playlist)
             .await
             .map_err(string_error)?;
@@ -100,8 +156,8 @@ pub fn source_auto_save(
     owner: &SourceOwner,
     source_id: SourceId,
 ) -> Receiver<Result<bool, String>> {
-    owner.reply(move |_, database| async move {
-        database
+    owner.reply(move |_, catalog| async move {
+        catalog
             .playlist_file_auto_save(Some(&source_id))
             .await
             .map_err(string_error)
@@ -116,7 +172,7 @@ pub fn set_source_auto_save(
     run(owner, move |owner| async move {
         owner
             .shared
-            .database
+            .catalog
             .set_playlist_file_auto_save(Some(&source_id), enabled)
             .await
             .map_err(string_error)?;
@@ -127,48 +183,34 @@ pub fn set_source_auto_save(
     })
 }
 
+/// Saves a linked playlist's file settings. The name and artwork are edited with
+/// `playlists::update_playlist`.
 pub fn update(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    name: String,
     auto_refresh: bool,
     auto_save: Option<bool>,
     path_mode: PlaylistPathMode,
-    artwork: Option<sources::ArtworkChange>,
 ) -> Receiver<Result<(), String>> {
     run(owner, move |owner| async move {
-        let mut settings_changed = false;
-        if let Some(mut link) = owner
+        let Some(mut link) = owner
             .shared
-            .database
+            .catalog
             .get_playlist_file_link(playlist)
             .await
             .map_err(string_error)?
-        {
-            link.auto_refresh = auto_refresh;
-            link.auto_save = auto_save;
-            link.path_mode = path_mode;
-            settings_changed = owner
-                .shared
-                .database
-                .save_playlist_file_link(&link)
-                .await
-                .map_err(string_error)?;
-        }
-        if !crate::playlists::update_playlist_on(
-            &owner,
-            playlist,
-            Some(&name),
-            None,
-            artwork.as_ref(),
-        )
-        .await?
-        {
-            after_edit(&owner, playlist).await;
-            if settings_changed {
-                publish(&owner, Some(playlist)).await;
-            }
-        }
+        else {
+            return Ok(());
+        };
+        link.auto_refresh = auto_refresh;
+        link.auto_save = auto_save;
+        link.path_mode = path_mode;
+        owner
+            .shared
+            .catalog
+            .save_playlist_file_link(&link)
+            .await
+            .map_err(string_error)?;
         Ok(())
     })
 }
@@ -219,7 +261,7 @@ async fn link_on(
     check_link(owner, playlist, source_id.as_ref(), &path).await?;
     let previous = owner
         .shared
-        .database
+        .catalog
         .get_playlist_file_link(playlist)
         .await
         .map_err(string_error)?;
@@ -236,7 +278,7 @@ async fn link_on(
     };
     owner
         .shared
-        .database
+        .catalog
         .save_playlist_file_link(&link)
         .await
         .map_err(string_error)?;
@@ -249,14 +291,14 @@ async fn link_on(
         if let Some(previous) = previous {
             owner
                 .shared
-                .database
+                .catalog
                 .save_playlist_file_link(&previous)
                 .await
                 .map_err(string_error)?;
         } else {
             owner
                 .shared
-                .database
+                .catalog
                 .unlink_playlist_file(playlist)
                 .await
                 .map_err(string_error)?;
@@ -264,7 +306,6 @@ async fn link_on(
         return Err(error);
     }
     associate(owner, &link).await?;
-    publish(owner, Some(playlist)).await;
     Ok(())
 }
 
@@ -276,7 +317,7 @@ pub(crate) async fn check_link(
 ) -> Result<(), String> {
     if !owner
         .shared
-        .database
+        .catalog
         .playlist_file_linkable(playlist)
         .await
         .map_err(string_error)?
@@ -293,7 +334,7 @@ pub(crate) async fn check_link(
     }
     if owner
         .shared
-        .database
+        .catalog
         .find_playlist_file_link(source, path)
         .await
         .map_err(string_error)?
@@ -315,7 +356,7 @@ pub(crate) async fn import_target(
     }
     let link = owner
         .shared
-        .database
+        .catalog
         .find_playlist_file_link(source, path)
         .await
         .map_err(string_error)?;
@@ -330,11 +371,10 @@ pub fn unlink(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Result<(),
         forget_file(&owner, playlist).await?;
         owner
             .shared
-            .database
+            .catalog
             .unlink_playlist_file(playlist)
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -348,7 +388,6 @@ pub fn save(
         let link = required_link(&owner, playlist).await?;
         let result = save_on(&owner, &link, overwrite).await;
         record_result(&owner, &link, &result).await;
-        publish(&owner, Some(playlist)).await;
         result
     })
 }
@@ -362,7 +401,6 @@ pub fn reload(
         let link = required_link(&owner, playlist).await?;
         let result = reload_on(&owner, &link, discard_changes).await.map(|_| ());
         record_result(&owner, &link, &result).await;
-        publish(&owner, Some(playlist)).await;
         result
     })
 }
@@ -386,20 +424,12 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
             std::fs::remove_file(&link.path).map_err(string_error)?;
         }
         forget_file(&owner, playlist).await?;
-        let source = owner
-            .shared
-            .database
-            .playlist_access(playlist, &ReadCancellation::new())
-            .await
-            .map_err(string_error)?
-            .and_then(|access| access.source_key);
         owner
             .shared
-            .database
-            .delete_playlist(source, playlist)
+            .catalog
+            .delete_playlists(&[playlist])
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -471,7 +501,7 @@ pub fn rename_file(
         }
         owner
             .shared
-            .database
+            .catalog
             .ignore_playlist_file(link.source_id.as_ref(), &previous)
             .await
             .map_err(string_error)?;
@@ -479,11 +509,10 @@ pub fn rename_file(
         link.revision = Some(revision(&owner, &link).await?);
         owner
             .shared
-            .database
+            .catalog
             .save_playlist_file_link(&link)
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -494,7 +523,7 @@ async fn required_link(
 ) -> Result<PlaylistFileLink, String> {
     owner
         .shared
-        .database
+        .catalog
         .get_playlist_file_link(playlist)
         .await
         .map_err(string_error)?
@@ -504,14 +533,14 @@ async fn required_link(
 pub(crate) async fn forget_file(owner: &SourceOwner, playlist: PlaylistKey) -> Result<(), String> {
     if let Some(link) = owner
         .shared
-        .database
+        .catalog
         .get_playlist_file_link(playlist)
         .await
         .map_err(string_error)?
     {
         owner
             .shared
-            .database
+            .catalog
             .ignore_playlist_file(link.source_id.as_ref(), &link.path)
             .await
             .map_err(string_error)?;
@@ -603,7 +632,7 @@ pub(crate) async fn remember(
 ) -> Result<(), String> {
     let mut link = owner
         .shared
-        .database
+        .catalog
         .get_playlist_file_link(playlist)
         .await
         .map_err(string_error)?
@@ -628,11 +657,12 @@ pub(crate) async fn remember(
     link.error = None;
     owner
         .shared
-        .database
+        .catalog
         .save_playlist_file_link(&link)
         .await
         .map_err(string_error)?;
-    associate(owner, &link).await
+    associate(owner, &link).await?;
+    Ok(())
 }
 
 async fn associate(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<(), String> {
@@ -643,7 +673,7 @@ async fn associate(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<(), S
     {
         owner
             .shared
-            .database
+            .catalog
             .associate_playlist_files(source, &[(path, link.playlist)])
             .await
             .map_err(string_error)?;
@@ -659,11 +689,22 @@ async fn reload_on(
     if link.dirty && !discard {
         return Err(LOCAL_CONFLICT.into());
     }
+    if link.dirty {
+        // The file replaces Rufin's changes, so an automatic save must not write them meanwhile.
+        let mut clean = link.clone();
+        clean.dirty = false;
+        owner
+            .shared
+            .catalog
+            .save_playlist_file_link(&clean)
+            .await
+            .map_err(string_error)?;
+    }
     let before = revision(owner, link).await?;
     let report = if let Some(source) = &link.source_id {
         owner
             .client(source)?
-            .import_playlist_file(&owner.shared.database, &link.path, Some(link.playlist))
+            .import_playlist_file(&owner.shared.catalog, &link.path, Some(link.playlist))
             .await
             .map_err(string_error)?
     } else if link.path.starts_with("content:") {
@@ -672,7 +713,7 @@ async fn reload_on(
     } else {
         let (_, _, access) = local_location(owner, Path::new(&link.path));
         sources::import_local_playlist_file(
-            &owner.shared.database,
+            &owner.shared.catalog,
             &access,
             Some(link.playlist),
             |_| None,
@@ -682,8 +723,8 @@ async fn reload_on(
     };
     owner
         .shared
-        .database
-        .mark_playlist_file_synced(link.playlist, &before)
+        .catalog
+        .mark_playlist_file_synced(link.playlist, &before, 0)
         .await
         .map_err(string_error)?;
     crate::playlists::enrich_imported_playlist(owner, report.playlist).await?;
@@ -698,6 +739,9 @@ async fn save_on(
     if !overwrite && link.revision.as_deref() != Some(revision(owner, link).await?.as_str()) {
         return Err(FILE_CONFLICT.into());
     }
+    let catalog = &owner.shared.catalog;
+    let edits = catalog.playlist_file_edits(link.playlist).await;
+    let edits = edits.map_err(string_error)?;
     if let Some(path) = local_path(owner, link) {
         export_local_on(
             owner,
@@ -734,7 +778,7 @@ async fn save_on(
         let mut output = std::io::BufWriter::new(file.reopen().map_err(string_error)?);
         owner
             .shared
-            .database
+            .catalog
             .export_playlist_file_as(
                 link.playlist,
                 Path::new(&link.path),
@@ -763,12 +807,11 @@ async fn save_on(
         })?;
     }
     let next = revision(owner, link).await?;
-    owner
-        .shared
-        .database
-        .mark_playlist_file_synced(link.playlist, &next)
+    catalog
+        .mark_playlist_file_synced(link.playlist, &next, edits)
         .await
-        .map_err(string_error)
+        .map_err(string_error)?;
+    Ok(())
 }
 
 pub(crate) async fn export_local_on(
@@ -821,15 +864,15 @@ pub(crate) async fn export_local_on(
     Ok(())
 }
 
-pub(crate) async fn after_edit(owner: &SourceOwner, playlist: PlaylistKey) {
-    let Ok(Some(link)) = owner.shared.database.get_playlist_file_link(playlist).await else {
+async fn after_edit(owner: &SourceOwner, playlist: PlaylistKey) {
+    let Ok(Some(link)) = owner.shared.catalog.get_playlist_file_link(playlist).await else {
         return;
     };
     let enabled = match link.auto_save {
         Some(value) => value,
         None => owner
             .shared
-            .database
+            .catalog
             .playlist_file_auto_save(link.source_id.as_ref())
             .await
             .unwrap_or(false),
@@ -844,7 +887,7 @@ async fn record_result(owner: &SourceOwner, link: &PlaylistFileLink, result: &Re
     if let Err(error) = result {
         let _ = owner
             .shared
-            .database
+            .catalog
             .set_playlist_file_error(link.playlist, Some(error))
             .await;
         if link.error.as_ref() != Some(error) {
@@ -858,7 +901,7 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
     loop {
         let Ok(page) = owner
             .shared
-            .database
+            .catalog
             .playlist_file_link_page(after, 128)
             .await
         else {
@@ -875,14 +918,12 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
             let result = async {
                 let current = revision(owner, &link).await?;
                 if link.auto_refresh && link.revision.as_ref() != Some(&current) {
-                    if reload_on(owner, &link, false).await? {
-                        publish(owner, Some(link.playlist)).await;
-                    }
+                    reload_on(owner, &link, false).await?;
                 } else if !link.dirty && link.revision.as_ref() == Some(&current) {
                     if link.error.is_some() {
                         owner
                             .shared
-                            .database
+                            .catalog
                             .set_playlist_file_error(link.playlist, None)
                             .await
                             .map_err(string_error)?;
@@ -898,81 +939,23 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
     }
 }
 
-pub(crate) async fn backfill_file_playlists(owner: &SourceOwner) -> Result<(), String> {
-    let configurations = owner.shared.settings.load().sources.configured.clone();
-    for configured in configurations {
-        let configuration = configured.configuration;
-        if !configuration.is_file_library() {
-            continue;
-        }
-        let source_id = &configuration.source_id;
-        let Some(source) = owner
-            .shared
-            .database
-            .cached_source(source_id.as_str(), &ReadCancellation::new())
-            .await
-            .map_err(string_error)?
-        else {
-            continue;
-        };
-        let mut after = None;
-        loop {
-            let page = owner
-                .shared
-                .database
-                .observed_playlist_file_page(source.source, after)
-                .await
-                .map_err(string_error)?;
-            let Some(last) = page.last() else { break };
-            after = Some(last.local_file_key);
-            let mut associations = Vec::new();
-            for file in page {
-                if file.playlist_identity.is_some() {
-                    continue;
-                }
-                let Some(path) = configuration.playlist_file_path(&file.path) else {
-                    continue;
-                };
-                if let Some(link) = owner
-                    .shared
-                    .database
-                    .find_playlist_file_link(Some(source_id), &path)
-                    .await
-                    .map_err(string_error)?
-                {
-                    associations.push((file.path, link.playlist));
-                }
-            }
-            if !associations.is_empty() {
-                owner
-                    .shared
-                    .database
-                    .associate_playlist_files(source_id, &associations)
-                    .await
-                    .map_err(string_error)?;
-            }
-            tokio::task::yield_now().await;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) async fn discover(
-    owner: &SourceOwner,
-    source_id: &SourceId,
-    source_key: library::SourceKey,
-) {
+/// Imports the playlist files a file source holds that no playlist is made from yet, and
+/// checks the linked ones. Runs after a refresh that stored, moved or removed a playlist file.
+pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
     let Some(configuration) = owner
         .configuration(source_id)
-        .filter(|source| source.is_file_library())
+        .filter(|source| source.is(library::SourceKind::file_library))
     else {
+        return;
+    };
+    let Some(source_key) = owner.shared.catalog.source_key(source_id) else {
         return;
     };
     let mut after = None;
     loop {
         let Ok(page) = owner
             .shared
-            .database
+            .catalog
             .observed_playlist_file_page(source_key, after)
             .await
         else {
@@ -988,7 +971,7 @@ pub(crate) async fn discover(
             };
             if owner
                 .shared
-                .database
+                .catalog
                 .is_playlist_file_ignored(Some(source_id), &path)
                 .await
                 .unwrap_or(false)
@@ -997,14 +980,14 @@ pub(crate) async fn discover(
             }
             if let Ok(Some(link)) = owner
                 .shared
-                .database
+                .catalog
                 .find_playlist_file_link(Some(source_id), &path)
                 .await
             {
                 if file.playlist_identity.is_none() {
                     if let Err(error) = owner
                         .shared
-                        .database
+                        .catalog
                         .associate_playlist_files(source_id, &[(file.path, link.playlist)])
                         .await
                     {
@@ -1022,14 +1005,13 @@ pub(crate) async fn discover(
                     None => {
                         owner
                             .client(source_id)?
-                            .import_playlist_file(&owner.shared.database, &path, None)
+                            .import_playlist_file(&owner.shared.catalog, &path, None)
                             .await
                             .map_err(string_error)?
                             .playlist
                     }
                 };
                 remember(owner, playlist, Some(source_id.clone()), path.clone(), None).await?;
-                publish(owner, Some(playlist)).await;
                 Ok::<_, String>(())
             }
             .await;
@@ -1039,15 +1021,4 @@ pub(crate) async fn discover(
         }
     }
     refresh_links(owner, Some(source_id)).await;
-}
-
-async fn publish(owner: &SourceOwner, playlist: Option<PlaylistKey>) {
-    owner
-        .shared
-        .send(SourceEvent::CatalogPublished(CatalogPublication {
-            source_key: None,
-            favorite: None,
-            change: CatalogChange::Playlists(playlist),
-        }))
-        .await;
 }

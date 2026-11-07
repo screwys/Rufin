@@ -5,35 +5,18 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/connect", get(status).post(action))
         .route("/api/connect/events", get(events))
         .route("/api/connect/continuation", get(continuation))
-        .route("/api/connect/roots", get(roots))
-}
-
-#[derive(serde::Deserialize)]
-struct RootQuery {
-    source: String,
-}
-
-async fn roots(
-    State(products): State<ProductHandles>,
-    Query(query): Query<RootQuery>,
-) -> Result<axum::Json<Vec<library::ConnectRoot>>, Error> {
-    products
-        .connect
-        .roots(query.source)
-        .await
-        .map(axum::Json)
-        .map_err(|error| {
-            (
-                StatusCode::BAD_REQUEST,
-                axum::Json(json!({"error":error.to_string()})),
-            )
-        })
 }
 
 async fn continuation(
     State(products): State<ProductHandles>,
 ) -> axum::Json<Option<rufin_core::connect::Device>> {
-    axum::Json(products.connect.status().continuation_device().cloned())
+    let status = products.connect.status();
+    axum::Json(status.continuation.and_then(|continuation| {
+        status
+            .devices
+            .into_iter()
+            .find(|device| device.id == continuation.device)
+    }))
 }
 
 async fn status(State(products): State<ProductHandles>) -> axum::Json<rufin_core::connect::Status> {

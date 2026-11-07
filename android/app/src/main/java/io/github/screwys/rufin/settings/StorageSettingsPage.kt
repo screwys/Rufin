@@ -17,7 +17,7 @@ import io.github.screwys.rufin.shared.rufin_core.CacheKind
 import io.github.screwys.rufin.shared.rufin_core.StorageSummary
 import io.github.screwys.rufin.shared.rufin_core.StorageReset
 import io.github.screwys.rufin.shared.rufin_core.SourceOperation
-import io.github.screwys.rufin.shared.rufin_core.SourceProgressStage
+import io.github.screwys.rufin.shared.sources.SourceProgressStage
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.userMessage
 import kotlinx.coroutines.CancellationException
@@ -26,7 +26,6 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StorageSettingsPage(model: RufinConnection, preferences: PreferencesConnection) {
-    LaunchedEffect(preferences) { preferences.refreshApplicationSettings() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var summary by remember { mutableStateOf<StorageSummary?>(null) }

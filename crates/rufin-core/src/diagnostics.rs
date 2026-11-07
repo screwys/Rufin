@@ -135,10 +135,10 @@ const NORMAL_FILTER: &str = concat!(
     "playback=info,",
     "playback_gstreamer=info,",
     "rufin=info,",
-    "scrobbling=info,",
+    "rufin_core::downloads=warn,",
     "secrets=info,",
     "sources=info,",
-    "gtk_=info,",
+    "ui=info,",
     "lofty=error"
 );
 const DEBUG_FILTER: &str = concat!(
@@ -151,10 +151,10 @@ const DEBUG_FILTER: &str = concat!(
     "playback=debug,",
     "playback_gstreamer=debug,",
     "rufin=debug,",
-    "scrobbling=debug,",
+    "rufin_core::downloads=warn,",
     "secrets=debug,",
     "sources=debug,",
-    "gtk_=debug,",
+    "ui=debug,",
     "lofty=error"
 );
 
@@ -1044,8 +1044,8 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug!(target: "h2::codec", "transport frame");
-            tracing::debug!(target: "gtk_shell::shell::route", route = "Home", "navigate");
-            tracing::debug!(target: "gtk_library::routes", "route rows ready");
+            tracing::debug!(target: "ui::shell::shell::route", route = "Home", "navigate");
+            tracing::debug!(target: "ui::library::routes", "route rows ready");
             tracing::debug!(target: "sources", endpoint = "/rest/getSongs", "source request");
             tracing::debug!(
                 target: "sources",

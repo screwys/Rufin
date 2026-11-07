@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.app.RufinConnection
@@ -65,7 +66,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     }
     val valid = settings != null && limit.toULongOrNull() != null &&
         (!minEnabled || minYear.toUShortOrNull() != null) && (!maxEnabled || maxYear.toUShortOrNull() != null)
-    fun play(placement: String) {
+    fun play(placement: QueuePlacement) {
         model.runAction {
             val saved = settings!!.copy(limit = limit.toULong(),
                 minYear = if (minEnabled) minYear.toUShort() else null,
@@ -98,15 +99,15 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
                 modifier = Modifier.clickable(enabled = settings != null) { playedFilter = true })
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ play("next") }, enabled = valid && model.pendingActions == 0) {
+                OutlinedButton({ play(QueuePlacement.AfterCurrent) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-mail-forward-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Next"))
                 }
-                Button({ play("now") }, enabled = valid && model.pendingActions == 0) {
+                Button({ play(QueuePlacement.Replace(0UL)) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-media-playback-start-symbolic", null, Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(translate("Play"))
                 }
-                OutlinedButton({ play("append") }, enabled = valid && model.pendingActions == 0) {
+                OutlinedButton({ play(QueuePlacement.End) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-go-last-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Later"))
                 }
             }
@@ -149,7 +150,7 @@ private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, o
     val route = browse.routes.firstOrNull { it.id == "Genres" }?.route
     val rows = remember(library, route, filter) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, route, filter, downloads = model.downloads) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, route, filter) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (rows.loadState.refresh as? LoadState.Error)?.error ?: (rows.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
@@ -162,7 +163,7 @@ private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, o
             items(rows.itemCount, key = rows.itemKey { it.row.key }) { index ->
                 val row = rows[index]?.row
                 if (row == null) Spacer(Modifier.height(56.dp))
-                else ListItem(headlineContent = { Text(row.title) }, modifier = Modifier.clickable { select(row.detailRoute) })
+                else ListItem(headlineContent = { Text(row.title) }, modifier = Modifier.clickable { select(row.route) })
             }
             if (rows.loadState.refresh is LoadState.Loading || rows.loadState.append is LoadState.Loading) item {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

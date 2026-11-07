@@ -57,14 +57,16 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
                     leadingContent = { Artwork(artwork, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) },
                     modifier = Modifier.clickable { onDismiss(); onNavigate(link.route, link.title, resolved?.sourceId) })
             }
-            resolved?.sourceLink?.let { link -> item {
+            resolved?.let { metadata -> metadata.sourceLink?.let { link -> item {
                 ListItem(headlineContent = { Text(translate(link.title)) },
                     leadingContent = { DetailLinkIcon(link.iconId, Modifier.size(40.dp)) },
                     modifier = Modifier.clickable {
-                        try { link.url?.let { openMediaUri(context, it) }; onDismiss() }
-                        catch (error: Exception) { player.reportError(error) }
+                        player.model.runAction {
+                            openMediaUri(context, link.url ?: bridge?.folderUri(metadata.mediaUri, originRoute) ?: return@runAction)
+                            onDismiss()
+                        }
                     })
-            } }
+            } } }
         }
     }
 }

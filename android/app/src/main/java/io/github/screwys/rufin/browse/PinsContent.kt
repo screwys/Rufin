@@ -48,16 +48,17 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
             if (item == null) Spacer(Modifier.height(64.dp)) else {
                 val artwork = rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
                 BrowseSwipeActions(item, true) {
-                ListItem(headlineContent = { BrowseTitle(item, player = player) },
+                ListItem(headlineContent = { BrowseTitle(page.shown(item), player = player) },
                     supportingContent = { if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     leadingContent = {
                         Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))
                     },
                     trailingContent = {
-                        PlayerIconButton("rufin-view-more-symbolic", "More", { action = item })
+                        item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
+                            ?: PlayerIconButton("rufin-view-more-symbolic", "More", { action = item })
                     },
-                    modifier = Modifier.playlistFolderDrag(item, model).combinedClickable(onClick = { browse.open(item) },
-                        onLongClick = if (item.row.playlistFolderMember == null) ({ action = item }) else null))
+                    modifier = Modifier.playlistFolderDrop(item, model).combinedClickable(onClick = { browse.open(item) },
+                        onLongClick = { action = item }))
                 }
             }
         }
@@ -72,7 +73,7 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
     }
     action?.let { item -> BrowseMenuSheet(model, browse, item, player, { action = null },
         { playlist = item; action = null }, { metadata = item; action = null },
-        onNavigate = { route, title, source -> action = null; browse.openLinkedRoute(route, title, source) }) }
+        onNavigate = { route, title, _ -> action = null; browse.openRoute(route, title) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
-    metadata?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(model, item.row.kind, item.row.mediaUri) { metadata = null } }
+    metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(model, item) { metadata = null } }
 }

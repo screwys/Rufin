@@ -22,5 +22,9 @@ internal fun SourceIcon(kind: String, modifier: Modifier = Modifier.size(24.dp))
         else -> null
     }
     if (resource != null) Image(painterResource(resource), null, modifier)
-    else RufinIcon(if (kind == "local") "rufin-cover-fallback-symbolic" else "rufin-network-server-symbolic", null, modifier)
+    else RufinIcon(when (kind) {
+        "local" -> "rufin-cover-fallback-symbolic"
+        "peer" -> "rufin-phonelink-symbolic"
+        else -> "rufin-network-server-symbolic"
+    }, null, modifier)
 }

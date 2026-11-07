@@ -7,9 +7,8 @@ use std::sync::Arc;
 
 use sqlx::{Connection, Row, SqliteConnection};
 
-use crate::{
-    Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey, TrackReference,
-};
+use crate::catalog::write::Scope;
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, TrackReference};
 
 pub const QUEUE_CONTEXT_LIMIT: usize = 100;
 
@@ -52,16 +51,20 @@ pub struct QueueRow {
     pub position: usize,
     pub track: crate::TrackView,
     pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueueEntry {
     pub track_key: crate::TrackKey,
     pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
+}
+
+/// Where an entry sits: its rank in the queue's order and, while shuffle is on, its rank in the
+/// play order.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct QueueRank {
+    pub rank: Vec<u8>,
+    pub shuffle: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -69,6 +72,9 @@ pub struct QueueRestore {
     #[serde(skip)]
     pub ids: Arc<[u64]>,
     pub entries: Arc<[QueueEntry]>,
+    /// The saved ranks of the entries; empty for a queue the Store did not give.
+    #[serde(skip)]
+    pub ranks: Arc<[QueueRank]>,
     pub order: Arc<[u32]>,
     #[serde(skip)]
     pub rows: Vec<Arc<QueueRow>>,
@@ -79,56 +85,15 @@ pub struct QueueRestore {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct QueueOrderUpdate {
-    pub rows: Vec<(usize, u64)>,
-    pub total: usize,
-}
-
-impl QueueOrderUpdate {
-    pub fn coalesce(&mut self, mut newer: Self) {
-        if newer.total < self.total {
-            self.rows.truncate(
-                self.rows
-                    .partition_point(|(position, _)| *position < newer.total),
-            );
-        }
-        newer.rows.truncate(
-            newer
-                .rows
-                .partition_point(|(position, _)| *position < newer.total),
-        );
-        if self.rows.is_empty() {
-            *self = newer;
-            return;
-        }
-        self.total = newer.total;
-        if newer.rows.is_empty() || self.rows.last().unwrap().0 < newer.rows[0].0 {
-            self.rows.extend(newer.rows);
-            return;
-        }
-        let mut rows = Vec::with_capacity(self.rows.len() + newer.rows.len());
-        let mut older = std::mem::take(&mut self.rows).into_iter().peekable();
-        for row in newer.rows {
-            while older.peek().is_some_and(|old| old.0 < row.0) {
-                rows.push(older.next().unwrap());
-            }
-            if older.peek().is_some_and(|old| old.0 == row.0) {
-                older.next();
-            }
-            rows.push(row);
-        }
-        rows.extend(older);
-        self.rows = rows;
-    }
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct QueueUpdate {
     pub replace: bool,
-    pub entries: HashMap<u64, QueueEntry>,
+    /// New entries and entries whose track or place changed, with their ranks.
+    pub entries: HashMap<u64, (QueueEntry, QueueRank)>,
     pub removed: HashSet<u64>,
-    pub ordinary: Option<QueueOrderUpdate>,
-    pub order: Option<QueueOrderUpdate>,
+    /// Shuffle went off, so no entry keeps a shuffle rank.
+    pub unshuffled: bool,
+    /// The current index, position, repeat and shuffle below are saved too.
+    pub state: bool,
     pub current_index: Option<usize>,
     pub progress_millis: i64,
     pub repeat_mode: QueueRepeatMode,
@@ -141,6 +106,12 @@ impl QueueUpdate {
             *self = newer;
             return;
         }
+        if newer.unshuffled {
+            self.unshuffled = true;
+            for (_, rank) in self.entries.values_mut() {
+                rank.shuffle = None;
+            }
+        }
         for id in newer.removed.drain() {
             self.entries.remove(&id);
             self.removed.insert(id);
@@ -149,50 +120,11 @@ impl QueueUpdate {
             self.removed.remove(&id);
             self.entries.insert(id, entry);
         }
-        for (old, next) in [
-            (&mut self.ordinary, newer.ordinary),
-            (&mut self.order, newer.order),
-        ] {
-            if let Some(next) = next {
-                if let Some(old) = old {
-                    old.coalesce(next);
-                } else {
-                    *old = Some(next);
-                }
-            }
-        }
+        self.state |= newer.state;
         self.current_index = newer.current_index;
         self.progress_millis = newer.progress_millis;
         self.repeat_mode = newer.repeat_mode;
         self.shuffled = newer.shuffled;
-    }
-}
-
-/// A page in play order, with each row's canonical member index.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueueTransferPage {
-    pub offset: usize,
-    pub rows: Vec<QueueTransferRow>,
-    pub order: Vec<u32>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueueTransferRow {
-    pub position: usize,
-    pub item: TrackReference,
-    pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
-}
-
-impl From<&QueueRow> for QueueTransferRow {
-    fn from(row: &QueueRow) -> Self {
-        Self {
-            position: row.position,
-            item: row.track.clone().into(),
-            provenance: row.provenance.clone(),
-            received_from_connect: row.received_from_connect,
-        }
     }
 }
 
@@ -207,7 +139,7 @@ enum SavedContext<S> {
 }
 
 async fn decode_queue_export(
-    connection: &mut SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     mut value: serde_json::Value,
 ) -> LibraryResult<QueueRestore> {
     if let Some(entries) = value
@@ -216,14 +148,12 @@ async fn decode_queue_export(
     {
         for entry in entries {
             if let Some(uri) = entry.get("media_uri").and_then(serde_json::Value::as_str) {
-                let key = crate::catalog::remember_track(
-                    connection,
-                    &TrackReference {
+                let key = write
+                    .put_reference(&TrackReference {
                         media_uri: uri.to_owned(),
                         ..Default::default()
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 entry["track_key"] = serde_json::to_value(key)?;
             }
         }
@@ -249,7 +179,6 @@ impl QueueLoad {
                 .map(|track_key| QueueEntry {
                     track_key,
                     provenance: provenance.clone(),
-                    received_from_connect: false,
                 })
                 .collect(),
         )
@@ -269,6 +198,7 @@ pub struct QueueEntries {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum QueuePlacement {
     Replace { anchor_index: usize },
     AfterCurrent,
@@ -304,7 +234,7 @@ impl QueueRepeatMode {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn track_references_for_uris(
         &self,
         media_uris: &[String],
@@ -316,11 +246,11 @@ impl Database {
             )));
         }
         let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
-        track_references_for_uris_on(&mut connection, media_uris).await
+        track_references_for_uris_on(self, &mut connection, media_uris).await
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn queue_search_page(
         &self,
         queue: &QueueRestore,
@@ -328,21 +258,21 @@ impl Database {
         offset: u64,
         limit: u32,
     ) -> LibraryResult<(Vec<usize>, u64)> {
-        let (_permit, mut reader) = self.acquire_general(&ReadCancellation::new()).await?;
-        let mut transaction = reader.begin().await?;
         let filter = filter.trim().to_lowercase();
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let context = crate::catalog::views::Context::new(&snapshot);
         let mut positions = Vec::new();
         let mut total = 0;
-        for (page, order) in queue.order.chunks(4096).enumerate() {
-            let keys = order
-                .iter()
-                .map(|i| queue.entries[*i as usize].track_key)
-                .collect::<Vec<_>>();
-            let matches=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE instr(normalized_search,?2)>0 ORDER BY CAST(requested.key AS INTEGER)")
-                .bind(serde_json::to_string(&keys)?).bind(&filter).fetch_all(&mut *transaction).await?;
-            for position in matches {
+        for (position, index) in queue.order.iter().enumerate() {
+            let key = queue.entries[*index as usize].track_key;
+            let matched = snapshot
+                .tracks
+                .get(key.raw())
+                .is_some_and(|record| context.track_holds(record, &filter, false));
+            if matched {
                 if total >= offset && positions.len() < limit as usize {
-                    positions.push(page * 4096 + position as usize);
+                    positions.push(position);
                 }
                 total += 1;
             }
@@ -350,231 +280,23 @@ impl Database {
         Ok((positions, total))
     }
 
-    pub async fn queue_transfer_page(
-        &self,
-        queue: &QueueRestore,
-        offset: usize,
-    ) -> LibraryResult<QueueTransferPage> {
-        let end = offset
-            .saturating_add(QUEUE_CONTEXT_LIMIT)
-            .min(queue.entries.len());
-        let order = queue.order.get(offset..end).ok_or_else(|| {
-            LibraryError::InvalidRequest("Queue transfer offset is out of range".into())
-        })?;
-        let requested = order
-            .iter()
-            .enumerate()
-            .map(|(index, canonical)| (offset + index, queue.entries[*canonical as usize].clone()))
-            .collect::<Vec<_>>();
-        let rows = self
-            .queue_rows_for_entries(&requested, &ReadCancellation::new())
-            .await?
-            .into_iter()
-            .map(|row| QueueTransferRow::from(row.as_ref()))
-            .collect();
-        Ok(QueueTransferPage {
-            offset,
-            rows,
-            order: queue.order[offset..end].to_vec(),
-        })
-    }
-
-    /// Staging does not replace this device's queue or disturb its metadata.
-    pub async fn stage_queue_transfer_page(
-        &self,
-        transfer: &str,
-        page: &QueueTransferPage,
-    ) -> LibraryResult<()> {
-        if page.rows.len() > QUEUE_CONTEXT_LIMIT
-            || page.rows.len() != page.order.len()
-            || !page.offset.is_multiple_of(QUEUE_CONTEXT_LIMIT)
-        {
-            return Err(LibraryError::InvalidRequest(
-                "Invalid queue transfer page".into(),
-            ));
-        }
-        let payload = serde_json::to_string(page)?;
-        let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO queue_transfer_pages(transfer,page_offset,payload) VALUES(?1,?2,?3) ON CONFLICT(transfer,page_offset) DO UPDATE SET payload=excluded.payload")
-            .bind(transfer).bind(page.offset as i64).bind(payload)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
-        Ok(())
-    }
-
-    pub async fn discard_queue_transfer(&self, transfer: &str) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
-        Ok(())
-    }
-
-    /// Read one page at a time; only compact membership and order stay in memory.
-    pub async fn prepare_queue_transfer(
-        &self,
-        transfer: &str,
-        total: usize,
-        current: usize,
-    ) -> LibraryResult<QueueRestore> {
-        let mut writer = self.writer().await?;
-        let reader = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut entries = vec![None; total];
-        let mut order = Vec::new();
-        let mut rows = Vec::new();
-        for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
-            let payload: Option<String> = sqlx::query_scalar(
-                "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
-            )
-            .bind(transfer)
-            .bind(offset as i64)
-            .fetch_optional(&mut *reader)
-            .await?;
-            let mut page: QueueTransferPage = serde_json::from_str(&payload.ok_or_else(|| {
-                LibraryError::InvalidRequest("Queue transfer is incomplete".into())
-            })?)?;
-            if page.rows.len() != QUEUE_CONTEXT_LIMIT.min(total - offset) {
-                return Err(LibraryError::InvalidRequest(
-                    "Queue transfer is incomplete".into(),
-                ));
-            }
-            for (index, mut row) in page.rows.drain(..).enumerate() {
-                let canonical = page.order[index] as usize;
-                let slot = entries
-                    .get_mut(canonical)
-                    .filter(|slot| slot.is_none())
-                    .ok_or_else(|| {
-                        LibraryError::InvalidRequest("Invalid queue play order".into())
-                    })?;
-                row.position = offset + index;
-                row.received_from_connect = true;
-                *slot = Some(QueueEntry {
-                    received_from_connect: true,
-                    track_key: persist_metadata(&mut *reader, &row.item).await?,
-                    provenance: row.provenance.clone(),
-                });
-                if row.position == current {
-                    let song =
-                        crate::tracks::load_track_rows(reader, &[slot.as_ref().unwrap().track_key])
-                            .await?
-                            .pop()
-                            .expect("requested canonical queue song");
-                    rows.push(Arc::new(QueueRow {
-                        position: row.position,
-                        track: song,
-                        provenance: row.provenance,
-                        received_from_connect: true,
-                        occurrence_id: None,
-                    }));
-                }
-            }
-            order.extend(page.order);
-        }
-        if current >= total {
-            return Err(LibraryError::InvalidRequest(
-                "Invalid queue current position".into(),
-            ));
-        }
-        let entries = entries.into_iter().map(Option::unwrap).collect::<Vec<_>>();
-        let current_index = Some(current);
-        Ok(QueueRestore {
-            entries: entries.into(),
-            order: order.into(),
-            rows,
-            current_index,
-            ..Default::default()
-        })
-    }
-
-    /// Commit staged metadata with the accepted queue in the same Store transaction.
-    pub async fn commit_queue_transfer(
-        &self,
-        transfer: &str,
-        queue: &QueueRestore,
-    ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        persist_transfer_on(&mut transaction, transfer, queue.entries.len()).await?;
-        save_queue_on(&mut transaction, queue).await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
-    /// Import a captured input without replacing the currently playing queue.
-    pub async fn queue_from_transfer(
-        &self,
-        transfer: &str,
-        total: usize,
-        current: usize,
-    ) -> LibraryResult<(QueueLoad, usize)> {
-        let queue = self
-            .prepare_queue_transfer(transfer, total, current)
-            .await?;
-        self.import_queue_transfer_metadata(transfer, total).await?;
-        Ok((
-            QueueLoad::Captured(
-                queue
-                    .order
-                    .iter()
-                    .map(|index| queue.entries[*index as usize].clone())
-                    .collect(),
-            ),
-            queue.current_index.unwrap_or_default(),
-        ))
-    }
-
-    pub async fn import_queue_transfer_metadata(
-        &self,
-        transfer: &str,
-        total: usize,
-    ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        persist_transfer_on(&mut transaction, transfer, total).await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
     pub async fn remember_media_uris(
         &self,
         uris: &[String],
     ) -> LibraryResult<Vec<crate::TrackKey>> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut write = self.write().await?;
         let mut keys = Vec::with_capacity(uris.len());
         for uri in uris {
             keys.push(
-                crate::catalog::remember_track(
-                    &mut transaction,
-                    &TrackReference {
+                write
+                    .put_reference(&TrackReference {
                         media_uri: uri.clone(),
                         ..Default::default()
-                    },
-                )
-                .await?,
+                    })
+                    .await?,
             );
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(keys)
     }
 
@@ -589,10 +311,15 @@ impl Database {
             QueueLoad::Tracks(groups) => {
                 let mut reader = self.acquire_reader().await?;
                 let mut transaction = reader.begin().await?;
-                for (selection, provenance) in groups {
+                let selections = groups
+                    .iter()
+                    .map(|(selection, _)| selection)
+                    .collect::<Vec<_>>();
+                let tracks =
+                    crate::selection::selected_tracks_on(self, &mut transaction, &selections)
+                        .await?;
+                for ((selection, provenance), songs) in groups.iter().zip(tracks) {
                     let resolve_anchor = !matches!(selection, crate::MemberSelection::Concat(_));
-                    let songs =
-                        crate::selection::selected_tracks_on(&mut transaction, &selection).await?;
                     for (rank, (track_key, entry_key)) in songs.into_iter().enumerate() {
                         if resolve_anchor
                             && selected.is_some_and(|(key, entry)| {
@@ -608,40 +335,37 @@ impl Database {
                         entries.push(QueueEntry {
                             track_key,
                             provenance,
-                            received_from_connect: false,
                         });
                     }
                 }
                 transaction.commit().await?;
             }
             QueueLoad::Items(_) | QueueLoad::Uris(_, _) => {
-                let mut writer = self.writer().await?;
-                let mut transaction = writer
-                    .as_mut()
-                    .ok_or(LibraryError::WriterUnavailable)?
-                    .begin()
-                    .await?;
+                let mut write = self.write().await?;
                 match input {
                     QueueLoad::Items(items) => {
-                        for (item, provenance) in items {
-                            let track_key = persist_metadata(&mut transaction, &item).await?;
+                        let references = items
+                            .iter()
+                            .map(|(item, _)| item.clone())
+                            .collect::<Vec<_>>();
+                        let keys = write.put_references(&references).await?;
+                        for ((_, provenance), track_key) in items.into_iter().zip(keys) {
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
-                                received_from_connect: false,
                             });
                         }
                     }
                     QueueLoad::Uris(uris, provenance) => {
-                        for (rank, uri) in uris.iter().enumerate() {
-                            let track_key = crate::catalog::remember_track(
-                                &mut transaction,
-                                &TrackReference {
-                                    media_uri: uri.clone(),
-                                    ..Default::default()
-                                },
-                            )
-                            .await?;
+                        let references = uris
+                            .iter()
+                            .map(|uri| TrackReference {
+                                media_uri: uri.clone(),
+                                ..Default::default()
+                            })
+                            .collect::<Vec<_>>();
+                        let keys = write.put_references(&references).await?;
+                        for (rank, track_key) in keys.into_iter().enumerate() {
                             let mut provenance = provenance.clone();
                             if let QueueProvenance::Context { source_rank, .. } = &mut provenance {
                                 *source_rank += rank;
@@ -649,13 +373,12 @@ impl Database {
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
-                                received_from_connect: false,
                             });
                         }
                     }
                     _ => unreachable!(),
                 }
-                transaction.commit().await?;
+                write.commit().await?;
             }
             QueueLoad::Captured(captured) => entries.extend(captured.iter().cloned()),
         }
@@ -675,135 +398,89 @@ impl Database {
                 "Queue window exceeds its context".into(),
             ));
         }
-        let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
         let keys = entries
             .iter()
             .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
-        let songs = crate::tracks::load_track_rows(&mut connection, &keys).await?;
+        let songs = self
+            .tracks(&keys, cancellation)
+            .await?
+            .into_iter()
+            .map(|song| (song.track_key, song))
+            .collect::<HashMap<_, _>>();
+        // An entry whose track the Store no longer holds has no row; the others keep their own.
         Ok(entries
             .iter()
-            .zip(songs)
-            .map(|((position, entry), song)| {
-                Arc::new(QueueRow {
+            .filter_map(|(position, entry)| {
+                Some(Arc::new(QueueRow {
                     occurrence_id: None,
                     position: *position,
-                    track: song,
+                    track: songs.get(&entry.track_key)?.clone(),
                     provenance: entry.provenance.clone(),
-                    received_from_connect: entry.received_from_connect,
-                })
+                }))
             })
             .collect())
     }
 
     pub async fn save_queue(&self, state: &QueueRestore) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        save_queue_on(&mut transaction, state).await?;
-        transaction.commit().await?;
+        let mut write = self.write().await?;
+        save_queue_on(write.connection().await?, state).await?;
+        write.changed(Scope::Queue { entries: true });
+        write.commit().await?;
         Ok(())
     }
 
+    /// Saves playback's queue edits. Clients hear of the queue only when rows changed.
     pub async fn apply_queue_update(&self, update: &QueueUpdate) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        apply_queue_update_on(&mut transaction, update).await?;
-        transaction.commit().await?;
+        let mut write = self.write().await?;
+        let (entries, state) = apply_queue_update_on(write.connection().await?, update).await?;
+        if entries > 0 || state {
+            write.changed(Scope::Queue {
+                entries: entries > 0,
+            });
+        }
+        write.commit().await?;
         Ok(())
     }
 
-    pub async fn restore_queue(&self) -> LibraryResult<QueueRestore> {
+    /// The entries among `entries` (id, track) that the saved queue lost, with None, or holds
+    /// with another track.
+    pub async fn saved_queue_moves(
+        &self,
+        entries: &[(u64, crate::TrackKey)],
+    ) -> LibraryResult<Vec<(u64, crate::TrackKey, Option<crate::TrackKey>)>> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT value->>0,value->>1,track_key FROM json_each(?1) LEFT JOIN queue_entries ON entry_id=value->>0 WHERE track_key IS NOT value->>1")
+            .bind(serde_json::to_string(entries)?).fetch_all(&mut *reader).await?)
+    }
+
+    /// The saved queue; with `current`, its repeat, shuffle and progress with the current
+    /// entry as the only one.
+    pub async fn restore_queue(&self, current: bool) -> LibraryResult<QueueRestore> {
         let mut reader = self.acquire_reader().await?;
         let mut transaction = reader.begin().await?;
-        let mut state = restore_queue_on(&mut transaction).await?;
+        let mut state = restore_queue_on(&mut transaction, current).await?;
         transaction.commit().await?;
         drop(reader);
-        let start = state.current_index.unwrap_or(0).saturating_sub(10);
-        let entries = state
-            .order
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(QUEUE_CONTEXT_LIMIT)
-            .map(|(position, index)| (position, state.entries[*index as usize].clone()))
+        // Now playing reads its one track; playback reads the rest of the shown window.
+        let current = state.current_index.and_then(|position| {
+            Some((
+                position,
+                *state.order.get(if current { 0 } else { position })? as usize,
+            ))
+        });
+        let entries = current
+            .map(|(position, index)| (position, state.entries[index].clone()))
+            .into_iter()
             .collect::<Vec<_>>();
         state.rows = self
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await?;
-        for row in &mut state.rows {
-            Arc::make_mut(row).occurrence_id = Some(state.ids[state.order[row.position] as usize]);
+        if let (Some(row), Some((_, index))) = (state.rows.first_mut(), current) {
+            Arc::make_mut(row).occurrence_id = Some(state.ids[index]);
         }
         Ok(state)
     }
-
-    pub async fn export_queue_jsonl(&self, output: impl std::io::Write) -> LibraryResult<()> {
-        let (_export, mut connection) = self.acquire_export().await?;
-        export_queue_jsonl_on(&mut connection, output).await
-    }
-
-    pub async fn import_queue_jsonl(&self, input: impl std::io::BufRead) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        import_queue_jsonl_on(&mut transaction, input).await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
-    pub async fn queue_positions_for_source(
-        &self,
-        queue: &QueueRestore,
-        source: SourceKey,
-    ) -> LibraryResult<Vec<usize>> {
-        let mut reader = self.acquire_reader().await?;
-        let mut positions = Vec::new();
-        for (page, order) in queue.order.chunks(4096).enumerate() {
-            let keys = order
-                .iter()
-                .map(|i| queue.entries[*i as usize].track_key)
-                .collect::<Vec<_>>();
-            let matching=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE source_key=?2 ORDER BY CAST(requested.key AS INTEGER)")
-                .bind(serde_json::to_string(&keys)?).bind(source).fetch_all(&mut *reader).await?;
-            positions.extend(
-                matching
-                    .into_iter()
-                    .map(|position| page * 4096 + position as usize),
-            );
-        }
-        Ok(positions)
-    }
-}
-
-async fn persist_transfer_on(
-    connection: &mut sqlx::SqliteConnection,
-    transfer: &str,
-    total: usize,
-) -> LibraryResult<()> {
-    for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
-        let payload: String = sqlx::query_scalar(
-            "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
-        )
-        .bind(transfer)
-        .bind(offset as i64)
-        .fetch_one(&mut *connection)
-        .await?;
-        let page: QueueTransferPage = serde_json::from_str(&payload)?;
-        for row in &page.rows {
-            persist_metadata(connection, &row.item).await?;
-        }
-    }
-    Ok(())
 }
 
 async fn save_settings(
@@ -812,11 +489,14 @@ async fn save_settings(
     progress: i64,
     repeat: QueueRepeatMode,
     shuffled: bool,
-) -> LibraryResult<()> {
-    sqlx::query("INSERT INTO queue_state(singleton,current_index,progress_millis,repeat_mode,shuffled) VALUES(1,?1,?2,?3,?4) ON CONFLICT(singleton) DO UPDATE SET current_index=excluded.current_index,progress_millis=excluded.progress_millis,repeat_mode=excluded.repeat_mode,shuffled=excluded.shuffled")
-        .bind(current.map(|index| index as i64)).bind(progress.max(0)).bind(repeat.as_str()).bind(shuffled).execute(connection).await?;
-    Ok(())
+) -> LibraryResult<u64> {
+    Ok(sqlx::query("INSERT INTO queue_state(singleton,current_index,progress_millis,repeat_mode,shuffled) VALUES(1,?1,?2,?3,?4) ON CONFLICT(singleton) DO UPDATE SET current_index=excluded.current_index,progress_millis=excluded.progress_millis,repeat_mode=excluded.repeat_mode,shuffled=excluded.shuffled WHERE (current_index,progress_millis,repeat_mode,shuffled) IS NOT (excluded.current_index,excluded.progress_millis,excluded.repeat_mode,excluded.shuffled)")
+        .bind(current.map(|index| index as i64)).bind(progress.max(0)).bind(repeat.as_str()).bind(shuffled).execute(connection).await?.rows_affected())
 }
+
+/// Replaces the saved queue. A queue without saved ranks gets the ranks of a list built by
+/// appends. Without shuffle the queue plays in its own order, so the current index moves to the
+/// current entry's place in it.
 pub(crate) async fn save_queue_on(
     connection: &mut sqlx::SqliteConnection,
     state: &QueueRestore,
@@ -830,17 +510,40 @@ pub(crate) async fn save_queue_on(
             "Queue IDs do not match its entries".into(),
         ));
     };
-    let order = state
-        .order
-        .iter()
-        .enumerate()
-        .map(|(position, index)| {
-            ids.get(*index as usize)
-                .copied()
-                .map(|id| (position, id))
-                .ok_or_else(|| LibraryError::InvalidRequest("Invalid queue play order".into()))
-        })
-        .collect::<LibraryResult<Vec<_>>>()?;
+    if state.order.len() != state.entries.len()
+        || state
+            .order
+            .iter()
+            .any(|index| *index as usize >= state.entries.len())
+    {
+        return Err(LibraryError::InvalidRequest(
+            "Invalid queue play order".into(),
+        ));
+    }
+    let ranks = if state.ranks.len() == state.entries.len() {
+        state.ranks.to_vec()
+    } else {
+        let mut ranks = (0..state.entries.len())
+            .map(|index| QueueRank {
+                rank: crate::rank::nth(index as u64),
+                shuffle: None,
+            })
+            .collect::<Vec<_>>();
+        if state.shuffled {
+            for (position, index) in state.order.iter().enumerate() {
+                ranks[*index as usize].shuffle = Some(crate::rank::nth(position as u64));
+            }
+        }
+        ranks
+    };
+    let current_index = if state.shuffled {
+        state.current_index
+    } else {
+        state
+            .current_index
+            .and_then(|index| state.order.get(index))
+            .map(|index| *index as usize)
+    };
     apply_queue_update_on(
         connection,
         &QueueUpdate {
@@ -848,17 +551,10 @@ pub(crate) async fn save_queue_on(
             entries: ids
                 .iter()
                 .copied()
-                .zip(state.entries.iter().cloned())
+                .zip(state.entries.iter().cloned().zip(ranks))
                 .collect(),
-            ordinary: Some(QueueOrderUpdate {
-                rows: ids.iter().copied().enumerate().collect(),
-                total: ids.len(),
-            }),
-            order: Some(QueueOrderUpdate {
-                rows: order,
-                total: state.order.len(),
-            }),
-            current_index: state.current_index,
+            current_index,
+            state: true,
             progress_millis: state.progress_millis,
             repeat_mode: state.repeat_mode,
             shuffled: state.shuffled,
@@ -866,63 +562,56 @@ pub(crate) async fn save_queue_on(
         },
     )
     .await
+    .map(drop)
 }
 
+/// Writes a queue update: the entry rows it changed, and whether the saved state changed.
 async fn apply_queue_update_on(
     connection: &mut sqlx::SqliteConnection,
     update: &QueueUpdate,
-) -> LibraryResult<()> {
+) -> LibraryResult<(u64, bool)> {
+    let mut changed = 0;
     if update.replace {
-        sqlx::raw_sql(
-            "DELETE FROM queue_positions; DELETE FROM queue_entries; DELETE FROM queue_contexts;",
-        )
-        .execute(&mut *connection)
-        .await?;
+        changed += sqlx::raw_sql("DELETE FROM queue_entries; DELETE FROM queue_contexts;")
+            .execute(&mut *connection)
+            .await?
+            .rows_affected();
     } else {
         for removed in update.removed.iter().collect::<Vec<_>>().chunks(1000) {
             let contexts = sqlx::query_scalar::<_, Option<i64>>(
                 "DELETE FROM queue_entries WHERE entry_id IN (SELECT value FROM json_each(?1)) RETURNING context_key",
             ).bind(serde_json::to_string(removed)?).fetch_all(&mut *connection).await?;
+            changed += contexts.len() as u64;
             sqlx::query("DELETE FROM queue_contexts WHERE context_key IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM queue_entries WHERE context_key=queue_contexts.context_key)")
                 .bind(serde_json::to_string(&contexts)?).execute(&mut *connection).await?;
         }
+        if update.unshuffled {
+            changed += sqlx::query(
+                "UPDATE queue_entries SET shuffle_rank=NULL WHERE shuffle_rank IS NOT NULL",
+            )
+            .execute(&mut *connection)
+            .await?
+            .rows_affected();
+        }
     }
-    let mut contexts = HashMap::new();
+    let contexts = stored_contexts(connection, update).await?;
     let mut entries = update.entries.iter().collect::<Vec<_>>();
     entries.sort_unstable_by_key(|(id, _)| *id);
     for entries in entries.chunks(1000) {
         let mut rows = Vec::with_capacity(entries.len());
-        for (id, entry) in entries {
+        for (id, (entry, rank)) in entries {
             let (context_key, source_rank, provenance) = match &entry.provenance {
                 QueueProvenance::Context {
                     context_id,
                     context_title,
                     source_rank,
-                } => {
-                    let key = (context_id.as_ref(), context_title.as_deref());
-                    let context_key = if let Some(key) = contexts.get(&key) {
-                        *key
-                    } else {
-                        let value = serde_json::to_string(&match context_title {
-                            Some(title) => SavedContext::Titled {
-                                id: context_id.as_ref(),
-                                title: title.clone(),
-                            },
-                            None => SavedContext::Legacy(context_id.as_ref()),
-                        })?;
-                        sqlx::query("INSERT INTO queue_contexts(context) VALUES(?1) ON CONFLICT(context) DO NOTHING")
-                            .bind(&value).execute(&mut *connection).await?;
-                        let stored: i64 = sqlx::query_scalar(
-                            "SELECT context_key FROM queue_contexts WHERE context=?1",
-                        )
-                        .bind(value)
-                        .fetch_one(&mut *connection)
-                        .await?;
-                        contexts.insert(key, stored);
-                        stored
-                    };
-                    (Some(context_key), Some(*source_rank as i64), None)
-                }
+                } => (
+                    contexts
+                        .get(&(context_id.as_ref(), context_title.as_deref()))
+                        .copied(),
+                    Some(*source_rank as i64),
+                    None,
+                ),
                 provenance => (None, None, Some(serde_json::to_string(provenance)?)),
             };
             rows.push((
@@ -931,52 +620,122 @@ async fn apply_queue_update_on(
                 provenance,
                 context_key,
                 source_rank,
-                entry.received_from_connect,
+                crate::rank::hex(&rank.rank),
+                rank.shuffle.as_deref().map(crate::rank::hex),
             ));
         }
-        sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,received_from_connect)
-            SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]'),json_extract(value,'$[5]') FROM json_each(?1) WHERE true ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key")
-            .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?;
+        // A stored entry keeps its provenance, so only its track and places can change.
+        changed += sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,rank,shuffle_rank)
+            SELECT value->>0,value->>1,value->>2,value->>3,value->>4,unhex(value->>5),unhex(value->>6) FROM json_each(?1) WHERE true
+            ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank,shuffle_rank=excluded.shuffle_rank
+            WHERE (track_key,rank,shuffle_rank) IS NOT (excluded.track_key,excluded.rank,excluded.shuffle_rank)")
+            .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?.rows_affected();
     }
-    for (kind, order) in [(0_i64, &update.ordinary), (1, &update.order)] {
-        if let Some(order) = order {
-            sqlx::query("DELETE FROM queue_positions WHERE order_kind=?1 AND position>=?2")
-                .bind(kind)
-                .bind(order.total as i64)
-                .execute(&mut *connection)
-                .await?;
-            for rows in order.rows.chunks(1000) {
-                sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id)
-                    SELECT ?1,json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(?2) WHERE true
-                    ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
-                    .bind(kind).bind(serde_json::to_string(rows)?).execute(&mut *connection).await?;
+    let state = update.state
+        && save_settings(
+            connection,
+            update.current_index,
+            update.progress_millis,
+            update.repeat_mode,
+            update.shuffled,
+        )
+        .await?
+            > 0;
+    Ok((changed, state))
+}
+
+/// The stored keys of the contexts an update's entries name; contexts not stored yet are
+/// stored now.
+async fn stored_contexts<'a>(
+    connection: &mut sqlx::SqliteConnection,
+    update: &'a QueueUpdate,
+) -> LibraryResult<HashMap<(&'a str, Option<&'a QueueContextTitle>), i64>> {
+    let mut named = HashMap::new();
+    for (entry, _) in update.entries.values() {
+        if let QueueProvenance::Context {
+            context_id,
+            context_title,
+            ..
+        } = &entry.provenance
+        {
+            if let std::collections::hash_map::Entry::Vacant(vacant) =
+                named.entry((context_id.as_ref(), context_title.as_deref()))
+            {
+                vacant.insert(serde_json::to_string(&match context_title {
+                    Some(title) => SavedContext::Titled {
+                        id: context_id.as_ref(),
+                        title: title.clone(),
+                    },
+                    None => SavedContext::Legacy(context_id.as_ref()),
+                })?);
             }
         }
     }
-    save_settings(
-        connection,
-        update.current_index,
-        update.progress_millis,
-        update.repeat_mode,
-        update.shuffled,
+    if named.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let values = named.values().collect::<Vec<_>>();
+    let mut stored: HashMap<String, i64> = sqlx::query_as::<_, (i64, String)>(
+        "SELECT context_key,context FROM queue_contexts WHERE context IN (SELECT value FROM json_each(?1))",
     )
-    .await
+    .bind(serde_json::to_string(&values)?)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|(key, context)| (context, key))
+    .collect();
+    let mut keys = HashMap::with_capacity(named.len());
+    for (name, value) in named {
+        let key = match stored.get(&value) {
+            Some(key) => *key,
+            None => {
+                let key: i64 = sqlx::query_scalar(
+                    "INSERT INTO queue_contexts(context) VALUES(?1) RETURNING context_key",
+                )
+                .bind(&value)
+                .fetch_one(&mut *connection)
+                .await?;
+                stored.insert(value, key);
+                key
+            }
+        };
+        keys.insert(name, key);
+    }
+    Ok(keys)
 }
 
-async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryResult<QueueRestore> {
-    let contexts =
-        sqlx::query_as::<_, (i64, String)>("SELECT context_key,context FROM queue_contexts")
-            .fetch_all(&mut *connection)
-            .await?
-            .into_iter()
-            .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
-            .collect::<LibraryResult<HashMap<_, _>>>()?;
-    let rows = sqlx::query("SELECT entry.* FROM queue_positions position JOIN queue_entries entry USING(entry_id) WHERE order_kind=0 ORDER BY position")
-        .fetch_all(&mut *connection).await?;
+/// The saved queue; with `current`, only the entry at the current index in play order.
+async fn restore_queue_on(
+    connection: &mut sqlx::SqliteConnection,
+    current: bool,
+) -> LibraryResult<QueueRestore> {
+    let mut state = QueueRestore::default();
+    read_settings(connection, &mut state).await?;
+    let entries = if current {
+        "(SELECT * FROM queue_entries ORDER BY CASE WHEN (SELECT shuffled FROM queue_state WHERE singleton=1) THEN coalesce(shuffle_rank,rank) ELSE rank END,entry_id LIMIT (SELECT count(current_index) FROM queue_state) OFFSET (SELECT coalesce(max(current_index),0) FROM queue_state))"
+    } else {
+        "queue_entries"
+    };
+    let contexts = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!("SELECT context_key,context FROM queue_contexts WHERE context_key IN(SELECT context_key FROM {entries})")))
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
+        .collect::<LibraryResult<HashMap<_, _>>>()?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance FROM {entries} ORDER BY rank,entry_id")))
+        .fetch_all(&mut *connection)
+        .await?;
     let mut entries = Vec::with_capacity(rows.len());
     let mut ids = Vec::with_capacity(rows.len());
+    let mut ranks = Vec::with_capacity(rows.len());
     for row in rows {
         ids.push(row.try_get::<i64, _>("entry_id")? as u64);
+        ranks.push(QueueRank {
+            rank: row.try_get("rank")?,
+            shuffle: row
+                .try_get::<Option<Vec<u8>>, _>("shuffle_rank")?
+                .filter(|_| state.shuffled),
+        });
         let provenance = match row.try_get::<Option<i64>, _>("context_key")? {
             Some(key) => {
                 let (context_id, context_title) = match &contexts[&key] {
@@ -994,29 +753,25 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
         entries.push(QueueEntry {
             track_key: row.try_get("track_key")?,
             provenance,
-            received_from_connect: row.try_get("received_from_connect")?,
         });
     }
-    let canonical = ids
-        .iter()
-        .enumerate()
-        .map(|(position, id)| (*id, position as u32))
-        .collect::<HashMap<_, _>>();
-    let order = sqlx::query_scalar::<_, i64>(
-        "SELECT entry_id FROM queue_positions WHERE order_kind=1 ORDER BY position",
-    )
-    .fetch_all(&mut *connection)
-    .await?
-    .into_iter()
-    .map(|id| canonical[&(id as u64)])
-    .collect();
-    let mut state = QueueRestore {
-        ids: ids.into(),
-        entries: entries.into(),
-        order,
-        ..Default::default()
-    };
-    read_settings(connection, &mut state).await?;
+    let mut order = (0..entries.len() as u32).collect::<Vec<_>>();
+    if state.shuffled {
+        order.sort_by(|a, b| {
+            let key = |index: &u32| {
+                let rank = &ranks[*index as usize];
+                (
+                    rank.shuffle.as_ref().unwrap_or(&rank.rank),
+                    ids[*index as usize],
+                )
+            };
+            key(a).cmp(&key(b))
+        });
+    }
+    state.ids = ids.into();
+    state.entries = entries.into();
+    state.ranks = ranks.into();
+    state.order = order.into();
     Ok(state)
 }
 
@@ -1033,15 +788,11 @@ async fn read_settings(
     Ok(())
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 pub(crate) struct LegacyQueueRow {
-    #[serde(default)]
-    pub playlist_entry_id: Option<String>,
     pub occurrence: String,
     pub item: TrackReference,
     pub canonical_position: usize,
-    #[serde(default)]
-    pub source_index: Option<usize>,
     pub provenance: QueueProvenance,
 }
 
@@ -1050,16 +801,16 @@ impl LegacyQueueRow {
         QueueEntry {
             track_key,
             provenance: self.provenance.clone(),
-            received_from_connect: false,
         }
     }
 }
 
 pub(crate) async fn export_queue_jsonl_on(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     mut output: impl std::io::Write,
 ) -> LibraryResult<()> {
-    let state = restore_queue_on(connection).await?;
+    let state = restore_queue_on(connection, false).await?;
     let keys = state
         .entries
         .iter()
@@ -1080,7 +831,7 @@ pub(crate) async fn export_queue_jsonl_on(
     output.write_all(b"\n")?;
     let mut seen = HashSet::new();
     for page in uris.chunks(QUEUE_CONTEXT_LIMIT) {
-        for item in track_references_for_uris_on(connection, page).await? {
+        for item in track_references_for_uris_on(catalog, connection, page).await? {
             if seen.insert(item.media_uri.clone()) {
                 serde_json::to_writer(&mut output, &item)?;
                 output.write_all(b"\n")?;
@@ -1090,7 +841,7 @@ pub(crate) async fn export_queue_jsonl_on(
     Ok(())
 }
 pub(crate) async fn import_queue_jsonl_on(
-    connection: &mut sqlx::SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     mut input: impl std::io::BufRead,
 ) -> LibraryResult<()> {
     let mut line = String::new();
@@ -1103,61 +854,31 @@ pub(crate) async fn import_queue_jsonl_on(
                 input.read_line(&mut line)? != 0
             } {
                 if !line.trim().is_empty() {
-                    persist_metadata(connection, &serde_json::from_str::<TrackReference>(&line)?)
+                    write
+                        .put_reference(&serde_json::from_str::<TrackReference>(&line)?)
                         .await?;
                 }
             }
-            decode_queue_export(connection, header["queue"].clone()).await?
+            decode_queue_export(write, header["queue"].clone()).await?
         }
-        Some(version @ 1..=3) => {
-            let mut rows: Vec<LegacyQueueRow> = if version == 3 {
-                serde_json::from_value(header["snapshots"].clone())?
-            } else if version == 2 {
-                serde_json::from_value(header["queue"]["occurrences"].clone())?
-            } else {
-                Vec::new()
-            };
-            if version == 1 {
-                while {
-                    line.clear();
-                    input.read_line(&mut line)? != 0
-                } {
-                    if !line.trim().is_empty() {
-                        rows.push(serde_json::from_str(&line)?);
-                    }
-                }
-            }
-            let mut keys = Vec::with_capacity(rows.len());
+        Some(3) => {
+            let rows: Vec<LegacyQueueRow> = serde_json::from_value(header["snapshots"].clone())?;
             for row in &rows {
-                keys.push(persist_metadata(connection, &row.item).await?);
+                write.put_reference(&row.item).await?;
             }
-            match version {
-                3 => {
-                    legacy::decode_saved(connection, header["queue"].clone())
-                        .await?
-                        .0
-                }
-                2 => {
-                    legacy::migrate_saved(connection, header["queue"].clone(), &rows)
-                        .await?
-                        .0
-                }
-                _ => QueueRestore {
-                    current_index: header["current_occurrence"]
-                        .as_str()
-                        .and_then(|id| rows.iter().position(|row| row.occurrence == id)),
-                    progress_millis: header["progress_millis"].as_i64().unwrap_or(0),
-                    repeat_mode: serde_json::from_value(header["repeat_mode"].clone())?,
-                    shuffled: header["shuffled"].as_bool().unwrap_or(false),
-                    order: (0..rows.len() as u32).collect(),
-                    entries: rows
-                        .iter()
-                        .zip(keys)
-                        .map(|(row, key)| row.entry(key))
-                        .collect(),
-                    ..Default::default()
-                },
+            let saved = legacy::decode_saved(header["queue"].clone())?;
+            let mut keys = Vec::with_capacity(saved.uris.len());
+            for uri in &saved.uris {
+                keys.push(
+                    write
+                        .put_reference(&TrackReference {
+                            media_uri: uri.clone(),
+                            ..Default::default()
+                        })
+                        .await?,
+                );
             }
+            saved.restore(keys).0
         }
         _ => {
             return Err(LibraryError::InvalidRequest(
@@ -1165,7 +886,7 @@ pub(crate) async fn import_queue_jsonl_on(
             ));
         }
     };
-    save_queue_on(connection, &state).await
+    save_queue_on(write.connection().await?, &state).await
 }
 #[allow(non_upper_case_globals)]
 impl QueuePlacement {
@@ -1178,13 +899,6 @@ impl QueuePlacement {
             other => other,
         }
     }
-}
-
-async fn persist_metadata(
-    connection: &mut SqliteConnection,
-    item: &TrackReference,
-) -> LibraryResult<crate::TrackKey> {
-    crate::catalog::remember_track(connection, item).await
 }
 
 /// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
@@ -1208,12 +922,13 @@ async fn track_uris_on(
 }
 
 async fn track_references_for_uris_on(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     uris: &[String],
 ) -> LibraryResult<Vec<TrackReference>> {
     let keys = sqlx::query_scalar::<_, crate::TrackKey>("SELECT track_key FROM json_each(?1) requested JOIN tracks ON media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
         .bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?;
-    let songs = crate::tracks::load_track_rows(connection, &keys).await?;
+    let songs = catalog.track_views_on(connection, &keys).await?;
     let songs = songs
         .into_iter()
         .map(|song| (song.media_uri.clone(), TrackReference::from(song)))

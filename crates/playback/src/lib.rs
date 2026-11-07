@@ -8,9 +8,7 @@ mod updates;
 mod view;
 
 pub use backend::*;
-pub use library::{
-    QueueProvenance as Provenance, QueueRepeatMode as RepeatMode, QueueRow, TrackReference,
-};
+pub use library::{QueueProvenance, QueueRepeatMode, QueueRow, TrackReference};
 pub use listening::*;
 pub use settings::*;
 pub use updates::*;

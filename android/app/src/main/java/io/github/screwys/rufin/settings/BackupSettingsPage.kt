@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.backup.BackupFrequency
+import io.github.screwys.rufin.shared.rufin_core.BackupFrequency
 
 import android.app.Activity
 import android.content.Intent
@@ -21,7 +21,6 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun BackupSettingsPage(model: RufinConnection, preferences: PreferencesConnection) {
-    LaunchedEffect(preferences) { preferences.refreshApplicationSettings() }
     val settings = preferences.applicationSettings?.backup
     if (settings == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -43,7 +42,6 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 write -> context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }
             withContext(Dispatchers.IO) { preferences.nativeSettings().setBackupPreferences(settings.copy(destinationUri = uri.toString())) }
-            preferences.refreshApplicationSettings()
         } }
     }
     SettingsPage {
@@ -85,7 +83,7 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 }
             }
         }
-        BackupContentsControls(settings.contents) { preferences.changePreference { setBackupPreferences(settings.copy(contents = it)) } }
+        BackupContentsControls(settings.contents) { preferences.changePreference { setBackupPreferences(applicationPreferences().backup.copy(contents = it)) } }
     }
     if (enable) BackupPasswordDialog(false, dismiss = { enable = false }) { passphrase ->
         enable = false
@@ -93,7 +91,6 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
             if (passphrase != null) model.connectedService().runtime.value!!.getOrThrow().backups().use { it.saveSchedulePassword(passphrase) }
             val next = settings.copy(enabled = true, encrypt = passphrase != null)
             withContext(Dispatchers.IO) { preferences.nativeSettings().setBackupPreferences(next) }
-            preferences.refreshApplicationSettings()
         }
     }
 }

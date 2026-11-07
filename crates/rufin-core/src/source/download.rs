@@ -1,61 +1,85 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Weak};
+
 use async_channel::Receiver;
+use library::{Catalog, Change, Scope, SourceKey, SourcePhase, TrackKey};
+use sources::{SourceConfiguration, SourceError};
 
-use super::SourceOwner;
-use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
-use sources::{SourceConfiguration, SourceError, SourceId};
-use std::sync::{Arc, atomic::Ordering};
+use super::{Shared, SourceOwner};
+use crate::features::{Feature, Pass};
+use crate::runtime::source::SourceOperation;
+use crate::settings::StoredSettings;
+use sources::{SourceProgress, SourceProgressStage};
 
-impl SourceOwner {
-    pub(crate) fn source_input_digest(&self, source_id: &SourceId) -> [u8; 32] {
-        self.configuration(source_id)
-            .and_then(|configuration| configuration.input_identity().ok())
-            .map_or([0; 32], |input| input.digest)
+/// Automatic artwork and lyrics downloads while either is on: one pass over every source when
+/// they start, then one over each source whose listing completes, and fetches for the tracks
+/// the change feed reports as added between. A pass skips what is cached and retries what
+/// failed.
+pub(crate) struct Assets(pub(crate) Weak<Shared>);
+
+impl Feature for Assets {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        settings.cache_downloads() != (false, false)
     }
 
-    pub(crate) fn request_asset_downloads(&self) {
-        self.shared.asset_download_requested.notify_one();
+    /// The pass reads both switches when it starts.
+    fn restarts(&self, previous: &StoredSettings, current: &StoredSettings) -> bool {
+        previous.cache_downloads() != current.cache_downloads()
     }
 
-    pub(crate) fn start_asset_downloader(&self) {
-        let weak = Arc::downgrade(&self.shared);
-        let requested = Arc::clone(&self.shared.asset_download_requested);
-        let task = self.shared.runtime.spawn(async move {
-            loop {
-                requested.notified().await;
-                let Some(shared) = weak.upgrade() else { break };
-                if !shared.started.load(Ordering::Acquire) {
-                    break;
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Tracks { .. }
+                | Scope::Source {
+                    phase: SourcePhase::Completed,
+                    ..
                 }
-                SourceOwner { shared }.download_assets().await;
-            }
-        });
-        *self
-            .shared
-            .asset_download
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Some(task);
-        self.request_asset_downloads();
+        )
     }
 
-    fn asset_download_enabled(&self, stage: SourceProgressStage) -> bool {
-        let (artwork, lyrics) = self.shared.settings.cache_downloads();
-        match stage {
-            SourceProgressStage::Artwork => artwork,
-            SourceProgressStage::Lyrics => lyrics,
-            _ => false,
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            if let Some(shared) = self.0.upgrade() {
+                download_added(shared, changes).await;
+            }
+        })
+    }
+
+    fn stopped(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            SourceOwner { shared }.publish_asset_operation(SourceOperation::Idle);
         }
     }
+}
 
-    async fn download_assets(&self) {
-        for configured in self.shared.settings.load().sources.configured {
-            for stage in [SourceProgressStage::Artwork, SourceProgressStage::Lyrics] {
-                if !self.asset_download_enabled(stage)
-                    || (stage == SourceProgressStage::Lyrics && configured.configuration.is_local())
-                {
+impl SourceOwner {
+    /// Fetches artwork and lyrics for every source, or only for these: whole, or these tracks.
+    async fn download_assets(&self, only: Option<&BTreeMap<SourceKey, Option<Vec<TrackKey>>>>) {
+        let (artwork, lyrics) = self.shared.settings.load().cache_downloads();
+        for configured in &self.shared.settings.load().sources.configured {
+            let source_id = &configured.configuration.source_id;
+            let Some(source_key) = self.shared.catalog.source_key(source_id) else {
+                continue;
+            };
+            let keys = match only.map(|only| only.get(&source_key)) {
+                Some(Some(keys)) => keys.as_deref(),
+                Some(None) => continue,
+                None => None,
+            };
+            for (stage, enabled) in [
+                (SourceProgressStage::Artwork, artwork),
+                (
+                    SourceProgressStage::Lyrics,
+                    lyrics && !configured.configuration.is_local(),
+                ),
+            ] {
+                if !enabled {
                     continue;
                 }
                 if let Err(error) = self
-                    .download_source_assets(&configured.configuration, stage)
+                    .download_source_assets(&configured.configuration, source_key, stage, keys)
                     .await
                 {
                     tracing::warn!(source = %configured.configuration.name, %error, "could not download source assets");
@@ -68,17 +92,12 @@ impl SourceOwner {
     async fn download_source_assets(
         &self,
         configuration: &SourceConfiguration,
+        source_key: SourceKey,
         stage: SourceProgressStage,
+        keys: Option<&[TrackKey]>,
     ) -> Result<(), String> {
         let source_id = &configuration.source_id;
-        let database = &self.shared.database;
-        let Some(source_key) = database
-            .source_identity_key(source_id)
-            .await
-            .map_err(super::string_error)?
-        else {
-            return Ok(());
-        };
+        let catalog = &self.shared.catalog;
         let cancel_read = library::ReadCancellation::new();
         let mut reported_at = std::time::Instant::now();
         let mut report = |completed| {
@@ -97,43 +116,47 @@ impl SourceOwner {
         let mut completed = 0;
         if stage == SourceProgressStage::Artwork {
             let mut after = None;
+            let mut chunks = keys.map(|keys| keys.chunks(128));
             loop {
-                let page = database
-                    .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
-                    .await
-                    .map_err(super::string_error)?;
-                if page.is_empty() {
-                    break;
+                let page = match &mut chunks {
+                    Some(chunks) => match chunks.next() {
+                        Some(keys) => catalog.track_key_artwork_bindings(keys).await,
+                        None => break,
+                    },
+                    None => {
+                        catalog
+                            .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
+                            .await
+                    }
+                }
+                .map_err(crate::string_error)?;
+                if chunks.is_none() {
+                    if page.is_empty() {
+                        break;
+                    }
+                    after = page.last().cloned();
                 }
                 if completed == 0 {
                     report(0);
                 }
-                after = page.last().cloned();
                 for binding in page {
-                    if !self.asset_download_enabled(stage) {
-                        return Ok(());
-                    }
                     self.shared
                         .artwork
                         .cache_source(&binding)
                         .await
-                        .map_err(super::string_error)?;
+                        .map_err(crate::string_error)?;
                     completed += 1;
                     report(completed);
                 }
             }
         } else {
-            let input = configuration
-                .input_identity()
-                .map_err(super::string_error)?
-                .digest;
             let mut source = None;
             let mut after = None;
             loop {
-                let page = database
-                    .uncached_source_lyrics_page(source_key, input, after, &cancel_read)
+                let page = catalog
+                    .uncached_source_lyrics_page(source_key, after, keys, &cancel_read)
                     .await
-                    .map_err(super::string_error)?;
+                    .map_err(crate::string_error)?;
                 if page.is_empty() {
                     break;
                 }
@@ -146,15 +169,7 @@ impl SourceOwner {
                 };
                 after = page.last().map(|(key, _)| *key);
                 for (_, uri) in page {
-                    if !self.asset_download_enabled(stage) {
-                        return Ok(());
-                    }
-                    let input = if library::source_entity_parts(&uri).is_some() {
-                        input
-                    } else {
-                        [0; 32]
-                    };
-                    match source.cached_lyrics(database, &uri, input).await {
+                    match source.cached_lyrics(catalog, &uri).await {
                         Ok(_) => {}
                         Err(
                             error @ (SourceError::Network(_)
@@ -168,6 +183,9 @@ impl SourceOwner {
                     completed += 1;
                     report(completed);
                 }
+            }
+            if completed > 0 {
+                self.notice(super::feed::Notice::Lyrics);
             }
         }
         Ok(())
@@ -184,29 +202,23 @@ impl SourceOwner {
         {
             return;
         }
-        self.shared.operation.send_replace(operation.clone());
-        let _ = self
-            .shared
-            .outputs
-            .events
-            .try_send(crate::runtime::SourceEvent::Operation(operation));
+        self.shared.operation.send_replace(operation);
     }
 }
 
 impl SourceOwner {
+    /// Downloads the tracks of `selection`, as a job named after what it selects.
     pub fn download_selection(
         &self,
         selection: library::MemberSelection,
-        context: String,
-        title: Option<String>,
     ) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, database| async move {
-            let uris = database
+        self.reply(move |owner, catalog| async move {
+            let uris = catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
             let subject =
-                downloads::DownloadSubject::for_media_uris(&context, title.as_deref(), &uris);
+                crate::downloads::DownloadSubject::of_selection(&catalog, &selection, &uris);
             owner.download_media(subject, uris);
             Ok(())
         })
@@ -216,8 +228,8 @@ impl SourceOwner {
         &self,
         selection: library::MemberSelection,
     ) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, database| async move {
-            let uris = database
+        self.reply(move |owner, catalog| async move {
+            let uris = catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
@@ -228,5 +240,37 @@ impl SourceOwner {
 
     pub fn remove_download_media(&self, media_uris: Vec<String>) {
         self.shared.downloads.remove(media_uris, true);
+    }
+}
+
+/// Fetches artwork and lyrics for the sources whose listing completed and the tracks the
+/// Changes added, or for every source.
+async fn download_added(shared: Arc<Shared>, changes: Option<Vec<Arc<Change>>>) {
+    let mut only = BTreeMap::<SourceKey, Option<Vec<TrackKey>>>::new();
+    let mut full = changes.is_none();
+    for scope in changes.iter().flatten().flat_map(|change| &change.scopes) {
+        match scope {
+            Scope::Reload => full = true,
+            Scope::Source {
+                key,
+                phase: SourcePhase::Completed,
+            } => {
+                only.insert(*key, None);
+            }
+            Scope::Tracks {
+                source: Some(source),
+                added,
+                ..
+            } if !added.is_empty() => {
+                let keys = only.entry(*source).or_insert_with(|| Some(Vec::new()));
+                keys.iter_mut().for_each(|keys| keys.extend(added));
+            }
+            _ => {}
+        }
+    }
+    if full || !only.is_empty() {
+        SourceOwner { shared }
+            .download_assets((!full).then_some(&only))
+            .await;
     }
 }

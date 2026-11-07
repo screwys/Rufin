@@ -1,5 +1,6 @@
 use crate::{
-    AlbumMetadata, ArtistMetadata, FolderMetadata, NativeUserState, TagMetadata, TrackMetadata,
+    AlbumMetadata, ArtistMetadata, FolderMetadata, NativeUserState, TagKind, TagMetadata,
+    TrackMetadata,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,9 +16,11 @@ pub struct TrackObservation {
     pub cue_start_millis: Option<i64>,
     pub cue_end_millis: Option<i64>,
     pub first_seen_at: Option<i64>,
-    pub loudness_analysis_key: [u8; 32],
+    /// When the audio may have changed: the file or server revision plus the CUE window.
+    pub audio_revision: Option<[u8; 32]>,
+    /// A hash of the audio stream, when the source knows it without decoding.
+    pub audio_hash: Option<[u8; 32]>,
     pub source_lyrics: Option<String>,
-    pub source_lyrics_input: [u8; 32],
     pub artwork_binding: Option<Vec<u8>>,
     pub user_data: NativeUserState,
     pub folders: Option<Vec<String>>,
@@ -40,15 +43,9 @@ pub struct ArtistObservation {
     pub user_data: NativeUserState,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct GenreObservation {
-    pub object_id: String,
-    pub metadata: TagMetadata,
-    pub artwork_binding: Option<Vec<u8>>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MoodObservation {
+#[derive(Clone, Debug, PartialEq)]
+pub struct TagObservation {
+    pub kind: TagKind,
     pub object_id: String,
     pub metadata: TagMetadata,
     pub artwork_binding: Option<Vec<u8>>,
@@ -84,8 +81,7 @@ pub struct CatalogBatch {
     pub tracks: Vec<TrackObservation>,
     pub albums: Vec<AlbumObservation>,
     pub artists: Vec<ArtistObservation>,
-    pub genres: Vec<GenreObservation>,
-    pub moods: Vec<MoodObservation>,
+    pub tags: Vec<TagObservation>,
     pub folders: Vec<FolderObservation>,
     pub playlists: Vec<PlaylistObservation>,
 }

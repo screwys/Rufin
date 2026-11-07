@@ -32,6 +32,22 @@ pub struct PlayerPreferences {
     pub right_panel: super::right_panel::RightPanelSettings,
 }
 
+impl From<&super::app::Settings> for PlayerPreferences {
+    fn from(ui: &super::app::Settings) -> Self {
+        let mut visualizer = ui.visualizer.clone();
+        visualizer.selected_preset = visualizer.selected_preset();
+        Self {
+            application: ui.application.clone(),
+            playback: ui.playback.clone(),
+            lyrics: ui.lyrics.preferences.clone(),
+            visualizer,
+            visualizer_save_target: ui.visualizer.save_target(),
+            display: ui.player_display.clone(),
+            right_panel: ui.right_panel.clone(),
+        }
+    }
+}
+
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlayerPreferenceOptions {
     pub lyrics_scroll_pause_millis: u64,
@@ -48,31 +64,6 @@ pub struct PlayerPreferenceOptions {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn player_preferences(&self) -> PlayerPreferences {
-        let stored = self
-            .file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let ui = &stored.ui;
-        let playback = ui.playback.clone();
-        let mut visualizer = ui.visualizer.clone();
-        visualizer.selected_preset = visualizer.selected_preset();
-        PlayerPreferences {
-            application: ui.application.clone(),
-            playback,
-            lyrics: ui.lyrics.preferences.clone(),
-            visualizer,
-            visualizer_save_target: ui.visualizer.save_target(),
-            display: ui.player_display.clone(),
-            right_panel: ui.right_panel.clone(),
-        }
-    }
-
-    pub fn cast_network_interface(&self) -> Option<String> {
-        self.load().cast_network_interface
-    }
-
     pub fn set_cast_network_interface(&self, value: Option<String>) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.cast_network_interface = value;

@@ -1,4 +1,5 @@
-use serde::{Deserialize, Deserializer, Serialize};
+pub use library::LibraryField;
+use serde::{Deserialize, Serialize};
 
 pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 17;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
@@ -7,12 +8,6 @@ pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
 pub const MIN_RESTORED_WINDOW_HEIGHT: i32 = 400;
 pub const MAX_RESTORED_WINDOW_WIDTH: i32 = 3_400;
 pub const MAX_RESTORED_WINDOW_HEIGHT: i32 = 2_000;
-fn default_narrow_layout_enabled() -> bool {
-    true
-}
-fn default_narrow_layout_threshold() -> i32 {
-    1_300
-}
 pub fn sanitized_window_size(width: Option<i32>, height: Option<i32>) -> Option<(i32, i32)> {
     let (width, height) = (width?, height?);
     if width < MIN_RESTORED_WINDOW_WIDTH || height < MIN_RESTORED_WINDOW_HEIGHT {
@@ -34,26 +29,12 @@ pub const MIN_RIGHT_SIDEBAR_WIDTH: i32 = 250;
 pub const MAX_RIGHT_SIDEBAR_WIDTH: i32 = 500;
 pub const MIN_TABLE_COLUMN_WIDTH: i32 = 24;
 pub const MAX_TABLE_COLUMN_WIDTH: i32 = 4_096;
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum LeftSidebarMode {
     #[default]
     Full,
     Compact,
     Hidden,
-}
-impl<'de> Deserialize<'de> for LeftSidebarMode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(match value.as_str() {
-            "Full" => Self::Full,
-            "Compact" => Self::Compact,
-            "Hidden" => Self::Hidden,
-            _ => Self::default(),
-        })
-    }
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RightSidebarMode {
@@ -86,18 +67,12 @@ impl Default for LayoutProfile {
         Self::new(LeftSidebarMode::Full, RightSidebarMode::Visible)
     }
 }
-fn default_narrow_layout_profile() -> LayoutProfile {
-    LayoutProfile::new(LeftSidebarMode::Compact, RightSidebarMode::Visible)
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct LayoutSettings {
-    #[serde(default)]
     pub default_profile: LayoutProfile,
-    #[serde(default = "default_narrow_layout_enabled")]
     pub narrow_enabled: bool,
-    #[serde(default = "default_narrow_layout_threshold")]
     pub narrow_threshold: i32,
-    #[serde(default = "default_narrow_layout_profile")]
     pub narrow_profile: LayoutProfile,
     pub preferred_left_sidebar_width: i32,
     pub preferred_right_sidebar_width: i32,
@@ -107,8 +82,8 @@ impl Default for LayoutSettings {
         Self {
             default_profile: LayoutProfile::default(),
             narrow_enabled: true,
-            narrow_threshold: default_narrow_layout_threshold(),
-            narrow_profile: default_narrow_layout_profile(),
+            narrow_threshold: 1_300,
+            narrow_profile: LayoutProfile::new(LeftSidebarMode::Compact, RightSidebarMode::Visible),
             preferred_left_sidebar_width: DEFAULT_LEFT_SIDEBAR_WIDTH,
             preferred_right_sidebar_width: DEFAULT_RIGHT_SIDEBAR_WIDTH,
         }
@@ -128,135 +103,6 @@ impl LayoutSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum StoredRightSidebarMode {
-    Hidden,
-    Compact,
-    #[default]
-    Default,
-    Comfortable,
-    Spacious,
-}
-
-impl StoredRightSidebarMode {
-    fn presentation(self) -> RightSidebarMode {
-        if matches!(self, Self::Hidden) {
-            RightSidebarMode::Hidden
-        } else {
-            RightSidebarMode::Visible
-        }
-    }
-
-    fn preferred_width(self) -> Option<i32> {
-        match self {
-            Self::Hidden => None,
-            Self::Compact => Some(250),
-            Self::Default => Some(300),
-            Self::Comfortable => Some(400),
-            Self::Spacious => Some(500),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for StoredRightSidebarMode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(match value.as_str() {
-            "Hidden" => Self::Hidden,
-            "Compact" => Self::Compact,
-            "Comfortable" => Self::Comfortable,
-            "Spacious" => Self::Spacious,
-            "Visible" | "Shown" | "Default" => Self::Default,
-            _ => Self::default(),
-        })
-    }
-}
-
-#[derive(Deserialize)]
-struct StoredLayoutProfile {
-    #[serde(default)]
-    left_sidebar: LeftSidebarMode,
-    #[serde(default)]
-    right_sidebar: StoredRightSidebarMode,
-    #[serde(default)]
-    last_visible_right_sidebar: StoredRightSidebarMode,
-}
-
-impl Default for StoredLayoutProfile {
-    fn default() -> Self {
-        Self {
-            left_sidebar: LeftSidebarMode::Full,
-            right_sidebar: StoredRightSidebarMode::Default,
-            last_visible_right_sidebar: StoredRightSidebarMode::Default,
-        }
-    }
-}
-
-fn default_stored_narrow_layout_profile() -> StoredLayoutProfile {
-    StoredLayoutProfile {
-        left_sidebar: LeftSidebarMode::Compact,
-        ..StoredLayoutProfile::default()
-    }
-}
-
-#[derive(Deserialize)]
-struct StoredLayoutSettings {
-    #[serde(default)]
-    default_profile: StoredLayoutProfile,
-    #[serde(default = "default_narrow_layout_enabled")]
-    narrow_enabled: bool,
-    #[serde(default = "default_narrow_layout_threshold")]
-    narrow_threshold: i32,
-    #[serde(default = "default_stored_narrow_layout_profile")]
-    narrow_profile: StoredLayoutProfile,
-    #[serde(default)]
-    preferred_left_sidebar_width: Option<i32>,
-    #[serde(default)]
-    preferred_right_sidebar_width: Option<i32>,
-}
-
-impl<'de> Deserialize<'de> for LayoutSettings {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let stored = StoredLayoutSettings::deserialize(deserializer)?;
-        let legacy_right_width = stored
-            .default_profile
-            .right_sidebar
-            .preferred_width()
-            .or_else(|| {
-                stored
-                    .default_profile
-                    .last_visible_right_sidebar
-                    .preferred_width()
-            })
-            .unwrap_or(DEFAULT_RIGHT_SIDEBAR_WIDTH);
-        let mut settings = Self {
-            default_profile: LayoutProfile::new(
-                stored.default_profile.left_sidebar,
-                stored.default_profile.right_sidebar.presentation(),
-            ),
-            narrow_enabled: stored.narrow_enabled,
-            narrow_threshold: stored.narrow_threshold,
-            narrow_profile: LayoutProfile::new(
-                stored.narrow_profile.left_sidebar,
-                stored.narrow_profile.right_sidebar.presentation(),
-            ),
-            preferred_left_sidebar_width: stored
-                .preferred_left_sidebar_width
-                .unwrap_or(DEFAULT_LEFT_SIDEBAR_WIDTH),
-            preferred_right_sidebar_width: stored
-                .preferred_right_sidebar_width
-                .unwrap_or(legacy_right_width),
-        };
-        settings.sanitize();
-        Ok(settings)
-    }
-}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ThemePreference {
@@ -264,6 +110,23 @@ pub enum ThemePreference {
     Light,
     Dark,
     Named(String),
+}
+
+impl ThemePreference {
+    /// The theme this preference shows, if any: Light and Dark are the built-in themes; System
+    /// follows the platform.
+    pub fn selected<'a>(
+        &self,
+        themes: &'a [crate::themes::Theme],
+    ) -> Option<&'a crate::themes::Theme> {
+        let id = match self {
+            Self::System => return None,
+            Self::Light => "builtin:light",
+            Self::Dark => "builtin:dark",
+            Self::Named(id) => id,
+        };
+        themes.iter().find(|theme| theme.id == id)
+    }
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
@@ -281,6 +144,22 @@ pub enum AccentPreference {
     Slate,
 }
 impl AccentPreference {
+    /// Its name, untranslated.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::System => localization::msgid("System"),
+            Self::Blue => localization::msgid("Blue"),
+            Self::Teal => localization::msgid("Teal"),
+            Self::Green => localization::msgid("Green"),
+            Self::Yellow => localization::msgid("Yellow"),
+            Self::Orange => localization::msgid("Orange"),
+            Self::Red => localization::msgid("Red"),
+            Self::Pink => localization::msgid("Pink"),
+            Self::Purple => localization::msgid("Purple"),
+            Self::Slate => localization::msgid("Slate"),
+        }
+    }
+
     pub fn color(self) -> Option<&'static str> {
         match self {
             Self::System => None,
@@ -308,26 +187,12 @@ impl AccentPreference {
         Self::Slate,
     ];
 }
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LibraryLayout {
     Row,
     Grid,
     Detail,
-}
-impl<'de> Deserialize<'de> for LibraryLayout {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(match value.as_str() {
-            "Row" | "row" | "Table" | "table" => Self::Row,
-            "Detail" | "detail" => Self::Detail,
-            "Grid" | "grid" => Self::Grid,
-            _ => Self::Grid,
-        })
-    }
 }
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum LibraryListKey {
@@ -414,65 +279,6 @@ impl LibraryListKey {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum LibraryField {
-    RowIndex,
-    Image,
-    Title,
-    TitleMerged,
-    Artist,
-    AlbumArtist,
-    Album,
-    Year,
-    ReleaseDate,
-    DateAdded,
-    LastPlayed,
-    PlayCount,
-    UserRating,
-    Genre,
-    Bpm,
-    Bitrate,
-    SampleRate,
-    BitDepth,
-    Channels,
-    Format,
-    FilePath,
-    Source,
-    TrackNumber,
-    DiscNumber,
-    SongCount,
-    AlbumCount,
-    Duration,
-    Favorite,
-    Tools,
-}
-impl LibraryField {
-    pub fn catalog_sort(self) -> library::CatalogSort {
-        use library::CatalogSort;
-        match self {
-            Self::RowIndex => CatalogSort::Position,
-            Self::TrackNumber => CatalogSort::TrackNumber,
-            Self::Artist => CatalogSort::Artist,
-            Self::AlbumArtist => CatalogSort::AlbumArtist,
-            Self::Album => CatalogSort::Album,
-            Self::Year => CatalogSort::Year,
-            Self::ReleaseDate => CatalogSort::ReleaseDate,
-            Self::DateAdded => CatalogSort::DateAdded,
-            Self::LastPlayed => CatalogSort::LastPlayed,
-            Self::PlayCount => CatalogSort::PlayCount,
-            Self::UserRating => CatalogSort::UserRating,
-            Self::Genre => CatalogSort::Genre,
-            Self::Bpm => CatalogSort::Bpm,
-            Self::Duration => CatalogSort::Duration,
-            Self::Favorite => CatalogSort::Favorite,
-            Self::SongCount => CatalogSort::TrackCount,
-            Self::AlbumCount => CatalogSort::AlbumCount,
-            _ => CatalogSort::Title,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DisplaySize {
@@ -567,6 +373,91 @@ impl LibraryListSettings {
         self.layout_version = LIBRARY_LIST_LAYOUT_VERSION;
     }
 
+    /// The fields `layout` shows: row columns, grid labels or detail track columns.
+    pub fn fields(&self, layout: LibraryLayout) -> &[LibraryField] {
+        match layout {
+            LibraryLayout::Row => &self.row_fields,
+            LibraryLayout::Grid => &self.grid_fields,
+            LibraryLayout::Detail => &self.detail_track_fields,
+        }
+    }
+
+    fn fields_mut(&mut self, layout: LibraryLayout) -> &mut Vec<LibraryField> {
+        match layout {
+            LibraryLayout::Row => &mut self.row_fields,
+            LibraryLayout::Grid => &mut self.grid_fields,
+            LibraryLayout::Detail => &mut self.detail_track_fields,
+        }
+    }
+
+    /// Whether `field` can be shown or hidden in `layout`. A row keeps one column, where
+    /// Tools counts as one.
+    pub fn can_toggle_field(&self, layout: LibraryLayout, field: LibraryField) -> bool {
+        let fields = self.fields(layout);
+        layout == LibraryLayout::Grid
+            || !fields.contains(&field)
+            || !row_column(field)
+            || fields.iter().filter(|field| row_column(**field)).count() > 1
+    }
+
+    /// Shows or hides `field` in `layout`. A shown field goes before Tools; the queue's row
+    /// index goes first.
+    pub fn show_field(
+        &mut self,
+        key: LibraryListKey,
+        layout: LibraryLayout,
+        field: LibraryField,
+        shown: bool,
+    ) {
+        if !self.can_toggle_field(layout, field) {
+            return;
+        }
+        let fields = self.fields_mut(layout);
+        if !shown {
+            fields.retain(|candidate| *candidate != field);
+        } else if key == LibraryListKey::Queue && field == LibraryField::RowIndex {
+            fields.retain(|candidate| *candidate != field);
+            fields.insert(0, field);
+        } else if !fields.contains(&field) {
+            let position = fields.len() - usize::from(fields.last() == Some(&LibraryField::Tools));
+            fields.insert(position, field);
+        }
+    }
+
+    /// Moves a shown `field` one place earlier (`delta` < 0) or later in `layout`.
+    pub fn move_field(&mut self, layout: LibraryLayout, field: LibraryField, delta: isize) {
+        let fields = self.fields_mut(layout);
+        let Some(index) = fields.iter().position(|candidate| *candidate == field) else {
+            return;
+        };
+        let target = if delta < 0 {
+            index.saturating_sub(1)
+        } else {
+            (index + 1).min(fields.len() - 1)
+        };
+        fields.swap(index, target);
+    }
+
+    /// Moves a shown `source` field before or `after` the shown `target` field in `layout`.
+    pub fn reorder_field(
+        &mut self,
+        layout: LibraryLayout,
+        source: LibraryField,
+        target: LibraryField,
+        after: bool,
+    ) {
+        let fields = self.fields_mut(layout);
+        let Some(source_index) = fields.iter().position(|field| *field == source) else {
+            return;
+        };
+        let field = fields.remove(source_index);
+        let Some(target_index) = fields.iter().position(|field| *field == target) else {
+            fields.insert(source_index.min(fields.len()), field);
+            return;
+        };
+        fields.insert((target_index + usize::from(after)).min(fields.len()), field);
+    }
+
     fn migrate_defaults(&mut self, key: LibraryListKey) {
         if self.layout_version >= LIBRARY_LIST_LAYOUT_VERSION {
             return;
@@ -588,171 +479,6 @@ impl LibraryListSettings {
             }
         }
 
-        if key == LibraryListKey::SmartPlaylists
-            && self.layout_version < 4
-            && self.sort_key == LibraryField::Title
-        {
-            self.sort_key = default_sort_key(key);
-        }
-
-        if key.supports_layout(LibraryLayout::Detail)
-            && self.layout_version < 5
-            && self
-                .detail_track_fields
-                .iter()
-                .any(|field| !available_detail_track_fields().contains(field))
-        {
-            self.detail_track_fields = default_detail_track_fields();
-        }
-
-        if self.layout_version < 6 {
-            match key {
-                LibraryListKey::Albums | LibraryListKey::ArtistAlbums => {
-                    let previous_default = [
-                        LibraryField::TitleMerged,
-                        LibraryField::Year,
-                        LibraryField::Favorite,
-                    ];
-                    let duplicate_artist_default = [
-                        LibraryField::TitleMerged,
-                        LibraryField::AlbumArtist,
-                        LibraryField::Year,
-                        LibraryField::Favorite,
-                    ];
-                    if self.row_fields == previous_default
-                        || self.row_fields == duplicate_artist_default
-                    {
-                        self.row_fields = combined_row_fields(key);
-                    }
-                }
-                LibraryListKey::ArtistTracks => {
-                    let previous_default = [
-                        LibraryField::RowIndex,
-                        LibraryField::TitleMerged,
-                        LibraryField::Album,
-                        LibraryField::Duration,
-                        LibraryField::Favorite,
-                    ];
-                    if self.row_fields == previous_default {
-                        self.row_fields = combined_row_fields(key);
-                    }
-                }
-                LibraryListKey::Queue
-                | LibraryListKey::FullscreenTracks
-                | LibraryListKey::Artists
-                | LibraryListKey::AlbumArtists
-                | LibraryListKey::Tracks
-                | LibraryListKey::Folders
-                | LibraryListKey::FavoriteTracks
-                | LibraryListKey::History
-                | LibraryListKey::Genres
-                | LibraryListKey::Moods
-                | LibraryListKey::Playlists
-                | LibraryListKey::SmartPlaylists
-                | LibraryListKey::AlbumDetailTracks
-                | LibraryListKey::GenreTracks
-                | LibraryListKey::MoodTracks
-                | LibraryListKey::PlaylistTracks
-                | LibraryListKey::SmartPlaylistTracks => {}
-            }
-        }
-
-        if self.layout_version < 7 {
-            match key {
-                LibraryListKey::Albums => {
-                    let previous_default = [
-                        LibraryField::TitleMerged,
-                        LibraryField::PlayCount,
-                        LibraryField::Year,
-                        LibraryField::Favorite,
-                    ];
-                    if self.layout == LibraryLayout::Row && self.row_fields == previous_default {
-                        self.layout = key.default_layout();
-                    }
-                }
-                LibraryListKey::FavoriteTracks | LibraryListKey::ArtistTracks => {
-                    let previous_default = [
-                        LibraryField::TitleMerged,
-                        LibraryField::Album,
-                        LibraryField::Year,
-                        LibraryField::Favorite,
-                    ];
-                    if self.row_fields == previous_default {
-                        self.row_fields = combined_row_fields(key);
-                    }
-                }
-                LibraryListKey::Queue
-                | LibraryListKey::FullscreenTracks
-                | LibraryListKey::Artists
-                | LibraryListKey::AlbumArtists
-                | LibraryListKey::Tracks
-                | LibraryListKey::Folders
-                | LibraryListKey::History
-                | LibraryListKey::Genres
-                | LibraryListKey::Moods
-                | LibraryListKey::Playlists
-                | LibraryListKey::SmartPlaylists
-                | LibraryListKey::AlbumDetailTracks
-                | LibraryListKey::ArtistAlbums
-                | LibraryListKey::GenreTracks
-                | LibraryListKey::MoodTracks
-                | LibraryListKey::PlaylistTracks
-                | LibraryListKey::SmartPlaylistTracks => {}
-            }
-        }
-
-        if self.layout_version < 8 {
-            let defaults = combined_row_fields(key);
-            let standard_track_default = matches!(
-                key,
-                LibraryListKey::Tracks
-                    | LibraryListKey::FavoriteTracks
-                    | LibraryListKey::ArtistTracks
-            ) && self.row_fields == defaults[1..];
-            let album_detail_default = key == LibraryListKey::AlbumDetailTracks
-                && self.row_fields
-                    == [
-                        LibraryField::TrackNumber,
-                        LibraryField::Title,
-                        LibraryField::Duration,
-                    ];
-            if standard_track_default || album_detail_default {
-                self.row_fields = defaults;
-            }
-
-            if self.detail_track_fields
-                == [
-                    LibraryField::TrackNumber,
-                    LibraryField::Title,
-                    LibraryField::Duration,
-                ]
-            {
-                self.detail_track_fields = default_detail_track_fields();
-            }
-        }
-
-        if self.layout_version < 9 && key == LibraryListKey::History {
-            if self.row_fields
-                == [
-                    LibraryField::RowIndex,
-                    LibraryField::TitleMerged,
-                    LibraryField::Album,
-                    LibraryField::Duration,
-                    LibraryField::Favorite,
-                ]
-            {
-                self.row_fields = combined_row_fields(key);
-            }
-            if self.grid_fields
-                == [
-                    LibraryField::Artist,
-                    LibraryField::Album,
-                    LibraryField::Duration,
-                ]
-            {
-                self.grid_fields = default_grid_fields(key);
-            }
-        }
         if self.layout_version < 10 {
             for fields in [&mut self.row_fields, &mut self.detail_track_fields] {
                 for field in fields.iter_mut() {
@@ -922,6 +648,18 @@ pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
             settings: LibraryListSettings::for_key(key),
         })
         .collect()
+}
+/// The labels under the title of a Home album card.
+pub const HOME_ALBUM_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
+/// The labels under the title of a Home track card.
+pub const HOME_TRACK_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
+/// The fields `layout` can show for `key`.
+pub fn available_fields(key: LibraryListKey, layout: LibraryLayout) -> &'static [LibraryField] {
+    match layout {
+        LibraryLayout::Row => available_row_fields(key),
+        LibraryLayout::Grid => available_grid_fields(key),
+        LibraryLayout::Detail => available_detail_track_fields(),
+    }
 }
 pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {
@@ -1367,17 +1105,16 @@ fn sanitize_required_fields(
     }
 }
 fn ensure_usable_row_field(fields: &mut Vec<LibraryField>, fallback: Vec<LibraryField>) {
-    if fields.iter().any(|field| row_field_is_usable(*field)) {
+    if fields.iter().any(|field| row_column(*field)) {
         return;
     }
-    if let Some(field) = fallback
-        .into_iter()
-        .find(|field| row_field_is_usable(*field))
-    {
+    if let Some(field) = fallback.into_iter().find(|field| row_column(*field)) {
         fields.push(field);
     }
 }
-fn row_field_is_usable(field: LibraryField) -> bool {
+
+/// Whether `field` is a column a row can keep alone; Tools counts as one.
+fn row_column(field: LibraryField) -> bool {
     !matches!(
         field,
         LibraryField::RowIndex
@@ -1385,7 +1122,6 @@ fn row_field_is_usable(field: LibraryField) -> bool {
             | LibraryField::TrackNumber
             | LibraryField::DiscNumber
             | LibraryField::Favorite
-            | LibraryField::Tools
     )
 }
 

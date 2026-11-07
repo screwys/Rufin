@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
             val measureFrames = BuildConfig.DEBUG || model.debugLogging
             DisposableEffect(measureFrames) {
                 val diagnostics = if (measureFrames)
-                    FrameDiagnostics(window, (1_000_000_000.0 / windowManager.defaultDisplay.refreshRate).toLong()) else null
+                    FrameDiagnostics(window, (1_000_000_000.0 / androidx.core.content.ContextCompat.getDisplayOrDefault(this@MainActivity).refreshRate).toLong()) else null
                 onDispose { diagnostics?.close() }
             }
             LaunchedEffect(connection) {

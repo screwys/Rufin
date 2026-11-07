@@ -164,15 +164,11 @@ mod tests {
             )),
         );
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
-        database
+        let mut updates = catalog.changes();
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
@@ -214,24 +210,24 @@ mod tests {
                 .respond_with(ResponseTemplate::new(status).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","albumList2":{"album":entries}}})))
                 .expect(1).mount(&server).await;
             source
-                .apply_items(&database, vec![format!("album:{id}")], vec![])
+                .apply_items(&catalog, vec![format!("album:{id}")], vec![])
                 .await
                 .unwrap();
             if identical {
                 assert!(
-                    updates.try_recv().is_err(),
+                    crate::published(&mut updates).is_none(),
                     "unchanged native data stays quiet"
                 );
             } else {
-                assert!(updates.try_recv().expect("catalog update").changed());
+                assert!(crate::published(&mut updates).is_some());
             }
-            let home = database
+            let home = catalog
                 .home_page(
-                    database
-                        .source_identity_key(&crate::SourceId::new("source"))
-                        .await
-                        .unwrap()
-                        .unwrap(),
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&crate::SourceId::new("source"))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,
@@ -277,28 +273,24 @@ mod tests {
         let mut item = serde_json::json!({"id":"track","title":"Track","duration":42,"starred":false,"rating":1});
         let baseline = navidrome_source_with_token(&server, "unused");
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let marker = library::Freshness::new(b"catalog".to_vec()).unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        let stamp = Some(catalog.start_observation().await.unwrap());
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        let stamp = Some(observation.start_observation().await.unwrap());
         (async {
             let mut batch = library::CatalogBatch::default();
             let result = batch
                 .tracks
                 .extend_from_slice(&[(track_from_navidrome(&baseline, "track", &item)).clone()]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
@@ -311,41 +303,40 @@ mod tests {
                 &serde_json::json!({"id":"second","title":"Second"}),
             ))
             .clone()]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
         .unwrap();
         (async {
-            let update = {
-                if let Some(stamp) = stamp {
-                    catalog
-                        .complete_source_observation(
-                            stamp,
-                            &[
-                                "track", "album", "artist", "genre", "mood", "folder", "playlist",
-                            ],
-                            (Some(marker.clone())).as_ref(),
-                        )
-                        .await
-                        .unwrap();
-                }
-                if let Some(stamp) = stamp {
-                    catalog
-                        .complete_source_observation(stamp, &[], Some(&marker))
-                        .await
-                        .unwrap();
-                }
-                Ok::<_, library::LibraryError>(catalog.changes().clone())
-            }?;
-            database
-                .publish_catalog_update(&catalog_source_id, update)
-                .await;
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker), None)
+                    .await
+                    .unwrap();
+            }
             Ok::<_, library::LibraryError>(())
         })
         .await
         .unwrap();
-        assert!(updates.try_recv().expect("catalog update").metadata);
+        assert!(
+            crate::published(&mut updates)
+                .expect("catalog update")
+                .1
+                .intersects(sources::Shown::CATALOG)
+        );
         item["starred"] = true.into();
         item["rating"] = 4.into();
         Mock::given(method("GET"))
@@ -385,19 +376,21 @@ mod tests {
             configuration.source_id,
             crate::source::Implementation::OpenSubsonic(provider),
         );
-        source
-            .apply_items(&database, upserts, vec![])
-            .await
-            .unwrap();
-        let update = updates.try_recv().expect("catalog update");
-        assert!(update.metadata);
+        source.apply_items(&catalog, upserts, vec![]).await.unwrap();
+        let mut update = sources::Shown::default();
+        while let Ok(change) = updates.try_recv() {
+            for (_, part) in sources::Shown::of(&change) {
+                update |= part;
+            }
+        }
+        assert!(update.intersects(sources::Shown::STATE));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),
             "track",
             "navidrome:track:track",
         );
-        let row = database
+        let row = catalog
             .track(&(&uri), &cancellation)
             .await
             .unwrap()
@@ -406,7 +399,7 @@ mod tests {
         assert_eq!(row.state.rating, Some(8));
         assert_eq!(row.metadata.title, "Track");
         assert!(
-            database
+            catalog
                 .accept_freshness("source", &marker, &cancellation)
                 .await
                 .unwrap()

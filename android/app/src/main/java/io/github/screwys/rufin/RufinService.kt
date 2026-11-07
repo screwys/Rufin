@@ -41,7 +41,6 @@ import io.github.screwys.rufin.platform.AndroidDocuments
 import io.github.screwys.rufin.core.AndroidRuntime
 import io.github.screwys.rufin.core.installCatalogs
 import io.github.screwys.rufin.core.installTranslations
-import io.github.screwys.rufin.core.resetDatabase as resetDatabaseFiles
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -141,10 +140,9 @@ class RufinService : MediaSessionService() {
             launch {
                 val artworkPlayer = started.player()
                 try {
-                    playback.map { state -> state?.let { current ->
-                        nativePlayer.artworkIdentity?.let { it to current.artworkRevision }
-                    } }.distinctUntilChanged().collectLatest { key ->
-                        val (identity, revision) = key ?: return@collectLatest
+                    playback.map { state -> state?.let { nativePlayer.artworkIdentity } }
+                        .distinctUntilChanged().collectLatest { key ->
+                        val identity = key ?: return@collectLatest
                         try {
                             val artwork = withContext(Dispatchers.Default) {
                                 artworkPlayer.artwork(identity.toByteArray(), 512u)?.let { image ->
@@ -158,7 +156,7 @@ class RufinService : MediaSessionService() {
                                     }
                                 }
                             }
-                            nativePlayer.updateArtwork(identity, revision, artwork)
+                            nativePlayer.updateArtwork(identity, artwork)
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (_: Exception) {
@@ -181,6 +179,25 @@ class RufinService : MediaSessionService() {
                     network.destroy()
                     multicastLock?.let { if (it.isHeld) it.release() }
                 }
+            }
+            launch {
+                // The document tree the sync folder uses; its grant goes once Connect stops
+                // using it: the folder changed or cleared, Connect turned off, or this device
+                // left or was removed. It stays while a document root, a download directory or
+                // the backup destination still uses that tree.
+                val connect = started.connect()
+                val status = connect.changes()
+                var folder: String? = null
+                try {
+                    while (isActive) {
+                        val next = withContext(Dispatchers.Default) { status.next() }
+                        val document = (next.settings.folder as? io.github.screwys.rufin.shared.rufin_core.SyncFolder.Document)?.document
+                        val dropped = folder?.takeIf { it != document }
+                        folder = document
+                        if (dropped != null) try { releaseSyncFolder(started, dropped) }
+                        catch (error: Exception) { Log.w("Rufin", "Could not release the old sync folder", error) }
+                    }
+                } finally { status.destroy(); connect.destroy() }
             }
             launch {
                 val source = started.source()
@@ -248,6 +265,15 @@ class RufinService : MediaSessionService() {
 
     }
 
+    private fun releaseSyncFolder(started: AndroidRuntime, document: String) {
+        val uri = android.net.Uri.parse(document)
+        val held = contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri } ?: return
+        if (started.usesDocument(document)) return
+        contentResolver.releasePersistableUriPermission(uri,
+            (if (held.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                (if (held.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0))
+    }
+
     private fun runtimeFailed(error: Exception) {
         Log.e("Rufin", "Could not run the shared runtime", error)
         mutableRuntime.value = Result.failure(error)
@@ -271,11 +297,6 @@ class RufinService : MediaSessionService() {
         if (wakeLock.isHeld) wakeLock.release()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
-    }
-
-    internal suspend fun resetDatabase() {
-        stopRuntimeForReset()
-        withContext(Dispatchers.IO) { resetDatabaseFiles(filesDir.absolutePath, cacheDir.absolutePath) }
     }
 
     internal suspend fun resetStorage(storage: AndroidStorage, kind: StorageReset) {
@@ -391,8 +412,8 @@ class RufinService : MediaSessionService() {
         true
     }.await()
 
+    /** Runs a play or queue request; focus and the foreground service come as playback starts. */
     internal suspend fun playRequest(action: suspend () -> Unit) {
-        preparePlayback()
         try { action() }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) {

@@ -266,7 +266,6 @@ impl UpnpController {
             BackendCommand::SetOutputVolume { .. } => "SetOutputVolume",
             BackendCommand::SetVisualizerEnabled(_) => "SetVisualizerEnabled",
             BackendCommand::ConfigureAudio(_) => "ConfigureAudio",
-            BackendCommand::UpdateLoudness { .. } => "UpdateLoudness",
             BackendCommand::SetPlaybackRate(_) => "SetPlaybackRate",
         };
         let _span = tracing::debug_span!(
@@ -450,7 +449,6 @@ impl UpnpController {
             }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
-            | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
@@ -2404,8 +2402,7 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            received_from_connect: false,
-            provenance: playback::Provenance::Manual,
+            provenance: playback::QueueProvenance::Manual,
             track: {
                 let reference = playback::TrackReference {
                     media_uri: library::source_entity_uri(

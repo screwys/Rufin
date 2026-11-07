@@ -155,7 +155,7 @@ pub(super) fn album_from_json(
             musicbrainz_release_group_id: None,
             album_artists: album_artists,
             genres: genre_credits_from_item(source, album),
-            release_types: normalize_release_types(json::strings(&album["releaseTypes"])),
+            release_types: library::normalize_release_types(json::strings(&album["releaseTypes"])),
             ..Default::default()
         },
         user_data: library::NativeUserState {
@@ -200,7 +200,7 @@ pub(super) fn track_from_json(
     let object_id = source.id("track", &raw_id);
     let title = json::field(song, "title").unwrap_or_else(|| "Untitled Track".to_string());
     let duration_seconds = json::field::<u32>(song, "duration").unwrap_or_default();
-    let loudness_analysis_key = audio_key(
+    let audio_revision = audio_key(
         &object_id,
         path.as_deref(),
         source_format.as_deref(),
@@ -213,6 +213,7 @@ pub(super) fn track_from_json(
                 sample_rate_hz: json::field(song, "samplingRate"),
                 bit_depth: json::field(song, "bitDepth"),
                 channels: json::field(song, "channelCount"),
+                size_bytes: json::field(song, "size"),
             },
             sort_text: clean_optional(json::field(song, "sortName"))
                 .unwrap_or_else(|| title.clone())
@@ -268,7 +269,8 @@ pub(super) fn track_from_json(
         },
         object_id,
         album_object_id: json::id(&song["albumId"]).map(|id| String::from(source.id("album", &id))),
-        loudness_analysis_key,
+        audio_revision: Some(audio_revision),
+        audio_hash: Some(audio_revision),
         artwork_binding: image_ref(source, json::id(&song["coverArt"]))
             .as_ref()
             .map(|image| crate::native_artwork_binding(source_id, image))
@@ -420,19 +422,17 @@ pub(super) fn playlist_from_json(
     }))
 }
 
+/// Subsonic names no entries, only positions: the ids are empty and stored entries keep theirs.
 pub(super) fn playlist_entries_from_json(
     source: &SubsonicSource,
-    playlist_id: &str,
     entries: &Value,
 ) -> Vec<library::PlaylistEntryObservation> {
     json::items(entries)
         .iter()
-        .enumerate()
-        .filter_map(|(index, song)| {
-            let raw_track_id = json::id(&song["id"])?;
+        .filter_map(|song| {
             Some(library::PlaylistEntryObservation {
-                object_id: playlist_entry_id(playlist_id, index, &raw_track_id),
-                track_id: source.id("track", &raw_track_id),
+                object_id: String::new(),
+                track_id: source.id("track", &json::id(&song["id"])?),
             })
         })
         .collect()

@@ -1,23 +1,22 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use downloads::{DownloadRules, SourceDownloadSettings};
+use crate::downloads::{DownloadRules, SourceDownloadSettings};
+use crate::presence::Settings as RichPresenceSettings;
 use library::PlayedFilter;
 use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
-    PlaybackSettings, RepeatMode,
+    PlaybackSettings, QueueRepeatMode,
 };
-use presence::Settings as RichPresenceSettings;
-use secrets::SecretStorageMode;
 use serde::{Deserialize, Serialize};
 use sources::SourceId;
 
 use super::{
     AccentPreference, ContextMenuSettings, LayoutSettings, LibraryListKey, LibraryListSettings,
-    LibraryListSettingsEntry, SettingsError, SettingsOwner, SidebarRouteItem, SidebarSettings,
-    ThemePreference, default_library_list_settings, sanitized_window_size,
+    LibraryListSettingsEntry, SecretStorageMode, SettingsError, SettingsOwner, SidebarRouteItem,
+    SidebarSettings, ThemePreference, default_library_list_settings, sanitized_window_size,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -208,6 +207,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     #[serde(default)]
     prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
     #[serde(default)]
+    use_sort_tags: bool = false => set_use_sort_tags;
+    #[serde(default)]
     download_artwork_automatically: bool = false => set_download_artwork_automatically;
     #[serde(default)]
     download_lyrics_automatically: bool = false => set_download_lyrics_automatically;
@@ -224,21 +225,19 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     reduce_motion: bool = false => set_reduce_motion;
     #[serde(default = "default_true")]
     show_downloaded_badges: bool = true => set_show_downloaded_badges;
-    #[serde(default = "default_true")]
-    new_playlist_current: bool = true => set_new_playlist_current;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
     #[serde(default)]
     external_site_links: ExternalSiteLinkSettings = ExternalSiteLinkSettings::default() => set_external_site_links;
     #[serde(default)]
-    home_blocks: Vec<HomeBlockKind> = default_home_blocks() => set_home_blocks;
+    home_blocks: Vec<HomeBlockKind> = default_home_blocks();
     #[serde(default)]
     context_menu: ContextMenuSettings = ContextMenuSettings::default() => set_context_menu;
     #[serde(default)]
     activity_overview: ActivityOverviewSettings = ActivityOverviewSettings::default();
     #[serde(default)]
-    backup: crate::runtime::BackupSettings = crate::runtime::BackupSettings::default();
-    #[serde(default = "legacy_secret_storage_mode")]
+    backup: crate::backup::BackupSettings = crate::backup::BackupSettings::default();
+    #[serde(default)]
     secret_storage_mode: SecretStorageMode = SecretStorageMode::default();
 });
 
@@ -299,7 +298,7 @@ pub struct Settings {
     pub show_bottom_bar_rating: bool,
     #[serde(default)]
     pub tray_enabled: bool,
-    #[serde(default, alias = "exit_to_tray")]
+    #[serde(default)]
     pub keep_running_after_close: bool,
     #[serde(default)]
     pub start_minimized: bool,
@@ -314,7 +313,7 @@ pub struct Settings {
     #[serde(default)]
     pub shuffle_enabled: bool,
     #[serde(default)]
-    pub repeat_mode: RepeatMode,
+    pub repeat_mode: QueueRepeatMode,
     #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default)]
@@ -361,7 +360,7 @@ impl Default for Settings {
             lastfm_api_key: String::new(),
             auto_dj_enabled: false,
             shuffle_enabled: false,
-            repeat_mode: RepeatMode::Off,
+            repeat_mode: QueueRepeatMode::Off,
             playback: PlaybackSettings::default(),
             random_play: RandomPlaySettings::default(),
             window_width: None,
@@ -393,12 +392,18 @@ impl Settings {
         self.application.notifications_enabled
     }
 
-    pub fn shows_external_site_links(&self) -> bool {
-        self.application.external_site_links.enabled
-    }
-
     pub fn allows_external_metadata_lookup(&self) -> bool {
         self.application.external_metadata_enabled && !self.application.private_mode
+    }
+
+    /// What artwork reads may use beyond the source: cached and online covers as these
+    /// settings allow.
+    pub fn artwork_policy(&self) -> artwork::ExternalPolicy {
+        artwork::ExternalPolicy::new(
+            self.application.external_metadata_enabled,
+            self.allows_external_metadata_lookup(),
+            self.lastfm_api_key.clone(),
+        )
     }
 
     pub fn sanitize(&mut self) {
@@ -468,10 +473,6 @@ impl Settings {
             .and_then(|directory| directory.native().map(PathBuf::from))
     }
 
-    pub fn download_location(&self, source_id: &SourceId) -> Option<downloads::DownloadDirectory> {
-        self.download_settings(source_id).directory
-    }
-
     pub fn download_settings(&self, source_id: &SourceId) -> SourceDownloadSettings {
         self.downloads
             .iter()
@@ -499,14 +500,14 @@ impl Settings {
     ) -> bool {
         self.set_download_location(
             source_id,
-            directory.map(downloads::DownloadDirectory::Native),
+            directory.map(crate::downloads::DownloadDirectory::Native),
         )
     }
 
     pub fn set_download_location(
         &mut self,
         source_id: SourceId,
-        directory: Option<downloads::DownloadDirectory>,
+        directory: Option<crate::downloads::DownloadDirectory>,
     ) -> bool {
         self.update_download_settings(source_id, |settings| settings.directory = directory)
     }
@@ -535,19 +536,7 @@ impl Settings {
 pub type SettingsHandle = Arc<super::SettingsOwner>;
 
 pub fn default_home_blocks() -> Vec<HomeBlockKind> {
-    vec![
-        HomeBlockKind::Showcase,
-        HomeBlockKind::Explore,
-        HomeBlockKind::MostPlayed,
-        HomeBlockKind::NewlyAdded,
-        HomeBlockKind::RecentlyPlayed,
-        HomeBlockKind::RecentlyReleased,
-        HomeBlockKind::Genres,
-    ]
-}
-
-fn legacy_secret_storage_mode() -> SecretStorageMode {
-    SecretStorageMode::ConfigFile
+    HomeBlockKind::all().to_vec()
 }
 
 fn default_starting_page() -> SidebarRouteItem {
@@ -615,8 +604,8 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
             .directory
             .as_ref()
             .is_some_and(|directory| match directory {
-                downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
-                downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
+                crate::downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
+                crate::downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
             })
         {
             entry.directory = None;

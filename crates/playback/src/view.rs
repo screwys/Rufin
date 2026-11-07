@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{QueueRow, RepeatMode, RunId};
+use crate::{QueueRepeatMode, QueueRow, RunId};
 
 pub type QueuePosition = usize;
 #[cfg(feature = "bindings")]
@@ -101,7 +101,7 @@ fn effective_transport_state(state: TransportStatus, desired_playing: bool) -> T
 #[derive(Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ControlsView {
-    pub repeat_mode: RepeatMode,
+    pub repeat_mode: QueueRepeatMode,
     pub shuffle_enabled: bool,
     pub auto_dj_enabled: bool,
     pub volume: f64,

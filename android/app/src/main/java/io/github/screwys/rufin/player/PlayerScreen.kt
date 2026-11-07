@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
@@ -98,7 +99,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
-    val combined = lyricsEnabled && visualizerEnabled && application?.rightPanel?.combined == true
+    val combined = lyricsEnabled && visualizerEnabled && application.rightPanel.combined
     val background = animateColorAsState(
         if (application?.display?.fullscreenDynamicBackground == true)
             lerp(MaterialTheme.colorScheme.surface, artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
@@ -106,7 +107,6 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val verticalOffset = remember { Animatable(0f) }
     val trackOffset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
-    LaunchedEffect(player) { player.refreshSettings() }
     LaunchedEffect(lyricsEnabled, visualizerEnabled) {
         if (surface == PlayerSurface.LYRICS && !lyricsEnabled || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
     }
@@ -211,7 +211,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }
         }
     }
-    if (queue) PlayerQueueSheet(player, preferences, onDismiss = { queue = false },
+    if (queue) PlayerQueueSheet(player, onDismiss = { queue = false },
         onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) })
     if (output) PlayerOutputSheet(player) { output = false }
     navigation?.let { uri -> MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == uri }, player,
@@ -284,7 +284,7 @@ private fun PlayerFooterButton(icon: String, label: String, action: () -> Unit) 
 private fun PlayerCover(player: PlayerConnection, artwork: PlayerArtwork?, modifier: Modifier) {
     val duration = if (LocalReduceMotion.current) 0 else 240
     val binding = player.currentItem?.artworkBinding?.toList()
-    val identity = remember(player.bridge, binding) {
+    val identity = remember(player.bridge, binding, player.artworkGeneration) {
         binding?.let { player.bridge?.artworkIdentity(it.toByteArray()) }
     }
     val cover = identity to artwork
@@ -321,7 +321,7 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
             }
             val favorite by remember(player) { derivedStateOf {
                 val state = player.playback
-                state?.transport?.current?.id?.mediaUri?.let { player.projectedFavorite(it, player.favorite) } == true
+                state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
             IconButton(player::favorite, Modifier.size(48.dp)) {
                 RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
@@ -439,8 +439,8 @@ private fun PlayerProgress(player: PlayerConnection) {
                 layout(placeable.width - inset, placeable.height) { placeable.placeRelative(-inset / 2, 0) }
             }.semantics { contentDescription = positionLabel })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(playerTime(displayedPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(playerTime(current.transport.durationMillis), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(clockText(displayedPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(clockText(current.transport.durationMillis), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -500,10 +500,4 @@ private fun PlayerPlayPause(player: PlayerConnection) {
 internal fun RefillSpinner(size: Dp, color: Color = LocalContentColor.current) {
     CircularProgressIndicator(Modifier.requiredSize(size).semantics { contentDescription = translate("Loading...") },
         color, 3.dp, color.copy(alpha = .15f), StrokeCap.Round)
-}
-
-private fun playerTime(millis: ULong): String {
-    val seconds = millis / 1000UL
-    return if (seconds >= 3600UL) "${seconds / 3600UL}:${((seconds / 60UL) % 60UL).toString().padStart(2, '0')}:${(seconds % 60UL).toString().padStart(2, '0')}"
-    else "${seconds / 60UL}:${(seconds % 60UL).toString().padStart(2, '0')}"
 }

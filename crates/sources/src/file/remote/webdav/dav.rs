@@ -1,4 +1,4 @@
-//! Incremental Multi-Status parsing for listings and sync-collection responses.
+//! Incremental Multi-Status parsing for listings.
 
 use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use tokio::io::AsyncBufRead;
@@ -18,40 +18,16 @@ pub(crate) struct Entry {
     pub etag: Option<String>,
     pub native_id: Option<String>,
     pub permissions: Option<String>,
-    pub sync_token: Option<String>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct DirectoryRevision {
-    etag: Option<String>,
-    sync_token: String,
 }
 
 impl Entry {
     pub fn revision(&self) -> Option<String> {
-        if self.directory
-            && let Some(token) = &self.sync_token
-        {
-            return Some(
-                serde_json::to_string(&DirectoryRevision {
-                    etag: self.etag.clone(),
-                    sync_token: token.clone(),
-                })
-                .expect("directory revision"),
-            );
-        }
         self.etag.clone().or_else(|| {
             self.modified
                 .as_ref()
                 .map(|modified| format!("{modified}:{}", self.size.unwrap_or_default()))
         })
     }
-}
-
-pub(crate) fn sync_token(revision: &str) -> Option<String> {
-    serde_json::from_str::<DirectoryRevision>(revision)
-        .ok()
-        .map(|revision| revision.sync_token)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -70,7 +46,6 @@ enum Element {
     FileId,
     InstanceFileId,
     Permissions,
-    SyncToken,
     Other,
 }
 
@@ -89,7 +64,6 @@ fn element(namespace: ResolveResult<'_>, local: &str) -> Element {
             "getlastmodified" => Modified,
             "getetag" => Etag,
             "resource-id" => ResourceId,
-            "sync-token" => SyncToken,
             _ => Other,
         },
         ResolveResult::Bound(ns) if ns.as_ref() == OC => match local {
@@ -105,7 +79,7 @@ fn element(namespace: ResolveResult<'_>, local: &str) -> Element {
 pub(crate) async fn parse<F: std::future::Future<Output = SourceResult<()>>>(
     input: impl AsyncBufRead + Unpin,
     mut accept: impl FnMut(Entry) -> F,
-) -> SourceResult<Option<String>> {
+) -> SourceResult<()> {
     use Element::*;
     let mut reader = NsReader::from_reader(input);
     reader.config_mut().expand_empty_elements = true;
@@ -115,7 +89,6 @@ pub(crate) async fn parse<F: std::future::Future<Output = SourceResult<()>>>(
     let mut properties = Entry::default();
     let mut property_status = None;
     let mut text = String::new();
-    let mut sync_token = None;
     let mut multistatus = false;
     let mut response_id_priority = 0;
     let mut property_id_priority = 0;
@@ -201,16 +174,12 @@ pub(crate) async fn parse<F: std::future::Future<Output = SourceResult<()>>>(
                         }
                     }
                     Permissions => properties.permissions = Some(value.to_string()),
-                    SyncToken if stack.contains(&Propstat) => {
-                        properties.sync_token = Some(value.to_string())
-                    }
-                    SyncToken => sync_token = Some(value.to_string()),
                     Propstat if property_status.is_some_and(|code| (200..300).contains(&code)) => {
                         response.directory |= properties.directory;
                         macro_rules! merge { ($($field:ident),*) => {$(
                             if properties.$field.is_some() { response.$field = properties.$field.take(); }
                         )*}; }
-                        merge!(size, modified, etag, permissions, sync_token);
+                        merge!(size, modified, etag, permissions);
                         if properties.native_id.is_some()
                             && property_id_priority > response_id_priority
                         {
@@ -233,7 +202,7 @@ pub(crate) async fn parse<F: std::future::Future<Output = SourceResult<()>>>(
         }
         buffer.clear();
     }
-    Ok(sync_token)
+    Ok(())
 }
 
 fn xml_error(error: impl std::fmt::Display) -> SourceError {
@@ -270,12 +239,9 @@ mod tests {
         assert_eq!(row.etag.as_deref(), Some("\"v1\""));
         assert_eq!(row.native_id.as_deref(), Some("oc-fileid:123"));
         assert!(!parsing.is_finished());
-        writer
-            .write_all(b"<x:sync-token>next</x:sync-token></x:multistatus>")
-            .await
-            .unwrap();
+        writer.write_all(b"</x:multistatus>").await.unwrap();
         drop(writer);
-        assert_eq!(parsing.await.unwrap().unwrap().as_deref(), Some("next"));
+        parsing.await.unwrap().unwrap();
     }
 
     #[tokio::test]

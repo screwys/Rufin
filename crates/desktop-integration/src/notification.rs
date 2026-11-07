@@ -4,9 +4,7 @@ use gio::prelude::FileExt;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 use glib::prelude::*;
 use playback::{PlaybackView, TransportStatus};
-use std::cell::Cell;
-#[cfg(target_os = "windows")]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 #[cfg(not(target_os = "windows"))]
 use std::fs;
 #[cfg(not(target_os = "windows"))]
@@ -74,8 +72,15 @@ struct NativeNowPlayingNotification {
     artwork_uri: Option<String>,
 }
 
+/// A now-playing notification: the run it shows, its title, body and artwork.
+type NowPlaying = (playback::RunId, String, String, Option<PathBuf>);
+
 pub struct Notifications {
     application: gio::Application,
+    /// The latest notification to send, and whether one is being sent: one at a time, so
+    /// each replaces the one before it.
+    pending: RefCell<Option<NowPlaying>>,
+    sending: Cell<bool>,
     #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
     notification_id: Cell<u32>,
     notification_run: Cell<Option<playback::RunId>>,
@@ -92,6 +97,8 @@ impl Notifications {
         let (activation_tx, activation_rx) = async_channel::bounded(1);
         let notifications = Rc::new(Self {
             application,
+            pending: RefCell::new(None),
+            sending: Cell::new(false),
             #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
             notification_id: Cell::new(0),
             notification_run: Cell::new(None),
@@ -158,86 +165,79 @@ impl Notifications {
             "{} - {}",
             entry.row.track.metadata.artist, entry.row.track.metadata.album
         );
+        self.pending.replace(Some((run, title, body, artwork_path)));
+        if self.sending.replace(true) {
+            return;
+        }
         let notifications = Rc::clone(self);
         glib::spawn_future_local(async move {
-            if !notifications.matches(run) {
-                return;
+            while let Some(request) = notifications.pending.take() {
+                notifications.send(request).await;
             }
-
-            #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-            {
-                let artwork_uri = artwork_path
-                    .as_deref()
-                    .and_then(now_playing_notification_artwork_uri);
-                let native_notification = NativeNowPlayingNotification {
-                    title: title.clone(),
-                    body: body.clone(),
-                    artwork_uri,
-                };
-                let replaces_id = notifications.notification_id.get();
-                match send_freedesktop_now_playing_notification(&native_notification, replaces_id)
-                    .await
-                {
-                    Ok(notification_id) => {
-                        if notifications.matches(run) {
-                            notifications
-                                .application
-                                .withdraw_notification(NOW_PLAYING_NOTIFICATION_ID);
-                            notifications.notification_id.set(notification_id);
-                        } else {
-                            close_freedesktop_now_playing_notification(notification_id).await;
-                        }
-                    }
-                    Err(error) => {
-                        warn!(%error, "failed to send Freedesktop now-playing notification");
-                        if replaces_id != 0 {
-                            notifications.notification_id.set(0);
-                            close_freedesktop_now_playing_notification(replaces_id).await;
-                        }
-                        if notifications.matches(run) {
-                            send_gio_now_playing_notification(
-                                &notifications.application,
-                                title,
-                                body,
-                                artwork_path,
-                            )
-                            .await;
-                        }
-                    }
-                }
-            }
-            #[cfg(target_os = "windows")]
-            if notifications.matches(run) {
-                notifications.clear_windows_toast();
-                let artwork_uri = artwork_path
-                    .as_deref()
-                    .map(|path| gio::File::for_path(path).uri().to_string());
-                match send_windows_now_playing_notification(
-                    &title,
-                    &body,
-                    artwork_uri.as_deref(),
-                    notifications.activation_tx.clone(),
-                ) {
-                    Ok(toast) => {
-                        notifications.windows_toast.replace(Some(toast));
-                    }
-                    Err(error) => warn!(%error, "failed to send Windows now-playing notification"),
-                }
-            }
-            #[cfg(all(
-                not(target_os = "windows"),
-                not(all(unix, not(any(target_os = "android", target_vendor = "apple"))))
-            ))]
-            if notifications.matches(run) {
-                send_gio_now_playing_notification(
-                    &notifications.application,
-                    title,
-                    body,
-                    artwork_path,
-                )
-                .await;
-            }
+            notifications.sending.set(false);
         });
+    }
+
+    async fn send(&self, (run, title, body, artwork_path): NowPlaying) {
+        if !self.matches(run) {
+            return;
+        }
+
+        #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+        {
+            let artwork_uri = artwork_path
+                .as_deref()
+                .and_then(now_playing_notification_artwork_uri);
+            let native_notification = NativeNowPlayingNotification {
+                title: title.clone(),
+                body: body.clone(),
+                artwork_uri,
+            };
+            let replaces_id = self.notification_id.get();
+            match send_freedesktop_now_playing_notification(&native_notification, replaces_id).await
+            {
+                Ok(notification_id) => {
+                    if self.matches(run) {
+                        self.application
+                            .withdraw_notification(NOW_PLAYING_NOTIFICATION_ID);
+                        self.notification_id.set(notification_id);
+                    } else {
+                        close_freedesktop_now_playing_notification(notification_id).await;
+                    }
+                }
+                Err(error) => {
+                    warn!(%error, "failed to send Freedesktop now-playing notification");
+                    if replaces_id != 0 {
+                        self.notification_id.set(0);
+                        close_freedesktop_now_playing_notification(replaces_id).await;
+                    }
+                    send_gio_now_playing_notification(self, run, title, body, artwork_path).await;
+                }
+            }
+        }
+        #[cfg(target_os = "windows")]
+        if self.matches(run) {
+            self.clear_windows_toast();
+            let artwork_uri = artwork_path
+                .as_deref()
+                .map(|path| gio::File::for_path(path).uri().to_string());
+            match send_windows_now_playing_notification(
+                &title,
+                &body,
+                artwork_uri.as_deref(),
+                self.activation_tx.clone(),
+            ) {
+                Ok(toast) => {
+                    self.windows_toast.replace(Some(toast));
+                }
+                Err(error) => warn!(%error, "failed to send Windows now-playing notification"),
+            }
+        }
+        #[cfg(all(
+            not(target_os = "windows"),
+            not(all(unix, not(any(target_os = "android", target_vendor = "apple"))))
+        ))]
+        send_gio_now_playing_notification(self, run, title, body, artwork_path).await;
     }
 
     pub fn withdraw(&self) {
@@ -450,8 +450,10 @@ async fn close_freedesktop_now_playing_notification(notification_id: u32) {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// Sends the gio notification for `run` once its artwork is decoded, while it still plays.
 async fn send_gio_now_playing_notification(
-    application: &gio::Application,
+    notifications: &Notifications,
+    run: playback::RunId,
     title: String,
     body: String,
     artwork_path: Option<PathBuf>,
@@ -463,6 +465,10 @@ async fn send_gio_now_playing_notification(
             .flatten(),
         None => None,
     };
+    if !notifications.matches(run) {
+        return;
+    }
+    let application = &notifications.application;
     let notification = gio::Notification::new(&title);
     notification.set_body(Some(&body));
     if let Some(bytes) = icon_bytes {

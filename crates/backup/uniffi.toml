@@ -1,4 +1,0 @@
-[bindings.kotlin]
-android = true
-package_name = "io.github.screwys.rufin.shared.backup"
-cdylib_name = "rufin_android"

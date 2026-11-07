@@ -1,8 +1,6 @@
-//! Indexed sidebar facts; smart totals are evaluated separately from row loading.
-use crate::{Database, LibraryResult, ReadCancellation, SmartPlaylistKey, SourceId};
+//! Sidebar pins: keys and totals from the resident Catalog, pictures from one statement.
+use crate::{Catalog, Item, LibraryResult, PlaylistListRow, ReadCancellation, Row, SourceId};
 use serde::{Deserialize, Serialize};
-use sqlx::{AssertSqlSafe, FromRow};
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
@@ -39,227 +37,308 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct SidebarPinRow {
-    pub pin: SidebarPin,
+/// What a collection row shows of itself: an album, artist, tag, playlist, smart playlist or
+/// playlist folder.
+#[derive(Debug, PartialEq)]
+pub struct CollectionShown<'a> {
+    /// The row's key in its kind.
     pub key: i64,
-    pub name: String,
-    pub totals: Option<(i64, i64)>,
-    pub artwork: Vec<Vec<u8>>,
+    pub name: &'a str,
+    pub track_count: i64,
+    pub duration_millis: i64,
+    /// Its picture, or the covers its mosaic picked.
+    pub artwork: Vec<&'a [u8]>,
 }
 
-const REQUESTED: &str = "WITH requested AS (
-    SELECT CAST(pin.key AS INTEGER) ordinal,kind.key kind,
-    json_extract(kind.value,'$.source_id') source_id,
-    coalesce(json_extract(kind.value,'$.album_id'),json_extract(kind.value,'$.artist_id'),
-        json_extract(kind.value,'$.genre_id'),json_extract(kind.value,'$.playlist_id'),
-        json_extract(kind.value,'$.folder_id')) object_id,
-    coalesce(json_extract(kind.value,'$.album_artist'),0) role
-    FROM json_each(?1) pin CROSS JOIN json_each(pin.value) kind)";
+impl crate::AlbumRow {
+    pub fn pin(&self) -> Option<SidebarPin> {
+        let (source_id, _, album_id) = crate::source_entity_parts(&self.media_uri)?;
+        Some(SidebarPin::Album {
+            source_id,
+            album_id,
+        })
+    }
+}
 
-impl Database {
-    pub async fn sidebar_pin_rows(
-        &self,
-        pins: &[SidebarPin],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SidebarPinRow>> {
-        if pins.is_empty() {
-            return Ok(Vec::new());
+impl crate::ArtistRow {
+    pub fn pin(&self) -> Option<SidebarPin> {
+        let (source_id, _, artist_id) = crate::source_entity_parts(&self.media_uri)?;
+        Some(SidebarPin::Artist {
+            source_id,
+            artist_id,
+            album_artist: self.album_artist,
+        })
+    }
+}
+
+impl crate::TagRow {
+    /// A genre's pin; moods have none.
+    pub fn pin(&self) -> Option<SidebarPin> {
+        (self.kind == crate::TagKind::Genre).then(|| SidebarPin::Genre {
+            source_id: SourceId::new(self.source_id.clone()),
+            genre_id: self.object_id.clone(),
+        })
+    }
+}
+
+impl crate::PlaylistRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::Playlist {
+            source_id: self.source_id.as_ref().map(SourceId::new),
+            playlist_id: self.object_id.clone(),
         }
-        #[derive(FromRow)]
-        struct Row {
-            ordinal: i64,
-            entity_key: i64,
-            name: String,
-            track_count: Option<i64>,
-            duration_millis: Option<i64>,
-            artwork_binding: Option<Vec<u8>>,
-            gallery: String,
-            cover_id: Option<String>,
-            cover_source: Option<String>,
+    }
+}
+
+impl crate::SmartPlaylistRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::SmartPlaylist {
+            playlist_id: self.object_id.clone(),
         }
-        let mut parts = Vec::new();
-        for (kind, table, key, name, totals_kind) in [
-            ("Album", "albums", "album_key", "title", "album"),
-            ("Artist", "artists", "artist_key", "name", "artist"),
-            ("Genre", "genres", "genre_key", "name", "genre"),
-            ("Playlist", "playlists", "playlist_key", "name", "playlist"),
-            (
-                "SmartPlaylist",
-                "smart_playlists",
-                "smart_playlist_key",
-                "name",
-                "smart",
-            ),
-        ] {
-            let (scope, totals, count, duration) = match kind {
-                "SmartPlaylist" => (String::new(), String::new(), "NULL".to_string(), "NULL".to_string()),
-                "Album" => ("AND item.source_key IS source.source_key AND source.source_key IS NOT NULL".into(), String::new(), "item.track_count".into(), "item.duration_millis".into()),
-                _ => (
-                    "AND item.source_key IS source.source_key AND (requested.source_id IS NULL OR source.source_key IS NOT NULL)".into(),
-                    format!("LEFT JOIN collection_totals totals ON totals.kind='{totals_kind}' AND totals.entity_key=item.{key} AND totals.role=requested.role AND coalesce(totals.folder_key,'')=''"),
-                    "coalesce(totals.track_count,0)".into(), "coalesce(totals.duration_millis,0)".into(),
-                ),
-            };
-            let artwork = crate::artwork::preview_sql(if kind == "Genre" {
-                "item.native_artwork"
-            } else {
-                "item.artwork_binding"
-            });
-            let gallery = if kind == "Genre" {
-                format!(
-                    "CASE WHEN item.native_artwork IS NULL THEN {} ELSE '[]' END",
-                    crate::collections::gallery_sql("genre", None)
-                        .replace("genre.genre_key", "item.genre_key")
-                )
-            } else {
-                "'[]'".into()
-            };
-            parts.push(format!("SELECT requested.ordinal,item.{key} entity_key,item.{name} name,{count} track_count,{duration} duration_millis,{artwork} artwork_binding,{gallery} gallery,NULL cover_id,NULL cover_source
-                FROM requested LEFT JOIN sources source ON source.object_id=requested.source_id
-                CROSS JOIN {table} item ON item.object_id=requested.object_id {scope} {totals}
-                WHERE requested.kind='{kind}' AND item.{name} IS NOT NULL"));
+    }
+}
+
+impl crate::PlaylistFolderRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::PlaylistFolder {
+            folder_id: self.object_id.clone(),
+            smart: self.smart,
         }
-        let binding = crate::artwork::preview_sql(
-            "CASE WHEN item.smart THEN smart.artwork_binding ELSE regular.artwork_binding END",
-        );
-        parts.push(format!(
-            "SELECT requested.ordinal,item.folder_key,item.name,NULL,NULL,
-            {binding},'[]',coalesce(smart.object_id,regular.object_id),source.object_id
-            FROM requested CROSS JOIN playlist_folders item ON item.object_id=requested.object_id
-            LEFT JOIN playlists regular ON regular.playlist_key=item.playlist_cover_key
-            LEFT JOIN smart_playlists smart ON smart.smart_playlist_key=item.smart_cover_key
-            LEFT JOIN sources source ON source.source_key=regular.source_key
-            WHERE requested.kind='PlaylistFolder'"
-        ));
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let rows = sqlx::query_as::<_, Row>(AssertSqlSafe(format!(
-            "{REQUESTED} SELECT * FROM ({}) ORDER BY ordinal",
-            parts.join(" UNION ALL ")
-        )))
-        .bind(serde_json::to_string(pins)?)
-        .fetch_all(&mut *connection)
-        .await?;
-        rows.into_iter()
-            .map(|row| {
-                let pin = pins[row.ordinal as usize].clone();
-                let owner = match &pin {
-                    SidebarPin::Playlist {
-                        source_id,
-                        playlist_id,
-                    } => Some((
-                        false,
-                        source_id.as_ref().map(ToString::to_string),
-                        playlist_id.clone(),
-                    )),
-                    SidebarPin::SmartPlaylist { playlist_id } => {
-                        Some((true, None, playlist_id.clone()))
-                    }
-                    SidebarPin::PlaylistFolder { smart, .. } => {
-                        row.cover_id.map(|id| (*smart, row.cover_source, id))
-                    }
-                    _ => None,
-                };
-                let artwork = if let Some(owner) = owner {
-                    Some(crate::artwork::playlist_artwork(
-                        row.artwork_binding,
-                        owner,
-                        (None, None),
-                    )?)
-                } else {
-                    row.artwork_binding
-                };
-                Ok(SidebarPinRow {
-                    pin,
-                    key: row.entity_key,
-                    name: row.name,
-                    totals: row.track_count.zip(row.duration_millis),
-                    artwork: if let Some(artwork) = artwork {
-                        vec![artwork]
-                    } else {
-                        serde_json::from_str::<Vec<String>>(&row.gallery)?
-                            .into_iter()
-                            .map(String::into_bytes)
-                            .collect()
-                    },
-                })
-            })
-            .collect()
+    }
+}
+
+impl crate::CollectionSummary {
+    /// Whether every track of the collection is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
+impl crate::PlaylistRow {
+    /// Whether every track of the playlist is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
+impl crate::SmartPlaylistRow {
+    /// Whether every track the smart playlist lists is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
+impl PlaylistListRow {
+    /// Whether every track of the playlist is downloaded; a folder never is.
+    pub fn downloaded(&self) -> bool {
+        match self {
+            Self::Playlist(playlist) => playlist.downloaded(),
+            Self::SmartPlaylist(smart) => smart.downloaded(),
+            Self::Folder(_) => false,
+        }
     }
 
-    pub async fn sidebar_pin_totals(
-        &self,
-        mut rows: Vec<SidebarPinRow>,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SidebarPinRow>> {
-        let mut keys = rows
-            .iter()
-            .filter(|row| matches!(row.pin, SidebarPin::SmartPlaylist { .. }))
-            .map(|row| SmartPlaylistKey::from_raw(row.key))
-            .collect::<Vec<_>>();
-        let folders = rows
-            .iter()
-            .filter(|row| matches!(row.pin, SidebarPin::PlaylistFolder { smart: true, .. }))
-            .map(|row| row.key)
-            .collect::<Vec<_>>();
-        let regular_folders = rows
-            .iter()
-            .filter(|row| matches!(row.pin, SidebarPin::PlaylistFolder { smart: false, .. }))
-            .map(|row| row.key)
-            .collect::<Vec<_>>();
-        if keys.is_empty() && folders.is_empty() && regular_folders.is_empty() {
-            return Ok(rows);
+    pub fn pin(&self) -> SidebarPin {
+        match self {
+            Self::Playlist(playlist) => playlist.pin(),
+            Self::SmartPlaylist(playlist) => playlist.pin(),
+            Self::Folder(folder) => folder.pin(),
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut folder_totals = HashMap::<i64, (i64, i64)>::new();
-        if !regular_folders.is_empty() {
-            folder_totals.extend(sqlx::query_as::<_,(i64,i64,i64)>("SELECT child.playlist_folder_key,sum(totals.track_count),sum(totals.duration_millis)
-                FROM json_each(?1) requested CROSS JOIN playlists child ON child.playlist_folder_key=requested.value
-                JOIN collection_totals totals ON totals.kind='playlist' AND totals.entity_key=child.playlist_key AND totals.role=0 AND coalesce(totals.folder_key,'')=''
-                WHERE child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed) GROUP BY child.playlist_folder_key")
-                .bind(serde_json::to_string(&regular_folders)?).fetch_all(&mut *connection).await?.into_iter().map(|(key,count,duration)| (key,(count,duration))));
+    }
+}
+
+impl Row {
+    /// Whether the row shows as downloaded: a track with its copy, or a collection with
+    /// tracks that are all downloaded.
+    pub fn downloaded(&self) -> bool {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.is_downloaded,
+            Self::Album(album) | Self::AlbumHeading(album) => album.summary.downloaded(),
+            Self::Artist(artist) => artist.summary.downloaded(),
+            Self::Tag(tag) => tag.summary.downloaded(),
+            Self::Playlist(playlist) => playlist.downloaded(),
+            Self::Folder(_) => false,
         }
-        let members: Vec<(i64, SmartPlaylistKey)> = if folders.is_empty() {
-            Vec::new()
-        } else {
-            sqlx::query_as("SELECT playlist_folder_key,smart_playlist_key FROM smart_playlists WHERE playlist_folder_key IN(SELECT value FROM json_each(?1))")
-                .bind(serde_json::to_string(&folders)?).fetch_all(&mut *connection).await?
+    }
+
+    /// The sidebar pin of a collection row.
+    pub fn pin(&self) -> Option<SidebarPin> {
+        match self {
+            Self::Album(album) | Self::AlbumHeading(album) => album.pin(),
+            Self::Artist(artist) => artist.pin(),
+            Self::Tag(tag) => tag.pin(),
+            Self::Playlist(playlist) => Some(playlist.pin()),
+            Self::Track(_) | Self::AlbumTrack { .. } | Self::Folder(_) => None,
+        }
+    }
+
+    /// What a collection row shows of itself; None for tracks and child folders.
+    pub fn collection(&self) -> Option<CollectionShown<'_>> {
+        fn picture(binding: &Option<Vec<u8>>) -> Vec<&[u8]> {
+            binding.iter().map(Vec::as_slice).collect()
+        }
+        Some(match self {
+            Self::Album(album) | Self::AlbumHeading(album) => CollectionShown {
+                key: album.album_key.raw(),
+                name: &album.title,
+                track_count: album.summary.track_count,
+                duration_millis: album.summary.duration_millis,
+                artwork: picture(&album.artwork_binding),
+            },
+            Self::Artist(artist) => CollectionShown {
+                key: artist.artist_key.raw(),
+                name: &artist.name,
+                track_count: artist.summary.track_count,
+                duration_millis: artist.summary.duration_millis,
+                artwork: picture(&artist.artwork_binding),
+            },
+            Self::Tag(tag) => CollectionShown {
+                key: tag.key,
+                name: &tag.name,
+                track_count: tag.summary.track_count,
+                duration_millis: tag.summary.duration_millis,
+                artwork: match &tag.artwork_binding {
+                    Some(binding) => vec![binding.as_slice()],
+                    None => tag
+                        .representative_artwork
+                        .iter()
+                        .map(Vec::as_slice)
+                        .collect(),
+                },
+            },
+            Self::Playlist(PlaylistListRow::Playlist(playlist)) => CollectionShown {
+                key: playlist.playlist_key.raw(),
+                name: &playlist.name,
+                track_count: playlist.track_count,
+                duration_millis: playlist.duration_millis,
+                artwork: picture(&playlist.artwork_binding),
+            },
+            Self::Playlist(PlaylistListRow::SmartPlaylist(smart)) => CollectionShown {
+                key: smart.smart_playlist_key.raw(),
+                name: &smart.name,
+                track_count: smart.track_count,
+                duration_millis: smart.duration_millis,
+                artwork: picture(&smart.artwork_binding),
+            },
+            Self::Playlist(PlaylistListRow::Folder(folder)) => CollectionShown {
+                key: folder.folder_key.raw(),
+                name: &folder.name,
+                track_count: folder.track_count,
+                duration_millis: folder.duration_millis,
+                artwork: picture(&folder.artwork_binding),
+            },
+            Self::Track(_) | Self::AlbumTrack { .. } | Self::Folder(_) => return None,
+        })
+    }
+}
+
+impl Catalog {
+    /// The items of pinned rows the Catalog still holds, in pin order.
+    fn pin_items(&self, pins: &[SidebarPin]) -> Vec<Option<Item>> {
+        use crate::CatalogKind as Kind;
+        let snapshot = self.snapshot();
+        let slot = |source: Option<&SourceId>| match source {
+            Some(id) => snapshot.source_slot(
+                snapshot
+                    .sources
+                    .values()
+                    .find(|source| source.object == id.as_str())?
+                    .key,
+            ),
+            None => Some(crate::catalog::snapshot::NO_SOURCE),
         };
-        keys.extend(members.iter().map(|(_, key)| *key));
-        keys.sort_unstable();
-        keys.dedup();
-        let mut totals = HashMap::new();
-        for batch in keys.chunks(crate::smart_playlists::SMART_PLAYLIST_ROW_LIMIT) {
-            let membership =
-                crate::smart_playlists::smart_membership_sql(&mut connection, now, Some(batch))
-                    .await?;
-            totals.extend(sqlx::query_as::<_,(SmartPlaylistKey,i64,i64)>(AssertSqlSafe(format!("{membership}
-                SELECT definition_key,count(*),coalesce(sum(track.duration_millis),0) FROM selected
-                JOIN tracks track INDEXED BY tracks_duration_idx USING(track_key) GROUP BY definition_key")))
-                .fetch_all(&mut *connection).await?.into_iter().map(|(key,count,duration)| (key,(count,duration))));
-        }
-        for (folder, key) in members {
-            if let Some(&(count, duration)) = totals.get(&key) {
-                let total = folder_totals.entry(folder).or_default();
-                total.0 += count;
-                total.1 += duration;
+        let wanted = pins.iter().map(|pin| {
+            let (kind, source, object) = match pin {
+                SidebarPin::Album {
+                    source_id,
+                    album_id,
+                } => (Kind::Album, Some(source_id), album_id),
+                SidebarPin::Artist {
+                    source_id,
+                    artist_id,
+                    ..
+                } => (Kind::Artist, Some(source_id), artist_id),
+                SidebarPin::Genre {
+                    source_id,
+                    genre_id,
+                } => (Kind::Genre, Some(source_id), genre_id),
+                SidebarPin::Playlist {
+                    source_id,
+                    playlist_id,
+                } => (Kind::Playlist, source_id.as_ref(), playlist_id),
+                SidebarPin::SmartPlaylist { playlist_id } => {
+                    (Kind::SmartPlaylist, None, playlist_id)
+                }
+                SidebarPin::PlaylistFolder { folder_id, .. } => {
+                    (Kind::PlaylistFolder, None, folder_id)
+                }
+            };
+            Some((kind, slot(source)?, object.as_str()))
+        });
+        let mut items = snapshot.items(wanted);
+        for (pin, item) in pins.iter().zip(&mut items) {
+            if let (
+                SidebarPin::Artist { album_artist, .. },
+                Some(Item::Artist {
+                    album_artist: role, ..
+                }),
+            ) = (pin, item)
+            {
+                *role = *album_artist;
             }
         }
-        for row in &mut rows {
-            row.totals = match row.pin {
-                SidebarPin::SmartPlaylist { .. } => Some(
-                    totals
-                        .get(&SmartPlaylistKey::from_raw(row.key))
-                        .copied()
-                        .unwrap_or_default(),
-                ),
-                SidebarPin::PlaylistFolder { .. } => {
-                    Some(folder_totals.get(&row.key).copied().unwrap_or_default())
-                }
-                _ => row.totals,
-            };
+        items
+    }
+
+    /// Rows of the pins the Catalog still holds, in pin order, with their totals: smart
+    /// playlists and their folders evaluated at `now` in music folder `folder`, playlist
+    /// folders over every source.
+    pub async fn pin_rows(
+        &self,
+        pins: &[SidebarPin],
+        now: i64,
+        folder: Option<crate::FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<(SidebarPin, Row)>> {
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(crate::LibraryError::ReadCancelled),
         }
+        let pinned = (pins.iter().zip(self.pin_items(pins)))
+            .filter_map(|(pin, item)| Some((pin, item?)))
+            .collect::<Vec<_>>();
+        let items = pinned.iter().map(|(_, item)| *item).collect::<Vec<_>>();
+        let mut connection = self.acquire_cancellable(cancellation).await?;
+        let shape = crate::read::Shape {
+            now,
+            folder,
+            ..crate::read::Shape::of(None)
+        };
+        let mut built = std::collections::HashMap::new();
+        for row in self
+            .rows_of_on(&mut connection, &items, &shape, true)
+            .await?
+        {
+            let item = match &row {
+                Row::Album(row) => Item::Album(row.album_key),
+                Row::Artist(row) => Item::Artist {
+                    key: row.artist_key,
+                    album_artist: row.album_artist,
+                },
+                Row::Tag(row) => Item::Genre(crate::GenreKey::from_raw(row.key)),
+                Row::Playlist(PlaylistListRow::Playlist(row)) => Item::Playlist(row.playlist_key),
+                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => {
+                    Item::Smart(row.smart_playlist_key)
+                }
+                Row::Playlist(PlaylistListRow::Folder(row)) => Item::PlaylistFolder(row.folder_key),
+                _ => continue,
+            };
+            built.insert(item, row);
+        }
+        let rows = pinned
+            .into_iter()
+            .filter_map(|(pin, item)| Some((pin.clone(), built.remove(&item)?)))
+            .collect();
         Ok(rows)
     }
 }

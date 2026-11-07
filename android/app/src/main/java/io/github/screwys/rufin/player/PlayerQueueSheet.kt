@@ -44,7 +44,6 @@ import io.github.screwys.rufin.ui.rufinMarquee
 import io.github.screwys.rufin.metadata.MetadataEditorScreen
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.LocalTranslationRevision
-import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.rememberArtwork
@@ -58,8 +57,8 @@ import kotlinx.coroutines.launch
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-internal fun PlayerQueueSheet(player: PlayerConnection, preferences: PreferencesConnection, onDismiss: () -> Unit,
-    onNavigate: (Route, String, String?) -> Unit = { route, title, source -> player.model.browse.openLinkedRoute(route, title, source) },
+internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
+    onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
 ) {
     val sheet = rememberModalBottomSheetState()
     val list = rememberLazyListState()
@@ -297,12 +296,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
             dismissButton = { TextButton({ clear = false }) { Text(translate("Cancel")) } })
     }
     if (create) {
-        val hasSource = player.model.sources?.selectedSourceId != null
-        PlaylistCreateSheet(player.model, { create = false },
-            initialCurrentSource = hasSource && preferences.applicationSettings?.newPlaylistCurrent != false,
-        ) { name, sourceId, public ->
+        PlaylistCreateSheet(player.model, { create = false }) { name, sourceId, public ->
             player.createQueuePlaylist(name, sourceId, public)
-            preferences.refreshApplicationSettings()
             create = false
         }
     }
@@ -317,7 +312,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
             } })
     }
     playlist?.let { item -> PlaylistPickerSheet(player.model, player.model.browse, item, player) { playlist = null } }
-    metadataEditor?.let { item -> MetadataEditorScreen(player.model, item.row.kind, item.row.mediaUri) { metadataEditor = null } }
+    metadataEditor?.row?.metadataItem?.let { item -> MetadataEditorScreen(player.model, item) { metadataEditor = null } }
 }
 
 @Composable

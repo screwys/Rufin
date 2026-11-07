@@ -481,10 +481,6 @@ mod tests {
             panic!("reopened settings")
         };
         let (next, _, next_credential) = edited.into_parts();
-        assert_eq!(
-            next.input_identity().unwrap(),
-            configuration.input_identity().unwrap()
-        );
         assert_eq!(next.name, "Renamed");
         assert!(next_credential.is_none());
         assert!(
@@ -556,10 +552,6 @@ mod tests {
         };
         let (configuration, _, credential) = connected.into_parts();
         assert_eq!(configuration.source_id, current.source_id);
-        assert_eq!(
-            configuration.input_identity().unwrap(),
-            current.input_identity().unwrap()
-        );
         assert!(
             !JellyfinEmbySourceConfig::from_configuration(&configuration)
                 .unwrap()

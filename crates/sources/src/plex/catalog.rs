@@ -1,143 +1,253 @@
-use super::item::{ItemResponse, read_items};
+use super::item::{ItemResponse, rating, read_items, smart};
 use super::{PlexSource, plex_id};
 use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
-use crate::source::{SourceReadProgress, SourceReadStage};
-use crate::{SourceError, SourceHomeSection, SourceResult};
+use crate::source::{SourceProgress, SourceProgressStage};
+use crate::{SourceError, SourceResult};
+use library::HomeSectionKind;
 use library::{FolderObservation, HomeEntryInput, HomeEntryKind};
 use serde_json::Value;
+use std::collections::HashSet;
 
 const PAGE: usize = 512;
 
 impl PlexSource {
+    /// Lists the music sections: all of them, or `since` a sync what the server changed, played
+    /// or rated since then and the deletions a count shows; a section new since then is listed
+    /// whole. Then hubs, playlists and Home. Returns the server's clock at the start.
     pub(crate) async fn acquire_catalog(
         &self,
-        catalog: &mut library::Catalog<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        observation: &mut library::Observation<'_>,
+        since: Option<i64>,
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let stamp = catalog.observed;
-
-        let sections = self.get("/library/sections", &[]).await?;
-        let home_prefixes = items(&sections["MediaContainer"]["Directory"])
+    ) -> SourceResult<Option<i64>> {
+        let walk = observation.is_walk();
+        let from = since.map(|since| since - crate::source::SYNC_MARGIN);
+        let known = observation
+            .catalog
+            .music_folders(observation.source)
+            .into_iter()
+            .map(|folder| folder.object_id)
+            .collect::<HashSet<_>>();
+        let (sections, started) = self.get_dated("/library/sections", &[]).await?;
+        let sections = items(&sections["MediaContainer"]["Directory"])
             .iter()
             .filter(|section| section["type"].as_str() == Some("artist"))
-            .filter_map(|section| id(&section["key"]))
-            .map(|section| format!("plex:{section}:"))
+            .filter_map(|section| {
+                let id = id(&section["key"])?;
+                let title = section["title"].as_str().unwrap_or(&id).to_owned();
+                Some((id, title))
+            })
             .collect::<Vec<_>>();
-        for section in items(&sections["MediaContainer"]["Directory"]) {
-            if section["type"].as_str() != Some("artist") {
-                continue;
-            }
-            let Some(section_id) = id(&section["key"]) else {
-                continue;
-            };
-            let title = section["title"].as_str().unwrap_or(&section_id);
+        let mut total = 0;
+        for (section_id, title) in &sections {
             let mut section_record = FolderObservation {
                 metadata: library::FolderMetadata {
-                    name: Some(title.to_owned()),
+                    name: Some(title.clone()),
                     ..Default::default()
                 },
-                object_id: plex_id("music-folder", &section_id),
+                object_id: plex_id("music-folder", section_id),
                 ..Default::default()
             };
-            let mut batch = library::CatalogBatch::default();
-            batch
-                .folders
-                .extend_from_slice(std::slice::from_ref(&section_record));
+            let batch = library::CatalogBatch {
+                folders: vec![section_record.clone()],
+                ..Default::default()
+            };
             if cancelled() {
-                return Err(crate::SourceError::Cancelled);
+                return Err(SourceError::Cancelled);
             }
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
+            let after = from
+                .filter(|_| known.contains(&section_record.object_id))
+                .map(|from| from.to_string());
             for (kind, stage) in [
-                ("8", SourceReadStage::Artists),
-                ("9", SourceReadStage::Albums),
-                ("10", SourceReadStage::Tracks),
+                ("8", SourceProgressStage::Artists),
+                ("9", SourceProgressStage::Albums),
+                ("10", SourceProgressStage::Tracks),
             ] {
-                let mut offset = 0;
-                loop {
-                    if cancelled() {
-                        return Err(SourceError::Cancelled);
-                    }
-                    let page = self
-                        .get(
-                            &format!("/library/sections/{section_id}/all"),
-                            &[
-                                ("type", kind.into()),
-                                ("includeGuids", "1".into()),
-                                ("includeStreams", "1".into()),
-                                ("X-Plex-Container-Start", offset.to_string()),
-                                ("X-Plex-Container-Size", PAGE.to_string()),
-                            ],
-                        )
-                        .await?;
-                    let rows = items(&page["MediaContainer"]["Metadata"]);
-                    let finished = page_finished(&page, offset, rows.len())?;
-                    section_record.tracks = if kind == "10" {
-                        rows.iter()
-                            .filter_map(|item| id(&item["ratingKey"]))
-                            .map(|raw| plex_id("track", &raw))
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    self.acquire_metadata_page(catalog, rows, Some(&section_record), cancelled)
-                        .await?;
-                    offset += rows.len();
-                    progress(SourceReadProgress {
-                        stage,
-                        completed: offset,
-                        total: field(&page["MediaContainer"], "totalSize"),
-                    });
-                    if finished {
-                        break;
-                    }
-                }
+                self.section_pages(
+                    observation,
+                    &mut section_record,
+                    kind,
+                    after.as_deref(),
+                    &|completed, total| {
+                        progress(SourceProgress {
+                            stage,
+                            completed,
+                            total,
+                        })
+                    },
+                    cancelled,
+                )
+                .await?;
             }
-            if let Some(stamp) = stamp {
+            if walk && after.is_none() {
                 if cancelled() {
-                    return Err(crate::SourceError::Cancelled);
+                    return Err(SourceError::Cancelled);
                 }
-                catalog
-                    .complete_source_folder_membership(&section_record.object_id, stamp)
+                observation
+                    .complete_source_folder_membership(&section_record.object_id)
                     .await?;
             }
-            self.acquire_hubs(catalog, &section_id, cancelled).await?;
-        }
-        if let Some(stamp) = stamp {
-            if cancelled() {
-                return Err(crate::SourceError::Cancelled);
+            if let Some(from) = from {
+                total += self
+                    .acquire_user_data(observation, section_id, from, cancelled)
+                    .await?;
             }
-            catalog
-                .complete_source_observation(stamp, &["track", "album", "artist", "folder"], None)
+            self.acquire_hubs(observation, section_id, cancelled)
                 .await?;
         }
-        if cancelled() {
-            return Err(crate::SourceError::Cancelled);
+        if walk {
+            if cancelled() {
+                return Err(SourceError::Cancelled);
+            }
+            let kinds: &[&str] = match from {
+                None => &["track", "album", "artist", "folder"],
+                Some(_) => &["folder"],
+            };
+            observation
+                .complete_source_observation(kinds, None, None)
+                .await?;
         }
-        catalog
+        // Since a sync the count shows deletions; only then are the ids listed.
+        if from.is_some() && observation.catalog.indexed_tracks(observation.source) > total {
+            let mut listed = HashSet::new();
+            for (section_id, _) in &sections {
+                let mut pages = Pages::new(section_id, vec![("type", "10".into())], PAGE);
+                while let Some(container) = self.next_page(&mut pages, cancelled).await? {
+                    listed.extend(
+                        items(&container["Metadata"])
+                            .iter()
+                            .filter_map(|item| id(&item["ratingKey"]))
+                            .map(|raw| plex_id("track", &raw)),
+                    );
+                }
+            }
+            observation.remove_unlisted("track", &listed).await?;
+        }
+        if cancelled() {
+            return Err(SourceError::Cancelled);
+        }
+        let home_prefixes = sections
+            .iter()
+            .map(|(section_id, _)| format!("plex:{section_id}:"))
+            .collect::<Vec<_>>();
+        observation
             .complete_source_home_sections(&"plex:", &Vec::new(), &home_prefixes)
             .await?;
-        self.acquire_playlists(catalog, cancelled).await?;
-        crate::source::acquire_home(catalog, cancelled, |section| self.home_section(section))
+        self.acquire_playlists(observation, cancelled).await?;
+        crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
 
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
+        progress(SourceProgress {
+            stage: SourceProgressStage::Finalizing,
             completed: 1,
             total: Some(1),
         });
+        Ok(started)
+    }
+
+    /// The next page's container of a section listing, or None after the last.
+    async fn next_page(
+        &self,
+        pages: &mut Pages,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<Option<Value>> {
+        if pages.finished {
+            return Ok(None);
+        }
+        if cancelled() {
+            return Err(SourceError::Cancelled);
+        }
+        let mut query = pages.query.clone();
+        query.push(("X-Plex-Container-Start", pages.offset.to_string()));
+        query.push(("X-Plex-Container-Size", pages.size.to_string()));
+        let mut body = self.get(&pages.path, &query).await?;
+        let count = items(&body["MediaContainer"]["Metadata"]).len();
+        pages.finished = page_finished(&body, pages.offset, count)?;
+        pages.offset += count;
+        Ok(Some(body["MediaContainer"].take()))
+    }
+
+    /// Reads one item type of a section in pages; `updated_after` keeps only the items the
+    /// server changed since then.
+    async fn section_pages(
+        &self,
+        observation: &mut library::Observation<'_>,
+        section: &mut FolderObservation,
+        kind: &str,
+        updated_after: Option<&str>,
+        progress: &(dyn Fn(usize, Option<usize>) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let mut query = vec![
+            ("type", kind.to_owned()),
+            ("includeGuids", "1".into()),
+            ("includeStreams", "1".into()),
+        ];
+        query.extend(updated_after.map(|after| ("updatedAt>>", after.to_owned())));
+        let mut pages = Pages::new(raw_item_id(&section.object_id), query, PAGE);
+        while let Some(container) = self.next_page(&mut pages, cancelled).await? {
+            let rows = items(&container["Metadata"]);
+            section.tracks = if kind == "10" {
+                rows.iter()
+                    .filter_map(|item| id(&item["ratingKey"]))
+                    .map(|raw| plex_id("track", &raw))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            self.acquire_metadata_page(observation, rows, Some(section), cancelled)
+                .await?;
+            progress(pages.offset, field(&container, "totalSize"));
+        }
         Ok(())
+    }
+
+    /// What was played or rated in a section since `from`, written from the listing rows.
+    /// Returns the section's track count, which the plays listing carries.
+    async fn acquire_user_data(
+        &self,
+        observation: &mut library::Observation<'_>,
+        section_id: &str,
+        from: i64,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<usize> {
+        let mut total = 0;
+        // Recent plays come first by date.
+        let query = vec![("type", "10".into()), ("sort", "lastViewedAt:desc".into())];
+        let mut pages = Pages::new(section_id, query, 64);
+        while let Some(container) = self.next_page(&mut pages, cancelled).await? {
+            total = field(&container, "totalSize").unwrap_or(total);
+            let rows = items(&container["Metadata"]);
+            let played = rows
+                .iter()
+                .take_while(|item| field::<i64>(item, "lastViewedAt").is_some_and(|at| at >= from))
+                .count();
+            write_user_data(observation, "track", &rows[..played], false).await?;
+            if played < rows.len() {
+                break;
+            }
+        }
+        for (kind, name) in [("8", "artist"), ("9", "album"), ("10", "track")] {
+            let query = vec![("type", kind.into()), ("lastRatedAt>>", from.to_string())];
+            let mut pages = Pages::new(section_id, query, PAGE);
+            while let Some(container) = self.next_page(&mut pages, cancelled).await? {
+                write_user_data(observation, name, items(&container["Metadata"]), true).await?;
+            }
+        }
+        Ok(total)
     }
 
     pub(super) async fn acquire_metadata_page(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         rows: &[Value],
         folder: Option<&FolderObservation>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let ids = rows
             .iter()
@@ -186,17 +296,17 @@ impl PlexSource {
             if cancelled() {
                 return Err(SourceError::Cancelled);
             }
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
         }
         Ok(())
     }
 
     async fn acquire_playlists(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let mut offset = 0;
         loop {
@@ -236,18 +346,43 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, true).await?;
+                    observation.apply_catalog(&batch, true).await?;
                 }
             };
 
+            // Entries are read again only when the playlist's revision changed; a smart
+            // playlist's entries change without it.
             for item in playlists {
-                if let Some(raw) = id(&item["ratingKey"]) {
-                    self.acquire_playlist_entries(catalog, &plex_id("playlist", &raw), cancelled)
-                        .await?;
+                let Some(raw) = id(&item["ratingKey"]) else {
+                    continue;
+                };
+                let playlist = plex_id("playlist", &raw);
+                let revision = format!(
+                    "{}:{}",
+                    field::<i64>(item, "updatedAt").unwrap_or_default(),
+                    field::<i64>(item, "leafCount").unwrap_or_default()
+                );
+                if !smart(item)
+                    && observation
+                        .catalog
+                        .source_playlist_is_fresh(source_id, &playlist, Some(&revision), 0)
+                        .await?
+                {
+                    continue;
                 }
+                self.acquire_playlist_entries(observation, &playlist, cancelled)
+                    .await?;
+                observation
+                    .write_source_playlist_freshness(&playlist, Some(&revision), None)
+                    .await?;
             }
             offset += rows.len();
             if finished {
+                if observation.is_walk() {
+                    observation
+                        .complete_source_observation(&["playlist"], None, None)
+                        .await?;
+                }
                 return Ok(());
             }
         }
@@ -255,11 +390,11 @@ impl PlexSource {
 
     pub(crate) async fn acquire_playlist_entries(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         playlist_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let mut offset = 0;
         loop {
@@ -280,11 +415,11 @@ impl PlexSource {
                 if item["type"].as_str() != Some("track") {
                     continue;
                 }
-                let (Some(raw), Some(entry)) =
-                    (id(&item["ratingKey"]), id(&item["playlistItemID"]))
-                else {
+                // A smart playlist's items carry no playlistItemID; each track appears once.
+                let Some(raw) = id(&item["ratingKey"]) else {
                     continue;
                 };
+                let entry = id(&item["playlistItemID"]).unwrap_or_else(|| raw.clone());
                 native.push((item, ItemResponse::Summary));
                 entries.push(library::PlaylistEntryObservation {
                     object_id: entry,
@@ -297,13 +432,13 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, false).await?;
+                    observation.apply_catalog(&batch, false).await?;
                 }
             };
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog
+            observation
                 .write_source_playlist_page(&playlist_id, offset, &entries, finished)
                 .await?;
             offset += rows.len();
@@ -315,12 +450,12 @@ impl PlexSource {
 
     pub(crate) async fn acquire_items(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         upserts: Vec<String>,
         mut removals: Vec<String>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         for raw in upserts {
             let item = match self.metadata(&raw).await {
@@ -333,7 +468,7 @@ impl PlexSource {
             };
             if item["type"] == "album" {
                 self.acquire_collection(
-                    catalog,
+                    observation,
                     &crate::SourceCollection::Album(plex_id("album", raw_item_id(&raw))),
                     Some(&item),
                     true,
@@ -369,27 +504,26 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, true).await?;
+                    observation.apply_catalog(&batch, true).await?;
                 }
             };
 
             if item["type"] == "playlist"
                 && let Some(id) = id(&item["ratingKey"])
             {
-                self.acquire_playlist_entries(catalog, &plex_id("playlist", &id), cancelled)
+                self.acquire_playlist_entries(observation, &plex_id("playlist", &id), cancelled)
                     .await?;
             }
         }
 
-        for raw in removals {
+        for kind in ["track", "album", "artist", "playlist"] {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            for kind in ["track", "album", "artist", "playlist"] {
-                catalog
-                    .remove_source_items(kind, &[plex_id(kind, raw_item_id(&raw))])
-                    .await?;
-            }
+            let ids = removals.iter().map(|raw| plex_id(kind, raw_item_id(raw)));
+            observation
+                .remove_source_items(kind, &ids.collect::<Vec<_>>())
+                .await?;
         }
 
         Ok(())
@@ -397,13 +531,14 @@ impl PlexSource {
 
     pub(crate) async fn home_section(
         &self,
-        section: SourceHomeSection,
+        section: HomeSectionKind,
     ) -> SourceResult<Vec<HomeEntryInput>> {
         let (kind, sort) = match section {
-            SourceHomeSection::MostPlayed => ("10", "viewCount:desc"),
-            SourceHomeSection::RecentlyPlayed => ("10", "lastViewedAt:desc"),
-            SourceHomeSection::NewlyAdded => ("9", "addedAt:desc"),
-            SourceHomeSection::RecentlyReleased => ("9", "originallyAvailableAt:desc"),
+            HomeSectionKind::Explore => return Ok(Vec::new()),
+            HomeSectionKind::MostPlayed => ("10", "viewCount:desc"),
+            HomeSectionKind::RecentlyPlayed => ("10", "lastViewedAt:desc"),
+            HomeSectionKind::NewlyAdded => ("9", "addedAt:desc"),
+            HomeSectionKind::RecentlyReleased => ("9", "originallyAvailableAt:desc"),
         };
         let page = self
             .get(
@@ -426,11 +561,11 @@ impl PlexSource {
 
     async fn acquire_hubs(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         section: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let page = match self
             .get(
@@ -463,12 +598,12 @@ impl PlexSource {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, false).await?;
+                observation.apply_catalog(&batch, false).await?;
             }
             if cancelled() {
                 return Err(SourceError::Cancelled);
             }
-            catalog
+            observation
                 .replace_source_home_section(section_id, title, &entries)
                 .await?;
             Ok::<_, SourceError>(())
@@ -507,7 +642,7 @@ impl PlexSource {
         if cancelled() {
             return Err(SourceError::Cancelled);
         }
-        catalog
+        observation
             .complete_source_home_sections(&format!("plex:{section}:"), &sections, &Vec::new())
             .await?;
         Ok(())
@@ -545,6 +680,50 @@ impl PlexSource {
             .cloned()
             .collect())
     }
+}
+
+/// Where a section listing has come.
+struct Pages {
+    path: String,
+    query: Vec<(&'static str, String)>,
+    size: usize,
+    offset: usize,
+    finished: bool,
+}
+
+impl Pages {
+    fn new(section: &str, query: Vec<(&'static str, String)>, size: usize) -> Self {
+        Self {
+            path: format!("/library/sections/{section}/all"),
+            query,
+            size,
+            offset: 0,
+            finished: false,
+        }
+    }
+}
+
+/// The play and rating state of listing rows; `rated` rows clear a rating they do not carry.
+async fn write_user_data(
+    observation: &mut library::Observation<'_>,
+    kind: &str,
+    rows: &[Value],
+    rated: bool,
+) -> SourceResult<()> {
+    let states = rows
+        .iter()
+        .filter_map(|item| {
+            let state = library::NativeUserState {
+                rating: rating(item, rated),
+                play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0),
+                last_played: field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
+                ..Default::default()
+            };
+            Some((plex_id(kind, &id(&item["ratingKey"])?), state))
+        })
+        .collect::<Vec<_>>();
+    observation.write_native_user_data(kind, &states).await?;
+    Ok(())
 }
 
 fn home_entry(position: usize, item: &Value) -> Option<HomeEntryInput> {
@@ -626,15 +805,11 @@ pub(super) mod tests {
             crate::source::Implementation::Plex(source(&server)),
         );
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
-        database
+        let mut updates = catalog.changes();
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
@@ -688,24 +863,24 @@ pub(super) mod tests {
                 .mount(&server)
                 .await;
             source
-                .apply_items(&database, vec![id.into()], vec![])
+                .apply_items(&catalog, vec![id.into()], vec![])
                 .await
                 .unwrap();
             if identical {
                 assert!(
-                    updates.try_recv().is_err(),
+                    crate::published(&mut updates).is_none(),
                     "unchanged native data stays quiet"
                 );
             } else {
-                assert!(updates.try_recv().expect("catalog update").changed());
+                assert!(crate::published(&mut updates).is_some());
             }
-            let home = database
+            let home = catalog
                 .home_page(
-                    database
-                        .source_identity_key(&crate::SourceId::new("source"))
-                        .await
-                        .unwrap()
-                        .unwrap(),
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&crate::SourceId::new("source"))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,
@@ -828,50 +1003,39 @@ pub(super) mod tests {
             .mount(&server)
             .await;
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
-        database
+        let mut updates = catalog.changes();
+        catalog
             .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
         {
             let result = source
-                .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
                 .await;
             result
         }
         .unwrap();
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("plex-test"),
             "track",
             "plex:track:track",
         );
-        let row = database
+        let row = catalog
             .track(&(&uri), &cancellation)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(row.metadata.title, "Bad � title");
-        let later_page = database
+        let later_page = catalog
             .tracks_by_uris(
                 &([library::source_entity_uri(
                     &crate::SourceId::new("plex-test"),
@@ -900,71 +1064,68 @@ pub(super) mod tests {
                 .collect::<Vec<_>>(),
             ["Rock"]
         );
-        let folders = database
-            .folder_page(
-                database
-                    .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                None,
-                0,
-                10,
-                &cancellation,
-            )
-            .await
-            .unwrap();
-        assert_eq!(folders.len(), 1);
-        assert_eq!(folders[0].metadata.name.as_deref(), Some("Music"));
-        assert_eq!(folders[0].track_count, 2);
-        let moods = library::ListRead {
-            playlist_scope: Default::default(),
-            kind: library::ListKind::Moods,
-            source: Some(
-                database
-                    .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                    .await
-                    .unwrap()
-                    .unwrap(),
-            ),
-            sort: library::CatalogSort::Title,
-            folder: Some(folders[0].folder_key),
-            filter: ("").to_string(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
+        let source_key = {
+            catalog.loaded().await;
+            catalog.source_key(&library::SourceId::new(&catalog_source_id))
         }
-        .moods(&database, 0, 10, &cancellation)
-        .await
         .unwrap();
+        let folders = crate::listed(
+            &catalog,
+            library::Read::Folders(library::FolderRead {
+                source: source_key,
+                parent: None,
+                filter: String::new(),
+                descending: false,
+            }),
+        )
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Folder(folder) => Some(folder),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Music");
+        assert_eq!(folders[0].summary.track_count, 2);
+        let moods = crate::listed(
+            &catalog,
+            library::Read::List(library::ListRead {
+                folder: folders[0].folder_key,
+                ..library::ListRead::new(
+                    library::ListKind::Moods,
+                    Some(source_key),
+                    library::LibraryField::Title,
+                )
+            }),
+        )
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Tag(tag) => Some(tag),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
         assert_eq!(moods.len(), 1);
-        assert_eq!(moods[0].metadata.name, "Calm");
+        assert_eq!(moods[0].name, "Calm");
         assert_eq!(moods[0].summary.track_count, 1);
+        let playable = crate::playable(&catalog, &uri).await;
         assert_eq!(
-            database
-                .playback_loudness(&uri, &cancellation)
-                .await
-                .unwrap()
-                .0
-                .unwrap()
-                .replay_gain_db,
+            playable.gains.track_loudness().unwrap().replay_gain_db,
             Some(-4.25)
         );
-        let playlist_key = database
-            .playlist_key_by_object(
-                database
-                    .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                "plex:playlist:list",
-                &cancellation,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        let entries = database
+        let playlist_key = crate::playlist_key(
+            &catalog,
+            {
+                catalog.loaded().await;
+                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+            }
+            .unwrap(),
+            "plex:playlist:list",
+        )
+        .await
+        .unwrap();
+        let entries = catalog
             .playlist_edit_entries(
                 playlist_key,
                 &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
@@ -980,19 +1141,19 @@ pub(super) mod tests {
             vec!["entry-one", "entry-two"]
         );
         assert!(
-            !database
+            !catalog
                 .playlists(&[playlist_key], &cancellation)
                 .await
                 .unwrap()[0]
                 .writable
         );
-        let home = database
+        let home = catalog
             .home_page(
-                database
-                    .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                    .await
-                    .unwrap()
-                    .unwrap(),
+                {
+                    catalog.loaded().await;
+                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                }
+                .unwrap(),
                 None,
                 0,
                 0,
@@ -1015,30 +1176,23 @@ pub(super) mod tests {
                         && section.rows.tracks.len() == 1
                 )
         );
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
         {
             let result = source
-                .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
                 .await;
             result
         }
         .unwrap();
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        assert!(!catalog.changes().changed());
+        assert!(!observation.changed());
         assert!(
-            updates.try_recv().is_err(),
+            crate::published(&mut updates).is_none(),
             "unchanged native data stays quiet"
         );
         drop(stations);
@@ -1060,36 +1214,32 @@ pub(super) mod tests {
             } else {
                 None
             };
-            database
+            catalog
                 .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
                 .await
                 .unwrap();
             let catalog_source_id = ("plex-test").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-            catalog.start_observation().await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+            observation.start_observation().await.unwrap();
             {
                 let result = source
-                    .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                    .acquire_catalog(&mut observation, None, &|_| {}, &|| false)
                     .await;
                 result
             }
             .unwrap();
-            {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            assert!(!catalog.changes().changed());
-            assert!(updates.try_recv().is_err(), "retained Home stays quiet");
-            let retained = database
+            assert!(!observation.changed());
+            assert!(
+                crate::published(&mut updates).is_none(),
+                "retained Home stays quiet"
+            );
+            let retained = catalog
                 .home_page(
-                    database
-                        .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                        .await
-                        .unwrap()
-                        .unwrap(),
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,
@@ -1102,8 +1252,8 @@ pub(super) mod tests {
             drop(unavailable_hubs);
         }
         drop(unavailable_stations);
-        database
-            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
+        catalog
+            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true, false)
             .await
             .unwrap();
         let mut updated = track();
@@ -1133,10 +1283,10 @@ pub(super) mod tests {
                 .await;
         }
         source_owner
-            .apply_items(&database, vec!["invalid".into(), "track".into()], vec![])
+            .apply_items(&catalog, vec!["invalid".into(), "track".into()], vec![])
             .await
             .unwrap();
-        let row = database
+        let row = catalog
             .track(&(&uri), &cancellation)
             .await
             .unwrap()

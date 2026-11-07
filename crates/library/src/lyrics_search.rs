@@ -5,134 +5,83 @@ use std::collections::BTreeMap;
 use futures_util::TryStreamExt;
 use sqlx::{Connection, SqliteConnection};
 
+use crate::catalog::{snapshot::Packed, views::Context};
 use crate::{
-    Database, LibraryResult, LyricsSnippet, LyricsSnippetPart, ReadCancellation, SearchRequest,
+    Catalog, LibraryResult, LyricsSnippet, LyricsSnippetPart, ReadCancellation, SearchRequest,
     SearchResults, TrackKey,
 };
 
-const LYRICS_SEARCH_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS lyrics_documents (
-    document_key INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL,
-    authority TEXT NOT NULL,
-    role TEXT NOT NULL,
-    language TEXT NOT NULL,
-    script TEXT NOT NULL,
-    ordinal INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    UNIQUE(media_uri, authority, role, language, script, ordinal),
-    FOREIGN KEY(media_uri, authority, role, language, script)
-        REFERENCES lyrics_cache(media_uri, authority, role, language, script)
-        ON DELETE CASCADE ON UPDATE CASCADE
-) STRICT;
+/// One row per display document of a lyrics row, written by the lyrics Write. It needs the
+/// `rufin_lyrics` tokenizer, so it stays outside the Store schema.
+const LYRICS_SEARCH_SCHEMA: &str = "CREATE VIRTUAL TABLE lyrics_fts USING fts5(
+    text, content='', contentless_delete=1, tokenize='rufin_lyrics', prefix='3'
+)";
 
--- Only the display text of each version-4 lyric document is searchable.
-CREATE VIEW IF NOT EXISTS lyrics_search_input AS
-SELECT cache.rowid cache_rowid, cache.media_uri, cache.authority, cache.role,
-    cache.language, cache.script, CAST(document.key AS INTEGER) ordinal,
-    (SELECT group_concat(text, char(10)) FROM (
-        SELECT replace(replace(json_extract(line.value, '$.text'), char(1), ''), char(2), '') text
-        FROM json_each(document.value, '$.lines') line
-        ORDER BY CAST(line.key AS INTEGER)
-    )) text
-FROM lyrics_cache cache,
-    json_each(CASE WHEN json_valid(cache.lyrics) THEN
-        CASE WHEN json_extract(cache.lyrics, '$.version') = 4
-            THEN json_extract(cache.lyrics, '$.bundle.content.Documents') END
-        END) document;
-
-CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
-    text, content='lyrics_documents', content_rowid='document_key',
-    tokenize='rufin_lyrics', prefix='3'
-);
-
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_insert AFTER INSERT ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
-END;
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_delete AFTER DELETE ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
-END;
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_update AFTER UPDATE OF text ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
-    INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
-END;
-
-CREATE TRIGGER IF NOT EXISTS lyrics_search_insert AFTER INSERT ON lyrics_cache BEGIN
-    INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text)
-        SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input
-        WHERE cache_rowid=new.rowid AND length(trim(text))>0;
-END;
-CREATE TRIGGER IF NOT EXISTS lyrics_search_update AFTER UPDATE OF lyrics ON lyrics_cache
-WHEN old.lyrics IS NOT new.lyrics BEGIN
-    DELETE FROM lyrics_documents WHERE media_uri=new.media_uri AND authority=new.authority
-        AND role=new.role AND language=new.language AND script=new.script;
-    INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text)
-        SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input
-        WHERE cache_rowid=new.rowid AND length(trim(text))>0;
-END;
-"#;
-
-pub(crate) async fn initialize(
-    connection: &mut SqliteConnection,
-    backfill: bool,
-) -> LibraryResult<()> {
+pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql(LYRICS_SEARCH_SCHEMA)
         .execute(&mut *connection)
         .await?;
-    if backfill {
-        let mut after = 0;
-        loop {
-            let page: Vec<i64> = sqlx::query_scalar(
-                "SELECT rowid FROM lyrics_cache WHERE rowid>?1 ORDER BY rowid LIMIT 128",
-            )
-            .bind(after)
-            .fetch_all(&mut *connection)
-            .await?;
-            let Some(last) = page.last().copied() else {
-                break;
-            };
-            sqlx::query("INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text) SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input WHERE cache_rowid>?1 AND cache_rowid<=?2 AND length(trim(text))>0")
-                .bind(after).bind(last).execute(&mut *connection).await?;
-            after = last;
-        }
-    }
     Ok(())
 }
 
-impl Database {
+impl Catalog {
+    /// Tracks whose lyrics match `request`, in every source; music folder `folder` narrows its
+    /// own source's.
     pub async fn search_tracks_by_lyrics(
         &self,
         request: &SearchRequest,
+        folder: Option<crate::FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<SearchResults> {
         let expressions = expressions(request.query());
         if expressions.is_empty() {
             return Ok(SearchResults::default());
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        self.loaded().await;
+        if Context::new(&self.snapshot())
+            .folder_slot(folder, None)
+            .is_none()
+        {
+            return Ok(SearchResults::default());
+        }
+        // A music folder narrows only its own source's tracks; a reload may move its slot.
+        let kept = |key: i64| {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot);
+            snapshot.tracks.get(key).is_none_or(|track| {
+                let slot = context.folder_slot(folder, None);
+                track.indexed() && slot.is_some_and(|slot| context.in_source_folder(track, slot))
+            })
+        };
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let mut keys = Vec::new();
         let mut lyrics = BTreeMap::new();
-        for expression in expressions {
+        for phrases in expressions {
             // Read in index order, stopping after a page of distinct tracks.
-            let mut rows = sqlx::query_as::<_, (i64, String)>(
-                "SELECT track.track_key,snippet(lyrics_fts,0,char(1),char(2),'…',32)
+            let mut rows = sqlx::query_as::<_, (i64, String, i64)>(
+                "SELECT track.track_key,lyrics.lyrics,lyrics_fts.rowid&3
                      FROM lyrics_fts
-                     JOIN lyrics_documents document ON document.document_key=lyrics_fts.rowid
-                     JOIN tracks track ON track.media_uri=document.media_uri
+                     JOIN lyrics_cache lyrics ON lyrics.lyrics_key=lyrics_fts.rowid>>2
+                     JOIN tracks track ON track.media_uri=lyrics.media_uri
                      WHERE lyrics_fts MATCH ?1
                        AND track.track_key NOT IN(SELECT value FROM json_each(?2))
                      ORDER BY lyrics_fts.rowid",
             )
-            .bind(&expression)
+            .bind(expression(&phrases))
             .bind(serde_json::to_string(&keys)?)
             .fetch(&mut *transaction);
-            while let Some((key, excerpt)) = rows.try_next().await? {
-                if keys.contains(&key) {
+            while let Some((key, payload, ordinal)) = rows.try_next().await? {
+                if keys.contains(&key) || !kept(key) {
                     continue;
                 }
                 keys.push(key);
-                lyrics.insert(TrackKey::from_raw(key), snippet(&excerpt));
+                let text = crate::lyrics::documents(&payload)
+                    .into_iter()
+                    .find(|(document, _)| *document as i64 == ordinal)
+                    .map(|(_, text)| text)
+                    .unwrap_or_default();
+                lyrics.insert(TrackKey::from_raw(key), snippet(&excerpt(&text, &phrases)));
                 if keys.len() == request.limit() {
                     break;
                 }
@@ -141,11 +90,15 @@ impl Database {
                 break;
             }
         }
-        let tracks = crate::tracks::load_track_requested(
-            &mut transaction,
-            crate::query::RequestedKeys::batch(&keys)?,
-        )
-        .await?;
+        let tracks = self
+            .search_rows(
+                &mut transaction,
+                &[keys, Vec::new(), Vec::new()],
+                false,
+                None,
+            )
+            .await?
+            .tracks;
         transaction.commit().await?;
         Ok(SearchResults {
             tracks,
@@ -155,11 +108,26 @@ impl Database {
     }
 }
 
-fn quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
+/// One quoted phrase of a match expression; a prefix phrase matches its last token as a prefix.
+#[derive(Clone, PartialEq)]
+struct Phrase {
+    text: String,
+    prefix: bool,
 }
 
-fn expressions(query: &str) -> Vec<String> {
+fn expression(phrases: &[Phrase]) -> String {
+    phrases
+        .iter()
+        .map(|phrase| {
+            let quoted = format!("\"{}\"", phrase.text.replace('"', "\"\""));
+            if phrase.prefix { quoted + "*" } else { quoted }
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// The whole query as one phrase, then every term, then every term with the last one a prefix.
+fn expressions(query: &str) -> Vec<Vec<Phrase>> {
     let mut terms = Vec::new();
     let mut text = String::new();
     let mut in_phrase = false;
@@ -183,21 +151,25 @@ fn expressions(query: &str) -> Vec<String> {
     if terms.is_empty() {
         return Vec::new();
     }
-    let phrase = quoted(
+    let phrase = |text: &str, prefix| Phrase {
+        text: text.to_owned(),
+        prefix,
+    };
+    let whole = phrase(
         &terms
             .iter()
             .map(|(text, _)| text.as_str())
             .collect::<Vec<_>>()
             .join(" "),
+        false,
     );
     let exact = terms
         .iter()
-        .map(|(text, _)| quoted(text))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    let mut result = vec![phrase];
+        .map(|(text, _)| phrase(text, false))
+        .collect::<Vec<_>>();
+    let mut result = vec![vec![whole]];
     if !result.contains(&exact) {
-        result.push(exact);
+        result.push(exact.clone());
     }
     let (last, is_phrase) = terms.last().expect("nonempty terms");
     if !is_phrase
@@ -209,14 +181,201 @@ fn expressions(query: &str) -> Vec<String> {
             >= 3
         && !last.chars().any(crate::lyrics_tokenizer::character_token)
     {
-        let mut prefix = terms
-            .iter()
-            .map(|(text, _)| quoted(text))
-            .collect::<Vec<_>>();
-        prefix.last_mut().expect("nonempty terms").push('*');
-        result.push(prefix.join(" AND "));
+        let mut prefix = exact;
+        prefix.last_mut().expect("nonempty terms").prefix = true;
+        result.push(prefix);
     }
     result
+}
+
+/// Tokens per excerpt, as `snippet()` was asked for.
+const EXCERPT_TOKENS: i64 = 32;
+
+/// A combining mark that `unicode61` folds away inside a word.
+fn diacritic(character: char) -> bool {
+    let code = character as u32;
+    match code {
+        768..=799 => 0x0802_9FDF_u32 >> (code - 768) & 1 == 1,
+        800..=817 => 0x0003_61F8_u32 >> (code - 800) & 1 == 1,
+        _ => false,
+    }
+}
+
+/// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
+/// letter with diacritics becomes its base letter.
+pub(crate) fn fold(character: char, folded: &mut String) {
+    for lower in character.to_lowercase() {
+        let mut base = None;
+        let mut marks = true;
+        unicode_normalization::char::decompose_canonical(lower, |part| match base {
+            None => base = Some(part),
+            Some(_) => marks &= unicode_normalization::char::is_combining_mark(part),
+        });
+        match base {
+            _ if diacritic(lower) => {}
+            Some(base) if u32::from(lower) < 0x2000 && base.is_ascii_alphabetic() && marks => {
+                folded.push(base);
+            }
+            _ => folded.push(lower),
+        }
+    }
+}
+
+/// The tokens `rufin_lyrics` splits a text into: byte range and folded text.
+fn tokens(text: &str) -> Vec<(usize, usize, String)> {
+    let mut tokens: Vec<(usize, usize, String)> = Vec::new();
+    let mut open = false;
+    for (offset, character) in text.char_indices() {
+        let end = offset + character.len_utf8();
+        if crate::lyrics_tokenizer::character_token(character) {
+            tokens.push((offset, end, character.to_string()));
+            open = false;
+        } else if character.is_alphanumeric()
+            && !unicode_normalization::char::is_combining_mark(character)
+            || open && diacritic(character)
+        {
+            if !open {
+                tokens.push((offset, end, String::new()));
+                open = true;
+            }
+            let token = tokens.last_mut().expect("an open token");
+            token.1 = end;
+            fold(character, &mut token.2);
+        } else {
+            open = false;
+        }
+    }
+    tokens
+}
+
+/// The excerpt FTS5's `snippet(lyrics_fts,0,char(1),char(2),'…',32)` would build from the
+/// document, which the contentless table does not keep: the window with the most distinct
+/// phrases, preferring a sentence start, matches marked with `\u{1}` and `\u{2}`.
+#[expect(
+    clippy::string_slice,
+    reason = "Offsets are token boundaries from char_indices on the same text"
+)]
+fn excerpt(text: &str, phrases: &[Phrase]) -> String {
+    let tokens = tokens(text);
+    let phrases = phrases
+        .iter()
+        .map(|phrase| {
+            let tokens = self::tokens(&phrase.text);
+            (
+                tokens.into_iter().map(|token| token.2).collect::<Vec<_>>(),
+                phrase.prefix,
+            )
+        })
+        .collect::<Vec<_>>();
+    // Phrase instances in position order: (position, phrase, length).
+    let mut instances = Vec::new();
+    for position in 0..tokens.len() {
+        for (index, (phrase, prefix)) in phrases.iter().enumerate() {
+            let matched = !phrase.is_empty()
+                && phrase.iter().enumerate().all(|(offset, wanted)| {
+                    tokens.get(position + offset).is_some_and(|token| {
+                        if *prefix && offset + 1 == phrase.len() {
+                            token.2.starts_with(wanted.as_str())
+                        } else {
+                            token.2 == *wanted
+                        }
+                    })
+                });
+            if matched {
+                instances.push((position as i64, index, phrase.len() as i64));
+            }
+        }
+    }
+    let size = tokens.len() as i64;
+    let score = |start: i64| {
+        let mut seen = vec![false; phrases.len()];
+        let (mut score, mut first, mut last) = (0, -1, 0);
+        for &(position, phrase, length) in &instances {
+            if (start..start + EXCERPT_TOKENS).contains(&position) {
+                score += if seen[phrase] { 1 } else { 1000 };
+                seen[phrase] = true;
+                if first < 0 {
+                    first = position;
+                }
+                last = position + length;
+            }
+        }
+        let centered = first - (EXCERPT_TOKENS - (last - first)) / 2;
+        (score, centered.min(size - EXCERPT_TOKENS).max(0))
+    };
+    let bytes = text.as_bytes();
+    let sentences = tokens
+        .iter()
+        .enumerate()
+        .filter(|(position, (start, ..))| {
+            *position == 0
+                || bytes[..*start]
+                    .iter()
+                    .rposition(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
+                    .is_some_and(|kept| kept + 1 < *start && matches!(bytes[kept], b'.' | b':'))
+        })
+        .map(|(position, _)| position as i64)
+        .collect::<Vec<_>>();
+    let (mut best, mut start) = (0, 0);
+    for &(position, ..) in &instances {
+        let (value, centered) = score(position);
+        if value > best {
+            (best, start) = (value, centered);
+        }
+        let sentence = sentences
+            .iter()
+            .rev()
+            .find(|sentence| **sentence <= position);
+        if let Some(&sentence) =
+            sentence.filter(|sentence| size > EXCERPT_TOKENS && **sentence < position)
+        {
+            let value = score(sentence).0 + if sentence == 0 { 120 } else { 100 };
+            if value > best {
+                (best, start) = (value, sentence);
+            }
+        }
+    }
+    // Overlapping instances coalesce; a span that starts before the window is not shown, and
+    // spans that touch are marked as one.
+    let mut spans = Vec::<(i64, i64)>::new();
+    for &(position, _, length) in &instances {
+        match spans.last_mut() {
+            Some(span) if position <= span.1 => span.1 = span.1.max(position + length - 1),
+            _ => spans.push((position, position + length - 1)),
+        }
+    }
+    let end = start + EXCERPT_TOKENS - 1;
+    let mut marks = Vec::<(usize, usize)>::new();
+    for (first, last) in spans
+        .into_iter()
+        .filter(|span| (start..=end).contains(&span.0))
+    {
+        let (from, to) = (tokens[first as usize].0, tokens[last.min(end) as usize].1);
+        match marks.last_mut() {
+            Some(mark) if mark.1 == from => mark.1 = to,
+            _ => marks.push((from, to)),
+        }
+    }
+    let mut excerpt = String::new();
+    let mut copied = 0;
+    if start > 0 {
+        excerpt.push('…');
+        copied = tokens[start as usize].0;
+    }
+    for (from, to) in marks {
+        excerpt.push_str(&text[copied..from]);
+        excerpt.push('\u{1}');
+        excerpt.push_str(&text[from..to]);
+        excerpt.push('\u{2}');
+        copied = to;
+    }
+    if end >= size - 1 {
+        excerpt.push_str(&text[copied..]);
+    } else {
+        excerpt.push_str(&text[copied..tokens[end as usize].1]);
+        excerpt.push('…');
+    }
+    excerpt
 }
 
 #[expect(

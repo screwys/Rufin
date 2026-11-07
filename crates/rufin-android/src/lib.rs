@@ -17,8 +17,6 @@ mod more;
 #[cfg(target_os = "android")]
 mod network;
 #[cfg(target_os = "android")]
-mod pins;
-#[cfg(target_os = "android")]
 mod player;
 #[cfg(target_os = "android")]
 mod playlists;

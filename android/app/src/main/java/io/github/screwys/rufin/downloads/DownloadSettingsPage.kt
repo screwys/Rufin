@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.downloads
 
+import io.github.screwys.rufin.shared.rufin_core.downloadRulesContain
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.shared.downloads.*
+import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.settings.PreferencesConnection
@@ -27,7 +28,7 @@ import io.github.screwys.rufin.settings.SettingsRow
 internal fun DownloadSettingsPage(model: RufinConnection, preferences: PreferencesConnection, embedded: Boolean = false) {
     val downloads = model.downloads
     val translation = LocalTranslationRevision.current
-    LaunchedEffect(translation) { downloads.refreshSources(); preferences.refreshApplicationSettings() }
+    LaunchedEffect(translation) { downloads.refreshSources() }
     val sources = downloads.sources
     fun DownloadSource.directory() = when (val directory = settings.directory) { is DownloadDirectory.Native -> directory.v1; is DownloadDirectory.Document -> directory.uri; null -> null }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
@@ -76,8 +77,8 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             DownloadQualityControls(source.settings.quality) { downloads.quality(source.source.id, it) }
             }
             SettingsGroup {
-            DownloadRule.entries.forEach { rule -> SettingsRow(rule.title(), trailing = {
-                Switch(source.settings.rules.enabled(rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
+            DownloadRule.entries.forEach { rule -> SettingsRow(downloadRuleTitle(rule), trailing = {
+                Switch(downloadRulesContain(source.settings.rules, rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
             }) }
             }
             SettingsGroup(translate("Downloaded")) {
@@ -87,7 +88,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             }
         }
     }
-    removingRule?.let { (sourceId, rule) -> AlertDialog(onDismissRequest = { removingRule = null }, title = { Text(rule.title()) },
+    removingRule?.let { (sourceId, rule) -> AlertDialog(onDismissRequest = { removingRule = null }, title = { Text(downloadRuleTitle(rule)) },
         text = { Text(translate("Choose whether to keep the completed downloads.")) },
         confirmButton = { TextButton({ downloads.rule(sourceId, rule, false, true); removingRule = null }) { Text(translate("Remove Rule and Delete Downloads")) } },
         dismissButton = { TextButton({ downloads.rule(sourceId, rule, false); removingRule = null }) { Text(translate("Remove Rule, Keep Downloads")) } }) }

@@ -13,7 +13,6 @@ import io.github.screwys.rufin.core.AndroidPlayer
 import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.core.AndroidPlayerMetadata
-import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
@@ -36,8 +35,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     internal val model get() = connection
     internal val artworkCache = ArtworkCache()
     private val readings = Executors.newSingleThreadExecutor { Thread(it, "Rufin lyrics") }.asCoroutineDispatcher()
-    var settings by mutableStateOf<PlayerPreferences?>(null)
-        private set
+    val settings by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.player }
     var preferenceOptions by mutableStateOf<PlayerPreferenceOptions?>(null)
         private set
     private var settingsOwner: SettingsOwner? = null
@@ -63,13 +61,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var favorite by mutableStateOf(false)
         private set
-    var artworkRevision by mutableStateOf(0UL)
-        private set
     var sourceLabels by mutableStateOf<List<String>>(emptyList())
         private set
     var currentContextId by mutableStateOf<String?>(null)
         private set
-    var currentSourceRank by mutableStateOf<ULong?>(null)
+    var currentRow by mutableStateOf<io.github.screwys.rufin.shared.library.QueueRow?>(null)
         private set
     var currentContext by mutableStateOf<Triple<String?, String, String?>?>(null)
         private set
@@ -96,6 +92,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     internal var bridge by mutableStateOf<AndroidPlayer?>(null)
         private set
+    /** What artwork identities read besides their binding, read again with each committed change
+     * and preference: an identity changes only with it. */
+    internal val artworkGeneration by derivedStateOf(structuralEqualityPolicy()) {
+        connection.catalogChanges; connection.preferences; bridge?.artworkGeneration()
+    }
     val service get() = connection.service
     val currentLyrics get() = lyrics?.takeIf { it.mediaId != null && it.mediaId == currentId }
     val lyricsToken get() = lyrics?.currentMediaId
@@ -120,7 +121,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
             playback = null
             currentItem = null
             currentContextId = null
-            currentSourceRank = null
+            currentRow = null
             currentContext = null
             metadataLinks = null
             if (service == null) return@collectLatest
@@ -139,7 +140,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 val visualizerSubscription = player.subscribeVisualizer()
                 try {
                     withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
-                    settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
                         launch {
                             service.outputs.routes.map { routes -> routes.firstOrNull { it.selected }?.id }
@@ -208,11 +208,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                 if (rowChanged) {
                                     currentItem = row?.track()
                                     currentContextId = row?.contextId()
-                                    currentSourceRank = row?.sourceRank()
+                                    currentRow = row
                                     currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
                                 }
-                                artworkRevision = update?.artworkRevision ?: 0UL
-                                artworkCache.updateRevision(artworkRevision)
                                 favorite = update?.favorite ?: false
                                 sourceLabels = update?.sourceLabels.orEmpty()
                                 playback = update
@@ -224,7 +222,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     bridge = null
                     settingsOwner = null
                     owner.destroy()
-                    settings = null
                     preferenceOptions = null
                     metadataLinks = null
                     waveform = null
@@ -257,13 +254,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     private fun action(block: suspend () -> Unit) = connection.runAction(block)
     private suspend fun changeSettings(change: (SettingsOwner) -> Unit) {
         val current = settingsOwner ?: return
-        val projected = withContext(Dispatchers.IO) {
-            change(current)
-            current.playerPreferences()
-        }
-        if (settingsOwner === current) settings = projected
+        withContext(Dispatchers.IO) { change(current) }
     }
-    fun refreshSettings() = action { changeSettings {} }
     fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun visualizerAppearance(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
@@ -328,21 +320,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun favorite() {
         val current = playback ?: return
         val uri = current.transport.current?.id?.mediaUri ?: return
-        val effective = connection.projectedFavorite("track", uri, favorite)
-        val favorite = !effective
-        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${currentId?.run} effective=$effective requested=$favorite")
-        connection.setFavoriteIntent("track", uri, favorite)
-        this.favorite = favorite
-        action {
-            try {
-                val result = sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(uri), favorite)
-                if (result != null && currentId?.mediaUri == uri && projectedFavorite(uri, favorite) == favorite)
-                    this.favorite = result
-            }
-            finally {
-                connection.releaseFavoriteIntent("track", uri, favorite)
-            }
-        }
+        val favorite = !this.favorite
+        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${currentId?.run} requested=$favorite")
+        action { sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(uri), favorite) }
     }
     fun shuffle() = action {
         val enabled = playback?.controls?.shuffleEnabled != true
@@ -363,19 +343,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     suspend fun createQueuePlaylist(name: String, sourceId: String?, public: Boolean?) {
         val source = sourceOwner ?: return
         val selection = playbackOwner?.selection() ?: return
-        try { createPlaylist(source, sourceId, name, selection, public, sourceId != null)?.settingsError?.let { error(it) } }
+        try { createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) } }
         finally { selection.destroy() }
         connection.showFeedback(translate("Saved"))
     }
-    suspend fun queueFavorite(mediaUri: String, favorite: Boolean): Boolean? {
-        if (connection.debugLogging) Log.d("Rufin", "Queue favorite clicked run=${currentId?.run} current=${currentId?.mediaUri == mediaUri} requested=$favorite")
-        connection.setFavoriteIntent("track", mediaUri, favorite)
-        return try { sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(mediaUri), favorite) }
-        finally {
-            connection.releaseFavoriteIntent("track", mediaUri, favorite)
-        }
-    }
-    internal fun projectedFavorite(uri: String, fallback: Boolean) = connection.projectedFavorite("track", uri, fallback)
     fun activateQueue(position: ULong) = action { playbackOwner?.activate(position) }
     fun removeQueue(position: ULong) = action { playbackOwner?.remove(position) }
     suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {

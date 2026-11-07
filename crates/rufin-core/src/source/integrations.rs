@@ -82,7 +82,10 @@ impl SourceOwner {
             .iter()
             .map(|s| (s, true))
             .chain(stored.sources.integrations.iter().map(|s| (s, false)))
-            .filter(|(s, _)| matches!(s.configuration.kind.as_str(), "webdav" | "smb"))
+            .filter(|(s, _)| {
+                s.configuration
+                    .is(|kind| kind.file_library() && kind != library::SourceKind::Local)
+            })
             .map(|(s, music_source)| FileIntegration {
                 id: s.configuration.source_id.clone(),
                 name: s.configuration.name.clone(),

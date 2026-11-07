@@ -188,10 +188,10 @@ impl PlexSource {
         album: library::AlbumView,
     ) -> Result<MetadataDraft, Error> {
         self.read_metadata(
-            &album.object_id,
+            &album.row.object_id,
             SourceEntityKind::Album,
             &album.metadata.title,
-            album.summary.track_count.max(0) as usize,
+            album.row.summary.track_count.max(0) as usize,
         )
         .await
     }
@@ -200,10 +200,10 @@ impl PlexSource {
         artist: library::ArtistView,
     ) -> Result<MetadataDraft, Error> {
         self.read_metadata(
-            &artist.object_id,
+            &artist.row.object_id,
             SourceEntityKind::Artist,
-            &artist.metadata.name,
-            artist.summary.track_count.max(0) as usize,
+            &artist.row.name,
+            artist.row.summary.track_count.max(0) as usize,
         )
         .await
     }

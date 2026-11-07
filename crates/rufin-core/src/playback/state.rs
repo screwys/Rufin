@@ -13,12 +13,24 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
 
-use crate::playback::Placement;
+use crate::playback::QueuePlacement;
 use playback::{
     BackendCommand, BackendEvent, BackendState, NextTransition, PlaybackOutput, PlaybackSettings,
-    PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueRow, RepeatMode,
-    RunEndReason, RunId, StreamRequest, manual_end_is_skip, qualified_play_threshold_millis,
+    PlaybackTransitionMode, PreparedNext, PreparedStream, QueueProvenance, QueueRepeatMode,
+    QueueRow, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
+    qualified_play_threshold_millis,
 };
+
+/// The listen of a run another device continues: that device carries it on, so one play
+/// across devices is one listen.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ContinuedListen {
+    pub(crate) play_id: String,
+    pub(crate) started_at: i64,
+    pub(crate) local_period: String,
+    pub(crate) audible_millis: u64,
+    pub(crate) qualified: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClockSample {
@@ -39,8 +51,10 @@ pub struct ExternalPlayback {
     pub duration_millis: u64,
     pub volume: f64,
     pub muted: bool,
-    pub repeat: RepeatMode,
+    pub repeat: QueueRepeatMode,
     pub shuffle: bool,
+    /// The rate its playhead moves at.
+    pub rate: f64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,7 +67,6 @@ pub struct AutoDjRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Radio(crate::playback::RadioPlayRequest),
-    Random(crate::playback::RandomPlayRequest),
     OperationFailed(String),
     ObserveExternal {
         output: PlaybackOutput,
@@ -64,7 +77,6 @@ pub enum Command {
     ActivateOccurrence(u64),
     Remove(usize),
     RemoveMany(QueueSelection),
-    Forget(Vec<library::TrackKey>),
     Reorder {
         selection: QueueSelection,
         target: crate::playback::QueueReorderTarget,
@@ -73,8 +85,7 @@ pub enum Command {
         input: library::QueueLoad,
         target: crate::playback::QueueReorderTarget,
     },
-    MoveAfterCurrent(usize),
-    MoveOccurrenceAfterCurrent(u64),
+    MoveAfterCurrentSelection(QueueSelection),
     Clear {
         include_current: bool,
     },
@@ -88,7 +99,7 @@ pub enum Command {
     SetVolume(f64),
     SetMuted(bool),
     PersistVolume(f64),
-    SetRepeat(RepeatMode),
+    SetRepeat(QueueRepeatMode),
     SetShuffle {
         enabled: bool,
         seed: u64,
@@ -100,8 +111,6 @@ pub enum Command {
     UpdateSettings(PlaybackSettings),
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
-    CatalogChanged,
-    RekeyTracks(Arc<[(library::TrackKey, library::TrackKey)]>),
 }
 
 impl Command {
@@ -109,7 +118,7 @@ impl Command {
         matches!(
             self,
             Self::ActivateOccurrence(_)
-                | Self::MoveOccurrenceAfterCurrent(_)
+                | Self::MoveAfterCurrentSelection(QueueSelection::Occurrences(_))
                 | Self::RemoveMany(QueueSelection::Occurrences(_))
                 | Self::Reorder {
                     selection: QueueSelection::Occurrences(_),
@@ -147,6 +156,12 @@ struct RunContext {
     backend_loaded: bool,
     seekable: bool,
     bitstream: bool,
+    /// A seek was sent; the position that answers it is saved.
+    seeking: bool,
+    /// The local copy that failed to open or decode; the run tries the next one only once.
+    failed_local: Option<String>,
+    /// When and in which period the continued listen started, for the start of this run.
+    continued_start: Option<(i64, String)>,
 }
 
 impl RunContext {
@@ -168,10 +183,17 @@ impl RunContext {
             backend_loaded: false,
             seekable: true,
             bitstream: false,
+            seeking: false,
+            failed_local: None,
+            continued_start: None,
         }
     }
 
+    /// The listen of this run; a run nothing was heard of records none.
     fn listen(&self, skipped: bool) -> Option<library::ListenWrite> {
+        if self.audible_millis == 0 {
+            return None;
+        }
         let track = &self.row.track;
         let metadata = &track.metadata;
         Some(library::ListenWrite {
@@ -231,6 +253,8 @@ struct NextPlan {
     request: StreamRequest,
     transition: NextTransition,
     resolution: NextResolution,
+    /// The local copy that failed to open or decode; the next run tries the next one only once.
+    failed_local: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -240,14 +264,21 @@ struct FailedRun {
 
 #[derive(Clone, Debug)]
 enum QueueCompletion {
-    Replace,
-    Insert { target: QueueReorderTarget },
+    /// Replaces the queue, and drops the first `superseded` deferred commands, which were
+    /// waiting for the request it cancelled.
+    Replace {
+        superseded: usize,
+    },
+    Insert {
+        target: QueueReorderTarget,
+    },
 }
 
 pub(super) struct Player {
     owner: Weak<PlaybackOwner>,
     playback: WeakPlayback,
-    backend: Box<dyn PlaybackBackend>,
+    /// Started on first use, so launching starts no audio pipeline.
+    backend: Option<Box<dyn PlaybackBackend>>,
     backend_errors: Vec<BackendEvent>,
     stream_tasks: HashMap<RunId, JoinHandle<()>>,
     dirty: bool,
@@ -268,7 +299,7 @@ pub(super) struct Player {
     next_plan: Option<NextPlan>,
     restored_paused: bool,
     next_run_number: u64,
-    candidate_tasks: HashMap<u64, (Placement, JoinHandle<()>)>,
+    candidate_tasks: HashMap<u64, (QueuePlacement, JoinHandle<()>)>,
     settings: PlaybackSettings,
     playback_output: PlaybackOutput,
     output_volume: f64,
@@ -291,7 +322,7 @@ impl Player {
         playback_output: PlaybackOutput,
         auto_dj_enabled: bool,
         auto_dj_refill_threshold: usize,
-        mut backend: Box<dyn PlaybackBackend>,
+        mut backend: Option<Box<dyn PlaybackBackend>>,
         owner: Weak<PlaybackOwner>,
         playback: WeakPlayback,
     ) -> Self {
@@ -299,7 +330,9 @@ impl Player {
         let output_volume = settings.volume;
         let output_muted = settings.muted;
         let restored_paused = sequence.selected().is_some();
-        backend.set_event_waker(event_waker(&playback));
+        if let Some(backend) = &mut backend {
+            backend.set_event_waker(event_waker(&playback));
+        }
         Self {
             owner,
             playback,
@@ -371,104 +404,6 @@ impl Player {
         (rows, self.sequence.total())
     }
 
-    pub(super) fn continuation(&mut self, sample: &ClockSample) -> Option<playback::Continuation> {
-        if self.status() == TransportStatus::Stopped {
-            return None;
-        }
-        self.advance_external_clock(sample);
-        if let Some(current) = self.current_run.as_mut() {
-            current.advance_clock(sample.monotonic_millis);
-        }
-        let current = self.sequence.selected_index()?;
-        Some(playback::Continuation {
-            header: playback::ContinuationHeader {
-                total: self.sequence.total(),
-                current,
-                position_millis: self.sequence.progress_millis(),
-                repeat: self.sequence.repeat_mode(),
-                shuffled: self.sequence.shuffle_enabled(),
-                auto_dj: self.auto_dj_enabled,
-                auto_dj_refill_threshold: self.auto_dj_refill_threshold,
-                playback_rate: self.settings.playback_rate,
-                desired_playing: self.desired_playing(),
-                listen: self
-                    .current_run
-                    .as_ref()
-                    .map(|run| playback::ContinuedListen {
-                        play_id: run.play_id.clone(),
-                        started_at_unix_seconds: run.started_at_unix_seconds,
-                        local_period: run.local_period.clone(),
-                        audible_millis: run.audible_millis,
-                        qualified: run.qualified,
-                    }),
-            },
-            queue: self.sequence.snapshot(),
-        })
-    }
-
-    pub(super) fn stop_continuation(
-        &mut self,
-        expected: &playback::ContinuationHeader,
-        sample: &ClockSample,
-    ) -> Option<playback::ContinuationHeader> {
-        let Some(current) = self.continuation(sample) else {
-            return None;
-        };
-        if current.header.current != expected.current
-            || current.header.listen.as_ref().map(|listen| &listen.play_id)
-                != expected.listen.as_ref().map(|listen| &listen.play_id)
-        {
-            return None;
-        }
-
-        self.qualify_current();
-        let header = self.continuation(sample).map(|state| state.header);
-        self.sequence.set_selected_duration(self.duration_millis());
-        self.stop(sample, false);
-
-        header
-    }
-
-    pub(super) fn adopt_continuation(
-        &mut self,
-        continuation: playback::Continuation,
-        stream: PreparedStream,
-        backend: Box<dyn PlaybackBackend>,
-        sample: &ClockSample,
-    ) -> Result<(), PlaybackError> {
-        let playback::Continuation { header, mut queue } = continuation;
-        queue.current_index = Some(header.current);
-        queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
-        queue.repeat_mode = header.repeat;
-        queue.shuffled = header.shuffled;
-        let sequence =
-            Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
-        if sequence.selected().is_none() {
-            return Err(SequenceError::MissingSelectedEntry.into());
-        }
-
-        self.swap_backend(backend)?;
-        self.finish_current(RunEndReason::Replaced, sample);
-        self.cancel_queue_read();
-        self.cancel_candidate_tasks(false);
-        self.deferred_queue.clear();
-        self.queue_loading = false;
-        self.queue_transport = None;
-        self.settings.playback_rate = header.playback_rate;
-        self.auto_dj_enabled = header.auto_dj;
-        self.auto_dj_refill_threshold = header.auto_dj_refill_threshold;
-        self.adopt_sequence(sequence, stream, header.desired_playing);
-        if let (Some(current), Some(listen)) = (self.current_run.as_mut(), header.listen) {
-            current.play_id = listen.play_id;
-            current.started_at_unix_seconds = listen.started_at_unix_seconds;
-            current.local_period = listen.local_period;
-            current.audible_millis = listen.audible_millis;
-            current.qualified = listen.qualified;
-            current.last_monotonic_millis = Some(sample.monotonic_millis);
-        }
-
-        Ok(())
-    }
     pub(super) fn external_queue_extent(&self) -> Option<(usize, usize)> {
         self.external
             .as_ref()
@@ -593,19 +528,30 @@ impl Player {
             && (duration == 0 || self.sequence.progress_millis() < duration)
     }
 
+    /// The rate the playhead moves at: the receiver's while one plays, else this device's
+    /// on its own output and 1x on another.
+    fn playback_rate(&self) -> f64 {
+        match &self.external {
+            Some(external) => external.rate,
+            None if self.playback_output.is_local() => self.settings.playback_rate,
+            None => 1.0,
+        }
+    }
+
     pub(super) fn advance_external_clock(&mut self, sample: &ClockSample) {
         let Some(external) = self.external.as_ref() else {
             return;
         };
         let elapsed = sample
             .monotonic_millis
-            .saturating_sub(self.external_clock_millis);
+            .saturating_sub(self.external_clock_millis) as f64
+            * external.rate;
         self.external_clock_millis = sample.monotonic_millis;
         if external.status != TransportStatus::Playing || self.sequence.selected_index().is_none() {
             return;
         }
         let previous = self.sequence.progress_millis();
-        let mut position = previous.saturating_add(elapsed);
+        let mut position = previous.saturating_add(elapsed as u64);
         let duration = self.duration_millis();
         if duration > 0 {
             position = position.min(duration);
@@ -614,12 +560,29 @@ impl Player {
         self.dirty |= position != previous;
     }
 
+    /// The listen of the current run as far as it was heard, for a device that continues it.
+    pub(super) fn current_listen(&mut self, sample: &ClockSample) -> Option<ContinuedListen> {
+        let current = self.current_run.as_mut()?;
+        current.advance_clock(sample.monotonic_millis);
+        Some(ContinuedListen {
+            play_id: current.play_id.clone(),
+            started_at: current.started_at_unix_seconds?,
+            local_period: current.local_period.clone()?,
+            audible_millis: current.audible_millis,
+            qualified: current.qualified,
+        })
+    }
+
+    /// Plays `queue` here from its current entry. With `listen` the run carries on the listen
+    /// another device started of that entry.
     pub(super) fn adopt_local(
         &mut self,
         queue: library::QueueRestore,
         stream: PreparedStream,
         playing: bool,
+        listen: Option<ContinuedListen>,
         backend: Box<dyn PlaybackBackend>,
+        sample: &ClockSample,
     ) -> Result<(), PlaybackError> {
         let sequence =
             Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
@@ -627,7 +590,19 @@ impl Player {
             return Err(SequenceError::MissingSelectedEntry.into());
         }
         let _ = self.swap_backend(backend);
+        self.finish_current(RunEndReason::Replaced, sample);
+        self.cancel_queue_read();
+        self.cancel_candidate_tasks(false);
+        self.deferred_queue.clear();
+        self.queue_loading = false;
+        self.queue_transport = None;
         self.adopt_sequence(sequence, stream, playing);
+        if let (Some(current), Some(listen)) = (self.current_run.as_mut(), listen) {
+            current.play_id = listen.play_id;
+            current.audible_millis = listen.audible_millis;
+            current.qualified = listen.qualified;
+            current.continued_start = Some((listen.started_at, listen.local_period));
+        }
         Ok(())
     }
 
@@ -820,66 +795,20 @@ impl Player {
     }
 
     fn play_radio(&mut self, request: crate::playback::RadioPlayRequest) {
-        let owner = self.owner();
-        let database = owner.database.clone();
-        let source = owner
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        let selected = source.upgrade().and_then(|owner| owner.selected_library());
-        self.start_candidates(request.placement, Provenance::Radio, async move {
-            crate::radio::radio_candidates(
-                &database,
-                source,
-                selected,
-                request.seed,
-                20,
-                &library::ReadCancellation::new(),
-            )
-            .await
-        });
-    }
-
-    fn play_random(&mut self, request: crate::playback::RandomPlayRequest) {
-        let owner = self.owner();
-        let Some(selected) = owner
-            .source_owner()
-            .and_then(|owner| owner.selected_library())
-        else {
-            return;
-        };
-        let database = owner.database.clone();
-        let excluded = self
-            .sequence
-            .selected()
-            .map(|entry| entry.track.track_key)
-            .into_iter()
-            .collect::<Vec<_>>();
-        self.start_candidates(request.placement, Provenance::Random, async move {
-            database
-                .random_candidates(
-                    selected.source_key,
-                    selected.music_folder_key,
-                    &request.criteria,
-                    &excluded,
-                    request.requested,
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .map_err(super::string_error)
-        });
+        let cancel = library::ReadCancellation::new();
+        let candidates = self.owner().candidates(request.seed, 20, cancel);
+        self.start_candidates(request.placement, QueueProvenance::Radio, candidates);
     }
 
     fn start_candidates(
         &mut self,
-        placement: Placement,
-        provenance: Provenance,
+        placement: QueuePlacement,
+        provenance: QueueProvenance,
         candidates: impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>>
         + Send
         + 'static,
     ) {
-        if matches!(placement, Placement::Replace { .. }) {
+        if matches!(placement, QueuePlacement::Replace { .. }) {
             self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
             self.auto_dj_waiting_for_continuation = false;
@@ -904,7 +833,7 @@ impl Player {
         &mut self,
         id: u64,
         result: Result<Vec<library::TrackKey>, String>,
-        provenance: Provenance,
+        provenance: QueueProvenance,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
         let was_loading = self.queue_loading();
@@ -928,7 +857,7 @@ impl Player {
     fn cancel_candidate_tasks(&mut self, replacement_only: bool) {
         let was_loading = self.queue_loading();
         self.candidate_tasks.retain(|_, (placement, task)| {
-            if !replacement_only || matches!(placement, Placement::Replace { .. }) {
+            if !replacement_only || matches!(placement, QueuePlacement::Replace { .. }) {
                 task.abort();
                 false
             } else {
@@ -949,7 +878,7 @@ impl Player {
         {
             return Ok(());
         }
-        if matches!(request.placement, Placement::Replace { .. }) {
+        if matches!(request.placement, QueuePlacement::Replace { .. }) {
             self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
             self.auto_dj_waiting_for_continuation = false;
@@ -976,7 +905,6 @@ impl Player {
         }
         match command {
             Command::Radio(request) => Ok(self.play_radio(request)),
-            Command::Random(request) => Ok(self.play_random(request)),
             Command::OperationFailed(message) => {
                 self.last_error = Some(message.clone());
                 Ok({
@@ -997,16 +925,14 @@ impl Player {
             }),
             Command::Remove(position) => Ok(self.remove(&position, sample)),
             Command::RemoveMany(selection) => Ok(self.remove_many(&selection, sample)),
-            Command::Forget(positions) => Ok(self.forget(&positions, sample)),
             Command::Reorder { selection, target } => Ok(self.reorder(&selection, &target, sample)),
             Command::Insert { input, target } => Ok(self.insert(input, &target)),
-            Command::MoveAfterCurrent(position) => Ok(self.move_after_current(&position, sample)),
-            Command::MoveOccurrenceAfterCurrent(id) => Ok({
+            Command::MoveAfterCurrentSelection(selection) => Ok({
                 let target = self
                     .sequence
                     .selected_index()
                     .map_or(QueueReorderTarget::End, QueueReorderTarget::After);
-                self.reorder(&QueueSelection::Occurrences(vec![id]), &target, sample);
+                self.reorder(&selection, &target, sample);
             }),
             Command::Clear { include_current } => Ok(self.clear(include_current, sample)),
             Command::PlayPause => Ok(self.play_pause()),
@@ -1016,19 +942,11 @@ impl Player {
             Command::Next => Ok(self.next(sample)),
             Command::Previous => Ok(self.previous(sample)),
             Command::Seek(position_millis) => Ok(self.seek(position_millis)),
-            Command::SetVolume(volume) => Ok(self.set_volume(volume)),
-            Command::SetMuted(muted) => Ok(self.set_muted(muted)),
-            Command::PersistVolume(volume) => {
-                self.set_volume(volume);
-                if self.playback_output.is_local() {
-                    self.owner().persist_output(
-                        self.settings.volume,
-                        self.settings.muted,
-                        self.settings.audio_output.clone(),
-                    );
-                }
-                Ok(())
-            }
+            Command::SetVolume(volume) => Ok(self.set_output(volume, false)),
+            // A mute is saved, and so is a volume committed after it settled, which keeps a mute
+            // set since.
+            Command::SetMuted(muted) => Ok(self.save_output(self.output_volume, muted)),
+            Command::PersistVolume(volume) => Ok(self.save_output(volume, self.output_muted)),
             Command::SetRepeat(repeat) => Ok(self.set_repeat(repeat)),
             Command::SetShuffle { enabled, seed } => Ok(self.set_shuffle(enabled, seed)),
             Command::SetAutoDj {
@@ -1040,23 +958,52 @@ impl Player {
                 self.send_backend(BackendCommand::SetVisualizerEnabled(enabled));
             }),
             Command::StreamInputsChanged => Ok(self.stream_inputs_changed()),
-            Command::RekeyTracks(pairs) => Ok({
-                let mut changed = false;
-                self.edit_queue(|sequence| changed = sequence.rekey_tracks(&pairs));
-                self.dirty |= changed;
-            }),
-            Command::CatalogChanged => Ok(self.sequence.refresh_metadata()),
+        }
+    }
+
+    /// Follows committed Changes, or everything after a lag. Identity moves move queue entries,
+    /// whose saved rows their Write moved already. Changed tracks that the queue shows read the
+    /// shown rows again; their committed favorites and ratings show in them as they are. After a
+    /// lag or a forgotten source, whose Write deleted its entries, the queue follows the saved one.
+    pub(super) fn library_changed(&mut self, changes: Option<&[Arc<library::Change>]>) {
+        let Some(changes) = changes else {
+            self.reread_membership();
+            self.sequence.refresh_metadata();
+            return;
+        };
+        let mut rekeys = Vec::new();
+        let mut refresh = false;
+        for scope in changes.iter().flat_map(|change| &change.scopes) {
+            match scope {
+                library::Scope::Reload | library::Scope::Display => refresh = true,
+                library::Scope::Rekey { old, new } => rekeys.push((*old, *new)),
+                library::Scope::Tracks { keys, .. } => refresh |= self.sequence.shows_any(keys),
+                library::Scope::State { items } => {
+                    let mut shown = false;
+                    self.edit_queue(|sequence| shown = sequence.show_states(items));
+                    self.dirty |= shown;
+                    // A read in flight may have taken its rows before this commit.
+                    refresh |= self.pending_hydration.is_some();
+                }
+                library::Scope::Source {
+                    phase: library::SourcePhase::Removed,
+                    ..
+                } => self.reread_membership(),
+                _ => {}
+            }
+        }
+        if !rekeys.is_empty() {
+            let mut changed = false;
+            self.edit_queue(|sequence| changed = sequence.rekey_tracks(&rekeys));
+            self.dirty |= changed;
+        }
+        if refresh {
+            self.sequence.refresh_metadata();
         }
     }
 
     pub(super) fn stream_resolved(&mut self, run: RunId, stream: impl Into<PreparedStream>) {
         let mut stream = stream.into();
-        if stream.loudness.is_none()
-            && self.settings.loudness_normalization != playback::LoudnessNormalization::Off
-        {
-            self.resolve_loudness(run, stream);
-            return;
-        }
         self.stream_tasks.remove(&run);
         if self.current_run.as_ref().is_some_and(|current| {
             current.id == run && current.status == TransportStatus::Resolving
@@ -1086,33 +1033,6 @@ impl Player {
                 next: Some(PreparedNext::new(plan.next_run, stream, plan.transition)),
             };
             self.send_backend(command);
-        }
-    }
-
-    pub(super) fn loudness_resolved(&mut self, run: RunId, stream: PreparedStream) {
-        self.stream_tasks.remove(&run);
-        if let Some(current) = self
-            .current_run
-            .as_mut()
-            .filter(|current| current.id == run)
-            && let Some(prepared) = current.resolved_stream.as_mut()
-        {
-            prepared.loudness = stream.loudness.clone();
-            self.send_backend(BackendCommand::UpdateLoudness {
-                run,
-                loudness: stream.loudness.unwrap_or_default(),
-            });
-        } else {
-            self.stream_resolved(run, stream);
-        }
-    }
-
-    fn resolve_loudness(&mut self, run: RunId, stream: PreparedStream) {
-        let task = self
-            .owner()
-            .resolve_loudness(self.playback.clone(), run, stream);
-        if let Some(previous) = self.stream_tasks.insert(run, task) {
-            previous.abort();
         }
     }
 
@@ -1215,14 +1135,29 @@ impl Player {
                 else {
                     return;
                 };
-                if error.kind().skippable() {
+                let failed = match &plan.resolution {
+                    NextResolution::Ready(stream) if plan.failed_local.is_none() => {
+                        retried_local(stream, error.kind())
+                    }
+                    _ => None,
+                };
+                let retry = failed.is_some();
+                if retry {
+                    plan.resolution = NextResolution::Resolving;
+                    plan.failed_local = failed.clone();
+                } else if error.kind().skippable() {
                     plan.resolution = NextResolution::Unplayable;
+                }
+                if retry || error.kind().skippable() {
                     self.send_backend(BackendCommand::PrepareNext {
                         current_run,
                         next: None,
                     });
                 }
-                self.report_error(error.message().to_string());
+                match failed {
+                    Some(failed) => self.resolve_next_plan_candidate(failed),
+                    None => self.report_error(error.message().to_string()),
+                }
             }
             BackendEvent::ProcessingApplied {
                 output,
@@ -1286,6 +1221,14 @@ impl Player {
                 else {
                     return;
                 };
+                if current.failed_local.is_none()
+                    && let Some(failed) = current
+                        .resolved_stream
+                        .as_ref()
+                        .and_then(|stream| retried_local(stream, error.kind()))
+                {
+                    return self.resolve_next_candidate(failed);
+                }
                 let failed = FailedRun {
                     desired_playing: current.desired_playing,
                 };
@@ -1355,7 +1298,7 @@ impl Player {
             return Ok(true);
         }
         self.apply_batch(
-            crate::playback::PlayRequest::from_input(load, Placement::End),
+            crate::playback::PlayRequest::from_input(load, QueuePlacement::End),
             sample,
         )?;
         Ok(true)
@@ -1376,7 +1319,7 @@ impl Player {
         self.complete_auto_dj(
             seed_run,
             seed_media_uri,
-            library::QueueLoad::track_keys(candidates, Provenance::AutoDj),
+            library::QueueLoad::track_keys(candidates, QueueProvenance::AutoDj),
             sample,
         )
     }
@@ -1408,7 +1351,7 @@ impl Player {
         request: crate::playback::PlayRequest,
         _sample: &ClockSample,
     ) -> Result<(), SequenceError> {
-        let replacing = matches!(request.placement, Placement::Replace { .. });
+        let replacing = matches!(request.placement, QueuePlacement::Replace { .. });
         let loading_changed = !self.queue_loading;
         self.queue_loading = true;
         if self.pending_queue.is_some() && !replacing {
@@ -1417,12 +1360,13 @@ impl Player {
             return Ok(());
         }
         if replacing {
-            self.deferred_queue.clear();
             self.queue_transport = None;
         }
         let completion = match request.placement {
-            Placement::Replace { .. } => QueueCompletion::Replace,
-            Placement::AfterCurrent => QueueCompletion::Insert {
+            QueuePlacement::Replace { .. } => QueueCompletion::Replace {
+                superseded: self.deferred_queue.len(),
+            },
+            QueuePlacement::AfterCurrent => QueueCompletion::Insert {
                 target: self
                     .sequence
                     .selected()
@@ -1432,7 +1376,7 @@ impl Player {
                         )
                     }),
             },
-            Placement::End => QueueCompletion::Insert {
+            QueuePlacement::End => QueueCompletion::Insert {
                 target: QueueReorderTarget::End,
             },
         };
@@ -1454,14 +1398,13 @@ impl Player {
         self.queue_loading = true;
         self.cancel_queue_read();
         let owner = self.owner();
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let playback = self.playback.clone();
         let shuffled = self.sequence.shuffle_enabled();
         let task = owner.runtime.spawn(async move {
             let result = request
-                .prepare(&database, shuffled, super::random_u64())
-                .await
-                .map_err(super::string_error);
+                .prepare(&catalog, shuffled, super::random_u64())
+                .await;
             playback.post(move |player, sample| {
                 if let Err(error) = player.complete_queue(id, result, sample) {
                     player.report_error(error.to_string());
@@ -1485,7 +1428,7 @@ impl Player {
             return;
         };
         let owner = self.owner();
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let playback = self.playback.clone();
         self.pending_hydration = Some(owner.runtime.spawn(async move {
             let requested = entries
@@ -1493,17 +1436,16 @@ impl Player {
                 .enumerate()
                 .map(|(position, (_, entry))| (position, entry.clone()))
                 .collect::<Vec<_>>();
-            let result = database
+            // An entry whose track the Store no longer holds has no row and keeps the one it has.
+            let result = catalog
                 .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
                 .await
                 .map(|rows| {
-                    entries
-                        .into_iter()
-                        .map(|(id, _)| id)
-                        .zip(rows.into_iter().map(|row| row.track.clone()))
+                    rows.iter()
+                        .map(|row| (entries[row.position].0, row.track.clone()))
                         .collect()
                 })
-                .map_err(super::string_error);
+                .map_err(crate::string_error);
             playback.post(move |player, sample| player.complete_queue_metadata(result, sample));
         }));
     }
@@ -1521,11 +1463,17 @@ impl Player {
         if self.external.is_some() {
             return;
         }
-        if matches!(self.pending_queue, Some((_, QueueCompletion::Replace, _))) {
+        if matches!(
+            self.pending_queue,
+            Some((_, QueueCompletion::Replace { .. }, _))
+        ) {
             return;
         }
         if self.current_run.is_none()
-            && self.queue_transport != Some(TransportStatus::Stopped)
+            && matches!(
+                self.queue_transport,
+                Some(TransportStatus::Playing | TransportStatus::Paused)
+            )
             && !self.restored_paused
         {
             self.begin_selected_run();
@@ -1612,7 +1560,9 @@ impl Player {
                 self.dirty = true;
             }
             Ok(page) => match completion {
-                QueueCompletion::Replace => {
+                QueueCompletion::Replace { superseded } => {
+                    self.deferred_queue
+                        .drain(..superseded.min(self.deferred_queue.len()));
                     self.finish_queue_run(sample, RunEndReason::ManualSkip);
                     self.sequence.add_page(page, QueueReorderTarget::End, true);
                     self.restored_paused = false;
@@ -1700,28 +1650,50 @@ impl Player {
         self.edit_queue(|sequence| sequence.remove(selection));
         self.changed_queue(removing_current, false, sample);
     }
-    fn forget(&mut self, keys: &[library::TrackKey], sample: &ClockSample) {
-        let keys = keys
-            .iter()
-            .copied()
-            .collect::<std::collections::HashSet<_>>();
-        let ids = (0..self.sequence.total())
-            .filter(|&position| {
-                self.sequence
-                    .entry_at(position)
-                    .is_some_and(|entry| keys.contains(&entry.track_key))
+    /// Removes the entries whose tracks the Catalog no longer holds with a source.
+    /// Compares the queue with the saved one once its edits are saved: a Write that deleted or
+    /// moved saved entries, which a forgotten source or a missed change did, wrote the truth.
+    fn reread_membership(&mut self) {
+        if self.external.is_some() {
+            return;
+        }
+        if let Some(update) = self.take_queue_persistence() {
+            self.owner().save_queue(update);
+        }
+        let entries = (0..self.sequence.total())
+            .filter_map(|i| {
+                Some((
+                    self.sequence.id_at(i)?.0,
+                    self.sequence.entry_at(i)?.track_key,
+                ))
             })
+            .collect();
+        let _ = (self.owner().store_sender).try_send(super::PlaybackStoreWork::Membership(entries));
+    }
+
+    /// Entries the saved queue lost leave; entries whose saved track moved follow it.
+    pub(super) fn saved_membership(
+        &mut self,
+        moves: &[(u64, library::TrackKey, Option<library::TrackKey>)],
+        sample: &ClockSample,
+    ) {
+        let rekeys = (moves.iter())
+            .filter_map(|(_, old, new)| Some((*old, (*new)?)))
             .collect::<Vec<_>>();
-        let previous = self.sequence.selected_index();
-        if previous.as_ref().is_some_and(|id| ids.contains(id)) {
+        let mut changed = false;
+        self.edit_queue(|sequence| changed = sequence.rekey_tracks(&rekeys));
+        self.dirty |= changed;
+        let gone = (moves.iter())
+            .filter_map(|(id, _, new)| new.is_none().then_some(*id))
+            .collect::<Vec<_>>();
+        let current = (self.sequence.selected_index())
+            .and_then(|i| self.sequence.id_at(i))
+            .is_some_and(|id| gone.contains(&id.0));
+        if current {
             self.finish_queue_run(sample, RunEndReason::Stopped)
         }
-        self.edit_queue(|sequence| sequence.remove(&QueueSelection::Positions(ids.clone())));
-        self.changed_queue(
-            previous.is_some_and(|position| ids.contains(&position)),
-            true,
-            sample,
-        );
+        self.edit_queue(|sequence| sequence.forget(&QueueSelection::Occurrences(gone)));
+        self.changed_queue(current, true, sample);
     }
     fn reorder(
         &mut self,
@@ -1737,7 +1709,7 @@ impl Player {
             self.queue_transport.get_or_insert(TransportStatus::Stopped);
         }
         self.request_queue(
-            crate::playback::PlayRequest::from_input(input, Placement::End),
+            crate::playback::PlayRequest::from_input(input, QueuePlacement::End),
             QueueCompletion::Insert {
                 target: match target {
                     QueueReorderTarget::Before(i) => self
@@ -1757,15 +1729,6 @@ impl Player {
             },
         )
     }
-    fn move_after_current(&mut self, id: &usize, sample: &ClockSample) {
-        let target = self
-            .sequence
-            .selected()
-            .map_or(QueueReorderTarget::End, |row| {
-                QueueReorderTarget::AfterOccurrence(row.occurrence_id.expect("local queue entry"))
-            });
-        self.reorder(&QueueSelection::Positions(vec![*id]), &target, sample)
-    }
     fn clear(&mut self, include_current: bool, sample: &ClockSample) {
         let previous = self.sequence.selected_index();
         if include_current {
@@ -1774,7 +1737,7 @@ impl Player {
         self.cancel_queue_read();
         self.queue_loading = false;
         self.deferred_queue.clear();
-        let removing_current = include_current || self.current_run.is_none();
+        let removing_current = include_current || self.sequence.selected_index().is_none();
         self.edit_queue(|sequence| sequence.clear(removing_current));
         self.changed_queue(removing_current && previous.is_some(), true, sample);
     }
@@ -1964,6 +1927,9 @@ impl Player {
                 run,
                 position_millis,
             });
+            if let Some(current) = self.current_run.as_mut() {
+                current.seeking = true;
+            }
         } else {
             // Nothing plays this run yet; its start uses the stored position.
             self.sequence.set_progress_millis(position_millis);
@@ -1993,55 +1959,39 @@ impl Player {
         self.dirty = true;
     }
 
-    fn set_volume(&mut self, volume: f64) {
+    fn set_output(&mut self, volume: f64, muted: bool) {
         let volume = if volume.is_finite() {
             volume.clamp(0.0, 1.0)
         } else {
             1.0
         };
-        if self.output_volume == volume && !self.output_muted {
+        if (self.output_volume, self.output_muted) == (volume, muted) {
             return;
         }
-        self.output_volume = volume;
-        self.output_muted = false;
+        (self.output_volume, self.output_muted) = (volume, muted);
         if self.playback_output.is_local() {
-            self.settings.volume = volume;
-            self.settings.muted = false;
+            (self.settings.volume, self.settings.muted) = (volume, muted);
         }
-
         self.send_backend(BackendCommand::SetOutputVolume {
             volume,
             volume_scale: self.settings.volume_scale,
-            muted: false,
+            muted,
         });
         self.dirty = true;
     }
 
-    fn set_muted(&mut self, muted: bool) {
-        if self.output_muted == muted {
-            return;
-        }
-        self.output_muted = muted;
-        if self.playback_output.is_local() {
-            self.settings.muted = muted;
-        }
-        self.send_backend(BackendCommand::SetOutputVolume {
-            volume: self.output_volume,
-            volume_scale: self.settings.volume_scale,
-            muted,
-        });
+    fn save_output(&mut self, volume: f64, muted: bool) {
+        self.set_output(volume, muted);
         if self.playback_output.is_local() {
             self.owner().persist_output(
                 self.settings.volume,
-                muted,
+                self.settings.muted,
                 self.settings.audio_output.clone(),
             );
         }
-
-        self.dirty = true;
     }
 
-    fn set_repeat(&mut self, repeat: RepeatMode) {
+    fn set_repeat(&mut self, repeat: QueueRepeatMode) {
         if self.sequence.repeat_mode() == repeat {
             return;
         }
@@ -2104,16 +2054,6 @@ impl Player {
         if self.playback_output.is_local() {
             self.output_volume = settings.volume;
             self.output_muted = settings.muted;
-            if settings.loudness_normalization != playback::LoudnessNormalization::Off
-                && let Some(current) = self.current_run.as_ref()
-                && let Some(stream) = current
-                    .resolved_stream
-                    .as_ref()
-                    .filter(|stream| stream.loudness.is_none())
-                && !self.stream_tasks.contains_key(&current.id)
-            {
-                self.resolve_loudness(current.id, stream.clone());
-            }
         }
         if visualizer_fft_changed
             || (self.playback_output.is_local() && audio_configuration_changed)
@@ -2254,6 +2194,9 @@ impl Player {
             millis.min(current.duration_millis)
         };
         let changed = self.sequence.progress_millis() != playhead_millis;
+        if std::mem::take(&mut current.seeking) {
+            self.sequence.persist_state();
+        }
         if !changed && current.status == TransportStatus::Paused {
             return;
         }
@@ -2351,12 +2294,16 @@ impl Player {
             };
             Some(stream.clone())
         });
+        let failed_local = self
+            .next_plan
+            .as_ref()
+            .and_then(|plan| plan.failed_local.clone());
         self.dirty = true;
         self.finish_current(RunEndReason::Completed, sample);
         if !self.sequence.activate_backend(position) {
             return;
         }
-        self.install_reserved_run(new_run, position, desired_playing);
+        self.install_reserved_run(new_run, position, desired_playing, failed_local);
         if let Some(current) = self.current_run.as_mut() {
             current.resolved_stream = transitioned_stream;
             current.backend_loaded = true;
@@ -2388,7 +2335,12 @@ impl Player {
             }
             return;
         };
-        self.install_reserved_run(plan.next_run, position, desired_playing);
+        self.install_reserved_run(
+            plan.next_run,
+            position,
+            desired_playing,
+            plan.failed_local.clone(),
+        );
         match plan.resolution {
             NextResolution::Ready(stream) if desired_playing => {
                 if let Some(current) = self.current_run.as_mut() {
@@ -2418,7 +2370,7 @@ impl Player {
     fn skip_unplayable(&mut self, failure: FailureKind, desired_playing: bool) -> bool {
         if !failure.skippable()
             || !self.settings.skip_unplayable_tracks
-            || self.sequence.repeat_mode() == RepeatMode::One
+            || self.sequence.repeat_mode() == QueueRepeatMode::One
             || self.consecutive_skips >= MAX_CONSECUTIVE_SKIPS
         {
             return false;
@@ -2431,7 +2383,13 @@ impl Player {
         true
     }
 
-    fn install_reserved_run(&mut self, run: RunId, position: usize, desired_playing: bool) {
+    fn install_reserved_run(
+        &mut self,
+        run: RunId,
+        position: usize,
+        desired_playing: bool,
+        failed_local: Option<String>,
+    ) {
         let Some(entry) = self
             .sequence
             .selected()
@@ -2442,6 +2400,7 @@ impl Player {
         };
         let mut current = RunContext::resolving(run, self.play_id(run), &entry);
         current.desired_playing = desired_playing;
+        current.failed_local = failed_local;
         self.current_run = Some(current);
         self.failed_run = None;
         self.current_media_changed = true;
@@ -2458,6 +2417,8 @@ impl Player {
         }
         self.failed_run = None;
         let Some(entry) = self.sequence.selected().cloned() else {
+            // The run begins when the metadata read completes.
+            self.queue_transport.get_or_insert(TransportStatus::Playing);
             self.sequence.need_metadata();
             self.current_run = None;
             self.next_plan = None;
@@ -2536,10 +2497,47 @@ impl Player {
             request: request.clone(),
             transition,
             resolution: NextResolution::Resolving,
+            failed_local: None,
         });
         let mut request = request;
         request.session_identifier = Some(self.play_id(next_run));
         self.resolve_stream(next_run, next, request);
+    }
+
+    /// A local copy failed to open or decode: the run resolves again past it, from where it
+    /// was.
+    fn resolve_next_candidate(&mut self, failed: String) {
+        let Some(current) = self.current_run.as_mut() else {
+            return;
+        };
+        current.status = TransportStatus::Resolving;
+        current.resolved_stream = None;
+        current.backend_loaded = false;
+        current.failed_local = Some(failed.clone());
+        let (run, row) = (current.id, current.row.clone());
+        let mut request =
+            StreamRequest::new(row.track.media_uri.clone(), self.settings.stream_quality);
+        request.session_identifier = Some(current.play_id.clone());
+        request.failed_local = Some(failed);
+        self.dirty = true;
+        self.resolve_stream(run, row, request);
+    }
+
+    /// The prepared next stream's local copy failed to open or decode: the next run resolves
+    /// again past it.
+    fn resolve_next_plan_candidate(&mut self, failed: String) {
+        let Some(plan) = self.next_plan.as_ref() else {
+            return;
+        };
+        let (next_run, occurrence) = (plan.next_run, plan.occurrence);
+        let mut request = plan.request.clone();
+        request.session_identifier = Some(self.play_id(next_run));
+        request.failed_local = Some(failed);
+        let Some(row) = self.sequence.at_id(occurrence).cloned() else {
+            self.next_plan = None;
+            return;
+        };
+        self.resolve_stream(next_run, row, request);
     }
 
     fn resolve_current(&mut self, run: RunId, entry: &std::sync::Arc<QueueRow>) {
@@ -2565,8 +2563,12 @@ impl Player {
             return;
         };
         current.status = TransportStatus::Playing;
-        current.started_at_unix_seconds = Some(sample.unix_seconds);
-        current.local_period = Some(sample.local_period.clone());
+        let (started_at, local_period) = current
+            .continued_start
+            .take()
+            .unwrap_or_else(|| (sample.unix_seconds, sample.local_period.clone()));
+        current.started_at_unix_seconds = Some(started_at);
+        current.local_period = Some(local_period);
         current.last_monotonic_millis = Some(sample.monotonic_millis);
         self.notices.push(PlaybackNotice::RunStarted(current.id));
         let current = self.current_run.as_ref().unwrap();
@@ -2660,11 +2662,7 @@ impl Player {
             phase,
             started_at_unix_seconds: current.started_at_unix_seconds.unwrap_or_default(),
             position_millis: self.sequence.progress_millis(),
-            playback_rate: if self.playback_output.is_local() {
-                self.settings.playback_rate
-            } else {
-                1.0
-            },
+            playback_rate: self.playback_rate(),
             duration_millis: (current.duration_millis > 0).then_some(current.duration_millis),
             paused: !current.desired_playing,
             muted: self.settings.muted,
@@ -2718,6 +2716,14 @@ impl Player {
     }
 }
 
+/// The local copy a stream opened, when its failure means the next copy may play.
+fn retried_local(stream: &PreparedStream, failure: FailureKind) -> Option<String> {
+    let uri = stream.uri();
+    ((uri.starts_with("file:") || uri.starts_with("content:"))
+        && (failure.skippable() || failure == FailureKind::DeniedAccess))
+        .then(|| uri.to_owned())
+}
+
 fn decided_transition(
     settings: &PlaybackSettings,
     current: Option<&library::TrackMetadata>,
@@ -2769,7 +2775,7 @@ impl Player {
             summary.current_index = summary.current_index.map(|index| index + offset);
             summary.next_index = summary.next_index.map(|index| index + offset);
             summary.can_next = summary.current_index.is_some_and(|index| index + 1 < total)
-                || sequence.repeat_mode() != RepeatMode::Off;
+                || sequence.repeat_mode() != QueueRepeatMode::Off;
         }
         PlaybackView {
             queue_loading: self.queue_loading(),
@@ -2797,11 +2803,7 @@ impl Player {
                 desired_playing: self.desired_playing(),
                 position_millis: self.position_millis(),
                 position_observed_at_millis: self.position_observed_at_millis(),
-                playback_rate: if self.playback_output().is_local() {
-                    settings.playback_rate
-                } else {
-                    1.0
-                },
+                playback_rate: self.playback_rate(),
                 duration_millis: self.duration_millis(),
                 can_seek: self.can_seek(),
                 buffering_percent: self.buffering_percent(),
@@ -2831,10 +2833,29 @@ impl Player {
             .expect("playback owner held by actor turn")
     }
 
+    /// The backend, started now when nothing used it yet.
+    fn backend(&mut self) -> Result<&mut Box<dyn PlaybackBackend>, String> {
+        if self.backend.is_none() {
+            let mut backend = self.owner().start_output_backend(&self.playback_output)?;
+            backend.set_event_waker(event_waker(&self.playback));
+            self.backend = Some(backend);
+        }
+        Ok(self.backend.as_mut().expect("the backend was just started"))
+    }
+
+    pub(super) fn start_backend(&mut self) {
+        if let Err(error) = self.backend() {
+            self.report_error(error);
+        }
+    }
+
     fn send_backend(&mut self, command: BackendCommand) {
         let run = command.run();
-        if let Err(error) = self.backend.send(command) {
-            let error = BackendFailure::new(error.to_string());
+        let sent = self
+            .backend()
+            .and_then(|backend| backend.send(command).map_err(|error| error.to_string()));
+        if let Err(error) = sent {
+            let error = BackendFailure::new(error);
             self.backend_errors.push(match run {
                 Some(run) => BackendEvent::Error { run, error },
                 None => BackendEvent::OperationFailed { run, error },
@@ -2843,13 +2864,9 @@ impl Player {
     }
 
     fn resolve_stream(&mut self, run: RunId, row: Arc<QueueRow>, request: StreamRequest) {
-        let task = self.owner().resolve_stream(
-            self.playback.clone(),
-            run,
-            row,
-            request,
-            self.settings.loudness_normalization,
-        );
+        let task = self
+            .owner()
+            .resolve_stream(self.playback.clone(), run, row, request);
         if let Some(previous) = self.stream_tasks.insert(run, task) {
             previous.abort();
         }
@@ -2867,7 +2884,11 @@ impl Player {
     }
 
     pub(super) fn drive(&mut self, clock: &dyn Fn() -> ClockSample) {
-        let events = self.backend.drain_events();
+        let events = self
+            .backend
+            .as_mut()
+            .map(|backend| backend.drain_events())
+            .unwrap_or_default();
         if events.is_empty() && self.external.is_none() {
             return;
         }
@@ -2941,7 +2962,6 @@ impl Player {
                 report.volume = self.output_volume;
                 report.muted = self.output_muted;
                 self.owner().report_source(report);
-                self.sequence.persist_state();
             }
             self.owner().publish(projection, current_media_changed);
         }
@@ -2963,15 +2983,16 @@ impl Player {
         output: PlaybackOutput,
         backend: Box<dyn PlaybackBackend>,
     ) {
-        let mut previous = self.install_backend(backend);
-        if let Some(run) = self.current_run()
-            && let Err(error) = previous.send(BackendCommand::Stop { run })
-        {
-            self.report_error(error.to_string());
-        }
-        previous.drain_events();
-        if let Err(error) = previous.shutdown() {
-            self.report_error(error.to_string());
+        if let Some(mut previous) = self.install_backend(backend) {
+            if let Some(run) = self.current_run()
+                && let Err(error) = previous.send(BackendCommand::Stop { run })
+            {
+                self.report_error(error.to_string());
+            }
+            previous.drain_events();
+            if let Err(error) = previous.shutdown() {
+                self.report_error(error.to_string());
+            }
         }
         self.replace_output(output);
     }
@@ -2979,13 +3000,15 @@ impl Player {
     fn install_backend(
         &mut self,
         mut backend: Box<dyn PlaybackBackend>,
-    ) -> Box<dyn PlaybackBackend> {
+    ) -> Option<Box<dyn PlaybackBackend>> {
         backend.set_event_waker(event_waker(&self.playback));
-        std::mem::replace(&mut self.backend, backend)
+        self.backend.replace(backend)
     }
 
     fn swap_backend(&mut self, backend: Box<dyn PlaybackBackend>) -> Result<(), PlaybackError> {
-        let mut previous = self.install_backend(backend);
+        let Some(mut previous) = self.install_backend(backend) else {
+            return Ok(());
+        };
         let stopped = self
             .current_run()
             .map_or(Ok(()), |run| previous.send(BackendCommand::Stop { run }));
@@ -3005,7 +3028,9 @@ impl Player {
         for (_, task) in self.stream_tasks.drain() {
             task.abort();
         }
-        self.backend.shutdown()
+        self.backend
+            .as_mut()
+            .map_or(Ok(()), |backend| backend.shutdown())
     }
 }
 

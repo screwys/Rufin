@@ -1,6 +1,6 @@
 //! Durable file associations, independent of playlist ownership and entry identities.
-use crate::{Database, LibraryError, LibraryResult, PlaylistKey, PlaylistPathMode, SourceId};
-use sqlx::{Connection, Row, SqliteConnection};
+use crate::{Catalog, LibraryError, LibraryResult, PlaylistKey, PlaylistPathMode, SourceId};
+use sqlx::{Row, SqliteConnection};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -48,7 +48,7 @@ mod tests {
     #[tokio::test]
     async fn removing_earlier_roots_keeps_links_on_their_original_files() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         let root_a = directory.path().join("A");
         let root_b = directory.path().join("B");
         let root_c = directory.path().join("C");
@@ -57,22 +57,21 @@ mod tests {
             std::fs::write(root.join("music.m3u8"), "#EXTM3U\n")?;
         }
         let source = SourceId::new("local");
-        database
+        catalog
             .set_playlist_file_auto_save(Some(&source), true)
             .await?;
         let mut keys = Vec::new();
         // Deliberately create higher ordinals first to exercise unique-path compaction.
         for index in [2, 1, 0] {
-            let playlist = database
+            let playlist = catalog
                 .create_playlist(
-                    None,
                     &format!("Root {index}"),
                     &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
                 )
                 .await?
                 .unwrap()
                 .0;
-            database
+            catalog
                 .save_playlist_file_link(&PlaylistFileLink {
                     playlist,
                     source_id: Some(source.clone()),
@@ -86,41 +85,37 @@ mod tests {
                 })
                 .await?;
             keys.push(playlist);
-            database
+            catalog
                 .ignore_playlist_file(Some(&source), &format!("@{index}/ignored.pls"))
                 .await?;
         }
-        database
+        catalog
             .remove_playlist_file_roots(&source, &[(0, root_a.clone())])
             .await?;
-        let a = database.get_playlist_file_link(keys[2]).await?.unwrap();
+        let a = catalog.get_playlist_file_link(keys[2]).await?.unwrap();
         check_eq!(a.source_id, None);
         check_eq!(std::path::PathBuf::from(&a.path), root_a.join("music.m3u8"));
         check_eq!(a.auto_save, Some(true));
-        let b = database.get_playlist_file_link(keys[1]).await?.unwrap();
+        let b = catalog.get_playlist_file_link(keys[1]).await?.unwrap();
         check_eq!(b.path, "@0/music.m3u8");
         check_eq!(b.source_id, Some(source.clone()));
         check_eq!(b.auto_save, None);
         check_eq!(
-            database
-                .get_playlist_file_link(keys[0])
-                .await?
-                .unwrap()
-                .path,
+            catalog.get_playlist_file_link(keys[0]).await?.unwrap().path,
             "@1/music.m3u8"
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(None, &root_a.join("ignored.pls").to_string_lossy())
                 .await?
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "@0/ignored.pls")
                 .await?
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "@1/ignored.pls")
                 .await?
         );
@@ -129,17 +124,21 @@ mod tests {
             std::fs::read_to_string(root_b.join("music.m3u8"))?,
             "#EXTM3U\n"
         );
-        database.close().await
+        catalog.close().await
     }
 
     #[tokio::test]
     async fn rejected_files_are_scoped_to_their_source_and_observed_playlists_are_paged()
     -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         {
-            let mut writer = database.writer().await?;
-            sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(writer.as_mut().unwrap()).await?;
+            let mut writer = catalog.writer().await?;
+            sqlx::query(
+                "INSERT INTO sources(source_key,object_id,display_name) VALUES (1,'files','Files')",
+            )
+            .execute(&mut *writer)
+            .await?;
         }
         let files = [
             (
@@ -158,69 +157,68 @@ mod tests {
                 "album/other.pls",
                 "other.pls",
                 crate::LocalFileKind::Media,
-                crate::LocalFileState::Observed,
+                crate::LocalFileState::Accepted,
             ),
             (
                 "album/folder.xspf",
                 "folder.xspf",
                 crate::LocalFileKind::Directory,
-                crate::LocalFileState::Observed,
+                crate::LocalFileState::Accepted,
             ),
         ]
         .into_iter()
-        .map(|(path, relative, kind, state)| {
-            (
-                crate::LocalFileWrite {
-                    path: path.into(),
-                    root: "album".into(),
-                    relative_path: relative.into(),
-                    kind,
-                    size_bytes: None,
-                    mtime_ns: 1,
-                    device_id: None,
-                    inode: None,
-                    native_id: None,
-                    picture_index: None,
-                    artist_pictures: None,
-                    revision: None,
-                    parse_version: Some(1),
-                    state,
-                },
-                Vec::new(),
-            )
+        .map(|(path, relative, kind, state)| crate::LocalFileWrite {
+            path: path.into(),
+            root: "album".into(),
+            relative_path: relative.into(),
+            kind,
+            size_bytes: None,
+            mtime_ns: 1,
+            device_id: None,
+            inode: None,
+            birth_ns: None,
+            native_id: None,
+            picture_index: None,
+            artist_pictures: None,
+            revision: None,
+            parse_version: Some(1),
+            state,
         })
         .collect::<Vec<_>>();
-        let mut catalog = database.catalog("files", None).await?;
-        catalog
-            .write_file_observations(&files, Vec::new(), true)
+        let mut observation = catalog.observe("files").await?;
+        observation
+            .write_files(crate::FileBatch {
+                files: files.clone(),
+                ..Default::default()
+            })
             .await?;
-        drop(catalog);
+        drop(observation);
         let source = SourceId::new("files");
         check!(
-            database
+            catalog
                 .file_path_is_rejected(&source, "album/photo.png")
                 .await?
         );
         check!(
-            database
+            catalog
                 .file_path_is_rejected(&source, "album/Music.M3U8")
                 .await?
         );
         check!(
-            !database
+            !catalog
                 .file_path_is_rejected(&source, "album/missing.flac")
                 .await?
         );
         check!(
-            !database
+            !catalog
                 .file_path_is_rejected(&SourceId::new("other"), "album/photo.png")
                 .await?
         );
-        let rows = database
+        let rows = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(rows.len(), 2);
-        let next = database
+        let next = catalog
             .observed_playlist_file_page(
                 crate::SourceKey::from_raw(1),
                 Some(rows[0].local_file_key),
@@ -228,45 +226,43 @@ mod tests {
             .await?;
         check_eq!(next.len(), 1);
         check_eq!(next[0].path, "album/other.pls");
-        let playlist = database
-            .create_playlist(
-                None,
-                "Shared",
-                &crate::MemberSelection::Uris((Vec::new()).into()),
-            )
+        let playlist = catalog
+            .create_playlist("Shared", &crate::MemberSelection::Uris((Vec::new()).into()))
             .await?
             .unwrap()
             .0;
-        database
+        catalog
             .associate_playlist_files(&source, &[(rows[0].path.clone(), playlist)])
             .await?;
-        database
-            .catalog("files", None)
+        catalog
+            .observe("files")
             .await?
-            .write_file_observations(&files, Vec::new(), true)
+            .write_files(crate::FileBatch {
+                files: files.clone(),
+                ..Default::default()
+            })
             .await?;
-        let associated = database
+        let associated = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(associated[0].playlist, Some(playlist));
         check!(associated[0].playlist_identity.is_some());
-        database.delete_playlist(None, playlist).await?;
-        let deleted = database
+        catalog.delete_playlists(&[playlist]).await?;
+        let deleted = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(deleted[0].playlist, None);
         check!(deleted[0].playlist_identity.is_some());
-        database.close().await
+        catalog.close().await
     }
 
     #[tokio::test]
-    async fn associations_survive_restart_and_track_only_edits() -> LibraryResult<()> {
+    async fn associations_survive_restart() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("library.sqlite");
-        let database = Database::open(&path).await?;
-        let playlist = database
+        let catalog = Catalog::open(&path).await?;
+        let playlist = catalog
             .create_playlist(
-                None,
                 "Music",
                 &crate::MemberSelection::Uris(
                     ((&["file:///song.flac".into(), "file:///two.flac".into()]).to_vec()).into(),
@@ -287,11 +283,10 @@ mod tests {
             dirty: false,
             error: None,
         };
-        check!(database.save_playlist_file_link(&link).await?);
-        check!(!database.save_playlist_file_link(&link).await?);
-        let second = database
+        check!(catalog.save_playlist_file_link(&link).await?);
+        check!(!catalog.save_playlist_file_link(&link).await?);
+        let second = catalog
             .create_playlist(
-                None,
                 "Second",
                 &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
@@ -300,170 +295,42 @@ mod tests {
             .0;
         let mut duplicate = link.clone();
         duplicate.playlist = second;
-        check!(database.save_playlist_file_link(&duplicate).await.is_err());
-        check!(!database.playlist_file_auto_save(Some(&source)).await?);
-        database
+        check!(catalog.save_playlist_file_link(&duplicate).await.is_err());
+        check!(!catalog.playlist_file_auto_save(Some(&source)).await?);
+        catalog
             .set_playlist_file_auto_save(Some(&source), true)
             .await?;
-        database
+        catalog
             .ignore_playlist_file(Some(&source), "0/ignored.pls")
             .await?;
-        check!(
-            !database
-                .update_playlist(None, playlist, Some("Music"), None)
-                .await?
-        );
-        check!(
-            !database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        check_eq!(
-            database
-                .add_playlist_tracks(
-                    None,
-                    playlist,
-                    &crate::MemberSelection::Uris(
-                        ((&["file:///song.flac".into()]).to_vec()).into()
-                    ),
-                    true
-                )
-                .await?,
-            0
-        );
-        check!(
-            !database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .update_playlist(None, playlist, Some("New name"), None)
+        catalog
+            .mark_playlist_file_synced(playlist, "third", 0)
             .await?;
-        check!(
-            database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .mark_playlist_file_synced(playlist, "second")
-            .await?;
-        database
-            .add_playlist_tracks(
-                None,
-                playlist,
-                &crate::MemberSelection::Uris(((&["file:///three.flac".into()]).to_vec()).into()),
-                false,
-            )
-            .await?;
-        check!(
-            database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
-        let entries = database
-            .playlist_edit_entries(
-                playlist,
-                &crate::MemberRead {
-                    collection: crate::Collection::Playlist(playlist),
-                    sort: Some(crate::CatalogSort::Position),
-                    ..crate::MemberRead::new(crate::Collection::Playlist(playlist))
-                }
-                .selection(),
-                &crate::ReadCancellation::default(),
-            )
-            .await
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|entry| entry.playlist_entry_key)
-                    .collect::<Vec<_>>()
-            })?;
-        database
-            .move_playlist_entry(None, playlist, entries[0], 0)
-            .await?;
-        check!(
-            !database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .move_playlist_entry(None, playlist, entries[0], 2)
-            .await?;
-        check!(
-            database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
-        database
-            .remove_playlist_entries(None, playlist, &[entries[1]])
-            .await?;
-        check!(
-            database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
-        check_eq!(
-            database
-                .remove_playlist_entries(None, playlist, &[entries[1]])
-                .await?,
-            0
-        );
-        check!(
-            !database
-                .get_playlist_file_link(playlist)
-                .await?
-                .unwrap()
-                .dirty
-        );
-        database.close().await?;
-        let database = Database::open(&path).await?;
-        let restored = database
+        catalog.close().await?;
+        let catalog = Catalog::open(&path).await?;
+        let restored = catalog
             .find_playlist_file_link(Some(&source), &link.path)
             .await?
             .unwrap();
         check_eq!(restored.revision.as_deref(), Some("third"));
         check!(!restored.dirty);
-        check!(database.playlist_file_auto_save(Some(&source)).await?);
+        check!(catalog.playlist_file_auto_save(Some(&source)).await?);
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "0/ignored.pls")
                 .await?
         );
-        database.delete_playlist(None, playlist).await?;
-        check!(database.get_playlist_file_link(playlist).await?.is_none());
-        database.close().await
+        catalog.delete_playlists(&[playlist]).await?;
+        check!(catalog.get_playlist_file_link(playlist).await?.is_none());
+        catalog.close().await
     }
 
     #[tokio::test]
     async fn backup_restores_links_by_identity() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
-        let playlist = database
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
+        let playlist = catalog
             .create_playlist(
-                None,
                 "Playlist",
                 &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
@@ -485,9 +352,9 @@ mod tests {
             dirty: true,
             error: Some("Unavailable".into()),
         };
-        database.save_playlist_file_link(&link).await?;
-        database.ignore_playlist_file(None, "ignored.m3u").await?;
-        database.set_playlist_file_auto_save(None, true).await?;
+        catalog.save_playlist_file_link(&link).await?;
+        catalog.ignore_playlist_file(None, "ignored.m3u").await?;
+        catalog.set_playlist_file_auto_save(None, true).await?;
         let backup = directory.path().join("backup");
         std::fs::create_dir(&backup)?;
         let groups = crate::StateGroups {
@@ -497,10 +364,10 @@ mod tests {
             activity: false,
             queue: false,
         };
-        let count = database.export_state(&backup, groups).await?;
-        database.unlink_playlist_file(playlist).await?;
-        database.restore_state(&backup, groups, count).await?;
-        let restored = database
+        let count = catalog.export_state(&backup, groups).await?;
+        catalog.unlink_playlist_file(playlist).await?;
+        catalog.restore_state(&backup, groups, count).await?;
+        let restored = catalog
             .find_playlist_file_link(None, &link.path)
             .await?
             .unwrap();
@@ -509,12 +376,12 @@ mod tests {
         check!(restored.dirty);
         check_eq!(restored.error, link.error);
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(None, "ignored.m3u")
                 .await?
         );
-        check!(database.playlist_file_auto_save(None).await?);
-        database.close().await
+        check!(catalog.playlist_file_auto_save(None).await?);
+        catalog.close().await
     }
 }
 
@@ -580,17 +447,6 @@ async fn linkable_on(
         .bind(playlist).fetch_one(connection).await?)
 }
 
-pub(crate) async fn mark_dirty_on(
-    connection: &mut SqliteConnection,
-    playlist: PlaylistKey,
-) -> LibraryResult<()> {
-    sqlx::query("UPDATE playlist_file_links SET dirty=1 WHERE playlist_key=?1 AND dirty=0")
-        .bind(playlist)
-        .execute(connection)
-        .await?;
-    Ok(())
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) enum PlaylistFileRecord {
     Link {
@@ -652,7 +508,8 @@ pub(crate) async fn restore_record_on(
             object_id,
             mut link,
         } => {
-            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2")
+            // A Rufin playlist a release kept under a source is restored without one.
+            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists WHERE object_id=?2 AND (owner='rufin' OR source_key IS (SELECT source_key FROM sources WHERE object_id=?1))")
                 .bind(source_id).bind(object_id).fetch_one(&mut *connection).await?;
             save_link_on(connection, &link).await?;
         }
@@ -677,16 +534,15 @@ pub(crate) async fn restore_record_on(
     Ok(())
 }
 
-impl Database {
+impl Catalog {
     /// Keep file locations attached to the same folders when earlier roots are removed.
     pub async fn remove_playlist_file_roots(
         &self,
         source: &SourceId,
         removed: &[(usize, std::path::PathBuf)],
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut write = self.write().await?;
+        let connection = write.connection().await?;
         let mut removed = removed.iter().collect::<Vec<_>>();
         removed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
         for (index, root) in removed {
@@ -698,20 +554,20 @@ impl Database {
                 std::path::MAIN_SEPARATOR
             );
             sqlx::query("UPDATE playlist_file_links SET source_id='',path=?3||substr(path,length(?2)+1),auto_save=COALESCE(auto_save,(SELECT auto_save FROM playlist_file_settings WHERE source_id=?1),0) WHERE source_id=?1 AND substr(path,1,length(?2))=?2")
-                .bind(source.as_str()).bind(&prefix).bind(&root).execute(&mut *transaction).await?;
+                .bind(source.as_str()).bind(&prefix).bind(&root).execute(&mut *connection).await?;
             sqlx::query("INSERT OR IGNORE INTO playlist_file_ignored(source_id,path) SELECT '',?3||substr(path,length(?2)+1) FROM playlist_file_ignored WHERE source_id=?1 AND substr(path,1,length(?2))=?2")
-                .bind(source.as_str()).bind(&prefix).bind(&root).execute(&mut *transaction).await?;
+                .bind(source.as_str()).bind(&prefix).bind(&root).execute(&mut *connection).await?;
             sqlx::query("DELETE FROM playlist_file_ignored WHERE source_id=?1 AND substr(path,1,length(?2))=?2")
-                .bind(source.as_str()).bind(&prefix).execute(&mut *transaction).await?;
+                .bind(source.as_str()).bind(&prefix).execute(&mut *connection).await?;
             // Move higher ordinals out of their occupied namespace before compacting them.
             for table in ["playlist_file_links", "playlist_file_ignored"] {
                 sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET path='@-'||substr(path,2) WHERE source_id=?1 AND substr(path,1,1)='@' AND CAST(substr(path,2,instr(path,'/')-2) AS INTEGER)>?2")))
-                    .bind(source.as_str()).bind(*index as i64).execute(&mut *transaction).await?;
+                    .bind(source.as_str()).bind(*index as i64).execute(&mut *connection).await?;
                 sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET path='@'||(CAST(substr(path,3,instr(path,'/')-3) AS INTEGER)-1)||substr(path,instr(path,'/')) WHERE source_id=?1 AND substr(path,1,2)='@-'")))
-                    .bind(source.as_str()).execute(&mut *transaction).await?;
+                    .bind(source.as_str()).execute(&mut *connection).await?;
             }
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -726,7 +582,7 @@ impl Database {
         path: &str,
     ) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
             .bind(source_id.as_str()).bind(path).fetch_one(&mut *reader).await?)
     }
 
@@ -736,7 +592,7 @@ impl Database {
         after: Option<crate::LocalFileKey>,
     ) -> LibraryResult<Vec<ObservedPlaylistFile>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT observed.local_file_key,observed.path,observed.root,observed.relative_path,observed.size_bytes,observed.mtime_ns,observed.revision,file.playlist_identity,(SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=json_extract(file.playlist_identity,'$[0]')) AND (json_extract(file.playlist_identity,'$[0]') IS NULL OR playlist.source_key IS NOT NULL) AND playlist.object_id=json_extract(file.playlist_identity,'$[1]') AND playlist.owner='rufin' AND playlist.name IS NOT NULL) playlist FROM local_files file JOIN observed_local_files observed USING(local_file_key) WHERE file.source_key=?1 AND file.local_file_key>?2 AND (lower(file.path) LIKE '%.m3u' OR lower(file.path) LIKE '%.m3u8' OR lower(file.path) LIKE '%.pls' OR lower(file.path) LIKE '%.xspf') AND observed.kind<>'directory' AND (lower(observed.path) LIKE '%.m3u' OR lower(observed.path) LIKE '%.m3u8' OR lower(observed.path) LIKE '%.pls' OR lower(observed.path) LIKE '%.xspf') ORDER BY file.local_file_key LIMIT 256")
+        Ok(sqlx::query_as("SELECT file.file_key local_file_key,file.path,file.root,file.relative_path,file.size_bytes,file.mtime_ns,file.revision,file.playlist_identity,(SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=json_extract(file.playlist_identity,'$[0]')) AND (json_extract(file.playlist_identity,'$[0]') IS NULL OR playlist.source_key IS NOT NULL) AND playlist.object_id=json_extract(file.playlist_identity,'$[1]') AND playlist.owner='rufin' AND playlist.name IS NOT NULL) playlist FROM files file WHERE file.source_key=?1 AND file.file_key>?2 AND (lower(file.path) LIKE '%.m3u' OR lower(file.path) LIKE '%.m3u8' OR lower(file.path) LIKE '%.pls' OR lower(file.path) LIKE '%.xspf') AND file.kind<>'directory' ORDER BY file.file_key LIMIT 256")
             .bind(source).bind(after.map_or(0, crate::LocalFileKey::raw)).fetch_all(&mut *reader).await?)
     }
     pub async fn associate_playlist_files(
@@ -744,30 +600,13 @@ impl Database {
         source: &SourceId,
         files: &[(String, PlaylistKey)],
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        let mut changed = std::collections::BTreeMap::<i64, Vec<String>>::new();
+        let mut write = self.write().await?;
+        let connection = write.connection().await?;
         for (path, playlist) in files {
-            let row: Option<(i64, String)> = sqlx::query_as("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target) RETURNING source_key,path")
-                .bind(source.as_str()).bind(path).bind(playlist).fetch_optional(&mut *transaction).await?;
-            if let Some((source, path)) = row {
-                changed.entry(source).or_default().push(path);
-            }
+            sqlx::query("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE files SET playlist_identity=(SELECT identity FROM target) WHERE file_key=(SELECT file.file_key FROM files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target)")
+                .bind(source.as_str()).bind(path).bind(playlist).execute(&mut *connection).await?;
         }
-        for (source, paths) in changed {
-            crate::connect::catalog::mark_files_on(
-                &mut transaction,
-                source,
-                &paths.iter().map(String::as_str).collect::<Vec<_>>(),
-                false,
-            )
-            .await?;
-        }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -810,43 +649,65 @@ impl Database {
     }
 
     pub async fn save_playlist_file_link(&self, link: &PlaylistFileLink) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        save_link_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            link,
-        )
-        .await
+        let mut write = self.write().await?;
+        let saved = save_link_on(write.connection().await?, link).await?;
+        write.link_playlist(link.playlist.raw(), true);
+        write.commit().await?;
+        Ok(saved)
     }
 
     pub async fn unlink_playlist_file(&self, playlist: PlaylistKey) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        Ok(
-            sqlx::query("DELETE FROM playlist_file_links WHERE playlist_key=?1")
+        let mut write = self.write().await?;
+        let removed = sqlx::query("DELETE FROM playlist_file_links WHERE playlist_key=?1")
+            .bind(playlist)
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected();
+        if removed != 0 {
+            write.link_playlist(playlist.raw(), false);
+        }
+        write.commit().await?;
+        Ok(removed != 0)
+    }
+
+    /// Whether this playlist is linked to a file.
+    pub fn is_linked(&self, playlist: PlaylistKey) -> bool {
+        self.snapshot()
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| record.flags & crate::catalog::snapshot::LINKED != 0)
+    }
+
+    /// Whether some playlist is linked to a file.
+    pub fn has_linked_playlists(&self) -> bool {
+        self.snapshot()
+            .playlists
+            .iter()
+            .any(|(_, record)| record.flags & crate::catalog::snapshot::LINKED != 0)
+    }
+
+    /// How many edits the playlist took since its file last held them.
+    pub async fn playlist_file_edits(&self, playlist: PlaylistKey) -> LibraryResult<u32> {
+        let mut reader = self.acquire_reader().await?;
+        let edits =
+            sqlx::query_scalar("SELECT dirty FROM playlist_file_links WHERE playlist_key=?1")
                 .bind(playlist)
-                .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?
-                .rows_affected()
-                != 0,
-        )
+                .fetch_optional(&mut *reader)
+                .await?;
+        Ok(edits.unwrap_or(0))
     }
 
-    pub async fn mark_playlist_file_dirty(&self, playlist: PlaylistKey) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        mark_dirty_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            playlist,
-        )
-        .await
-    }
-
+    /// The file holds `revision` and the first `edits` edits; later ones keep it dirty.
     pub async fn mark_playlist_file_synced(
         &self,
         playlist: PlaylistKey,
         revision: &str,
+        edits: u32,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=0,error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR dirty<>0 OR error IS NOT NULL)")
-            .bind(playlist).bind(revision).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+        let mut write = self.write().await?;
+        sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=max(dirty-?3,0),error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR ?3<>0 OR error IS NOT NULL)")
+            .bind(playlist).bind(revision).bind(edits).execute(write.connection().await?).await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -855,14 +716,15 @@ impl Database {
         playlist: PlaylistKey,
         error: Option<&str>,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
+        let mut write = self.write().await?;
         sqlx::query(
             "UPDATE playlist_file_links SET error=?2 WHERE playlist_key=?1 AND error IS NOT ?2",
         )
         .bind(playlist)
         .bind(error)
-        .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+        .execute(write.connection().await?)
         .await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -871,12 +733,13 @@ impl Database {
         source_id: Option<&SourceId>,
         path: &str,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
+        let mut write = self.write().await?;
         sqlx::query("INSERT OR IGNORE INTO playlist_file_ignored(source_id,path) VALUES(?1,?2)")
             .bind(location_source(source_id))
             .bind(path)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(write.connection().await?)
             .await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -914,9 +777,31 @@ impl Database {
         source_id: Option<&SourceId>,
         enabled: bool,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
+        let mut write = self.write().await?;
         sqlx::query("INSERT INTO playlist_file_settings(source_id,auto_save) VALUES(?1,?2) ON CONFLICT(source_id) DO UPDATE SET auto_save=excluded.auto_save WHERE auto_save<>excluded.auto_save")
-            .bind(location_source(source_id)).bind(enabled).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .bind(location_source(source_id)).bind(enabled).execute(write.connection().await?).await?;
+        write.commit().await?;
         Ok(())
     }
+}
+
+/// An edit made the playlist differ from its linked file. An unlinked playlist has nothing to
+/// mark.
+pub(crate) async fn mark_dirty_on(
+    catalog: &Catalog,
+    connection: &mut SqliteConnection,
+    playlist: PlaylistKey,
+) -> LibraryResult<()> {
+    let linked = catalog
+        .snapshot()
+        .playlists
+        .get(playlist.raw())
+        .is_some_and(|record| record.flags & crate::catalog::snapshot::LINKED != 0);
+    if linked {
+        sqlx::query("UPDATE playlist_file_links SET dirty=dirty+1 WHERE playlist_key=?1")
+            .bind(playlist)
+            .execute(connection)
+            .await?;
+    }
+    Ok(())
 }

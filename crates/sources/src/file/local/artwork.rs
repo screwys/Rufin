@@ -8,7 +8,8 @@ use crate::LocalImageRef;
 use crate::{ImageBytes, SourceError, SourceResult};
 
 use crate::file::artwork::{
-    best_picture_index, content_type, image_rank, read_image_input, supported_image,
+    FolderImage, best_picture_index, content_type, folder_cover, folder_portrait, read_image_input,
+    supported_image,
 };
 use crate::file::discovery;
 use crate::file::lofty::read_lofty;
@@ -29,27 +30,29 @@ impl ArtworkReference {
     }
 }
 
+/// The supported images in `directory`.
+pub(crate) fn directory_images(directory: &Path) -> Vec<FolderImage> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| supported_image(path) && path.is_file())
+        .map(|path| FolderImage {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            path: path.to_string_lossy().into_owned(),
+            revision: None,
+        })
+        .collect()
+}
+
 pub(crate) fn directory_image(directory: &Path) -> Option<PathBuf> {
-    let mut best = None;
-    let mut count = 0;
-    for entry in fs::read_dir(directory).ok()?.flatten() {
-        let path = entry.path();
-        if !supported_image(&path) || !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        if crate::file::artwork::is_artist_image(&name) {
-            continue;
-        }
-        count += 1;
-        let rank = image_rank(&name);
-        let candidate = (rank, path);
-        if best.as_ref().is_none_or(|current| &candidate < current) {
-            best = Some(candidate);
-        }
-    }
-    best.filter(|(rank, _)| *rank != usize::MAX || count == 1)
-        .map(|(_, path)| path)
+    folder_cover(&directory_images(directory)).map(|image| PathBuf::from(&image.path))
 }
 
 pub(crate) fn directory_artist_image_for(
@@ -57,19 +60,8 @@ pub(crate) fn directory_artist_image_for(
     artist: &str,
     allow_generic: bool,
 ) -> Option<PathBuf> {
-    fs::read_dir(directory)
-        .ok()?
-        .flatten()
-        .filter_map(|entry| {
-            let rank = crate::file::artwork::artist_image_rank_for(
-                &entry.file_name().to_string_lossy(),
-                artist,
-                allow_generic,
-            );
-            (rank != usize::MAX && entry.path().is_file()).then(|| (rank, entry.path()))
-        })
-        .min()
-        .map(|(_, path)| path)
+    folder_portrait(&directory_images(directory), artist, allow_generic)
+        .map(|image| PathBuf::from(&image.path))
 }
 
 pub(crate) fn file_reference(source_id: &str, path: &Path, revision: String) -> LocalImageRef {

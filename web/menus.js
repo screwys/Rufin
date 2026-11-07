@@ -1,13 +1,14 @@
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { loadView, openMediaLink } from "./library.js";
+import { loadView, navigate } from "./library.js";
 
 import { $, button, el, icon, run, notice } from "./ui.js";
 import { sourceIcon } from "./sources.js";
 
-function playRadio(row, kind = "track", mode = "replace") {
-  return api("/queue/radio", "POST", { kind, id: row.id, uri: row.uri, mode });
+// Plays the radio a row's menu offers.
+function playRadio(seed, mode = "replace") {
+  return api("/queue/radio", "POST", { ...seed, mode });
 }
 
 let menuAnchor = null;
@@ -36,16 +37,16 @@ function menuItems(menu, actions) {
     const name =
       itemIcon ||
       {
-        [tr("Play")]: "play",
-        [tr("Play Next")]: "play-next",
-        [tr("Play Later")]: "play-last",
-        [tr("Remove from Queue")]: "remove",
-        [tr("Remove from Playlist")]: "remove",
-        [tr("Edit")]: "edit",
-        [tr("Delete Playlist")]: "delete",
-        [tr("Favorite")]: "favorite",
-        [tr("Add to Favorites")]: "favorite",
-        [tr("Remove from Favorites")]: "favorite-filled",
+        [tr("Play")]: "rufin-media-playback-start-symbolic",
+        [tr("Play Next")]: "rufin-mail-forward-symbolic",
+        [tr("Play Later")]: "rufin-go-last-symbolic",
+        [tr("Remove from Queue")]: "rufin-list-remove-symbolic",
+        [tr("Remove from Playlist")]: "rufin-list-remove-symbolic",
+        [tr("Edit")]: "rufin-document-edit-symbolic",
+        [tr("Delete Playlist")]: "rufin-process-stop-symbolic",
+        [tr("Favorite")]: "rufin-heart-outline-symbolic",
+        [tr("Add to Favorites")]: "rufin-heart-outline-symbolic",
+        [tr("Remove from Favorites")]: "rufin-heart-filled-symbolic",
       }[label];
     const item = button(
       label,
@@ -64,7 +65,7 @@ function menuItems(menu, actions) {
     item.setAttribute("role", "menuitem");
     if (children) {
       item.setAttribute("aria-haspopup", "menu");
-      item.append(icon("forward"));
+      item.append(icon("rufin-go-next-symbolic"));
       item.addEventListener("pointerenter", () =>
         run(() => openSubmenu(children, item, false)),
       );
@@ -120,22 +121,23 @@ function positionSubmenu(menu, anchor) {
   menu.style.top = `${Math.max(8, Math.min(rect.top, innerHeight - menu.offsetHeight - 8))}px`;
 }
 
-function radioMenu(row, kind = "track") {
+function radioMenu(seed) {
   const title = {
     track: tr("Track radio"),
     album: tr("Album radio"),
     artist: tr("Artist radio"),
     album_artist: tr("Artist radio"),
+    genre: tr("Genre radio"),
     playlist: tr("Playlist radio"),
-  }[kind];
+  }[seed.kind];
   return [
     title,
     null,
-    "radio",
+    "rufin-audio-only-symbolic",
     [
-      [tr("Play"), () => playRadio(row, kind, "replace")],
-      [tr("Play Next"), () => playRadio(row, kind, "next")],
-      [tr("Play Later"), () => playRadio(row, kind, "append")],
+      [tr("Play"), () => playRadio(seed, "replace")],
+      [tr("Play Next"), () => playRadio(seed, "next")],
+      [tr("Play Later"), () => playRadio(seed, "append")],
     ],
   ];
 }
@@ -144,39 +146,19 @@ function playlistMenu(target) {
   return [
     tr("Add to Playlist"),
     null,
-    "add-playlist",
+    "rufin-playlists-compact-symbolic",
     { playlistTarget: target },
   ];
 }
 
-async function goToMenu(row, kind = "track", metadata) {
-  if (kind === "artist")
-    return [
-      tr("Go to"),
-      null,
-      "go-to",
-      [
-        [
-          tr("Go to {artist}", { artist: row.name }),
-          () => openMediaLink("artists", row),
-          "artists",
-        ],
-      ],
-    ];
-  metadata ??= await api(`/media?${new URLSearchParams({ uri: row.uri })}`);
-  const items = metadata.artists.map((artist) => [
-    tr("Go to {artist}", { artist: artist.name }),
-    () => openMediaLink("artists", artist),
-    "artists",
-  ]);
-  const album = kind === "album" ? row : metadata.album;
-  if (album)
-    items.push([
-      tr("Go to Album"),
-      () => openMediaLink("albums", album),
-      "albums",
-    ]);
-  return items.length ? [tr("Go to"), null, "go-to", items] : null;
+// Go to on a row: the artists, album and server page core lists for it.
+function goToMenu(row) {
+  const items = (row.go_to || []).map((target) => {
+    if (target.url) return [target.title, () => open(target.url, "_blank", "noopener"), "rufin-external-link-compact-symbolic"];
+    if (target.name) return [tr("Go to {artist}", { artist: target.name }), () => navigate(target.page), "rufin-artists-symbolic"];
+    return [tr("Go to Album"), () => navigate(target.page), "rufin-albums-symbolic"];
+  });
+  return items.length ? [tr("Go to"), null, "rufin-external-link-compact-symbolic", items] : null;
 }
 
 function renderPlaylistSubmenu(menu, target, signal) {
@@ -196,41 +178,44 @@ function renderPlaylistSubmenu(menu, target, signal) {
         closeMenus();
         return openName(null, target);
       },
-      "add",
+      "rufin-list-add-symbolic",
       "menu-item",
     ),
   );
   menu.lastChild.append(document.createTextNode(tr("New Playlist")));
-  let offset = 0,
-    total = 0,
-    request = 0,
+  // The playlists whose names hold the search, read from the library a window at a time as
+  // the list scrolls.
+  let shown = 0,
+    count = 0,
+    reading = null,
+    generation = 0,
     timer;
-  const load = async () => {
-    const turn = ++request,
-      start = offset;
+  const read = async (reset) => {
+    if (reset) generation += 1;
+    else if (reading || shown >= count) return;
+    const current = generation;
+    const offset = reset ? 0 : shown;
     const params = new URLSearchParams({
-      offset: start,
-      limit: 64,
-      total: start === 0,
-      sort: "title",
+      ...(state.source ? { source: state.source } : {}),
       q: search.value,
+      offset,
+      limit: 100,
     });
-    if (state.source) params.set("source", state.source);
-    const result = await api(`/playlists?${params}`, "GET", undefined, signal);
-    if (signal.aborted || turn !== request) return;
-    if (result.total !== null) total = result.total;
+    reading = api(`/playlists/destinations?${params}`, "GET", undefined, signal);
+    const result = await reading.finally(() => {
+      if (current === generation) reading = null;
+    });
+    if (signal.aborted || current !== generation) return;
     const focused = document.activeElement?.dataset.playlistId;
-    window.replaceChildren();
-    window.style.paddingTop = `${start * 32}px`;
-    window.style.paddingBottom = `${Math.max(0, total - start - result.playlists.length) * 32}px`;
+    if (reset) window.replaceChildren();
+    count = result.count;
+    shown = offset + result.playlists.length;
     for (const row of result.playlists) {
       const item = button(
         row.name,
         async () => {
           await api("/playlists/entries", "POST", {
             id: row.id,
-            source: state.source,
-            folder: state.selectedLibrary,
             ...target,
           });
           closeMenus();
@@ -238,7 +223,6 @@ function renderPlaylistSubmenu(menu, target, signal) {
         null,
         "menu-item",
       );
-      item.disabled = !row.writable;
       item.dataset.playlistId = String(row.id);
       item.setAttribute("role", "menuitem");
       window.append(item);
@@ -248,21 +232,12 @@ function renderPlaylistSubmenu(menu, target, signal) {
   };
   search.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      offset = 0;
-      scroll.scrollTop = 0;
-      run(load);
-    }, 150);
+    timer = setTimeout(() => run(() => read(true)), 150);
   });
   scroll.addEventListener("scroll", () => {
-    const next = Math.min(Math.max(0, total - 64), Math.max(0, Math.floor(scroll.scrollTop / 32 / 32) * 32));
-    if (next !== offset) {
-      offset = next;
-      clearTimeout(timer);
-      timer = setTimeout(() => run(load), 60);
-    }
+    if (scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 48) run(() => read(false));
   });
-  run(load);
+  run(() => read(true));
 }
 
 let editingPlaylist = null;
@@ -312,14 +287,17 @@ async function openName(playlist = null, uris = []) {
   if (playlist) await loadPlaylistFile();
   if (!playlist) {
     const configured = await api("/sources");
+    // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     playlistSource =
-      configured.sources.find((source) => source.id === state.source) || null;
-    $("playlist-owner").disabled = !playlistSource;
+      configured.sources.find(
+        (source) => source.id === state.source && source.owns_playlists,
+      ) || null;
+    $("playlist-owner").hidden = !playlistSource;
     $("playlist-owner").setAttribute(
       "aria-pressed",
       String(!!playlistSource),
     );
-    showPlaylistOwner();
+    if (playlistSource) showPlaylistOwner();
   }
   $("name-dialog").showModal();
   $("playlist-name").focus();
@@ -352,7 +330,7 @@ function showPlaylistOwner() {
   owner.replaceChildren(image);
   owner.title = current
     ? tr(
-        "This is owned by {source}. Regular playlists are synced to your remote.",
+        "This is owned by {source} and synced to it.",
         { source: playlistSource.name },
       )
     : tr(
@@ -399,7 +377,6 @@ function init() {
         await api("/playlists/file", "POST", { ...input, force: true });
       }
       await loadPlaylistFile();
-      await loadView();
     }));
   }
   $("track-menu").setAttribute("popover", "manual");
@@ -465,19 +442,15 @@ function init() {
           : {
               name,
               ...newPlaylistUris,
-              selection_source: newPlaylistUris.source ?? state.source,
               source:
                 $("playlist-owner").getAttribute("aria-pressed") === "true"
                   ? playlistSource.id
                   : null,
-              current:
-                $("playlist-owner").getAttribute("aria-pressed") === "true",
               public: $("playlist-public-row").hidden ? null : $("playlist-public").checked,
             },
       );
       $("name-dialog").close();
       if (result.settings_error) notice(result.settings_error);
-      if (!remoteEdit || changedName) await loadView();
     });
   });
 }

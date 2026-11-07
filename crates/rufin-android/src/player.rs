@@ -137,23 +137,18 @@ impl AndroidPlayer {
                 sender.send_replace(Arc::new(frame));
             }
         });
-        let (events, operations) = async_channel::unbounded();
-        products.runtime.spawn(async move {
-            while let Ok(event) = lyrics_events.recv().await {
-                if !matches!(event, rufin_core::lyrics::LyricsEvent::Current(_))
-                    && events.send(event).await.is_err()
-                {
-                    break;
-                }
-            }
-        });
         Self {
             products: products.clone(),
             visualizer,
             drawing: Mutex::new(VisualizerDrawingState::default()),
-            lyrics_events: tokio::sync::Mutex::new(operations),
+            lyrics_events: tokio::sync::Mutex::new(lyrics_events),
             waveform: tokio::sync::Mutex::new(waveform),
         }
+    }
+
+    fn artwork_request(&self, binding: &[u8], size: u32) -> artwork::ArtworkRequest {
+        artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(binding), size)
+            .with_external(self.products.settings.load().artwork_policy())
     }
 }
 
@@ -164,65 +159,73 @@ impl AndroidPlayer {
         media_uri: String,
         origin_route: Option<rufin_core::route::Route>,
     ) -> Result<Option<AndroidPlayerMetadata>, AndroidError> {
-        let database = self.products.library.clone();
+        let catalog = self.products.library.clone();
         let source = self.products.source.clone();
-        let selected = source.selected_library();
         self.products
             .runtime
             .spawn(async move {
                 use rufin_core::route::Route;
                 use rufin_core::route::detail_links::{
-                    DetailLinks, album_artist_links, metadata_links, track_artist_links,
+                    DetailLinks, metadata_links, track_artist_links,
                 };
-                use rufin_core::settings::layout::LibraryField;
+                use rufin_core::settings::LibraryField;
                 let cancellation = library::ReadCancellation::new();
-                let entity = library::source_entity_parts(&media_uri);
-                let (artists, album, source_id) = match entity {
-                    Some((source, kind, _)) if kind == "album" => {
-                        let Some(album) = database
-                            .album(&media_uri, false, &cancellation)
-                            .await
-                            .map_err(error)?
-                        else {
+                let (artists, album, source_id) = match library::source_entity_parts(&media_uri) {
+                    Some((source, kind, _)) if kind == "album" || kind == "artist" => {
+                        catalog.loaded().await;
+                        let Some(item) = catalog.item(&media_uri) else {
                             return Ok(None);
                         };
-                        (
-                            album_artist_links(&album),
-                            DetailLinks::route(
-                                &album.metadata.title,
-                                Some(Route::AlbumDetail(media_uri.clone())),
-                            ),
-                            Some(source.to_string()),
-                        )
-                    }
-                    Some((source, kind, _)) if kind == "artist" => {
-                        let Some(artist) = database
-                            .artist(
-                                &media_uri,
-                                matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
-                                false,
-                                &cancellation,
-                            )
+                        let row = catalog
+                            .rows_of(&[item], false, &cancellation)
                             .await
                             .map_err(error)?
-                        else {
-                            return Ok(None);
-                        };
-                        let name = artist.metadata.name;
-                        let route = match &origin_route {
-                            Some(Route::AlbumArtistDetail(uri)) if *uri == media_uri => {
-                                Route::AlbumArtistDetail(uri.clone())
+                            .pop();
+                        match row {
+                            Some(library::Row::Album(album)) => {
+                                let credits = album
+                                    .links
+                                    .album_artists
+                                    .into_iter()
+                                    .map(|credit| library::TrackArtistLink {
+                                        artist_key: credit.artist_key,
+                                        media_uri: credit.media_uri,
+                                        name: credit.name,
+                                    })
+                                    .collect::<Vec<_>>();
+                                (
+                                    metadata_links(
+                                        LibraryField::AlbumArtist,
+                                        &album.artist,
+                                        None,
+                                        &[],
+                                        &credits,
+                                    ),
+                                    DetailLinks::route(
+                                        &album.title,
+                                        Some(Route::AlbumDetail(media_uri.clone())),
+                                    ),
+                                    Some(source.to_string()),
+                                )
                             }
-                            _ => Route::ArtistDetail(media_uri.clone()),
-                        };
-                        (
-                            DetailLinks::route(&name, Some(route)),
-                            DetailLinks::default(),
-                            Some(source.to_string()),
-                        )
+                            Some(library::Row::Artist(artist)) => {
+                                let route = match &origin_route {
+                                    Some(Route::AlbumArtistDetail(uri)) if *uri == media_uri => {
+                                        Route::AlbumArtistDetail(uri.clone())
+                                    }
+                                    _ => Route::ArtistDetail(media_uri.clone()),
+                                };
+                                (
+                                    DetailLinks::route(&artist.name, Some(route)),
+                                    DetailLinks::default(),
+                                    Some(source.to_string()),
+                                )
+                            }
+                            _ => return Ok(None),
+                        }
                     }
                     _ => {
-                        let Some(track) = database
+                        let Some(track) = catalog
                             .track(&media_uri, &cancellation)
                             .await
                             .map_err(error)?
@@ -249,61 +252,42 @@ impl AndroidPlayer {
                     Route::AlbumDetail(uri) => Some(uri.as_str()),
                     _ => None,
                 });
-                let mut source_link = rufin_core::detail_links::navigation_source_link(
+                let source_link = rufin_core::detail_links::navigation_source_link(
                     configuration.as_ref(),
                     &media_uri,
                     album_uri,
                 );
-                if let Some(link) = source_link.as_mut()
-                    && link.url.is_none()
-                {
-                    link.url = source
-                        .collection_folder_uri(
-                            media_uri.clone(),
-                            matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
-                            selected
-                                .as_ref()
-                                .filter(|selected| {
-                                    Some(selected.source_id.as_str()) == source_id.as_deref()
-                                })
-                                .and_then(|selected| selected.music_folder_key),
-                        )
-                        .recv()
-                        .await
-                        .ok()
-                        .and_then(Result::ok);
-                    if link.url.is_none() {
-                        source_link = None;
-                    }
-                }
                 let mut artist_links = AndroidArtistLink::from_detail_links(&artists)?;
                 let mut album_links = AndroidArtistLink::from_detail_links(&album)?;
-                let media_uris: Vec<_> = artists
-                    .spans()
+                // Each link shows its album's or artist's picture.
+                let items = artist_links
                     .iter()
-                    .chain(album.spans())
-                    .map(|link| match &link.route {
-                        rufin_core::route::Route::ArtistDetail(uri)
-                        | rufin_core::route::Route::AlbumArtistDetail(uri)
-                        | rufin_core::route::Route::AlbumDetail(uri) => uri.clone(),
-                        _ => unreachable!("Artist and album metadata links"),
+                    .chain(&album_links)
+                    .filter_map(|link| match &link.route {
+                        Route::ArtistDetail(uri)
+                        | Route::AlbumArtistDetail(uri)
+                        | Route::AlbumDetail(uri) => catalog.item(uri),
+                        _ => None,
                     })
-                    .collect();
-                let mut bindings = Vec::with_capacity(media_uris.len());
-                for window in media_uris.chunks(128) {
-                    bindings.extend(
-                        database
-                            .artwork_bindings(window, &cancellation)
-                            .await
-                            .map_err(error)?,
-                    );
-                }
-                for (link, binding) in artist_links
-                    .iter_mut()
-                    .chain(&mut album_links)
-                    .zip(bindings)
-                {
-                    link.artwork_identity = binding;
+                    .collect::<Vec<_>>();
+                let pictures = catalog
+                    .rows_of(&items, true, &cancellation)
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .filter_map(|row| match row {
+                        library::Row::Album(row) => Some((row.media_uri, row.artwork_binding)),
+                        library::Row::Artist(row) => Some((row.media_uri, row.artwork_binding)),
+                        _ => None,
+                    })
+                    .collect::<std::collections::HashMap<_, _>>();
+                for link in artist_links.iter_mut().chain(&mut album_links) {
+                    if let Route::ArtistDetail(uri)
+                    | Route::AlbumArtistDetail(uri)
+                    | Route::AlbumDetail(uri) = &link.route
+                    {
+                        link.artwork_identity = pictures.get(uri).cloned().flatten();
+                    }
                 }
                 Ok(Some(AndroidPlayerMetadata {
                     media_uri,
@@ -319,6 +303,27 @@ impl AndroidPlayer {
             .map_err(error)?
     }
 
+    /// The folder a Go to sheet's folder link opens, resolved when it is chosen.
+    pub async fn folder_uri(
+        &self,
+        media_uri: String,
+        origin_route: Option<rufin_core::route::Route>,
+    ) -> Result<String, AndroidError> {
+        self.products
+            .source
+            .collection_folder_uri(
+                media_uri,
+                matches!(
+                    origin_route,
+                    Some(rufin_core::route::Route::AlbumArtistDetail(_))
+                ),
+            )
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
+    }
+
     pub fn current_lyrics(
         &self,
         source: Arc<rufin_core::lyrics::CurrentLyrics>,
@@ -331,7 +336,7 @@ impl AndroidPlayer {
             .current()
             .and_then(|view| view.transport.current.clone());
         let stored = self.products.settings.load();
-        let settings = stored.lyrics;
+        let settings = &stored.lyrics;
         let mut state = AndroidLyricsState {
             snapshot: None,
             current_media_id: media.as_ref().map(|media| media.id.clone()),
@@ -493,10 +498,20 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
+    /// What [`Self::artwork_identity`] reads besides the binding: the artwork policy and the
+    /// invalidations. An identity changes only with it.
+    pub fn artwork_generation(&self) -> String {
+        self.products
+            .artwork
+            .generation(&self.products.settings.load().artwork_policy())
+    }
+
+    /// The image `binding` shows now, under the artwork policy and invalidations.
     pub fn artwork_identity(&self, binding: Vec<u8>) -> String {
-        artwork::ArtworkBinding::opaque(&binding)
-            .stable_identity()
-            .to_owned()
+        self.products
+            .artwork
+            .key(&self.artwork_request(&binding, 0))
+            .image()
     }
 
     pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<AndroidArtwork> {
@@ -518,14 +533,7 @@ impl AndroidPlayer {
         identity: Vec<u8>,
         size: u32,
     ) -> Result<Option<AndroidArtwork>, AndroidError> {
-        let stored = self.products.settings.load();
-        let request =
-            artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size)
-                .with_external(artwork::ExternalPolicy::new(
-                    stored.application.external_metadata_enabled,
-                    stored.allows_external_metadata_lookup(),
-                    stored.lastfm_api_key,
-                ));
+        let request = self.artwork_request(&identity, size);
         let artwork = self.products.artwork.clone();
         self.products
             .runtime

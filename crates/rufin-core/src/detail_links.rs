@@ -1,4 +1,4 @@
-use library::{AlbumView, ArtistView};
+use library::{AlbumView, ArtistView, SourceKind};
 use localization::msgid;
 
 use crate::settings::ExternalSiteLinkSettings;
@@ -16,7 +16,7 @@ pub fn navigation_source_link(
 ) -> Option<DetailLink> {
     let folder = source.map_or_else(
         || media_uri.starts_with("file:"),
-        |source| matches!(source.kind.as_str(), "local" | "webdav" | "smb"),
+        |source| source.is(SourceKind::file_library),
     );
     if folder {
         return Some(DetailLink {
@@ -27,7 +27,7 @@ pub fn navigation_source_link(
     }
     let source = source?;
     // Navidrome's player links tracks to their album page.
-    let uri = if source.kind == "navidrome"
+    let uri = if source.source_kind() == Some(SourceKind::Navidrome)
         && library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
     {
         album_uri?
@@ -41,15 +41,16 @@ pub fn navigation_source_link(
 
 pub fn source_link(source: &sources::SourceConfiguration, media_uri: &str) -> Option<DetailLink> {
     let (_, kind, object_id) = library::source_entity_parts(media_uri)?;
-    let folder = matches!(source.kind.as_str(), "local" | "webdav" | "smb");
-    let title = match source.kind.as_str() {
-        "local" | "webdav" | "smb" => msgid("Open Folder"),
-        "jellyfin" => msgid("Open on Jellyfin"),
-        "emby" => msgid("Open on Emby"),
-        "plex" => msgid("Open on Plex"),
-        "navidrome" => msgid("Open on Navidrome"),
-        "subsonic" => msgid("Open on server"),
-        _ => return None,
+    let source_kind = source.source_kind()?;
+    let folder = source_kind.file_library();
+    let title = match source_kind {
+        SourceKind::Local | SourceKind::Webdav | SourceKind::Smb => msgid("Open Folder"),
+        SourceKind::Jellyfin => msgid("Open on Jellyfin"),
+        SourceKind::Emby => msgid("Open on Emby"),
+        SourceKind::Plex => msgid("Open on Plex"),
+        SourceKind::Navidrome => msgid("Open on Navidrome"),
+        SourceKind::Subsonic => msgid("Open on server"),
+        SourceKind::Peer => return None,
     };
     Some(DetailLink {
         title,
@@ -95,7 +96,7 @@ pub fn album_external_links(
     }
     if settings.server
         && let Some(source) = source
-        && let Some(link) = source_link(source, &album.media_uri)
+        && let Some(link) = source_link(source, &album.row.media_uri)
     {
         links.push(link);
     }
@@ -112,7 +113,7 @@ pub fn artist_external_links(
     }
     let mut links = Vec::new();
     if settings.lastfm
-        && let Some(url) = lastfm_artist_url(&artist.metadata.name)
+        && let Some(url) = lastfm_artist_url(&artist.row.name)
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
@@ -131,7 +132,7 @@ pub fn artist_external_links(
     }
     if settings.server
         && let Some(source) = source
-        && let Some(link) = source_link(source, &artist.media_uri)
+        && let Some(link) = source_link(source, &artist.row.media_uri)
     {
         links.push(link);
     }
@@ -175,7 +176,6 @@ fn musicbrainz_album_url(album: &AlbumView) -> Option<String> {
 
 fn musicbrainz_artist_url(artist: &ArtistView) -> Option<String> {
     let artist_id = artist
-        .metadata
         .musicbrainz_artist_id
         .as_deref()
         .and_then(clean_url_label)?;

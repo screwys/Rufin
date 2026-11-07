@@ -1,4 +1,4 @@
-use crate::{RepeatMode, RunId};
+use crate::{QueueRepeatMode, RunId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceReportPhase {
@@ -25,45 +25,8 @@ pub struct SourceReportFact {
     pub muted: bool,
     pub volume: f64,
     pub shuffle: bool,
-    pub repeat_mode: RepeatMode,
+    pub repeat_mode: QueueRepeatMode,
     pub failed: bool,
-}
-
-/// The existing listen moves with playback; delivery jobs do not.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ContinuedListen {
-    pub play_id: String,
-    pub started_at_unix_seconds: Option<i64>,
-    pub local_period: Option<String>,
-    pub audible_millis: u64,
-    pub qualified: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ContinuationHeader {
-    pub total: usize,
-    pub current: usize,
-    pub position_millis: u64,
-    pub repeat: crate::RepeatMode,
-    pub shuffled: bool,
-    pub auto_dj: bool,
-    pub auto_dj_refill_threshold: usize,
-    pub playback_rate: f64,
-    #[serde(default = "continuation_playing")]
-    pub desired_playing: bool,
-    pub listen: Option<ContinuedListen>,
-}
-
-fn continuation_playing() -> bool {
-    true
-}
-
-/// Membership and resolved order share the player's compact, immutable arrays.
-/// Transport reads metadata from the Store in bounded pages.
-#[derive(Clone, Debug)]
-pub struct Continuation {
-    pub header: ContinuationHeader,
-    pub queue: library::QueueRestore,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,8 +38,12 @@ pub enum RunEndReason {
     Failed,
 }
 
+/// How long a track must be heard to count as played. A track of unknown length counts after
+/// four minutes, so it does not count the moment it starts.
 pub fn qualified_play_threshold_millis(duration_millis: u64) -> u64 {
-    if duration_millis <= 10_000 {
+    if duration_millis == 0 {
+        240_000
+    } else if duration_millis <= 10_000 {
         duration_millis
     } else if duration_millis < 60_000 {
         (duration_millis / 2).max(5_000)
@@ -104,6 +71,7 @@ mod tests {
 
     #[test]
     fn qualified_play_threshold_preserves_short_half_and_clamped_law() {
+        assert_eq!(qualified_play_threshold_millis(0), 240_000);
         assert_eq!(qualified_play_threshold_millis(9_500), 9_500);
         assert_eq!(qualified_play_threshold_millis(31_000), 15_500);
         assert_eq!(qualified_play_threshold_millis(10_000), 10_000);

@@ -24,12 +24,12 @@ md5_digest.workspace = true
 serde_json.workspace = true
 sources.workspace = true
 thiserror.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["fs", "rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]

@@ -4,7 +4,7 @@ use std::path::Path;
 use super::{local, media};
 
 pub async fn import_local_playlist_file(
-    database: &library::Database,
+    catalog: &library::Catalog,
     path: &Path,
     target: Option<library::PlaylistKey>,
     recognize: impl Fn(&str) -> Option<String>,
@@ -90,7 +90,7 @@ pub async fn import_local_playlist_file(
     })
     .await
     .map_err(|error| crate::SourceError::Other(error.to_string()))??;
-    let resolved = database
+    let resolved = catalog
         .equivalent_local_file_uris(&files)
         .await?
         .into_iter()
@@ -99,14 +99,14 @@ pub async fn import_local_playlist_file(
         if let Some(canonical) = resolved.get(&locator.media_uri) {
             locator.media_uri = canonical.clone();
         }
-        database.upsert_local_locator(locator).await?;
+        catalog.upsert_local_locator(locator).await?;
     }
     for entry in &mut document.entries {
         if let Some(canonical) = resolved.get(&entry.locator) {
             entry.locator = canonical.clone();
         }
     }
-    database
+    catalog
         .import_playlist_document(document, &path, target, recognize)
         .await
         .map_err(Into::into)

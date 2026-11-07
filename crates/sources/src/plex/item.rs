@@ -46,13 +46,7 @@ pub(super) fn read_items<'a>(
                     )
                 })
                 .transpose()?;
-            let rating = (matches!(response, ItemResponse::Complete)
-                || item.get("userRating").is_some())
-            .then(|| {
-                field::<f64>(item, "userRating")
-                    .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
-                    .map(|v| (v.round() as i64) * 10)
-            });
+            let rating = rating(item, matches!(response, ItemResponse::Complete));
             let year = field::<i64>(item, "year").filter(|v| *v > 0).or_else(|| {
                 if kind == "track" {
                     field::<i64>(item, "parentYear").filter(|v| *v > 0)
@@ -145,6 +139,7 @@ pub(super) fn read_items<'a>(
                         channels: stream
                             .and_then(|stream| field(stream, "channels"))
                             .or_else(|| field(media, "audioChannels")),
+                        size_bytes: field(part, "size"),
                     };
                     let duration = field::<i64>(item, "duration").unwrap_or_default().max(0);
                     let source_path = part["file"].as_str();
@@ -230,7 +225,6 @@ pub(super) fn read_items<'a>(
                             favorite: Some(false),
                             rating: rating,
                             play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0),
-                            skip_count: field::<i64>(item, "skipCount").filter(|v| *v >= 0),
                             last_played: field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
                             ..Default::default()
                         },
@@ -239,16 +233,15 @@ pub(super) fn read_items<'a>(
                         artwork_binding: artwork,
                         first_seen_at: added,
                         source_path: source_path.map(str::to_owned),
-                        loudness_analysis_key: *hash.finalize().as_bytes(),
+                        audio_revision: Some(*hash.finalize().as_bytes()),
+                        audio_hash: Some(*hash.finalize().as_bytes()),
                         folders,
                         ..Default::default()
                     };
                     tracks.push(input);
                 }
                 "playlist" => {
-                    let smart = crate::remote_json::boolean(&item["smart"])
-                        .or_else(|| field::<i64>(item, "smart").map(|v| v != 0))
-                        .unwrap_or(false);
+                    let smart = smart(item);
                     playlists.push(library::PlaylistObservation {
                         object_id: object,
                         name: title.to_owned(),
@@ -275,15 +268,16 @@ pub(super) fn read_items<'a>(
             artists,
             folders,
             playlists,
-            genres: genre_rows
+            tags: genre_rows
                 .into_iter()
-                .map(|tag| library::GenreObservation {
+                .map(|tag| library::TagObservation {
+                    kind: library::TagKind::Genre,
                     object_id: tag.object_id,
                     metadata: library::TagMetadata {
                         name: tag.name,
                         sort_text: tag.sort_text,
                     },
-                    ..Default::default()
+                    artwork_binding: None,
                 })
                 .collect(),
             ..Default::default()
@@ -298,6 +292,21 @@ pub(super) fn read_items<'a>(
         }
     }
     Ok(batches)
+}
+
+pub(super) fn smart(playlist: &Value) -> bool {
+    crate::remote_json::boolean(&playlist["smart"])
+        .or_else(|| field::<i64>(playlist, "smart").map(|v| v != 0))
+        .unwrap_or(false)
+}
+
+/// A row's rating in tenths; a `rated` row clears one it does not carry.
+pub(super) fn rating(item: &Value, rated: bool) -> Option<Option<i64>> {
+    (rated || item.get("userRating").is_some()).then(|| {
+        field::<f64>(item, "userRating")
+            .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
+            .map(|v| (v.round() as i64) * 10)
+    })
 }
 
 fn genres(item: &Value) -> Vec<library::TagReference> {
@@ -349,14 +358,10 @@ mod tests {
     #[tokio::test]
     async fn artist_title_sort_survives_full_import_and_album_track_refresh() {
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let artists = [
             json!({"ratingKey":"608","type":"artist","title":"The Cure","titleSort":"Cure, The"}),
             json!({"ratingKey":"609","type":"artist","title":"Duran Duran"}),
@@ -369,13 +374,13 @@ mod tests {
             json!({"ratingKey":"track-608","type":"track","title":"Friday I'm in Love","parentRatingKey":"album-608","parentTitle":"Wish","grandparentRatingKey":"608","grandparentTitle":"The Cure"}),
             json!({"ratingKey":"track-609","type":"track","title":"Rio","parentRatingKey":"album-609","parentTitle":"Rio","grandparentRatingKey":"609","grandparentTitle":"Duran Duran"}),
         ];
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("plex"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         (async {
             for batch in read_items(
@@ -386,26 +391,19 @@ mod tests {
                     .chain(&tracks)
                     .map(|item| (item, ItemResponse::Complete)),
             )? {
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
             }
             Ok::<_, crate::SourceError>(())
         })
         .await
         .unwrap();
 
-        {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         for refresh in [false, true] {
             if refresh {
                 let catalog_source_id = ("plex").to_string();
-                let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
 
                 (async {
                     for batch in read_items(
@@ -415,53 +413,38 @@ mod tests {
                             .chain(&tracks)
                             .map(|item| (item, ItemResponse::Complete)),
                     )? {
-                        catalog.apply_catalog(&batch, true).await?;
+                        observation.apply_catalog(&batch, true).await?;
                     }
                     Ok::<_, crate::SourceError>(())
                 })
                 .await
                 .unwrap();
-
-                {
-                    database
-                        .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
-                        .await;
-                    Ok::<_, crate::SourceError>(())
-                }
-                .unwrap();
             }
-            let rows = library::ListRead {
-                playlist_scope: Default::default(),
-                kind: library::ListKind::Artists {
-                    album_artist: false,
-                },
-                source: Some(
-                    database
-                        .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                        .await
-                        .unwrap()
+            let rows = crate::listed_artists(
+                &catalog,
+                library::ListRead {
+                    playlist_scope: Default::default(),
+                    kind: library::ListKind::Artists {
+                        album_artist: false,
+                    },
+                    source: Some(
+                        {
+                            catalog.loaded().await;
+                            catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                        }
                         .unwrap(),
-                ),
-                sort: library::CatalogSort::Title,
-                folder: None,
-                filter: ("").to_string(),
-                descending: false,
-                favorites_only: false,
-                downloaded_only: false,
-                activity: false,
-            }
-            .page_artists(
-                &database,
-                library::RouteSeedWindow::top(),
-                &library::ReadCancellation::new(),
+                    ),
+                    sort: library::LibraryField::Title,
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false,
+                    activity: false,
+                },
             )
-            .await
-            .map(|page| page.rows)
-            .unwrap();
+            .await;
             assert_eq!(
-                rows.iter()
-                    .map(|row| row.metadata.name.as_str())
-                    .collect::<Vec<_>>(),
+                rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
                 ["The Cure", "Duran Duran"]
             );
         }

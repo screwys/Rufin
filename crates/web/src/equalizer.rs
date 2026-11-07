@@ -168,18 +168,17 @@ async fn response(
     State(products): State<ProductHandles>,
     Query(target): Query<Target>,
 ) -> Result<Response<Body>, Error> {
-    let view = products.playback.equalizer_view(target.output);
+    let playback = products.playback.clone();
     let value = tokio::task::spawn_blocking(move || {
-        let rate = view.sample_rate.unwrap_or(48000);
+        let rate = playback
+            .equalizer_view(target.output.clone())
+            .sample_rate
+            .unwrap_or(48000);
         let end = (f64::from(rate) / 2.).min(20000.);
         let frequencies: Vec<_> = (0..256)
             .map(|i| 20. * (end / 20.).powf(f64::from(i) / 255.))
             .collect();
-        let gains = if view.enabled {
-            audio_processing::effects::response_curve_db(&view.profile, rate, &frequencies)
-        } else {
-            vec![0.0; frequencies.len()]
-        };
+        let gains = playback.equalizer_response(target.output, frequencies.clone());
         json!({"frequencies":frequencies,"gain_db":gains,"sample_rate":rate})
     })
     .await

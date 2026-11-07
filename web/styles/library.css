@@ -25,7 +25,7 @@
   z-index: 1;
 }
 
-.track-list th:first-child {
+.track-list th.number {
   width: calc(var(--index-width, 3ch) + 18px);
   text-align: center;
 }
@@ -40,7 +40,7 @@
   border-bottom: 0;
 }
 
-.track-list th:nth-child(3) {
+.track-list th.album {
   width: 25%;
 }
 
@@ -59,6 +59,11 @@
 
 .track-list tr.current td {
   color: var(--accent);
+}
+
+.track-list td.actions,
+.track-list td.favorite {
+  padding-inline: 4px;
 }
 
 .track-list td.actions {
@@ -247,8 +252,8 @@
 }
 
 @media (max-width: 1100px) {
-  .track-list th:nth-child(3),
-  .track-list td:nth-child(3) {
+  .track-list th.album,
+  .track-list td.album {
     display: none;
   }
 }
@@ -315,8 +320,9 @@
   width: 42px;
 }
 
+/* Play and More side by side. */
 .track-list th.actions {
-  width: 38px;
+  width: 66px;
 }
 
 .track-list th.duration,
@@ -459,6 +465,13 @@
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.album-card .collection-title .icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -3px;
 }
 
 .album-card .collection-title,
