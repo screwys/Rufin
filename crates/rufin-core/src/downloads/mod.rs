@@ -2841,7 +2841,6 @@ impl Actor {
             )
             .await
             .map_err(|error| error.to_string())?;
-            // The cancelled jobs stay gone however many files remain.
             remove_file_if_present(&directory.join(QUEUE_FILE)).await?;
             remove_file_if_present(&directory.join(QUEUE_PART_FILE)).await?;
             let mut after = String::new();
