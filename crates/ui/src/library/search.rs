@@ -551,7 +551,7 @@ impl SearchRouteProjection {
         let toolbar = shell.library_toolbar_projection_without_detail(
             category.key(),
             None,
-            category.sort_fields(),
+            rufin_core::settings::available_sort_fields(category.key()),
         );
         let presentation = SearchPresentation {
             category,

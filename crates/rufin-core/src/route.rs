@@ -209,7 +209,7 @@ impl SidebarRouteDescriptor {
         }
     }
 
-use crate::settings::layout::{LibraryField, LibraryListKey};
+use crate::settings::layout::LibraryListKey;
 impl CollectionCategory {
     pub const fn name(self) -> &'static str {
         match self {
@@ -248,30 +248,6 @@ impl CollectionCategory {
             Self::Tracks => LibraryListKey::Tracks,
             Self::Albums => LibraryListKey::Albums,
             Self::Artists => LibraryListKey::Artists,
-        }
-    }
-
-    pub fn sort_fields(self) -> &'static [LibraryField] {
-        match self {
-            Self::Tracks => crate::settings::available_sort_fields(LibraryListKey::Tracks),
-            Self::Albums => &[
-                LibraryField::Title,
-                LibraryField::AlbumArtist,
-                LibraryField::Year,
-                LibraryField::ReleaseDate,
-                LibraryField::DateAdded,
-                LibraryField::LastPlayed,
-                LibraryField::PlayCount,
-                LibraryField::UserRating,
-                LibraryField::Favorite,
-            ],
-            Self::Artists => &[
-                LibraryField::Title,
-                LibraryField::LastPlayed,
-                LibraryField::PlayCount,
-                LibraryField::UserRating,
-                LibraryField::Favorite,
-            ],
         }
     }
 }
