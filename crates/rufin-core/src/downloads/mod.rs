@@ -1210,7 +1210,16 @@ impl Actor {
                     }
                 }
             }
-            Command::LibraryChanged(changes) => self.library_changed(changes.as_deref()),
+            Command::LibraryChanged(changes) => {
+                // A source added since the last attach has its Store row once a commit lands.
+                let settings = self.settings.load();
+                let mut configured = settings.sources.configured.iter();
+                if configured.any(|item| !self.attached.contains_key(&item.configuration.source_id))
+                {
+                    self.attach_configured(active).await;
+                }
+                self.library_changed(changes.as_deref())
+            }
             Command::Remove { media_uris, notify } => {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
