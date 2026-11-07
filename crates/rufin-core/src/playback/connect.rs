@@ -505,20 +505,11 @@ impl PlaybackOwner {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let source = Arc::clone(&self.source);
-        let selected = source.selected_library();
         let request = request.clone();
+        let candidates = self.candidates(request.seed.clone(), 20, ReadCancellation::new());
         self.runtime.spawn(async move {
             let result = async {
-                let candidates = crate::radio::radio_candidates(
-                    &receiver.catalog,
-                    source,
-                    selected,
-                    request.seed,
-                    20,
-                    &ReadCancellation::new(),
-                )
-                .await?;
+                let candidates = candidates.await?;
                 let _command = receiver.commands.lock().await;
                 receiver
                     .input(

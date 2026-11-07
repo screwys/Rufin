@@ -473,19 +473,10 @@ impl PlaybackOwner {
         if self.request_plex_auto_dj(&request) {
             return;
         }
-        let catalog = self.catalog.clone();
-        let source = Arc::clone(&self.source);
-        let selected = source.selected_library();
+        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
-            let candidates = crate::radio::radio_candidates(
-                &catalog,
-                source,
-                selected,
-                library::RadioSeed::Track(request.seed_media_uri.clone()),
-                request.requested_count,
-                &library::ReadCancellation::new(),
-            )
-            .await;
+            let candidates = candidates.await;
             playback.post(move |player, sample| match candidates {
                 Ok(candidates) => {
                     if let Err(error) = player.complete_auto_dj_candidates(

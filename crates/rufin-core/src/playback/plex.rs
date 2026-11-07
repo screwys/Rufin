@@ -926,8 +926,9 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let selected = plex.source_owner.selected_library();
         let request = request.clone();
+        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
             let result = async {
                 let (_, context) = {
@@ -940,15 +941,7 @@ impl PlaybackOwner {
                 {
                     return Ok(());
                 }
-                let candidates = crate::radio::radio_candidates(
-                    &plex.catalog,
-                    plex.source_owner.clone(),
-                    selected,
-                    library::RadioSeed::Track(request.seed_media_uri.clone()),
-                    request.requested_count,
-                    &library::ReadCancellation::new(),
-                )
-                .await?;
+                let candidates = candidates.await?;
                 let _guard = plex.commands.lock().await;
                 let timeline = plex.current().await?;
                 plex.observe(timeline, false).await?;
@@ -993,19 +986,11 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let selected = plex.source_owner.selected_library();
         let request = request.clone();
+        let candidates = self.candidates(request.seed.clone(), 20, Default::default());
         self.runtime.spawn(async move {
             let result = async {
-                let candidates = crate::radio::radio_candidates(
-                    &plex.catalog,
-                    plex.source_owner.clone(),
-                    selected,
-                    request.seed,
-                    20,
-                    &library::ReadCancellation::new(),
-                )
-                .await?;
+                let candidates = candidates.await?;
                 let _guard = plex.commands.lock().await;
                 plex.insert(
                     PlayRequest::from_input(

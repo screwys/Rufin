@@ -783,21 +783,9 @@ impl Player {
     }
 
     fn play_radio(&mut self, request: crate::playback::RadioPlayRequest) {
-        let owner = self.owner();
-        let catalog = owner.catalog.clone();
-        let source = Arc::clone(&owner.source);
-        let selected = source.selected_library();
-        self.start_candidates(request.placement, QueueProvenance::Radio, async move {
-            crate::radio::radio_candidates(
-                &catalog,
-                source,
-                selected,
-                request.seed,
-                20,
-                &library::ReadCancellation::new(),
-            )
-            .await
-        });
+        let cancel = library::ReadCancellation::new();
+        let candidates = self.owner().candidates(request.seed, 20, cancel);
+        self.start_candidates(request.placement, QueueProvenance::Radio, candidates);
     }
 
     fn start_candidates(
