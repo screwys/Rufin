@@ -1135,6 +1135,8 @@ async fn local_refresh_after_a_deleted_album_track_removes_it() {
     refresh().await.expect("later refresh");
 }
 
+// An offline rename is paired by inode; Windows exposes no file identity to pair it by.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_moved_folder_larger_than_a_write_keeps_every_track_identity() {
     let root = tempfile::tempdir().unwrap();
@@ -2108,6 +2110,8 @@ async fn apply_paths(
         .await
 }
 
+// An offline rename is paired by inode; Windows exposes no file identity to pair it by.
+#[cfg(unix)]
 #[tokio::test]
 async fn cue_folder_rename_keeps_favorites() {
     let root = tempfile::tempdir().expect("music root");

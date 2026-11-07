@@ -605,15 +605,23 @@ pub(crate) struct LocalFiles<'a> {
 
 impl<'a> LocalFiles<'a> {
     pub(crate) fn importing(local: &'a LocalSource, paths: &[String]) -> Self {
+        // Canonical, as roots and the paths `place` matches against them are.
         let imports = paths
             .iter()
+            .map(|path| {
+                if path.starts_with("content:") {
+                    return path.clone();
+                }
+                scan::normalize_observed_path(std::path::Path::new(path))
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .filter(|path| {
                 !local
                     .roots
                     .iter()
                     .any(|root| std::path::Path::new(path).starts_with(root))
             })
-            .cloned()
             .collect();
         Self { local, imports }
     }
@@ -699,7 +707,8 @@ impl walk::FileSource for LocalFiles<'_> {
                     continue;
                 }
                 // An entry removed since the listing is gone; one that cannot be read fails it.
-                let metadata = match entry.metadata() {
+                // The file's own metadata: Windows listings carry folder times NTFS updates late.
+                let metadata = match fs::metadata(entry.path()) {
                     Ok(metadata) => metadata,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(error) => return Err(SourceError::Other(error.to_string())),
