@@ -54,22 +54,16 @@ impl Feature for Links {
                 refresh_links(&SourceOwner { shared }, None).await;
                 return;
             };
-            let catalog = &shared.catalog;
-            let mut edited = changes
+            // A link's settings change saves edits that waited for automatic saving.
+            let edited = changes
                 .iter()
                 .flat_map(|change| &change.scopes)
                 .filter_map(|scope| match scope {
-                    // A link's settings change saves edits that waited for automatic saving.
-                    Scope::Playlist { key, .. } | Scope::PlaylistLink { key }
-                        if catalog.is_linked(*key) =>
-                    {
-                        Some(*key)
-                    }
+                    Scope::Playlist { key, .. } | Scope::PlaylistLink { key } => Some(*key),
                     _ => None,
                 })
-                .collect::<Vec<_>>();
-            edited.sort_unstable();
-            edited.dedup();
+                .filter(|key| shared.catalog.is_linked(*key))
+                .collect::<std::collections::BTreeSet<_>>();
             let owner = SourceOwner { shared };
             for playlist in edited {
                 after_edit(&owner, playlist).await;
