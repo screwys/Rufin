@@ -1018,17 +1018,6 @@ impl GstEngine {
                 }
                 Ok(())
             }
-            BackendCommand::UpdateLoudness { run, loudness } => {
-                if self.run_is_current(run) {
-                    if let Some(current) = lock_recover(&self.shared).current.as_mut() {
-                        current.stream.loudness = Some(loudness.clone());
-                    }
-                    self.active_pipeline_mut().update_loudness(&loudness);
-                    self.end_passthrough_if_needed()
-                } else {
-                    Ok(())
-                }
-            }
             BackendCommand::ConfigureAudio(mut settings) => {
                 debug!(
                     fade_on_play_stop = settings.fade_on_status_change,

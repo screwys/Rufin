@@ -661,21 +661,6 @@ impl PlayerPipeline {
         }));
     }
 
-    pub(super) fn update_loudness(&mut self, loudness: &TrackLoudness) {
-        {
-            let gapless = lock_recover(&self.gapless);
-            if gapless.pending.is_none() {
-                *lock_recover(&self.queued_loudness) = Some(loudness.clone());
-            }
-        }
-        if let Some(stream) = self.current_stream.as_mut() {
-            stream.loudness = Some(loudness.clone());
-        }
-        if let Some(graph) = self.audio_graph.as_mut() {
-            graph.set_loudness(loudness.clone());
-        }
-    }
-
     pub(super) fn configure_audio(
         &mut self,
         settings: &BackendAudioSettings,

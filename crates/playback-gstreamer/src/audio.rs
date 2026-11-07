@@ -421,12 +421,6 @@ impl AudioGraph {
         self.processing_output = output.into();
     }
 
-    pub(super) fn set_loudness(&mut self, loudness: TrackLoudness) {
-        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        state.current_loudness = Some(loudness);
-        state.apply_loudness();
-    }
-
     pub(super) fn reconfigure(
         &mut self,
         settings: &BackendAudioSettings,
@@ -1209,7 +1203,11 @@ mod tests {
             track: Some(Box::new(measurement(-28.0, Some(0.1)))),
             album: Some(Box::new(measurement(-33.0, Some(0.1)))),
         };
-        graph.set_loudness(measured.clone());
+        {
+            let mut state = graph.state.lock().unwrap();
+            state.current_loudness = Some(measured.clone());
+            state.apply_loudness();
+        }
         *stream.lock().unwrap() = Some(measured);
         assert!((volume.property::<f64>("volume") - 10_f64.powf(5.0 / 20.0)).abs() < 0.001);
 

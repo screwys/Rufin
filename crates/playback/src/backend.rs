@@ -246,10 +246,6 @@ pub enum BackendCommand {
         muted: bool,
     },
     ConfigureAudio(BackendAudioSettings),
-    UpdateLoudness {
-        run: RunId,
-        loudness: TrackLoudness,
-    },
     SetPlaybackRate(f64),
     SetVisualizerEnabled(bool),
 }
@@ -261,8 +257,7 @@ impl BackendCommand {
             | Self::Play { run }
             | Self::Pause { run }
             | Self::Stop { run }
-            | Self::Seek { run, .. }
-            | Self::UpdateLoudness { run, .. } => Some(*run),
+            | Self::Seek { run, .. } => Some(*run),
             Self::PrepareNext { current_run, .. } => Some(*current_run),
             Self::SetOutputVolume { .. }
             | Self::ConfigureAudio(_)
