@@ -313,7 +313,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun radio(item: BrowseItem, placement: QueuePlacement) = connection.runAction {
         connection.connectedService().playRequest {
-            library?.playRadio((item.row.target as? FavoriteTarget.Track)?.v1, item.row.route, placement)
+            library?.playRadio(item.row, placement)
         }
     }
     fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {

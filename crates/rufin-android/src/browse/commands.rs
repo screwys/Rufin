@@ -20,6 +20,11 @@ impl AndroidLibrary {
         rufin_core::menu::menu(&self.source, &self.settings.load(), &row.row)
     }
 
+    /// What a swipe on the row can do, as core's Menu offers it with every entry shown.
+    pub fn swipes(&self, row: AndroidBrowseRow) -> rufin_core::menu::Menu {
+        rufin_core::menu::swipes(&self.source, &self.settings.load(), &row.row)
+    }
+
     pub async fn download_target(
         &self,
         route: Option<Route>,
@@ -159,39 +164,14 @@ impl AndroidLibrary {
         Ok(())
     }
 
-    /// Plays the radio of the track `track` names, or of the collection `route` shows.
-    pub async fn play_radio(
+    /// Plays the radio the row seeds, as its menu offers it.
+    pub fn play_radio(
         &self,
-        track: Option<String>,
-        route: Option<Route>,
+        row: AndroidBrowseRow,
         placement: rufin_core::playback::QueuePlacement,
     ) -> Result<(), AndroidError> {
-        let seed = if let Some(track) = track {
-            library::RadioSeed::Track(track)
-        } else {
-            let route = route.ok_or_else(|| error("Choose a radio seed"))?;
-            self.catalog.loaded().await;
-            match &route {
-                Route::AlbumDetail(uri)
-                | Route::ArtistDetail(uri)
-                | Route::AlbumArtistDetail(uri) => match (self.catalog.item(uri), &route) {
-                    (Some(library::Item::Album(key)), Route::AlbumDetail(_)) => {
-                        Some(library::RadioSeed::Album(key))
-                    }
-                    (Some(library::Item::Artist { key, .. }), Route::ArtistDetail(_)) => {
-                        Some(library::RadioSeed::Artist(key))
-                    }
-                    (Some(library::Item::Artist { key, .. }), Route::AlbumArtistDetail(_)) => {
-                        Some(library::RadioSeed::AlbumArtist(key))
-                    }
-                    _ => None,
-                },
-                Route::GenreDetail(key) => Some(library::RadioSeed::Genre(*key)),
-                Route::PlaylistDetail(key) => Some(library::RadioSeed::Playlist(*key)),
-                _ => None,
-            }
-            .ok_or_else(|| error("This item has no radio action"))?
-        };
+        let seed = rufin_core::menu::radio_seed(&row.row)
+            .ok_or_else(|| error("This item has no radio action"))?;
         self.playback
             .play_radio(rufin_core::playback::RadioPlayRequest { seed, placement });
         Ok(())

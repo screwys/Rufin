@@ -1,7 +1,7 @@
 package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
-import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.Menu
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -60,10 +60,14 @@ internal enum class BrowseSwipeAction(val icon: String) {
         PlayRadioLater -> translate("Play radio later")
     }
 
-    fun availableFor(item: BrowseItem): Boolean = when (this) {
-        Favorite -> item.row.target != null
-        PlayLater, PlayNext, AddToPlaylist, Download -> item.row.playlistFolder == null && (item.row.isTrack || item.row.route != null)
-        PlayRadio, PlayRadioNext, PlayRadioLater -> item.row.target != null || item.row.genre != null || item.row.playlist != null
+    /** Whether the row offers it, as core's swipe Menu says. */
+    fun availableFor(offered: Menu): Boolean = when (this) {
+        Favorite -> offered.favorite
+        PlayLater -> offered.playLater
+        PlayNext -> offered.playNext
+        Download -> offered.download
+        AddToPlaylist -> offered.addToPlaylist
+        PlayRadio, PlayRadioNext, PlayRadioLater -> offered.radio != null
     }
 }
 
@@ -103,8 +107,10 @@ internal fun BrowseSwipeActions(
     val configured = LocalBrowseGestureActions.current
     // A swipe acts on the row as it shows now, with the favorites and ratings committed since.
     val item = configured?.browse?.visiblePage?.shown(listed) ?: listed
-    val left = (configured?.left ?: BrowseSwipeAction.Favorite).takeIf { it.availableFor(item) }
-    val right = (configured?.right ?: BrowseSwipeAction.PlayLater).takeIf { it.availableFor(item) }
+    val library = configured?.browse?.library
+    val offered = remember(item.row, library) { library?.swipes(item.row) }
+    val left = configured?.left?.takeIf { offered != null && it.availableFor(offered) }
+    val right = configured?.right?.takeIf { offered != null && it.availableFor(offered) }
     if (!enabled || configured == null || left == null && right == null) {
         content()
         return

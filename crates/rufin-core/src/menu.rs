@@ -54,7 +54,41 @@ pub enum GoTo {
 
 /// The menu of `row` under `settings`.
 pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
-    let shown = |item| settings.application.context_menu.is_visible(item);
+    offered(owner, settings, row, |item| {
+        settings.application.context_menu.is_visible(item)
+    })
+}
+
+/// What `row` offers, every configurable entry shown: what a swipe on it can do.
+pub fn swipes(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
+    offered(owner, settings, row, |_| true)
+}
+
+/// The radio a play of `row` seeds.
+pub fn radio_seed(row: &Row) -> Option<RadioSeed> {
+    Some(match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => {
+            RadioSeed::Track(track.media_uri.clone())
+        }
+        Row::Album(album) | Row::AlbumHeading(album) => RadioSeed::Album(album.album_key),
+        Row::Artist(artist) if artist.album_artist => RadioSeed::AlbumArtist(artist.artist_key),
+        Row::Artist(artist) => RadioSeed::Artist(artist.artist_key),
+        Row::Tag(tag) if tag.kind == TagKind::Genre => {
+            RadioSeed::Genre(library::GenreKey::from_raw(tag.key))
+        }
+        Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
+            RadioSeed::Playlist(playlist.playlist_key)
+        }
+        _ => return None,
+    })
+}
+
+fn offered(
+    owner: &SourceOwner,
+    settings: &Settings,
+    row: &Row,
+    shown: impl Fn(ContextMenuItem) -> bool,
+) -> Menu {
     let stored = owner.shared.settings.load();
     let source = row_source(owner, &stored.sources, row);
     let plays = crate::view::PlayTarget::plays(row);
@@ -64,31 +98,17 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
         play_later: plays && shown(ContextMenuItem::PlayLater),
         ..Menu::default()
     };
-    let (radio, add_to_playlist, rated) = match row {
+    let (add_to_playlist, rated) = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             menu.edit_metadata =
                 !track.cue && (track.source_key.is_some() || track.media_uri.starts_with("file:"));
-            (Some(RadioSeed::Track(track.media_uri.clone())), true, true)
+            (true, true)
         }
-        Row::Album(album) | Row::AlbumHeading(album) => {
+        Row::Album(_) | Row::AlbumHeading(_) | Row::Artist(_) => {
             menu.edit_metadata = true;
-            (Some(RadioSeed::Album(album.album_key)), true, true)
+            (true, true)
         }
-        Row::Artist(artist) => {
-            menu.edit_metadata = true;
-            let seed = if artist.album_artist {
-                RadioSeed::AlbumArtist(artist.artist_key)
-            } else {
-                RadioSeed::Artist(artist.artist_key)
-            };
-            (Some(seed), true, true)
-        }
-        Row::Tag(tag) if tag.kind == TagKind::Genre => (
-            Some(RadioSeed::Genre(library::GenreKey::from_raw(tag.key))),
-            false,
-            false,
-        ),
-        Row::Tag(_) => (None, true, false),
+        Row::Tag(tag) => (tag.kind != TagKind::Genre, false),
         Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
             menu.export = true;
             menu.edit = playlist.metadata_writable;
@@ -101,11 +121,7 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
                 },
             ));
             menu.remove_unavailable = crate::playlists::can_remove_unavailable(owner, playlist);
-            (
-                Some(RadioSeed::Playlist(playlist.playlist_key)),
-                false,
-                false,
-            )
+            (false, false)
         }
         Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
             menu.export = true;
@@ -117,17 +133,17 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
                     key: playlist.smart_playlist_key,
                 },
             ));
-            (None, false, false)
+            (false, false)
         }
         Row::Playlist(PlaylistListRow::Folder(_)) => {
             menu.edit = true;
             menu.delete = true;
-            (None, false, false)
+            (false, false)
         }
         // A child folder plays the folder it opens, as a collection row plays its page.
-        Row::Folder(_) => (None, true, false),
+        Row::Folder(_) => (true, false),
     };
-    menu.radio = radio.filter(|_| shown(ContextMenuItem::PlayRadio));
+    menu.radio = radio_seed(row).filter(|_| shown(ContextMenuItem::PlayRadio));
     menu.add_to_playlist = add_to_playlist && shown(ContextMenuItem::AddToPlaylist);
     menu.favorite = rated && shown(ContextMenuItem::Favorites);
     menu.rating = rated && settings.application.context_menu.rating_visible;
