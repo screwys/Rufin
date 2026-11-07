@@ -669,37 +669,18 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                 };
                 shell.present_selected_dialog(&dialog);
             }
-            Err(SourceMetadataError::LocalAccessRequired {
-                source_id,
-                source_path,
-            }) => {
-                let Some(selected) = shell
-                    .selected_library()
-                    .as_deref()
-                    .filter(|selected| selected.source_id == source_id)
-                    .cloned()
-                else {
-                    shell
-                        .control_feedback
-                        .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
-                    return;
-                };
+            Err(error) => {
                 let retry_shell = Rc::downgrade(&shell);
-                present_local_access_recovery(
+                track_metadata_error(
                     &shell,
-                    selected,
-                    &source_path,
                     Rc::new(move || {
                         if let Some(shell) = retry_shell.upgrade() {
                             present_metadata_dialog(&shell, item.clone());
                         }
                     }),
+                    error,
                 );
             }
-            Err(SourceMetadataError::Unavailable) => shell
-                .control_feedback
-                .show_feedback_toast(tr(msgid("Metadata editing is no longer available"))),
-            Err(error) => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
         }
     });
     shell.selected_ui.metadata_load.replace(Some(load));
@@ -768,6 +749,9 @@ fn track_metadata_error(shell: &Rc<Shell>, retry: Rc<dyn Fn()>, error: SourceMet
                     .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
             }
         }
+        SourceMetadataError::Unavailable => shell
+            .control_feedback
+            .show_feedback_toast(tr(msgid("Metadata editing is no longer available"))),
         error => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
     }
 }
