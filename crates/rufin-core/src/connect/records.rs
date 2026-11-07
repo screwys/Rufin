@@ -2088,7 +2088,8 @@ impl Records {
         Ok(())
     }
 
-    /// The value of each live row that holds none, as it leaves this device.
+    /// The value of each live row that holds none, as it leaves this device. A value that
+    /// changed since its row was recorded is left out; the pass that records it sends it.
     async fn values(&self, rows: &mut [Row]) -> Result<(), String> {
         let mut wanted = BTreeMap::<String, Vec<String>>::new();
         for row in rows
@@ -2111,14 +2112,16 @@ impl Records {
                 if kind == "setting" {
                     self.seal(&mut item.value)?;
                 }
-                values.insert(item.id, item.value);
+                values.insert(item.id, (item.digest, item.value));
             }
         }
         for row in rows
             .iter_mut()
             .filter(|row| !row.deleted && row.value.is_none())
         {
-            row.value = values.remove(&row.id);
+            row.value = (values.remove(&row.id))
+                .filter(|(digest, _)| *digest == row.digest)
+                .map(|(_, value)| value);
         }
         Ok(())
     }
