@@ -310,7 +310,6 @@ impl PlayTarget {
             row => Some(Self::Route(Route::of_playlist(row))),
         }
     }
-
 }
 
 impl SourceOwner {
@@ -1351,10 +1350,11 @@ impl View {
                     read: Read::AlbumTracks(_),
                     ..
                 }
+                | Body::Releases { .. }
                 | Body::Home(_)
                 | Body::Search(..)
                 | Body::Missing => false,
-                Body::Rows { .. } | Body::Releases { .. } | Body::Folders { .. } => true,
+                Body::Rows { .. } | Body::Folders { .. } => true,
             }
     }
 
