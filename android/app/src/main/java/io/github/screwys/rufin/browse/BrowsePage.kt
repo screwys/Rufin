@@ -187,7 +187,7 @@ internal class BrowsePage(
                 for (shown in read) {
                     val index = shown.index.toInt() - offset
                     if (index < 0) {
-                        val current = summary?.takeIf { it.row.key == header!!.row.key } ?: continue
+                        val current = summary?.takeIf { currentView === view && it.row.key == header!!.row.key } ?: continue
                         library.takeDownloads(current.row, shown.row)?.let { summary = current.copy(row = it) }
                         continue
                     }
