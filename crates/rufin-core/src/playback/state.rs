@@ -53,6 +53,8 @@ pub struct ExternalPlayback {
     pub muted: bool,
     pub repeat: QueueRepeatMode,
     pub shuffle: bool,
+    /// The rate its playhead moves at.
+    pub rate: f64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -526,19 +528,30 @@ impl Player {
             && (duration == 0 || self.sequence.progress_millis() < duration)
     }
 
+    /// The rate the playhead moves at: the receiver's while one plays, else this device's
+    /// on its own output and 1x on another.
+    fn playback_rate(&self) -> f64 {
+        match &self.external {
+            Some(external) => external.rate,
+            None if self.playback_output.is_local() => self.settings.playback_rate,
+            None => 1.0,
+        }
+    }
+
     pub(super) fn advance_external_clock(&mut self, sample: &ClockSample) {
         let Some(external) = self.external.as_ref() else {
             return;
         };
         let elapsed = sample
             .monotonic_millis
-            .saturating_sub(self.external_clock_millis);
+            .saturating_sub(self.external_clock_millis) as f64
+            * external.rate;
         self.external_clock_millis = sample.monotonic_millis;
         if external.status != TransportStatus::Playing || self.sequence.selected_index().is_none() {
             return;
         }
         let previous = self.sequence.progress_millis();
-        let mut position = previous.saturating_add(elapsed);
+        let mut position = previous.saturating_add(elapsed as u64);
         let duration = self.duration_millis();
         if duration > 0 {
             position = position.min(duration);
@@ -2649,11 +2662,7 @@ impl Player {
             phase,
             started_at_unix_seconds: current.started_at_unix_seconds.unwrap_or_default(),
             position_millis: self.sequence.progress_millis(),
-            playback_rate: if self.playback_output.is_local() {
-                self.settings.playback_rate
-            } else {
-                1.0
-            },
+            playback_rate: self.playback_rate(),
             duration_millis: (current.duration_millis > 0).then_some(current.duration_millis),
             paused: !current.desired_playing,
             muted: self.settings.muted,
@@ -2794,11 +2803,7 @@ impl Player {
                 desired_playing: self.desired_playing(),
                 position_millis: self.position_millis(),
                 position_observed_at_millis: self.position_observed_at_millis(),
-                playback_rate: if self.playback_output().is_local() {
-                    settings.playback_rate
-                } else {
-                    1.0
-                },
+                playback_rate: self.playback_rate(),
                 duration_millis: self.duration_millis(),
                 can_seek: self.can_seek(),
                 buffering_percent: self.buffering_percent(),

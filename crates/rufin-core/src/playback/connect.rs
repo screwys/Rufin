@@ -116,6 +116,7 @@ impl RufinPlayback {
                     muted: frame.muted,
                     repeat: frame.repeat,
                     shuffle: frame.shuffle,
+                    rate: frame.rate,
                 },
             )
             .map_err(string_error)?;
@@ -262,7 +263,10 @@ impl PlaybackOwner {
     /// moment.
     pub(crate) fn observed(&self, projection: Option<&PlaybackProjection>) -> Observed {
         let Some(projection) = projection else {
-            return Observed::default();
+            return Observed {
+                rate: 1.0,
+                ..Observed::default()
+            };
         };
         let view = &projection.view;
         let transport = projection.reporting_transport();
@@ -291,6 +295,7 @@ impl PlaybackOwner {
             auto_dj: view.controls.auto_dj_enabled,
             revision: view.queue.revision,
             total: view.queue.total,
+            rate: transport.playback_rate,
         }
     }
 

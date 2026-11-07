@@ -63,6 +63,8 @@ pub(super) struct Cast {
     placement: Option<QueuePlacement>,
     target: Option<QueueReorderTarget>,
     listen: Option<ContinuedListen>,
+    /// The rate the queue played at; the receiver keeps its own without one.
+    rate: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +90,7 @@ pub(crate) struct Observed {
     pub(crate) auto_dj: bool,
     pub(crate) revision: u64,
     pub(crate) total: usize,
+    pub(crate) rate: f64,
 }
 
 /// The playback state frames of a receiver.
@@ -376,6 +379,7 @@ impl Records {
             placement: None,
             target: None,
             listen: session.listen,
+            rate: None,
         }))
     }
 }
@@ -520,6 +524,7 @@ impl ConnectOwner {
             None => self.playback.current_listen().await,
             Some(_) => None,
         };
+        let settings = &self.settings.file().load().ui;
         Ok(Cast {
             items: records.queue_items(&queue.entries).await?,
             order: queue.order.to_vec(),
@@ -528,10 +533,11 @@ impl ConnectOwner {
             playing,
             repeat: queue.repeat_mode,
             shuffle: queue.shuffled,
-            auto_dj: self.settings.file().load().ui.auto_dj_enabled,
+            auto_dj: settings.auto_dj_enabled,
             placement,
             target: target.flatten(),
             listen,
+            rate: Some(settings.playback.playback_rate),
         })
     }
 
@@ -540,6 +546,13 @@ impl ConnectOwner {
         let entries = records.entries(cast.items).await?;
         let playback = Arc::clone(&self.playback);
         let Some(placement) = cast.placement else {
+            // It plays at the rate the queue played at, which the player reads as committed.
+            if let Some(rate) = cast.rate {
+                self.settings.file().edit(|stored| {
+                    stored.ui.playback.playback_rate = rate;
+                    Ok(())
+                })?;
+            }
             playback
                 .continue_queue(
                     library::QueueRestore {

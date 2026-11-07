@@ -358,6 +358,7 @@ impl PlexPlayback {
                             .is_some(),
                         repeat: repeat(&timeline),
                         shuffle: timeline.shuffle.unwrap_or(false),
+                        rate: 1.0,
                     },
                 )
                 .map_err(string_error);
@@ -426,6 +427,7 @@ impl PlexPlayback {
                         .is_some(),
                     repeat: repeat(&timeline),
                     shuffle: timeline.shuffle.unwrap_or(false),
+                    rate: 1.0,
                 },
             )
             .map_err(string_error)

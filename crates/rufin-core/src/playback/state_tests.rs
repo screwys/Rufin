@@ -1344,6 +1344,7 @@ async fn receiver_window_survives_local_hydration_ticks() {
                 muted: false,
                 repeat: QueueRepeatMode::Off,
                 shuffle: false,
+                rate: 1.0,
             },
             &sample,
         )
@@ -1405,6 +1406,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
         muted: false,
         repeat: QueueRepeatMode::All,
         shuffle: true,
+        rate: 1.0,
     };
     session
         .observe_external(output.clone(), observation.clone(), &sample)
