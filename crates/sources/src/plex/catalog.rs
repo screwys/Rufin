@@ -516,15 +516,14 @@ impl PlexSource {
             }
         }
 
-        for raw in removals {
+        for kind in ["track", "album", "artist", "playlist"] {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            for kind in ["track", "album", "artist", "playlist"] {
-                observation
-                    .remove_source_items(kind, &[plex_id(kind, raw_item_id(&raw))])
-                    .await?;
-            }
+            let ids = removals.iter().map(|raw| plex_id(kind, raw_item_id(raw)));
+            observation
+                .remove_source_items(kind, &ids.collect::<Vec<_>>())
+                .await?;
         }
 
         Ok(())

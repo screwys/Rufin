@@ -141,13 +141,12 @@ impl JellyfinEmbySource {
             }
         }
 
-        for raw_id in removals {
+        for kind in ["track", "album", "artist", "genre", "playlist"] {
             check_cancelled(cancelled)?;
-            for kind in ["track", "album", "artist", "genre", "playlist"] {
-                observation
-                    .remove_source_items(kind, &[self.kind.object_id(kind, &raw_id)])
-                    .await?;
-            }
+            let ids = removals.iter().map(|raw| self.kind.object_id(kind, raw));
+            observation
+                .remove_source_items(kind, &ids.collect::<Vec<_>>())
+                .await?;
         }
 
         Ok(())
