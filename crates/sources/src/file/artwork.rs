@@ -328,7 +328,8 @@ impl<'a> ArtworkFiles<'a> {
 
     /// Album, track and artist pictures of the albums with tracks in `directories` or the
     /// directory below, and of the artists those tracks credit; every album when None. Each
-    /// page of 128 albums or artists is two reads and one Write.
+    /// page of 128 albums is two reads and one Write; an artist's tracks are read in pages
+    /// until a picture is found, and each 128 artists are one Write.
     pub(crate) async fn acquire(
         &self,
         observation: &mut library::Observation<'_>,
@@ -412,40 +413,47 @@ impl<'a> ArtworkFiles<'a> {
             .source_artwork_artists(source_id, directories)
             .await?;
         for artists in artists.chunks(128) {
-            let ids = artists
-                .iter()
-                .map(|(id, _)| id.as_str())
-                .collect::<Vec<_>>();
-            let tracks = catalog
-                .source_artwork_artist_tracks(source_id, &ids)
-                .await?;
             let (mut images, mut artist_art) = (Vec::new(), Vec::new());
             for (artist, name) in artists {
-                check_cancelled(cancelled)?;
-                let tracks = owned(&tracks, artist);
                 // Folder portraits in any folder above a track come before embedded pictures.
                 let mut visited = HashSet::new();
                 let mut image = None;
-                'folders: for track in tracks {
-                    check_cancelled(cancelled)?;
-                    for prefix in self.directories(track)? {
-                        if !visited.insert(prefix.clone()) {
-                            continue;
-                        }
-                        let images = cached(&mut listings, &prefix, async {
-                            self.folder_images(catalog, source_id, &prefix).await
-                        })
+                let mut after = 0;
+                'folders: loop {
+                    let page = catalog
+                        .source_artwork_artist_tracks(source_id, artist, after)
                         .await?;
-                        image = self
-                            .directory_portrait(catalog, source_id, &prefix, &images, artist, name)
+                    let Some(last) = page.last() else { break };
+                    after = last.key;
+                    for track in &page {
+                        check_cancelled(cancelled)?;
+                        for prefix in self.directories(track)? {
+                            if !visited.insert(prefix.clone()) {
+                                continue;
+                            }
+                            let images = cached(&mut listings, &prefix, async {
+                                self.folder_images(catalog, source_id, &prefix).await
+                            })
                             .await?;
-                        if image.is_some() {
-                            break 'folders;
+                            image = self
+                                .directory_portrait(
+                                    catalog, source_id, &prefix, &images, artist, name,
+                                )
+                                .await?;
+                            if image.is_some() {
+                                break 'folders;
+                            }
                         }
                     }
                 }
-                if image.is_none() {
-                    for track in tracks {
+                let mut after = 0;
+                'embedded: while image.is_none() {
+                    let page = catalog
+                        .source_artwork_artist_tracks(source_id, artist, after)
+                        .await?;
+                    let Some(last) = page.last() else { break };
+                    after = last.key;
+                    for track in &page {
                         check_cancelled(cancelled)?;
                         let (found, observed) =
                             self.embedded_artist_image(source_id, track, name)?;
@@ -454,7 +462,7 @@ impl<'a> ArtworkFiles<'a> {
                         }
                         if found.is_some() {
                             image = found;
-                            break;
+                            break 'embedded;
                         }
                     }
                 }

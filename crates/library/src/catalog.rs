@@ -115,6 +115,7 @@ pub struct CachedSource {
 pub struct LocalArtworkCandidate {
     /// The album or artist the track was read for.
     pub owner: String,
+    pub key: i64,
     pub object_id: String,
     pub path: String,
     pub root: Option<String>,
