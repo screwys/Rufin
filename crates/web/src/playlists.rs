@@ -303,7 +303,6 @@ pub(super) async fn create(
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
-    let cancellation = library::ReadCancellation::new();
     #[derive(Deserialize)]
     struct Input {
         source: Option<sources::SourceId>,
@@ -314,7 +313,6 @@ pub(super) async fn create(
         page: Option<page::PageToken>,
     }
     let input: Input = body(request).await?;
-    let source = input.source.clone();
     let selection = playlist_selection(products, input.uris, input.page).await?;
     let created = rufin_core::playlists::create_playlist(
         &products.source,
@@ -329,27 +327,7 @@ pub(super) async fn create(
         .as_ref()
         .and_then(|created| created.settings_error.as_ref());
     let object_id = created.as_ref().map(|created| created.object_id.as_str());
-    // A playlist of a source the Catalog does not hold has no key; None is Rufin's own.
-    let owner = match &source {
-        Some(source) => products.library.source_key(source).map(Some),
-        None => Some(None),
-    };
-    let id = match (object_id, owner) {
-        (Some(object), Some(owner)) => products
-            .library
-            .catalog_keys(
-                library::CatalogKind::Playlist,
-                owner,
-                &[object.to_owned()],
-                &cancellation,
-            )
-            .await
-            .map_err(internal)?
-            .first()
-            .copied()
-            .map(PlaylistKey::from_raw),
-        _ => None,
-    };
+    let id = created.as_ref().and_then(|created| created.playlist_key);
     Ok(json_response(
         StatusCode::OK,
         json!({"id":id,"object_id":object_id,"settings_error":settings_error}),

@@ -403,7 +403,6 @@ pub async fn create_playlist(
 ) -> sources::SourceResult<Option<PlaylistCreation>> {
     crate::playlist_files::run(owner, move |owner| async move {
         let catalog = &owner.shared.catalog;
-        let pin_source = source_id.clone();
         let target = match source_id {
             None => PlaylistOwner::Local,
             Some(id) => {
@@ -413,6 +412,11 @@ pub async fn create_playlist(
                     .ok_or("Source access is unavailable")?;
                 configured_playlist_owner(&owner, &id, cached.source)?
             }
+        };
+        // A source that keeps no playlists of its own gives Rufin's own, pinned as Rufin's.
+        let pin_source = match &target {
+            PlaylistOwner::Local => None,
+            PlaylistOwner::Server(source, _) => Some(source.source_id().clone()),
         };
         let (playlist, object_id) = match target {
             PlaylistOwner::Local => {
