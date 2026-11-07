@@ -406,6 +406,8 @@ pub(crate) async fn import_playlist_on(
         ),
         position: 0,
     };
+    // Preserved entry ids belong to the playlist the file names.
+    let mut foreign = true;
     if let Some(value) = parsed.identity {
         if !value.source_owned
             && value.name.is_some()
@@ -416,6 +418,7 @@ pub(crate) async fn import_playlist_on(
                 .bind(&value.source_id).bind(&value.object_id).fetch_one(write.connection().await?).await?;
             if !native {
                 identity = value;
+                foreign = false;
             }
         }
     }
@@ -424,14 +427,15 @@ pub(crate) async fn import_playlist_on(
     }
     let mut changed = true;
     let key = if let Some(key) = target {
-        let name = sqlx::query_scalar::<_, String>(
-            "SELECT name FROM playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL",
+        let (name, object) = sqlx::query_as::<_, (String, String)>(
+            "SELECT name,object_id FROM playlists WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT NULL",
         )
         .bind(key)
         .fetch_optional(write.connection().await?)
         .await?
         .ok_or_else(|| invalid("Playlist is not editable"))?;
         changed = Some(&name) != identity.name.as_ref();
+        foreign = object != identity.object_id;
         if changed {
             let row: crate::catalog::write::PlaylistRow =
                 sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -463,6 +467,7 @@ pub(crate) async fn import_playlist_on(
         }
         let mut entry = item.to_entry(entries.len() as i64);
         entry.track.media_uri = uri;
+        entry.object_id.retain(|_| !foreign);
         entries.push(entry);
     }
     let imported = entries.len() as u64;
