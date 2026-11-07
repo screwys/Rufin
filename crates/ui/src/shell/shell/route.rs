@@ -514,8 +514,8 @@ impl Shell {
     }
 
     /// What `changed` means for the page mounted for `route` now that `current` is selected, as
-    /// core decides it: its view's verdict, or for a page without a read of its own (Search or
-    /// a page waiting for a source) its route's. None when another route or none is mounted.
+    /// core decides it: its view's verdict, or for a page waiting for a source its route's;
+    /// Search's results are its session's. None when another route or none is mounted.
     fn mounted_refresh(
         &self,
         route: &Route,
@@ -526,6 +526,7 @@ impl Shell {
         let entry = mounted.as_ref().filter(|entry| &entry.route == route)?;
         Some(match entry.view.view() {
             Some(view) => view.refresh(current, changed),
+            None if *route == Route::Search && entry.selected.is_some() => Refresh::Nothing,
             None => {
                 rufin_core::view::refresh_unread(route, entry.selected.as_ref(), current, changed)
             }
