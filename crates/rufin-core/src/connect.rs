@@ -878,7 +878,7 @@ impl ConnectOwner {
     ) -> Result<u64, String> {
         let after = records.pulled(peer).await?;
         let mut pull = network
-            .pull(peer, profile, after)
+            .pull(peer, profile, after, joining)
             .await
             .map_err(string_error)?;
         let total = pull.total;

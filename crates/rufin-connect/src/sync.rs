@@ -38,8 +38,16 @@ pub trait Values: Send + Sync {
 
 #[derive(Serialize, Deserialize)]
 enum Request {
-    Pull { profile: String, after: i64 },
-    Changed { profile: String, sequence: i64 },
+    /// A joining device holds none of the rows it wrote; any other has them.
+    Pull {
+        profile: String,
+        after: i64,
+        joining: bool,
+    },
+    Changed {
+        profile: String,
+        sequence: i64,
+    },
 }
 
 /// What a pull reads after its row count.
@@ -72,7 +80,7 @@ impl Pull {
 
 impl ConnectNetwork {
     /// Pull the rows a trusted device holds after `after`.
-    pub async fn pull(&self, peer: &str, profile: &str, after: i64) -> Result<Pull> {
+    pub async fn pull(&self, peer: &str, profile: &str, after: i64, joining: bool) -> Result<Pull> {
         let connection =
             tokio::time::timeout(Duration::from_secs(30), self.connect(peer, SYNC_PROTOCOL))
                 .await
@@ -84,6 +92,7 @@ impl ConnectNetwork {
                 &Request::Pull {
                     profile: profile.to_owned(),
                     after,
+                    joining,
                 },
                 MAX_FRAME,
             )
@@ -182,9 +191,14 @@ impl ProtocolHandler for SyncProtocol {
                         _ = connection.closed() => {}
                     }
                 }
-                Request::Pull { profile: id, after } => {
+                Request::Pull {
+                    profile: id,
+                    after,
+                    joining,
+                } => {
                     ensure!(id == profile.id, "The Connect profile changed");
-                    serve(&profile, after, &mut send).await?;
+                    let held = (!joining).then(|| connection.remote_id().to_string());
+                    serve(&profile, held, after, &mut send).await?;
                     send.finish()?;
                     let _ = connection.closed().await;
                 }
@@ -200,7 +214,13 @@ impl ProtocolHandler for SyncProtocol {
     }
 }
 
-async fn serve(profile: &Arc<Profile>, mut after: i64, send: &mut SendStream) -> Result<()> {
+/// Sends the rows after `after`, but none `held` wrote.
+async fn serve(
+    profile: &Arc<Profile>,
+    held: Option<String>,
+    mut after: i64,
+    send: &mut SendStream,
+) -> Result<()> {
     write_frame(send, &profile.store.count_after(after).await?, MAX_FRAME).await?;
     loop {
         let mut rows = profile.store.rows_after(after, PAGE, None).await?;
@@ -209,6 +229,7 @@ async fn serve(profile: &Arc<Profile>, mut after: i64, send: &mut SendStream) ->
         };
         after = last.sequence;
         let complete = rows.len() < PAGE;
+        rows.retain(|row| Some(&row.device) != held.as_ref());
         profile
             .values
             .encode(&mut rows)

@@ -176,7 +176,7 @@ async fn pull(
         .into_iter()
         .find(|known| known.device == device)
         .map_or(0, |known| known.pulled);
-    let mut pull = network.pull(&device, profile, after).await?;
+    let mut pull = network.pull(&device, profile, after, false).await?;
     let mut applied = Vec::new();
     loop {
         match pull.next().await? {
