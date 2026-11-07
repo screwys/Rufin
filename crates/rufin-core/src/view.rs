@@ -91,6 +91,9 @@ pub struct View {
     /// The header it shows; a reread that keeps the header keeps it.
     header: Option<HeaderKey>,
     body: Body,
+    /// This read's identity, which its plays carry as `|result=`: a play from a newer read of
+    /// the page queues again.
+    read: u64,
 }
 
 enum Body {
@@ -410,6 +413,7 @@ impl SourceOwner {
                 art,
                 header: None,
                 body: Body::Missing,
+                read: 0,
             },
             plan,
             header,
@@ -795,6 +799,8 @@ async fn read(
     cancel: &ReadCancellation,
 ) -> LibraryResult<Opened> {
     let catalog = Arc::clone(&view.owner.shared.catalog);
+    static READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    view.read = READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let named = header.is_some();
     view.header = header.or(view.header);
     let (header, first, rows, favorites) = match plan {
@@ -998,10 +1004,14 @@ impl View {
             && previous.settings_reread(&self.settings).is_none()
     }
 
-    /// The context id a play of this page carries, in the order it reads; `result` ties it to
-    /// the order a client shows, as `|result=`.
-    fn play_context(&self, result: Option<&str>) -> Arc<str> {
-        with_result(self.context_id(), result)
+    /// The context id a play of this page carries, in the order it reads, tied to this read.
+    pub fn play_context(&self) -> String {
+        self.with_read(self.context_id())
+    }
+
+    /// `context` tied to this read, as `|result=`.
+    pub fn with_read(&self, context: String) -> String {
+        format!("{context}|result={}", self.read)
     }
 
     /// The context id a play of an artist page's favorite tracks carries, in their order.
@@ -1114,12 +1124,7 @@ impl View {
     /// What playing the page whole queues, as its header Play does: everything it lists in
     /// its order and filter, from a random track when shuffle is on; an artist page plays the
     /// artist's tracks. None when it lists no tracks of its own.
-    pub fn play_all(
-        &self,
-        placement: QueuePlacement,
-        shuffled: bool,
-        result: Option<&str>,
-    ) -> Option<PlayRequest> {
+    pub fn play_all(&self, placement: QueuePlacement, shuffled: bool) -> Option<PlayRequest> {
         let selection = match &self.body {
             Body::Releases { read, .. } => {
                 artist_tracks(&self.route, read, &self.settings)?.selection()
@@ -1128,7 +1133,7 @@ impl View {
         };
         Some(play_whole(
             selection,
-            self.play_context(result),
+            self.play_context().into(),
             placement,
             shuffled,
         ))
@@ -1144,7 +1149,6 @@ impl View {
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
-        result: Option<&str>,
     ) -> Option<PlayRequest> {
         let page = self
             .members()
@@ -1154,7 +1158,7 @@ impl View {
         };
         Some(
             PlayRequest::captured(page.clone().selection(), index, placement, false)
-                .with_context(self.play_context(result))
+                .with_context(self.play_context().into())
                 .with_anchor(key, entry)
                 .shuffled(shuffled),
         )
@@ -1169,7 +1173,6 @@ impl View {
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
-        result: Option<&str>,
     ) -> Option<PlayRequest> {
         let read = self.favorites()?;
         if !matches!(placement, QueuePlacement::Replace { .. }) {
@@ -1177,7 +1180,7 @@ impl View {
         }
         self.favorites_context_id().map(|context| {
             PlayRequest::captured(read.clone().selection(), index, placement, false)
-                .with_context(with_result(context, result))
+                .with_context(self.with_read(context).into())
                 .with_anchor(key, None)
                 .shuffled(shuffled)
         })
@@ -1195,7 +1198,6 @@ impl View {
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
-        result: Option<&str>,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<PlayRequest>> {
         let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
@@ -1206,11 +1208,8 @@ impl View {
                 tracks,
                 placement,
                 shuffled,
-                result,
             ),
-            Row::AlbumTrack { track, .. } => {
-                self.play_album_track(track, placement, shuffled, result)
-            }
+            Row::AlbumTrack { track, .. } => self.play_album_track(track, placement, shuffled),
             row => match self.row_target(row) {
                 Some(target) => Some(
                     (self.owner)
@@ -1254,7 +1253,6 @@ impl View {
         track: &library::TrackRow,
         placement: QueuePlacement,
         shuffled: bool,
-        result: Option<&str>,
     ) -> Option<PlayRequest> {
         if !matches!(placement, QueuePlacement::Replace { .. }) {
             return Some(PlayRequest::track(track.track_key, placement));
@@ -1270,7 +1268,7 @@ impl View {
         );
         Some(
             PlayRequest::captured(read.selection(), 0, placement, false)
-                .with_context(with_result(context, result))
+                .with_context(self.with_read(context).into())
                 .with_anchor(track.track_key, None)
                 .shuffled(shuffled),
         )
@@ -1295,15 +1293,13 @@ impl View {
             .and_then(|selected| selected.music_folder_key)
     }
 
-    /// What playing Home's section `index` queues: its rows in the order it shows them, from
-    /// its row `from`. None when the page is not Home or has no such section.
+    /// What playing Home's section `index` queues: its rows in the order it shows them. None
+    /// when the page is not Home or has no such section.
     pub fn play_section(
         &self,
         index: usize,
-        from: usize,
         placement: QueuePlacement,
         shuffled: bool,
-        result: Option<&str>,
     ) -> Option<PlayRequest> {
         let section = self.home_sections()?.into_iter().nth(index)?;
         // Each album and genre as its page lists it: an album whole, a genre in the folder.
@@ -1339,8 +1335,8 @@ impl View {
         };
         let source = self.selected.as_ref()?.source_id.as_str();
         Some(
-            PlayRequest::captured(MemberSelection::Concat(selections), from, placement, false)
-                .with_context(with_result(format!("home:{source}:{id}"), result))
+            PlayRequest::captured(MemberSelection::Concat(selections), 0, placement, false)
+                .with_context(self.with_read(format!("home:{source}:{id}")).into())
                 .shuffled(shuffled),
         )
     }
@@ -1884,6 +1880,7 @@ impl View {
             art: self.art,
             header: self.header,
             body: Body::Missing,
+            read: 0,
         }
     }
 
@@ -2155,14 +2152,6 @@ fn rows_selection(
         read,
         ranges,
         members: Box::new(members),
-    }
-}
-
-/// `context` tied to the order a client shows: `|result=` and its id.
-fn with_result(context: String, result: Option<&str>) -> Arc<str> {
-    match result {
-        Some(result) => format!("{context}|result={result}").into(),
-        None => context.into(),
     }
 }
 

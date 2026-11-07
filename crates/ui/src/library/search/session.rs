@@ -495,7 +495,7 @@ impl SearchSession {
         let playback = catalog.products.playback.clone();
         self.runtime.spawn(async move {
             let cancel = ReadCancellation::new();
-            match view.play(&row, 0, placement, false, None, &cancel).await {
+            match view.play(&row, 0, placement, false, &cancel).await {
                 Ok(Some(request)) => playback.play_selection(request),
                 Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "could not play the search result"),

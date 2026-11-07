@@ -257,7 +257,7 @@ internal class BrowsePage(
 
     fun playSection(section: HomeSectionItems, shuffled: Boolean = false) = connection.runAction {
         val view = currentView ?: return@runAction
-        connection.connectedService().playRequest { view.playSection(section.index, 0UL, shuffled, section.title) }
+        connection.connectedService().playRequest { view.playSection(section.index, shuffled, section.title) }
     }
 
     private fun homeSections(view: AndroidView, sections: List<AndroidHomeSection>, display: AndroidBrowseDisplay?,

@@ -411,7 +411,6 @@ async fn queue_play(
                 input.index.unwrap_or(0),
                 placement,
                 false,
-                None,
             ),
         }
         .ok_or_else(gone)?

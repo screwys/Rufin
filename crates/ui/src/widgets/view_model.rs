@@ -281,8 +281,6 @@ trait AnyRows {
 struct State<T> {
     source: Source<T>,
     len: usize,
-    /// A new id for every order taken, for the `|result=` of plays from it.
-    order: u64,
     ready: BTreeMap<usize, Arc<T>>,
     /// Ready windows, least recently used first.
     windows: VecDeque<usize>,
@@ -639,12 +637,10 @@ impl<T> Clone for Rows<T> {
 impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
     fn with_source(source: Source<T>, len: usize, runtime: Option<tokio::runtime::Handle>) -> Self {
         use glib::subclass::prelude::ObjectSubclassIsExt;
-        static NEXT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let list: RowList = glib::Object::new();
         list.imp().state.replace(Some(Box::new(State::<T> {
             source,
             len,
-            order: NEXT_ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             ready: BTreeMap::new(),
             windows: VecDeque::new(),
             stale: BTreeSet::new(),
@@ -706,11 +702,6 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// The order the rows were read in, for the `|result=` of plays from it.
-    pub fn order_id(&self) -> String {
-        self.with(|state| state.order.to_string())
     }
 
     /// The read row at `position`, without asking for it.
@@ -833,14 +824,10 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
     /// are read again, and only its tail changes; another list keeps its items when its length
     /// stays.
     pub fn replace(&self, len: usize, first: usize, rows: Vec<T>, refresh: bool) {
-        static NEXT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let old_len = self.list.n_items() as usize;
         let keep = refresh || old_len == len;
         let updates = self.with(|state| {
             state.reset_reads();
-            state.order = NEXT_ORDER
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                .wrapping_add(1 << 32);
             let previous = std::mem::take(&mut state.ready);
             state.windows.clear();
             state.stale.clear();
@@ -1089,7 +1076,6 @@ impl Rows<Row> {
     /// The context id a play of the collection these rows list carries from elsewhere, and the
     /// one plays from these rows carry, tied to their order.
     pub fn context_ids(&self) -> (String, String) {
-        let order = self.order_id();
         self.with(|state| match &state.source {
             Source::View {
                 view,
@@ -1101,11 +1087,11 @@ impl Rows<Row> {
                     .split_once("|query=")
                     .map_or(context.as_str(), |(base, _)| base)
                     .to_owned();
-                (base, format!("{context}|result={order}"))
+                (base, view.with_read(context))
             }
             Source::View { view, .. } => (
                 rufin_core::view::context_base(view.route()),
-                format!("{}|result={order}", view.context_id()),
+                view.play_context(),
             ),
             Source::Seeded | Source::Pages(_) => (String::new(), String::new()),
         })
@@ -1137,11 +1123,10 @@ impl Rows<Row> {
             }
             return;
         };
-        let order = self.order_id();
         if favorites {
             if let Row::Track(track) = row.as_ref()
                 && let Some(request) =
-                    view.play_favorite(track.track_key, index, placement, shuffled, Some(&order))
+                    view.play_favorite(track.track_key, index, placement, shuffled)
             {
                 products.playback.play_selection(request);
             }
@@ -1150,10 +1135,7 @@ impl Rows<Row> {
         let playback = Arc::clone(&products.playback);
         products.runtime.spawn(async move {
             let cancel = library::ReadCancellation::new();
-            match view
-                .play(&row, index, placement, shuffled, Some(&order), &cancel)
-                .await
-            {
+            match view.play(&row, index, placement, shuffled, &cancel).await {
                 Ok(Some(request)) => playback.play_selection(request),
                 Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "could not play the row"),
@@ -1168,10 +1150,9 @@ impl Rows<Row> {
         placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
     ) {
-        let order = self.order_id();
         if let Some(request) = self
             .view()
-            .and_then(|view| view.play_all(placement, shuffled, Some(&order)))
+            .and_then(|view| view.play_all(placement, shuffled))
         {
             playback.play_selection(request);
         }

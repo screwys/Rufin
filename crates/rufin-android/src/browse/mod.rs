@@ -319,7 +319,7 @@ impl AndroidView {
 
     /// The context id the page's plays carry.
     pub fn context_id(&self) -> String {
-        self.view.context_id()
+        self.view.play_context()
     }
 
     /// Plays or queues the page whole, as its header does.
@@ -332,27 +332,24 @@ impl AndroidView {
         let target = CollectionTarget::for_route(self.view.route());
         self.playback.play_selection(
             self.view
-                .play_all(placement, shuffled, None)
+                .play_all(placement, shuffled)
                 .ok_or_else(|| error("Choose a collection"))?
                 .with_context_title(caption(target, context_title)),
         );
         Ok(())
     }
 
-    /// Plays Home's section `index` from its row `from`, which `context_title` names.
+    /// Plays Home's section `index`, which `context_title` names.
     pub fn play_section(
         &self,
         index: u64,
-        from: u64,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
         let request = self.view.play_section(
             usize::try_from(index).map_err(error)?,
-            usize::try_from(from).map_err(error)?,
             QueuePlacement::Now,
             shuffled,
-            None,
         );
         self.play_request(
             request.map(|request| request.with_context_title(caption(None, context_title))),
@@ -617,7 +614,7 @@ impl AndroidLibrary {
             match (&row.item, &view) {
                 (AndroidBrowseItem::Library { row }, Some(view)) => {
                     view.view
-                        .play(row, index, placement, shuffled, None, &cancel)
+                        .play(row, index, placement, shuffled, &cancel)
                         .await
                 }
                 (AndroidBrowseItem::Recent { row }, _) => source
