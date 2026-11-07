@@ -458,22 +458,12 @@ impl Catalog {
         let Some(owner) = snapshot.source_slot(source) else {
             return Ok(SmartPlaylistValueSuggestions::default());
         };
-        let scoped = match folder {
-            Some(folder) => {
-                let Some(folder) = snapshot.folders.slot(folder.raw()) else {
-                    return Ok(SmartPlaylistValueSuggestions::default());
-                };
-                Some(
-                    snapshot
-                        .tracks
-                        .iter()
-                        .filter(|(_, track)| snapshot.track_runs(track)[3].contains(&folder))
-                        .flat_map(|(_, track)| snapshot.track_runs(track)[2].iter().copied())
-                        .collect::<std::collections::HashSet<_>>(),
-                )
-            }
-            None => None,
+        let context = crate::catalog::views::Context::new(&snapshot);
+        let Some(folder) = context.folder_slot(folder, Some(owner)) else {
+            return Ok(SmartPlaylistValueSuggestions::default());
         };
+        // Tags a visible track of the music folder carries.
+        let derived = self.derived(&context, folder);
         let names = |kind: crate::TagKind| {
             let mut tags = snapshot
                 .tags
@@ -481,7 +471,7 @@ impl Catalog {
                 .filter(|(slot, tag)| {
                     tag.kind() == kind
                         && tag.source == owner
-                        && scoped.as_ref().is_none_or(|scoped| scoped.contains(slot))
+                        && derived.tags[*slot as usize].tracks > 0
                 })
                 .map(|(_, tag)| {
                     (
