@@ -1391,6 +1391,12 @@ impl Catalog {
                 windows
                     .iter()
                     .flat_map(|(items, _)| items.iter().copied())
+                    // Rows whose totals their order counted read no listens.
+                    .filter(|item| match item {
+                        Item::Smart(key) => !shape.totals.contains_key(&key.raw()),
+                        Item::PlaylistFolder(key) => !shape.totals.contains_key(&-key.raw()),
+                        _ => true,
+                    })
                     .chain(header.and_then(|header| match header {
                         HeaderKey::Smart { key, .. } => Some(Item::Smart(key)),
                         _ => None,
