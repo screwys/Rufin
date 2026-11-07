@@ -78,6 +78,7 @@ pub struct LocalFileWrite {
     pub mtime_ns: i64,
     pub device_id: Option<i64>,
     pub inode: Option<i64>,
+    pub birth_ns: Option<i64>,
     pub native_id: Option<String>,
     pub revision: Option<String>,
     pub picture_index: Option<i64>,
@@ -310,7 +311,7 @@ impl Catalog {
         media_uri: &str,
     ) -> LibraryResult<Option<(String, Option<String>, Option<LocalFileWrite>)>> {
         let mut connection = self.acquire_reader().await?;
-        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,details.source_path,CASE WHEN file.file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',file.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'native_id',file.native_id,'revision',file.revision,'picture_index',file.picture_index,'artist_pictures',file.artist_pictures,'parse_version',file.parse_version,'state',file.state) END
+        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,details.source_path,CASE WHEN file.file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',file.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'birth_ns',file.birth_ns,'native_id',file.native_id,'revision',file.revision,'picture_index',file.picture_index,'artist_pictures',file.artist_pictures,'parse_version',file.parse_version,'state',file.state) END
             FROM tracks track LEFT JOIN track_details details USING(track_key)
             LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
             WHERE track.source_key=?1 AND track.media_uri=?2")

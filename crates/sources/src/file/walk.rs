@@ -32,6 +32,7 @@ pub(crate) struct Entry {
     pub mtime_ns: i64,
     pub device_id: Option<i64>,
     pub inode: Option<i64>,
+    pub birth_ns: Option<i64>,
     pub native_id: Option<String>,
     /// WebDAV ETag, SMB change time, document revision.
     pub revision: Option<String>,
@@ -180,7 +181,8 @@ pub(crate) async fn walk<F: FileSource>(
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 enum Identity {
-    Inode(i64, i64, Option<i64>, i64),
+    /// Device, inode and the inode's birth time: a freed inode a new file reuses is born again.
+    Inode(i64, i64, i64),
     Native(String),
 }
 
@@ -188,9 +190,9 @@ fn identity(file: &LocalFileWrite) -> Option<Identity> {
     if !parseable(file.kind) {
         return None;
     }
-    match (file.device_id, file.inode, &file.native_id) {
-        (Some(d), Some(i), _) => Some(Identity::Inode(d, i, file.size_bytes, file.mtime_ns)),
-        (_, _, Some(id)) => Some(Identity::Native(id.clone())),
+    match (file.device_id, file.inode, file.birth_ns, &file.native_id) {
+        (Some(device), Some(inode), Some(birth), _) => Some(Identity::Inode(device, inode, birth)),
+        (_, _, _, Some(id)) => Some(Identity::Native(id.clone())),
         _ => None,
     }
 }
@@ -426,8 +428,12 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 LocalFileState::Unreadable => false,
             };
         if !unchanged
-            || (stored.device_id, stored.inode, &stored.native_id)
-                == (row.device_id, row.inode, &row.native_id)
+            || (
+                stored.device_id,
+                stored.inode,
+                stored.birth_ns,
+                &stored.native_id,
+            ) == (row.device_id, row.inode, row.birth_ns, &row.native_id)
         {
             return unchanged;
         }

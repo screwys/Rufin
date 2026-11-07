@@ -9,7 +9,7 @@ use super::*;
 use crate::{LocalFileKind, LocalFileState, LocalFileWrite, LocalLocatorWrite, TrackObservation};
 use sqlx::{QueryBuilder, Sqlite};
 
-const FILE_COLUMNS: &str = "path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state";
+const FILE_COLUMNS: &str = "path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,birth_ns,native_id,revision,picture_index,artist_pictures,parse_version,state";
 
 /// The walk order key: '/' sorts before every other character, so a directory's subtree
 /// follows it directly, as a depth-first walk of name-sorted listings visits it.
@@ -154,7 +154,7 @@ impl super::Observation<'_> {
         }
         for page in batch.files.chunks(128) {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "INSERT INTO files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state) ",
+                "INSERT INTO files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,birth_ns,native_id,revision,picture_index,artist_pictures,parse_version,state) ",
             );
             query.push_values(page, |mut row, file| {
                 row.push_bind(source)
@@ -166,6 +166,7 @@ impl super::Observation<'_> {
                     .push_bind(file.mtime_ns)
                     .push_bind(file.device_id)
                     .push_bind(file.inode)
+                    .push_bind(file.birth_ns)
                     .push_bind(&file.native_id)
                     .push_bind(&file.revision)
                     .push_bind(file.picture_index)
@@ -173,16 +174,16 @@ impl super::Observation<'_> {
                     .push_bind(file.parse_version)
                     .push_bind(file.state);
             });
-            query.push(" ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=excluded.artist_pictures,parse_version=excluded.parse_version,state=excluded.state");
+            query.push(" ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,birth_ns=excluded.birth_ns,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=excluded.artist_pictures,parse_version=excluded.parse_version,state=excluded.state");
             query.build().execute(write.connection().await?).await?;
         }
         if !batch.identities.is_empty() {
             let rows = batch
                 .identities
                 .iter()
-                .map(|file| (&file.path, file.device_id, file.inode, &file.native_id))
+                .map(|f| (&f.path, f.device_id, f.inode, f.birth_ns, &f.native_id))
                 .collect::<Vec<_>>();
-            sqlx::query("UPDATE files SET device_id=json_extract(item.value,'$[1]'),inode=json_extract(item.value,'$[2]'),native_id=json_extract(item.value,'$[3]') FROM json_each(?2) item WHERE files.source_key=?1 AND files.path=json_extract(item.value,'$[0]')")
+            sqlx::query("UPDATE files SET device_id=json_extract(item.value,'$[1]'),inode=json_extract(item.value,'$[2]'),birth_ns=json_extract(item.value,'$[3]'),native_id=json_extract(item.value,'$[4]') FROM json_each(?2) item WHERE files.source_key=?1 AND files.path=json_extract(item.value,'$[0]')")
                 .bind(source).bind(serde_json::to_string(&rows)?).execute(write.connection().await?).await?;
         }
         if !batch.inputs.is_empty() {

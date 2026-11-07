@@ -176,6 +176,7 @@ mod tests {
             mtime_ns: 1,
             device_id: None,
             inode: None,
+            birth_ns: None,
             native_id: None,
             picture_index: None,
             artist_pictures: None,

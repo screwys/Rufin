@@ -548,6 +548,11 @@ pub(crate) fn entry(name: String, metadata: &fs::Metadata) -> Entry {
             .unwrap_or_default(),
         device_id,
         inode,
+        birth_ns: metadata
+            .created()
+            .ok()
+            .and_then(|born| born.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|duration| i64::try_from(duration.as_nanos()).ok()),
         native_id: None,
         revision: None,
     }
@@ -581,6 +586,7 @@ pub(crate) fn local_row(root: &str, relative: &str, entry: &Entry) -> library::L
         mtime_ns: entry.mtime_ns,
         device_id: entry.device_id,
         inode: entry.inode,
+        birth_ns: entry.birth_ns,
         native_id: entry.native_id.clone(),
         revision: entry.revision.clone(),
         picture_index: None,

@@ -228,7 +228,8 @@ CREATE TABLE files (
     relative_path TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('media', 'cue', 'image', 'directory')),
     size_bytes INTEGER, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER,
-    native_id TEXT, revision TEXT, parse_version INTEGER,
+    -- The inode's birth time, which a reused inode does not keep.
+    birth_ns INTEGER, native_id TEXT, revision TEXT, parse_version INTEGER,
     picture_index INTEGER, artist_pictures TEXT, playlist_identity TEXT,
     state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable')),
     UNIQUE (source_key, path)

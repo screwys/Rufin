@@ -314,6 +314,7 @@ impl FileSource {
             mtime_ns: 0,
             device_id: None,
             inode: None,
+            birth_ns: None,
             native_id,
             revision,
             picture_index: None,
