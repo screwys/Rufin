@@ -27,21 +27,20 @@ impl SettingsState {
         }
     }
 
-    /// Keeps `current` on what every writer commits. `sidebar_moved` runs when such a commit
-    /// changed the sidebar before a local write took it in.
-    pub fn follow(self: &Rc<Self>, sidebar_moved: impl Fn() + 'static) {
+    /// Keeps `current` on what every writer commits, and runs `committed` after each commit,
+    /// told whether it changed the sidebar before a local write took it in.
+    pub fn follow(self: &Rc<Self>, committed: impl Fn(bool) + 'static) {
         let mut changes = self.changes.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             while changes.changed().await.is_ok() {
                 changes.borrow_and_update();
                 let Some(state) = weak.upgrade() else { break };
-                let Some(previous) = state.sync() else {
-                    continue;
-                };
-                if previous.sidebar != state.current.borrow().sidebar {
-                    sidebar_moved();
-                }
+                let previous = state.sync();
+                committed(
+                    previous
+                        .is_some_and(|previous| previous.sidebar != state.current.borrow().sidebar),
+                );
             }
         });
     }

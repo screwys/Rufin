@@ -130,10 +130,15 @@ impl Shell {
     pub(crate) fn follow_settings(self: &Rc<Self>) {
         request_sidebar_pins(self);
         let weak = Rc::downgrade(self);
-        self.settings.follow(move || {
-            if let Some(shell) = weak.upgrade() {
+        self.settings.follow(move |sidebar_moved| {
+            let Some(shell) = weak.upgrade() else { return };
+            if sidebar_moved {
                 shell.rebuild_sidebar_navigation();
             }
+            // Search results sort as their lists do, wherever a sort changed.
+            shell
+                .search_session
+                .resort(&shell.settings.current.borrow());
         });
     }
 

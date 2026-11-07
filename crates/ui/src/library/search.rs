@@ -622,7 +622,6 @@ impl SearchRouteProjection {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        self.session.resort(&shell.settings.current.borrow());
         if let Some(active) = self.active.borrow().as_ref() {
             let settings = shell
                 .settings
