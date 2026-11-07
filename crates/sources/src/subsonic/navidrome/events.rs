@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::{LIVE_CHANGE_LIMIT, RemoteItemChange};
+use crate::source::RemoteItemChange;
 use futures_util::TryStreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::{Duration, sleep};
@@ -58,6 +58,8 @@ impl SubsonicSource {
         mut changed: impl FnMut(RemoteItemChange) -> bool + Send,
     ) -> SourceResult<()> {
         let client = reqwest::Client::builder()
+            .referer(false)
+            .redirect(remote_http::authenticated_redirect_policy())
             .danger_accept_invalid_certs(self.trust_invalid_cert)
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(45))
@@ -141,18 +143,7 @@ fn event_change(event: &str, data: &str) -> Option<RemoteItemChange> {
                 .map(|id| format!("{resource}:{id}")),
         );
     }
-    upserts.sort();
-    upserts.dedup();
-    if upserts.len() > LIVE_CHANGE_LIMIT {
-        Some(RemoteItemChange::BoundaryLost)
-    } else if upserts.is_empty() {
-        None
-    } else {
-        Some(RemoteItemChange::Items {
-            upserts,
-            removals: Vec::new(),
-        })
-    }
+    (!upserts.is_empty()).then(|| RemoteItemChange::items(upserts, Vec::new()))
 }
 
 #[cfg(test)]
@@ -173,15 +164,15 @@ mod tests {
             )),
         );
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let scan = Scan::begin(&database, "source", "Source", "source", None)
+        let mut updates = catalog.changes();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
-        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
-            panic!("initial publication");
-        };
+
         let cancellation = library::ReadCancellation::new();
         for (id, status, empty, identical, expected) in [
             ("old", 200, false, false, vec!["old"]),
@@ -218,21 +209,25 @@ mod tests {
                 .and(wiremock::matchers::query_param("type", "newest")).and(wiremock::matchers::query_param("size", "24"))
                 .respond_with(ResponseTemplate::new(status).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","albumList2":{"album":entries}}})))
                 .expect(1).mount(&server).await;
-            let outcome = source
-                .apply_items(&database, vec![format!("album:{id}")], vec![])
+            source
+                .apply_items(&catalog, vec![format!("album:{id}")], vec![])
                 .await
                 .unwrap();
-            assert_eq!(
-                matches!(outcome, library::ScanOutcome::Identical(_)),
-                identical
-            );
-            assert!(matches!(
-                outcome,
-                library::ScanOutcome::Changed(_) | library::ScanOutcome::Identical(_)
-            ));
-            let home = database
+            if identical {
+                assert!(
+                    crate::published(&mut updates).is_none(),
+                    "unchanged native data stays quiet"
+                );
+            } else {
+                assert!(crate::published(&mut updates).is_some());
+            }
+            let home = catalog
                 .home_page(
-                    publication.source,
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&crate::SourceId::new("source"))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,
@@ -245,7 +240,7 @@ mod tests {
                 home.newly_added
                     .albums
                     .iter()
-                    .all(|album| album.album.track_count == 1)
+                    .all(|album| album.album.summary.track_count == 1)
             );
             let mut titles = home
                 .newly_added
@@ -278,35 +273,70 @@ mod tests {
         let mut item = serde_json::json!({"id":"track","title":"Track","duration":42,"starred":false,"rating":1});
         let baseline = navidrome_source_with_token(&server, "unused");
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
+        let mut updates = catalog.changes();
         let marker = library::Freshness::new(b"catalog".to_vec()).unwrap();
-        let mut scan = Scan::begin(
-            &database,
-            "source",
-            "Source",
-            "source",
-            Some(marker.clone()),
-        )
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
+            .await
+            .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        let stamp = Some(observation.start_observation().await.unwrap());
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch
+                .tracks
+                .extend_from_slice(&[(track_from_navidrome(&baseline, "track", &item)).clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
         .await
         .unwrap();
-        stage_track(&mut scan, track_from_navidrome(&baseline, "track", &item))
-            .await
-            .unwrap();
-        stage_track(
-            &mut scan,
-            track_from_navidrome(
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.tracks.extend_from_slice(&[(track_from_navidrome(
                 &baseline,
                 "second",
                 &serde_json::json!({"id":"second","title":"Second"}),
-            ),
-        )
+            ))
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
         .await
         .unwrap();
-        let library::ScanOutcome::Changed(_) = scan.finish().await.unwrap() else {
-            panic!("initial publication")
-        };
+        (async {
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker), None)
+                    .await
+                    .unwrap();
+            }
+            Ok::<_, library::LibraryError>(())
+        })
+        .await
+        .unwrap();
+        assert!(
+            crate::published(&mut updates)
+                .expect("catalog update")
+                .1
+                .intersects(sources::Shown::CATALOG)
+        );
         item["starred"] = true.into();
         item["rating"] = 4.into();
         Mock::given(method("GET"))
@@ -334,8 +364,8 @@ mod tests {
         provider
             .listen_navidrome_changes(|change| match change {
                 RemoteItemChange::BoundaryLost => true,
-                RemoteItemChange::Items { upserts: items, .. } => {
-                    upserts = items;
+                RemoteItemChange::Items(items) => {
+                    upserts = items.into_keys().collect();
                     false
                 }
             })
@@ -346,32 +376,33 @@ mod tests {
             configuration.source_id,
             crate::source::Implementation::OpenSubsonic(provider),
         );
-        assert!(matches!(
-            source
-                .apply_items(&database, upserts, vec![])
-                .await
-                .unwrap(),
-            library::ScanOutcome::Changed(_)
-        ));
+        source.apply_items(&catalog, upserts, vec![]).await.unwrap();
+        let mut update = sources::Shown::default();
+        while let Ok(change) = updates.try_recv() {
+            for (_, part) in sources::Shown::of(&change) {
+                update |= part;
+            }
+        }
+        assert!(update.intersects(sources::Shown::STATE));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),
             "track",
             "navidrome:track:track",
         );
-        let row = database
-            .track_row_by_uri(&uri, &cancellation)
+        let row = catalog
+            .track(&(&uri), &cancellation)
             .await
             .unwrap()
             .unwrap();
-        assert!(row.favorite);
-        assert_eq!(row.rating, Some(8));
-        assert_eq!(row.title, "Track");
+        assert!(row.state.favorite);
+        assert_eq!(row.state.rating, Some(8));
+        assert_eq!(row.metadata.title, "Track");
         assert!(
-            Scan::accept_freshness(&database, "source", &marker, &cancellation)
+            catalog
+                .accept_freshness("source", &marker, &cancellation)
                 .await
                 .unwrap()
-                .is_some()
         );
     }
 

@@ -1,17 +1,40 @@
-//! Owns bounded cached Search and complete route-filter orders over normalized facts.
-//! Callers receive final rows and never merge related Store results.
+//! Search over the resident Catalog, and the rows of server search results by object id.
 
-use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
+use crate::catalog::views::{Context, holds};
+use crate::read::Members;
 use crate::{
-    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Database, FolderKey, LibraryResult, ReadCancellation,
-    SourceKey, TrackKey, TrackRow,
-    collections::{load_album_rows, load_artist_rows},
-    tracks::load_track_rows,
+    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Catalog, Collection, FolderKey, Item, LibraryField,
+    LibraryResult, ListKind, ListRead, MemberRead, Read, ReadCancellation, Row, SourceKey,
+    TrackKey, TrackRow,
 };
 
 const SEARCH_LIMIT: usize = 100;
 const SEARCH_TEXT_LIMIT: usize = 256;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum SearchMode {
+    #[default]
+    Title,
+    Lyrics,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct LyricsSnippet {
+    pub parts: Vec<LyricsSnippetPart>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct LyricsSnippetPart {
+    pub text: String,
+    pub highlighted: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchRequest {
@@ -52,9 +75,13 @@ pub struct SearchResults {
     pub tracks: Vec<TrackRow>,
     pub albums: Vec<AlbumRow>,
     pub artists: Vec<ArtistRow>,
+    pub lyrics: BTreeMap<crate::TrackKey, LyricsSnippet>,
 }
 
-impl Database {
+impl Catalog {
+    /// The rows of a server's search results by object id in music folder `folder`, kept to it
+    /// as the lists of that folder hold them unless the server `kept` its results to it already
+    /// (its Catalog may not hold every result's folder yet).
     pub async fn search_rows_by_objects(
         &self,
         source: SourceKey,
@@ -74,33 +101,121 @@ impl Database {
         .any(|len| len > SEARCH_LIMIT)
         {
             return Err(crate::LibraryError::InvalidRequest(
-                "Search identity page exceeds 100 rows".to_string(),
+                "Search identity page exceeds 100 rows".into(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let track_keys = object_track_keys(&mut transaction, source, track_objects).await?;
-        let album_keys = object_album_keys(&mut transaction, source, album_objects).await?;
-        let artist_keys = object_artist_keys(&mut transaction, source, artist_objects).await?;
-        let tracks = load_track_rows(&mut transaction, &track_keys).await?;
-        let albums = load_album_rows(&mut transaction, source, &album_keys, folder).await?;
-        let artists = load_artist_rows(
-            &mut transaction,
-            source,
-            &artist_keys,
-            album_artists,
-            folder,
-        )
-        .await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(SearchResults {
-            tracks,
-            albums,
-            artists,
-        })
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let tracks = self
+            .track_keys_by_objects(&mut connection, Some(source), track_objects)
+            .await?;
+        let keys = {
+            let snapshot = self.snapshot();
+            let owner = snapshot
+                .source_slot(source)
+                .unwrap_or(crate::catalog::snapshot::NO_SOURCE);
+            let keys = |kind, objects: &[String]| {
+                let objects = (objects.iter()).map(|object| (owner, object.as_str()));
+                snapshot
+                    .object_keys(kind, &objects.collect::<Vec<_>>())
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            };
+            let mut keys: [Vec<i64>; 3] = [
+                tracks,
+                keys(crate::CatalogKind::Album, album_objects),
+                keys(crate::CatalogKind::Artist, artist_objects),
+            ];
+            let context = Context::new(&snapshot);
+            // The server searched the folder; a folder the Catalog does not hold finds none.
+            if context.folder_slot(folder, Some(owner)).is_none() {
+                keys = Default::default();
+            }
+            keys
+        };
+        self.search_rows(&mut connection, &keys, album_artists, folder)
+            .await
     }
 
+    /// The rows of search results, in one statement.
+    pub(crate) async fn search_rows(
+        &self,
+        connection: &mut sqlx::SqliteConnection,
+        keys: &[Vec<i64>; 3],
+        album_artists: bool,
+        folder: Option<FolderKey>,
+    ) -> LibraryResult<SearchResults> {
+        let items = keys[0]
+            .iter()
+            .map(|key| Item::Track {
+                key: TrackKey::from_raw(*key),
+                entry: None,
+            })
+            .chain(
+                keys[1]
+                    .iter()
+                    .map(|key| Item::Album(AlbumKey::from_raw(*key))),
+            )
+            .chain(keys[2].iter().map(|key| Item::Artist {
+                key: ArtistKey::from_raw(*key),
+                album_artist: album_artists,
+            }))
+            .collect::<Vec<_>>();
+        // Each row counts in music folder `folder` as the one rule narrows its kind, with the
+        // plays of every kind, as Search orders by any list's sort.
+        let shape = crate::read::Shape {
+            activity: true,
+            folder,
+            ..crate::read::Shape::of(None)
+        };
+        let rows = self.rows_of_on(connection, &items, &shape, true).await?;
+        let mut results = SearchResults::default();
+        for row in rows {
+            match row {
+                Row::Track(row) => results.tracks.push(row),
+                Row::Album(row) => results.albums.push(row),
+                Row::Artist(row) => results.artists.push(row),
+                _ => {}
+            }
+        }
+        Ok(results)
+    }
+
+    /// `results` read again from the current Catalog: the same rows with their current
+    /// totals, favorites, ratings and downloads.
+    pub async fn reread_search(
+        &self,
+        results: &SearchResults,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<SearchResults> {
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let keys = [
+            results
+                .tracks
+                .iter()
+                .map(|row| row.track_key.raw())
+                .collect(),
+            results
+                .albums
+                .iter()
+                .map(|row| row.album_key.raw())
+                .collect(),
+            results
+                .artists
+                .iter()
+                .map(|row| row.artist_key.raw())
+                .collect(),
+        ];
+        let album_artists = results.artists.iter().any(|row| row.album_artist);
+        let mut reread = self
+            .search_rows(&mut connection, &keys, album_artists, folder)
+            .await?;
+        reread.lyrics.clone_from(&results.lyrics);
+        Ok(reread)
+    }
+
+    /// Tracks, albums and artists of a source whose texts hold every search term.
     pub async fn search(
         &self,
         source: SourceKey,
@@ -112,168 +227,68 @@ impl Database {
         if request.query.is_empty() {
             return Ok(SearchResults::default());
         }
+        // A one-letter term matches a whole word; a longer one matches anywhere.
         let terms = request
             .query
             .split_whitespace()
-            .filter(|term| !term.is_empty())
+            .map(|term| (term, term.chars().count() == 1))
             .collect::<Vec<_>>();
-        let terms_json = serde_json::to_string(&terms)?;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let track_keys = sqlx::query_scalar::<_, TrackKey>(
-            "SELECT track_key FROM tracks
-             WHERE source_key=?1 AND NOT EXISTS (
-               SELECT 1 FROM json_each(?2) term
-               WHERE CASE WHEN length(term.value)=1
-                     THEN instr(' '||normalized_search||' ',' '||term.value||' ')
-                     ELSE instr(normalized_search,term.value) END=0
-                 AND CAST(year AS TEXT)<>term.value
-             )
-               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=tracks.track_key AND scope.folder_key=?4))
-             ORDER BY sort_text, track_key LIMIT ?3",
-        )
-        .bind(source)
-        .bind(&terms_json)
-        .bind(request.limit as i64)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let tracks = load_track_rows(&mut transaction, &track_keys).await?;
-        let album_keys = sqlx::query_scalar::<_, AlbumKey>(
-            "SELECT album.album_key FROM albums AS album
-             WHERE album.source_key=?1 AND NOT EXISTS (
-               SELECT 1 FROM json_each(?2) term WHERE
-                 CASE WHEN length(term.value)=1
-                   THEN instr(' '||album.normalized_title || ' ' || lower(album.display_artist)||' ',' '||term.value||' ')
-                   ELSE instr(album.normalized_title || ' ' || lower(album.display_artist),term.value) END=0
-                 AND CAST(album.year AS TEXT)<>term.value
-                 AND NOT EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND CASE WHEN length(term.value)=1 THEN instr(' '||artist.normalized_name||' ',' '||term.value||' ') ELSE instr(artist.normalized_name,term.value) END>0)
-                 AND NOT EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND CASE WHEN length(term.value)=1 THEN instr(' '||genre.normalized_name||' ',' '||term.value||' ') ELSE instr(genre.normalized_name,term.value) END>0)
-             )
-               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?4))
-             ORDER BY album.sort_text, album.album_key LIMIT ?3",
-        )
-        .bind(source)
-        .bind(&terms_json)
-        .bind(request.limit as i64)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let albums = load_album_rows(&mut transaction, source, &album_keys, folder).await?;
-        let artist_keys = sqlx::query_scalar::<_, ArtistKey>(
-            "SELECT artist.artist_key FROM artists artist
-             WHERE artist.source_key=?1 AND NOT EXISTS (
-               SELECT 1 FROM json_each(?2) term WHERE CASE WHEN length(term.value)=1
-                 THEN instr(' '||artist.normalized_name||' ',' '||term.value||' ')
-                 ELSE instr(artist.normalized_name,term.value) END=0
-             )
-               AND ((?5=0 AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.artist_key=artist.artist_key)) OR (?5=1 AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key)))
-               AND (?4 IS NULL OR (?5=0 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?4)) OR (?5=1 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?4)))
-             ORDER BY artist.sort_text,artist.artist_key LIMIT ?3",
-        )
-        .bind(source)
-        .bind(&terms_json)
-        .bind(request.limit as i64)
-        .bind(folder)
-        .bind(album_artists)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let artists = load_artist_rows(
-            &mut transaction,
-            source,
-            &artist_keys,
-            album_artists,
+        let tracks = MemberRead {
             folder,
-        )
-        .await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(SearchResults {
-            tracks,
-            albums,
-            artists,
-        })
+            ..MemberRead::new(Collection::Source(source))
+        };
+        let tracks = self.order(&Read::Members(tracks), cancellation).await?;
+        let albums = ListRead {
+            folder,
+            ..ListRead::new(ListKind::Albums, Some(source), LibraryField::Title)
+        };
+        let albums = self.order(&Read::List(albums), cancellation).await?;
+        let artists = ListRead {
+            folder,
+            ..ListRead::new(
+                ListKind::Artists {
+                    album_artist: album_artists,
+                },
+                Some(source),
+                LibraryField::Title,
+            )
+        };
+        let artists = self.order(&Read::List(artists), cancellation).await?;
+        let keys = {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot);
+            let all = |holds: &dyn Fn(&str, bool) -> bool| {
+                terms.iter().all(|(term, word)| holds(term, *word))
+            };
+            let found = |order: &crate::Order, kept: &dyn Fn(u32) -> bool| match &order.0.members {
+                Members::Tracks(keys) | Members::Keys(keys) => keys
+                    .iter()
+                    .filter(|key| kept(**key))
+                    .map(|key| i64::from(*key))
+                    .take(request.limit)
+                    .collect(),
+                _ => Vec::new(),
+            };
+            [
+                found(&tracks, &|key| {
+                    snapshot.tracks.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| context.track_holds(record, term, word))
+                    })
+                }),
+                found(&albums, &|key| {
+                    snapshot.albums.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| context.album_holds(record, term, word))
+                    })
+                }),
+                found(&artists, &|key| {
+                    snapshot.artists.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| holds(&[snapshot.text(record.name)], None, term, word))
+                    })
+                }),
+            ]
+        };
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        self.search_rows(&mut connection, &keys, album_artists, folder)
+            .await
     }
-}
-
-async fn object_track_keys(
-    connection: &mut SqliteConnection,
-    source: SourceKey,
-    objects: &[String],
-) -> LibraryResult<Vec<TrackKey>> {
-    object_keys(connection, source, objects, "tracks", "track_key").await
-}
-
-async fn object_album_keys(
-    connection: &mut SqliteConnection,
-    source: SourceKey,
-    objects: &[String],
-) -> LibraryResult<Vec<AlbumKey>> {
-    if objects.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut query = object_key_query(objects, "albums", "album_key");
-    query.push_bind(source).push(" ORDER BY requested.position");
-    Ok(query
-        .build_query_scalar()
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
-}
-
-async fn object_artist_keys(
-    connection: &mut SqliteConnection,
-    source: SourceKey,
-    objects: &[String],
-) -> LibraryResult<Vec<ArtistKey>> {
-    if objects.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut query = object_key_query(objects, "artists", "artist_key");
-    query.push_bind(source).push(" ORDER BY requested.position");
-    Ok(query
-        .build_query_scalar()
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
-}
-
-async fn object_keys(
-    connection: &mut SqliteConnection,
-    source: SourceKey,
-    objects: &[String],
-    table: &'static str,
-    key: &'static str,
-) -> LibraryResult<Vec<TrackKey>> {
-    if objects.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut query = object_key_query(objects, table, key);
-    query.push_bind(source).push(" ORDER BY requested.position");
-    Ok(query
-        .build_query_scalar()
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
-}
-
-fn object_key_query(
-    objects: &[String],
-    table: &'static str,
-    key: &'static str,
-) -> QueryBuilder<Sqlite> {
-    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(object_id,position) AS (");
-    query.push_values(
-        objects.iter().cloned().enumerate(),
-        |mut row, (position, object)| {
-            row.push_bind(object).push_bind(position as i64);
-        },
-    );
-    query
-        .push(") SELECT entity.")
-        .push(key)
-        .push(" FROM requested JOIN ")
-        .push(table)
-        .push(" entity ON entity.object_id=requested.object_id WHERE entity.source_key=");
-    query
 }

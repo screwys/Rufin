@@ -16,9 +16,9 @@ use url::Url;
 use super::dav;
 use crate::{SourceError, SourceResult};
 
-pub(crate) fn custom_headers(values: &[(String, String)]) -> SourceResult<HeaderMap> {
+pub(crate) fn custom_headers(values: &[crate::FileHeader]) -> SourceResult<HeaderMap> {
     let mut headers = HeaderMap::new();
-    for (name, value) in values {
+    for crate::FileHeader { name, value } in values {
         headers.insert(
             HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| SourceError::InvalidConfig("Invalid HTTP header name".into()))?,
@@ -73,7 +73,7 @@ impl WebDavClient {
                 .map_err(|_| SourceError::InvalidConfig("Invalid WebDAV collection URL".into()))?
                 .push("");
         }
-        root.set_path(&normalized_path(&root));
+        canonical_path(&mut root);
         let mut http = Client::builder()
             .user_agent(concat!("Rufin/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(20))
@@ -131,7 +131,7 @@ impl WebDavClient {
         let mut url = collection
             .join(href)
             .map_err(|e| SourceError::Other(e.to_string()))?;
-        url.set_path(&normalized_path(&url));
+        canonical_path(&mut url);
         let root = self.root.path().trim_end_matches('/');
         if url.origin() != self.root.origin()
             || !(url.path() == root
@@ -155,7 +155,7 @@ impl WebDavClient {
         depth: u8,
         accept: impl FnMut(dav::Entry) -> F,
     ) -> SourceResult<()> {
-        const PROPERTIES: &[u8] = br#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><d:sync-token/><o:id/><o:fileid/><o:permissions/></d:prop></d:propfind>"#;
+        const PROPERTIES: &[u8] = br#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><o:id/><o:fileid/><o:permissions/></d:prop></d:propfind>"#;
         let mut headers = xml_headers();
         headers.insert(
             "Depth",
@@ -180,9 +180,7 @@ impl WebDavClient {
         self.list(url, 0, |entry: dav::Entry| {
             std::future::ready((|| {
                 let location = self.resolve_href(url, &entry.href)?;
-                if location.path().trim_end_matches('/')
-                    != normalized_path(url).trim_end_matches('/')
-                {
+                if location.path().trim_end_matches('/') != url.path().trim_end_matches('/') {
                     return Ok(());
                 }
                 if let Some(status) = entry.status.filter(|status| !(200..300).contains(status)) {
@@ -201,29 +199,6 @@ impl WebDavClient {
         })
         .await?;
         found.ok_or(SourceError::NotFound)
-    }
-
-    pub async fn sync<F: std::future::Future<Output = SourceResult<()>>>(
-        &self,
-        url: &Url,
-        token: &str,
-        accept: impl FnMut(dav::Entry) -> F,
-    ) -> SourceResult<Option<String>> {
-        let token = quick_xml::escape::escape(token);
-        let body = format!(
-            r#"<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:sync-token>{token}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><o:id/><o:fileid/><o:permissions/></d:prop></d:sync-collection>"#
-        );
-        let response = self
-            .request(
-                Method::from_bytes(b"REPORT").unwrap(),
-                url,
-                xml_headers(),
-                Body::Bytes(body.as_bytes()),
-            )
-            .await?;
-        require_status(&response, &[StatusCode::MULTI_STATUS])?;
-        let stream = response.bytes_stream().map_err(std::io::Error::other);
-        dav::parse(BufReader::new(StreamReader::new(stream)), accept).await
     }
 
     /// A short exclusive write lock, when the server implements DAV locking.
@@ -335,6 +310,22 @@ impl WebDavClient {
         require_status(&response, &[StatusCode::CREATED, StatusCode::NO_CONTENT])
     }
 
+    /// Creates a collection; one already there is left as it is.
+    pub async fn create_collection(&self, url: &Url) -> SourceResult<()> {
+        let response = self
+            .request(
+                Method::from_bytes(b"MKCOL").unwrap(),
+                url,
+                HeaderMap::new(),
+                Body::Empty,
+            )
+            .await?;
+        require_status(
+            &response,
+            &[StatusCode::CREATED, StatusCode::METHOD_NOT_ALLOWED],
+        )
+    }
+
     pub async fn remove(&self, url: &Url) -> SourceResult<()> {
         let response = self
             .request(Method::DELETE, url, HeaderMap::new(), Body::Empty)
@@ -442,18 +433,33 @@ impl WebDavClient {
     }
 }
 
-// DAV servers can return lowercase percent escapes for the same requested path.
-fn normalized_path(url: &Url) -> String {
-    let mut path = url.path().as_bytes().to_vec();
-    for index in 0..path.len().saturating_sub(2) {
-        if path[index] == b'%'
-            && path[index + 1].is_ascii_hexdigit()
-            && path[index + 2].is_ascii_hexdigit()
-        {
-            path[index + 1..=index + 2].make_ascii_uppercase();
-        }
-    }
-    String::from_utf8(path).expect("URL paths are UTF-8")
+// DAV servers escape names their own way, such as `%28` for `(` or a lowercase `%e8`.
+// The root and hrefs re-escape each segment's decoded bytes with url's SPECIAL_PATH_SEGMENT
+// set, which `push` gives request URLs, so they match and non-UTF-8 names keep their bytes.
+fn canonical_path(url: &mut Url) {
+    const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'#')
+        .add(b'?')
+        .add(b'{')
+        .add(b'}')
+        .add(b'/')
+        .add(b'%')
+        .add(b'\\');
+    let path = url
+        .path()
+        .split('/')
+        .map(|segment| {
+            let bytes = std::borrow::Cow::from(percent_encoding::percent_decode_str(segment));
+            percent_encoding::percent_encode(&bytes, SEGMENT).to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    url.set_path(&path);
 }
 
 fn xml_headers() -> HeaderMap {

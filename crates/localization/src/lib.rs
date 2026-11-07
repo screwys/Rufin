@@ -4,6 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub use android::{install_catalogs, tr, trn};
+
 pub const DOMAIN: &str = "rufin";
 const ENGLISH_LANGUAGE_PREFERENCE: &str = "en";
 pub const SYSTEM_LANGUAGE_PREFERENCE: &str = "system";
@@ -76,6 +81,7 @@ pub struct LanguageOption {
 }
 
 /// Binds the Rufin gettext domain before GTK initializes the process locale.
+#[cfg(not(target_os = "android"))]
 pub fn initialize() -> Result<(), String> {
     let localedir = locale_dir();
     gettextrs::bindtextdomain(DOMAIN, &localedir).map_err(|error| {
@@ -133,6 +139,10 @@ fn selected_language_preference(
 }
 
 pub fn language_options() -> Vec<LanguageOption> {
+    language_options_for(available_translation_language_ids())
+}
+
+pub fn language_options_for(ids: impl IntoIterator<Item = String>) -> Vec<LanguageOption> {
     let mut seen = BTreeSet::new();
     let mut options = vec![LanguageOption {
         id: default_language_preference(),
@@ -145,7 +155,7 @@ pub fn language_options() -> Vec<LanguageOption> {
     });
     seen.insert(ENGLISH_LANGUAGE_PREFERENCE.to_string());
 
-    for id in available_translation_language_ids() {
+    for id in ids {
         let id = sanitize_language_preference(&id);
         if id == SYSTEM_LANGUAGE_PREFERENCE || is_english_language(&id) || !seen.insert(id.clone())
         {
@@ -172,10 +182,12 @@ pub fn language_option_index(options: &[LanguageOption], language_preference: &s
         .unwrap_or_default() as u32
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn tr(message: &str) -> String {
     gettextrs::dgettext(DOMAIN, message)
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn trn(singular: &str, plural: &str, count: u64) -> String {
     gettextrs::dngettext(
         DOMAIN,

@@ -4,51 +4,64 @@ use serde::Serialize;
 impl JellyfinEmbySource {
     pub(crate) fn jellyfin_download(
         &self,
-        track_object_id: &str,
-        quality: StreamQuality,
+        track: &str,
+        quality: crate::DownloadQuality,
+        channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
-        if quality == StreamQuality::Original {
-            let stream = stream_descriptor(
+        let original = || {
+            stream_descriptor(
                 &self.base_url,
                 &self.user_id,
                 &self.device_id,
                 &self.access_token,
                 self.trust_invalid_cert,
-                track_object_id,
-                quality,
-            )?;
-            return Ok(crate::ResolvedDownload::new(stream, None));
-        }
-
-        let StreamQuality::MaxBitrateKbps(kbps) = quality else {
-            unreachable!("original downloads return before transcoding")
+                track,
+                StreamQuality::Original,
+            )
         };
-        let raw_track_id = raw_item_id(track_object_id);
-        let bitrate = kbps
-            .min(super::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)
-            .saturating_mul(1_000)
-            .to_string();
-        let mut url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Universal"))?;
+        let Some(encoding) = quality.encoding() else {
+            return Ok(crate::ResolvedDownload::ready(original()?, None));
+        };
+        let channels = if encoding.stereo() {
+            2
+        } else {
+            channels.unwrap_or(2)
+        };
+        let limit = if channels >= 6 { 640 } else { channels * 128 };
+        if encoding.codec != library::AudioCodec::Flac
+            && encoding.bitrate_kbps.is_some_and(|rate| rate > limit)
+        {
+            return Ok(crate::ResolvedDownload::encode(original()?, quality));
+        }
+        let mut url = endpoint(
+            &self.base_url,
+            &format!("Audio/{}/Universal", raw_item_id(track)),
+        )?;
+        let container = match encoding.codec {
+            library::AudioCodec::Opus | library::AudioCodec::Vorbis => "ogg",
+            _ => encoding.codec.name(),
+        };
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("DeviceId", &self.device_id)
-            .append_pair("api_key", &self.access_token)
-            .append_pair("transcodingContainer", "ogg")
-            .append_pair("audioCodec", "opus")
-            .append_pair("audioBitRate", &bitrate);
-        let mut redacted_url = url.clone();
-        redacted_url
-            .query_pairs_mut()
-            .clear()
-            .append_pair("UserId", &self.user_id)
-            .append_pair("DeviceId", &self.device_id)
-            .append_pair("api_key", "<redacted>")
-            .append_pair("transcodingContainer", "ogg")
-            .append_pair("audioCodec", "opus")
-            .append_pair("audioBitRate", &bitrate);
-        let stream = ResolvedStream::with_redacted(url.to_string(), redacted_url.to_string())
-            .with_trust_invalid_certificate(self.trust_invalid_cert);
-        Ok(crate::ResolvedDownload::new(stream, Some("ogg")))
+            .append_pair("ApiKey", &self.access_token)
+            .append_pair("transcodingContainer", container)
+            .append_pair("transcodingProtocol", "http")
+            .append_pair("audioCodec", encoding.codec.name());
+        if encoding.codec != library::AudioCodec::Flac
+            && let Some(rate) = encoding.bitrate_kbps
+        {
+            url.query_pairs_mut()
+                .append_pair("audioBitRate", &rate.saturating_mul(1000).to_string());
+        }
+        if encoding.stereo() {
+            url.query_pairs_mut().append_pair("maxAudioChannels", "2");
+        }
+        let stream = ResolvedStream::new(url.to_string())
+            .with_trust_invalid_certificate(self.trust_invalid_cert)
+            .with_content_type(Some(encoding.codec.content_type().into()))
+            .with_transcoding(true);
+        Ok(crate::ResolvedDownload::ready(stream, Some(encoding.codec)))
     }
 
     pub(crate) async fn jellyfin_create_playlist(
@@ -141,7 +154,7 @@ pub(super) fn stream_descriptor(
             .append_pair("UserId", user_id)
             .append_pair("DeviceId", device_id)
             .append_pair("Static", static_stream)
-            .append_pair("api_key", access_token);
+            .append_pair("ApiKey", access_token);
         if let Some(max_bitrate) = &max_bitrate {
             query
                 .append_pair("MaxStreamingBitrate", max_bitrate)
@@ -157,7 +170,7 @@ pub(super) fn stream_descriptor(
             .append_pair("UserId", user_id)
             .append_pair("DeviceId", device_id)
             .append_pair("Static", static_stream)
-            .append_pair("api_key", "<redacted>");
+            .append_pair("ApiKey", "<redacted>");
         if let Some(max_bitrate) = &max_bitrate {
             redacted_query
                 .append_pair("MaxStreamingBitrate", max_bitrate)

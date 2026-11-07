@@ -14,42 +14,16 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(target_os = "android")]
+pub mod android;
+#[cfg(target_os = "android")]
+use android::SystemKeyringBackend;
+
 const CONFIG_SECRET_FORMAT: &str = "config-base64";
 const KEYRING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 static SECRET_SERVICE: Mutex<Option<(tokio::runtime::Runtime, Arc<oo7::Keyring>)>> =
     Mutex::new(None);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SecretStorageMode {
-    ConfigFile,
-    SystemKeyring,
-}
-
-impl Default for SecretStorageMode {
-    fn default() -> Self {
-        default_secret_storage_mode()
-    }
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "windows",
-    all(unix, not(any(target_os = "android", target_vendor = "apple")))
-))]
-fn default_secret_storage_mode() -> SecretStorageMode {
-    SecretStorageMode::SystemKeyring
-}
-
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "windows",
-    all(unix, not(any(target_os = "android", target_vendor = "apple")))
-)))]
-fn default_secret_storage_mode() -> SecretStorageMode {
-    SecretStorageMode::ConfigFile
-}
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -719,6 +693,7 @@ fn native_credential_error(error: keyring_core::Error) -> SecretError {
 }
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -727,6 +702,7 @@ fn native_credential_error(error: keyring_core::Error) -> SecretError {
 struct SystemKeyringBackend;
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -740,6 +716,7 @@ impl SystemKeyringBackend {
 }
 
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
@@ -768,7 +745,7 @@ impl SecretStore for SystemKeyringBackend {
 mod tests {
     use super::{
         CachedSecretStore, ConfigSecretStore, MemorySecretStore, SecretError, SecretKey,
-        SecretResult, SecretStorageMode, SecretStore, SwitchableSecretStore,
+        SecretResult, SecretStore, SwitchableSecretStore,
     };
     #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
     use super::{PROJECT_NAME, SystemKeyringStore};
@@ -796,35 +773,6 @@ mod tests {
         );
         store.delete_token(SOURCE).expect("delete token");
         assert_eq!(store.load_token(SOURCE).expect("load token"), None);
-    }
-
-    #[test]
-    fn secret_storage_mode_preserves_stored_names() {
-        assert_eq!(
-            serde_json::to_string(&SecretStorageMode::ConfigFile)
-                .expect("serialize config-file mode"),
-            "\"config-file\""
-        );
-        assert_eq!(
-            serde_json::from_str::<SecretStorageMode>("\"system-keyring\"")
-                .expect("deserialize system-keyring mode"),
-            SecretStorageMode::SystemKeyring
-        );
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "windows",
-            all(unix, not(any(target_os = "android", target_vendor = "apple")))
-        ))]
-        assert_eq!(
-            SecretStorageMode::default(),
-            SecretStorageMode::SystemKeyring
-        );
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            all(unix, not(any(target_os = "android", target_vendor = "apple")))
-        )))]
-        assert_eq!(SecretStorageMode::default(), SecretStorageMode::ConfigFile);
     }
 
     #[test]

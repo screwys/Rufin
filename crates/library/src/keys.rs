@@ -10,6 +10,12 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 #[serde(transparent)]
 pub struct SourceId(String);
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(SourceId, String, {
+    lower: |value| value.to_string(),
+    try_lift: |value| Ok(SourceId::new(value)),
+});
+
 impl SourceId {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
@@ -28,8 +34,16 @@ impl fmt::Display for SourceId {
     }
 }
 
+/// Every entity word that source URIs carry.
+pub(crate) fn source_entity_kinds() -> impl Iterator<Item = &'static str> {
+    ["track", "album", "artist"]
+        .into_iter()
+        .chain(crate::tags::TAG_TABLES.iter().map(|table| table.name))
+        .chain(["folder"])
+}
+
 pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) -> String {
-    debug_assert!(matches!(entity_kind, "track" | "album" | "artist"));
+    debug_assert!(source_entity_kinds().any(|kind| kind == entity_kind));
     format!(
         "{}{}",
         source_entity_prefix(source, entity_kind),
@@ -38,14 +52,14 @@ pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) 
 }
 
 pub(crate) fn source_entity_prefix(source: &SourceId, entity_kind: &str) -> String {
-    debug_assert!(matches!(entity_kind, "track" | "album" | "artist"));
+    debug_assert!(source_entity_kinds().any(|kind| kind == entity_kind));
     format!("rufin:source/{entity_kind}/{}/", encode(source.as_str()))
 }
 
 pub fn source_entity_parts(uri: &str) -> Option<(SourceId, String, String)> {
     let mut parts = uri.strip_prefix("rufin:source/")?.split('/');
     let kind = parts.next()?;
-    if !matches!(kind, "track" | "album" | "artist") {
+    if !source_entity_kinds().any(|known| known == kind) {
         return None;
     }
     let source = decode(parts.next()?)?;
@@ -87,11 +101,15 @@ pub fn cue_media_parts(uri: &str) -> Option<(String, String, i64, i64)> {
 }
 
 pub fn normalize_direct_media_uri(uri: &str) -> Option<String> {
+    if document_media_id(uri).is_some() {
+        return Some(uri.to_owned());
+    }
     let mut parsed = url::Url::parse(uri).ok()?;
-    if !matches!(parsed.scheme(), "file" | "http" | "https")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
+    // Android providers own the complete document identity, including user/profile routing.
+    if parsed.scheme() == "content" {
+        return Some(uri.to_owned());
+    }
+    if !matches!(parsed.scheme(), "file" | "http" | "https") {
         return None;
     }
     parsed.set_fragment(None);
@@ -104,6 +122,43 @@ pub fn file_media_path(uri: &str) -> Option<std::path::PathBuf> {
         return None;
     }
     parsed.to_file_path().ok()
+}
+
+/// Private document locators carry provider identity separately from the granted URI.
+pub fn document_locator_fragment(native_id: &str, uri: &str) -> String {
+    format!("{native_id}!{}", utf8_percent_encode(uri, NON_ALPHANUMERIC))
+}
+
+pub fn document_fragment_parts(fragment: &str) -> Option<(String, String)> {
+    let (native_id, uri) = fragment.split_once('!')?;
+    Some((
+        native_id.to_owned(),
+        percent_decode_str(uri).decode_utf8().ok()?.into_owned(),
+    ))
+}
+
+pub fn document_locator_parts(locator: &str) -> Option<(String, String)> {
+    let uri = url::Url::parse(locator).ok()?;
+    if uri.scheme() != "rufin-document" {
+        return None;
+    }
+    document_fragment_parts(uri.fragment()?)
+}
+
+pub fn document_access_uri(locator: &str) -> Option<String> {
+    document_locator_parts(locator).map(|(_, uri)| uri)
+}
+
+pub fn document_media_uri(native_id: &str) -> String {
+    format!("rufin:document/{}", encode(native_id))
+}
+
+pub fn document_media_id(uri: &str) -> Option<String> {
+    let id = uri.strip_prefix("rufin:document/")?;
+    if id.is_empty() {
+        return None;
+    }
+    percent_decode_str(id).decode_utf8().ok().map(String::from)
 }
 
 fn encode(value: &str) -> String {
@@ -136,6 +191,12 @@ macro_rules! integer_key {
         #[sqlx(transparent)]
         pub struct $name(i64);
 
+        #[cfg(feature = "bindings")]
+        uniffi::custom_type!($name, i64, {
+            lower: |value| value.raw(),
+            try_lift: |value| Ok($name::from_raw(value)),
+        });
+
         impl $name {
             pub const fn from_raw(value: i64) -> Self {
                 Self(value)
@@ -162,6 +223,7 @@ integer_key!(GenreKey);
 integer_key!(MoodKey);
 integer_key!(FolderKey);
 integer_key!(PlaylistKey);
+integer_key!(PlaylistFolderKey);
 integer_key!(PlaylistEntryKey);
 integer_key!(SmartPlaylistKey);
 integer_key!(ListenKey);
@@ -199,12 +261,17 @@ mod tests {
     }
 
     #[test]
-    fn direct_identity_rejects_credentials_and_normalizes_paths() {
+    fn direct_identity_preserves_authentication_and_normalizes_paths() {
         assert_eq!(
             normalize_direct_media_uri("https://example.test/a/../song.flac#fragment").as_deref(),
             Some("https://example.test/song.flac")
         );
-        assert!(normalize_direct_media_uri("https://user:secret@example.test/song").is_none());
+        for uri in [
+            "https://user:secret@example.test/song",
+            "https://example.test/song?token=secret&signature=abc%2Bdef&token=other",
+        ] {
+            assert_eq!(normalize_direct_media_uri(uri).as_deref(), Some(uri));
+        }
     }
 
     #[test]
@@ -217,4 +284,9 @@ mod tests {
         assert!(file_media_path("https://example.test/song.flac").is_none());
         assert!(file_media_path("file://user:secret@localhost/song.flac").is_none());
     }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn source_id_for_uri(uri: String) -> Option<SourceId> {
+    source_entity_parts(&uri).map(|(source, _, _)| source)
 }

@@ -70,19 +70,12 @@ jobs:
       image: registry.fedoraproject.org/fedora-minimal:44
     permissions:
       contents: read
+    outputs:
+      build_id: ${{ steps.build.outputs.build_id }}
 
     steps:
       - name: Install COPR client
-        run: dnf -y --setopt=install_weak_deps=False install bash cargo cpio copr-cli curl findutils gawk git gnupg2 grep jq rpm rpmlint wavpack
-
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-
-      - name: Trust checked-out repository
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        run: dnf -y --setopt=install_weak_deps=False install bash copr-cli curl findutils grep jq
 
       - name: Download source RPM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -100,21 +93,8 @@ jobs:
           printf '%s\n' "$COPR_CONFIG" > "$HOME/.config/copr"
           chmod 600 "$HOME/.config/copr"
 
-      - name: Trust COPR package key
-        run: |
-          set -euo pipefail
-          key_path="$(mktemp)"
-          curl -fsSL \
-            https://download.copr.fedorainfracloud.org/results/screwyy/rufin/pubkey.gpg \
-            -o "$key_path"
-          fingerprint="$(
-            gpg --show-keys --with-colons "$key_path" \
-              | awk -F: '$1 == "fpr" { print $10; exit }'
-          )"
-          test "$fingerprint" = 3C724C8F016C6D63890CFDBFD57ADF06B547821C
-          rpm --import "$key_path"
-
       - name: Select and monitor COPR build
+        id: build
         env:
           RECOVERY_COPR_BUILD_ID: ${{ inputs.copr_build_id }}
           RELEASE_TAG: ${{ inputs.upload_release_tag }}
@@ -128,6 +108,8 @@ jobs:
               --nowait \
               --chroot fedora-44-x86_64 \
               --chroot fedora-44-aarch64 \
+              --chroot fedora-45-x86_64 \
+              --chroot fedora-45-aarch64 \
               screwyy/rufin \
               "$srpm")"
             printf '%s\n' "$output"
@@ -137,7 +119,7 @@ jobs:
           else
             echo "Reusing COPR build $build_id."
           fi
-          echo "COPR_BUILD_ID=$build_id" >> "$GITHUB_ENV"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
 
           expected_version="${RELEASE_TAG#v}-1"
           api_errors=0
@@ -196,14 +178,66 @@ jobs:
             exit 1
           fi
 
-      - name: Collect Fedora 44 packages
+  packages:
+    name: Collect Fedora ${{ matrix.fedora }} RPMs
+    needs: copr
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        fedora: [44, 45]
+    container:
+      image: registry.fedoraproject.org/fedora-minimal:${{ matrix.fedora }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install COPR client
+        run: dnf -y --setopt=install_weak_deps=False install bash cargo cpio copr-cli curl findutils gawk git gnupg2 grep rpm rpmlint wavpack
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Trust checked-out repository
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure COPR
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          set -euo pipefail
+          test -n "$COPR_CONFIG"
+          install -d -m 700 "$HOME/.config"
+          printf '%s\n' "$COPR_CONFIG" > "$HOME/.config/copr"
+          chmod 600 "$HOME/.config/copr"
+
+      - name: Trust COPR package key
+        run: |
+          set -euo pipefail
+          key_path="$(mktemp)"
+          curl -fsSL \
+            https://download.copr.fedorainfracloud.org/results/screwyy/rufin/pubkey.gpg \
+            -o "$key_path"
+          fingerprint="$(
+            gpg --show-keys --with-colons "$key_path" \
+              | awk -F: '$1 == "fpr" { print $10; exit }'
+          )"
+          test "$fingerprint" = 3C724C8F016C6D63890CFDBFD57ADF06B547821C
+          rpm --import "$key_path"
+
+      - name: Collect packages
+        env:
+          COPR_BUILD_ID: ${{ needs.copr.outputs.build_id }}
+          FEDORA: ${{ matrix.fedora }}
         run: |
           set -euo pipefail
           copr-cli download-build \
             --rpms \
             --dest dist/copr \
-            --chroot fedora-44-x86_64 \
-            --chroot fedora-44-aarch64 \
+            --chroot "fedora-${FEDORA}-x86_64" \
+            --chroot "fedora-${FEDORA}-aarch64" \
             "$COPR_BUILD_ID"
           mkdir -p dist/release
           x86_rpm_path=
@@ -231,7 +265,7 @@ jobs:
           }
           for arch in x86_64 aarch64; do
             mapfile -t rpm_paths < <(
-              find "dist/copr/fedora-44-${arch}" \
+              find "dist/copr/fedora-${FEDORA}-${arch}" \
                 -type f \
                 -name "rufin-[0-9]*.${arch}.rpm" \
                 -print
@@ -250,13 +284,13 @@ jobs:
           done
           test -n "$x86_rpm_path"
           dnf -y --setopt=install_weak_deps=False install "$x86_rpm_path"
-          gst-inspect-1.0 --exists playbin
+          gst-inspect-1.0 --exists playbin3
           gst-inspect-1.0 --exists audiobuffersplit
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: rpm-release
+          name: rpm-release-fedora-${{ matrix.fedora }}
           path: dist/release/*.rpm
           if-no-files-found: error
           retention-days: 7
@@ -264,7 +298,7 @@ jobs:
   release:
     name: Upload RPM release assets
     if: inputs.upload_release_tag != ''
-    needs: copr
+    needs: packages
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -276,14 +310,17 @@ jobs:
       - name: Download workflow artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: rpm-release
+          pattern: rpm-release-*
+          merge-multiple: true
           path: dist
 
       - name: Verify release assets
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -name 'rufin-*.x86_64.rpm' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -name 'rufin-*.aarch64.rpm' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name 'rufin-*.fc44.x86_64.rpm' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name 'rufin-*.fc45.x86_64.rpm' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name 'rufin-*.fc44.aarch64.rpm' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name 'rufin-*.fc45.aarch64.rpm' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -name 'rufin-*.src.rpm' | wc -l)" -eq 0
 
       - name: Attest RPMs

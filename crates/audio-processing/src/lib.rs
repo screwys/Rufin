@@ -4,7 +4,16 @@ use gst::prelude::*;
 use gstreamer as gst;
 use std::sync::OnceLock;
 
+mod decode;
+pub use decode::{ContentFailure, DecodeError, content_failure};
+pub mod effects;
+mod fingerprint;
+pub use fingerprint::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 mod loudness;
+mod media_input;
+mod payload_hash;
+pub use media_input::{ResolvedStream, StreamWindow};
+pub use payload_hash::payload_hash;
 #[cfg(target_os = "macos")]
 mod tls;
 mod transcode;
@@ -14,10 +23,13 @@ mod waveform;
 pub use loudness::{
     AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
-pub use transcode::TranscodedAudioReader;
+pub use transcode::{TranscodeOptions, TranscodedAudioReader, VisualizerFrame, transcode_audio};
 pub use waveform::generate_waveform_peaks_cancellable;
 
-pub use visualizer::VisualizerFft;
+pub use visualizer::{
+    VISUALIZER_BAND_COUNT, VisualizerFft, copy_audio_samples, copy_visualizer_samples,
+    visualizer_frequency, visualizer_position,
+};
 
 /// Initialize GStreamer once before playback or waveform work starts.
 pub fn ensure_gstreamer_initialized() -> Result<(), String> {
@@ -34,25 +46,34 @@ pub fn ensure_gstreamer_initialized() -> Result<(), String> {
         .clone()
 }
 
-pub fn connect_server_certificate_policy(
+pub fn configure_sources(
     element: &gst::Element,
     trust_invalid_certificate: impl Fn() -> bool + Send + Sync + 'static,
 ) {
-    let _ = element.connect("source-setup", false, move |values| {
-        if let Some(source) = values
-            .get(1)
-            .and_then(|value| value.get::<gst::Element>().ok())
+    element.connect("source-setup", false, move |values| {
+        let source = values[1].get::<gst::Element>().expect("decoder source");
+        if source.find_property("ssl-strict").is_some() {
+            source.set_property("ssl-strict", !trust_invalid_certificate());
+        }
+        if source
+            .factory()
+            .is_some_and(|factory| factory.name() == "souphttpsrc")
         {
-            apply_server_certificate_policy(&source, trust_invalid_certificate());
+            // Soup doubles fast reads. Parsers can copy the whole read to join
+            // a split frame, so keep transfer blocks small independently of buffering.
+            source
+                .static_pad("src")
+                .expect("HTTP source output")
+                .add_probe(gst::PadProbeType::BUFFER, |pad, _| {
+                    let source = pad.parent_element().expect("HTTP source");
+                    if source.property::<u32>("blocksize") > 64 * 1024 {
+                        source.set_property("blocksize", 64_u32 * 1024);
+                    }
+                    gst::PadProbeReturn::Ok
+                });
         }
         None
     });
-}
-
-fn apply_server_certificate_policy(source: &gst::Element, trust_invalid_certificate: bool) {
-    if source.find_property("ssl-strict").is_some() {
-        source.set_property("ssl-strict", !trust_invalid_certificate);
-    }
 }
 
 #[cfg(test)]
@@ -74,7 +95,7 @@ mod tests {
             .expect("GStreamer HTTP source");
         let trust_invalid_certificate = Arc::new(AtomicBool::new(false));
         let policy = Arc::clone(&trust_invalid_certificate);
-        connect_server_certificate_policy(&playbin, move || policy.load(Ordering::SeqCst));
+        configure_sources(&playbin, move || policy.load(Ordering::SeqCst));
 
         playbin.emit_by_name::<()>("source-setup", &[&source]);
         assert!(source.property::<bool>("ssl-strict"));
@@ -84,3 +105,6 @@ mod tests {
         assert!(!source.property::<bool>("ssl-strict"));
     }
 }
+
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();

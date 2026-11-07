@@ -1,10 +1,9 @@
 use crate::{
-    EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings,
-    StreamQuality, VolumeScale,
+    LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, StreamQuality, VolumeScale,
 };
+use audio_processing::ResolvedStream;
 use library::LoudnessMeasurement;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -17,6 +16,9 @@ pub struct StreamRequest {
     pub quality: StreamQuality,
     #[serde(default)]
     pub session_identifier: Option<String>,
+    /// A local copy that failed to open or decode; the stream comes from the next candidate.
+    #[serde(skip)]
+    pub failed_local: Option<String>,
 }
 
 impl StreamRequest {
@@ -29,156 +31,9 @@ impl StreamRequest {
             media_uri: media_uri.into(),
             quality,
             session_identifier: None,
+            failed_local: None,
         }
     }
-
-    pub fn for_item(item: &crate::QueueItem, quality: StreamQuality) -> Self {
-        Self::new(item.media_uri.clone(), quality)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StreamWindow {
-    pub start_millis: u64,
-    pub end_millis: u64,
-}
-
-#[derive(Clone)]
-pub struct ResolvedStream {
-    transcoded: bool,
-    pub content_type: Option<String>,
-    uri: String,
-    redacted_uri: String,
-    trust_invalid_certificate: bool,
-    window: Option<StreamWindow>,
-    resource: Option<std::sync::Arc<dyn Send + Sync>>,
-}
-
-impl PartialEq for ResolvedStream {
-    fn eq(&self, other: &Self) -> bool {
-        self.uri == other.uri
-            && self.transcoded == other.transcoded
-            && self.redacted_uri == other.redacted_uri
-            && self.trust_invalid_certificate == other.trust_invalid_certificate
-            && self.window == other.window
-            && self.content_type == other.content_type
-    }
-}
-
-impl Eq for ResolvedStream {}
-
-impl ResolvedStream {
-    pub fn new(uri: impl Into<String>) -> Self {
-        let uri = uri.into();
-        Self {
-            redacted_uri: redact_sensitive_uri(&uri),
-            transcoded: false,
-            uri,
-            trust_invalid_certificate: false,
-            window: None,
-            resource: None,
-            content_type: None,
-        }
-    }
-
-    pub fn with_redacted(uri: impl Into<String>, redacted_uri: impl Into<String>) -> Self {
-        Self {
-            transcoded: false,
-            uri: uri.into(),
-            redacted_uri: redacted_uri.into(),
-            trust_invalid_certificate: false,
-            window: None,
-            resource: None,
-            content_type: None,
-        }
-    }
-
-    pub fn with_trust_invalid_certificate(mut self, trust: bool) -> Self {
-        self.trust_invalid_certificate = trust;
-        self
-    }
-
-    pub fn with_transcoding(mut self, transcoded: bool) -> Self {
-        self.transcoded = transcoded;
-        self
-    }
-
-    pub fn transcoded(&self) -> bool {
-        self.transcoded
-    }
-
-    pub fn with_content_type(mut self, content_type: Option<String>) -> Self {
-        self.content_type = content_type;
-        self
-    }
-
-    /// Retain temporary input or its serving endpoint while this stream is in use.
-    /// Resource ownership does not participate in stream identity or equality.
-    pub fn with_resource(mut self, resource: std::sync::Arc<dyn Send + Sync>) -> Self {
-        self.resource = Some(resource);
-        self
-    }
-
-    pub fn with_window(mut self, start_millis: u64, end_millis: u64) -> Self {
-        if end_millis > start_millis {
-            self.window = Some(StreamWindow {
-                start_millis,
-                end_millis,
-            });
-        }
-        self
-    }
-
-    pub fn uri(&self) -> &str {
-        &self.uri
-    }
-    pub fn redacted_uri(&self) -> &str {
-        &self.redacted_uri
-    }
-    pub fn trust_invalid_certificate(&self) -> bool {
-        self.trust_invalid_certificate
-    }
-    pub fn start_millis(&self) -> u64 {
-        self.window.as_ref().map_or(0, |window| window.start_millis)
-    }
-    pub fn end_millis(&self) -> Option<u64> {
-        self.window.as_ref().map(|window| window.end_millis)
-    }
-    pub fn window(&self) -> Option<&StreamWindow> {
-        self.window.as_ref()
-    }
-}
-
-impl fmt::Debug for ResolvedStream {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ResolvedStream")
-            .field("uri", &self.redacted_uri)
-            .field("window", &self.window)
-            .finish()
-    }
-}
-
-fn redact_sensitive_uri(uri: &str) -> String {
-    let Some((base, query)) = uri.split_once('?') else {
-        return uri.to_string();
-    };
-    let query = query
-        .split('&')
-        .map(|pair| {
-            let Some((key, value)) = pair.split_once('=') else {
-                return pair.to_string();
-            };
-            let lower = key.to_ascii_lowercase();
-            if lower.contains("token") || lower.contains("key") {
-                format!("{key}=<redacted>")
-            } else {
-                format!("{key}={value}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("&");
-    format!("{base}?{query}")
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -189,6 +44,12 @@ pub struct TrackLoudness {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RunId(u64);
+
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(RunId, u64, {
+    lower: |value| value.get(),
+    try_lift: |value| Ok(RunId::new(value)),
+});
 
 impl RunId {
     pub const fn new(value: u64) -> Self {
@@ -218,34 +79,27 @@ pub enum NextTransition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedStream {
     pub stream: Box<ResolvedStream>,
-    pub loudness: TrackLoudness,
-    pub occurrence: Option<std::sync::Arc<crate::QueueOccurrence>>,
+    pub loudness: Option<TrackLoudness>,
+    pub row: Option<std::sync::Arc<crate::QueueRow>>,
     pub artwork_path: Option<Arc<PathBuf>>,
-    pub allows_preloading: bool,
 }
 
 impl PreparedStream {
-    pub fn new(stream: ResolvedStream, loudness: TrackLoudness) -> Self {
+    pub fn new(stream: ResolvedStream, loudness: Option<TrackLoudness>) -> Self {
         Self {
             stream: Box::new(stream),
             loudness,
-            occurrence: None,
+            row: None,
             artwork_path: None,
-            allows_preloading: true,
         }
     }
 
-    pub fn without_preloading(mut self) -> Self {
-        self.allows_preloading = false;
-        self
-    }
-
-    pub fn with_occurrence(
+    pub fn with_row(
         mut self,
-        occurrence: std::sync::Arc<crate::QueueOccurrence>,
+        row: std::sync::Arc<crate::QueueRow>,
         content_type: Option<String>,
     ) -> Self {
-        self.occurrence = Some(occurrence);
+        self.row = Some(row);
         if self.stream.content_type.is_none() {
             self.stream.content_type = content_type;
         }
@@ -255,7 +109,7 @@ impl PreparedStream {
 
 impl From<ResolvedStream> for PreparedStream {
     fn from(stream: ResolvedStream) -> Self {
-        Self::new(stream, TrackLoudness::default())
+        Self::new(stream, Some(TrackLoudness::default()))
     }
 }
 
@@ -290,12 +144,13 @@ pub struct BackendAudioSettings {
     pub loudness_normalization_scope: LoudnessNormalizationScope,
     pub ebu_r128_target_lufs: f64,
     pub audio_output: Option<String>,
-    pub equalizer: EqualizerSettings,
     pub preserve_pitch: bool,
     pub volume: f64,
     pub volume_scale: VolumeScale,
     pub muted: bool,
     pub fade_on_status_change: bool,
+    pub visualizer_ignore_volume: bool,
+    pub visualizer_fft_size: u32,
 }
 
 impl Default for BackendAudioSettings {
@@ -318,12 +173,13 @@ impl From<PlaybackSettings> for BackendAudioSettings {
             loudness_normalization_scope: settings.loudness_normalization_scope,
             ebu_r128_target_lufs: settings.ebu_r128_target_lufs,
             audio_output: settings.audio_output,
-            equalizer: settings.equalizer,
             preserve_pitch: settings.preserve_pitch,
             volume: settings.volume,
             volume_scale: settings.volume_scale,
             muted: settings.muted,
             fade_on_status_change: settings.audio_fade_on_status_change,
+            visualizer_ignore_volume: settings.visualizer_ignore_volume,
+            visualizer_fft_size: settings.visualizer_fft_size,
         }
     }
 }
@@ -336,6 +192,28 @@ pub enum BackendState {
     Paused,
     Playing,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessingRequest {
+    pub output: String,
+    pub local_device: Option<String>,
+    pub config: audio_processing::effects::ProcessingConfig,
+    pub meter: bool,
+    pub spectrum: bool,
+    pub cast_encoding: library::AudioEncoding,
+}
+impl Default for ProcessingRequest {
+    fn default() -> Self {
+        Self {
+            output: "local:default".into(),
+            local_device: None,
+            config: Default::default(),
+            meter: false,
+            spectrum: false,
+            cast_encoding: library::AudioEncoding::mp3(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum BackendCommand {
     Start {
@@ -397,6 +275,11 @@ pub enum BackendEvent {
         run: RunId,
         state: BackendState,
     },
+    /// Transport observed on a receiver, including changes made on the receiver.
+    TransportObserved {
+        run: RunId,
+        state: BackendState,
+    },
     Position {
         run: RunId,
         millis: u64,
@@ -420,6 +303,11 @@ pub enum BackendEvent {
         old_run: RunId,
         new_run: RunId,
     },
+    /// The output takes this run's compressed audio undecoded, or decodes it again.
+    Bitstream {
+        run: RunId,
+        active: bool,
+    },
     NextNeeded {
         run: RunId,
     },
@@ -427,6 +315,21 @@ pub enum BackendEvent {
         current_run: RunId,
         next_run: RunId,
         error: BackendFailure,
+    },
+    ProcessingApplied {
+        output: String,
+        config: audio_processing::effects::ProcessingConfig,
+        sample_rate: Option<u32>,
+        preamp_db: f64,
+    },
+    ProcessingFailed {
+        output: String,
+        message: String,
+    },
+    ProcessingMeter {
+        output: String,
+        peak_db: Vec<f64>,
+        spectrum_db: Vec<f64>,
     },
     AudioApplied {
         volume: f64,
@@ -437,8 +340,20 @@ pub enum BackendEvent {
         run: RunId,
         levels: Vec<f64>,
     },
+    /// The backend can no longer play this run.
     Error {
         run: RunId,
+        error: BackendFailure,
+    },
+    /// A command failed while the current playback remains usable.
+    OperationFailed {
+        run: Option<RunId>,
+        error: BackendFailure,
+    },
+    /// Play or Pause was rejected while the current playback remains usable.
+    TransportRejected {
+        run: RunId,
+        requested_playing: bool,
         error: BackendFailure,
     },
 }
@@ -461,17 +376,61 @@ pub enum BackendError {
     #[error("playback command channel closed")]
     ChannelClosed,
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FailureKind {
+    UnavailableMedia,
+    UnsupportedFormat,
+    Decode,
+    DeniedAccess,
+    Connection,
+    Output,
+    #[default]
+    Unclassified,
+}
+
+impl FailureKind {
+    /// The failure belongs to this track, so the queue can continue.
+    pub fn skippable(self) -> bool {
+        matches!(
+            self,
+            Self::UnavailableMedia | Self::UnsupportedFormat | Self::Decode
+        )
+    }
+
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::UnavailableMedia => "Track unavailable",
+            Self::UnsupportedFormat => "Format not supported",
+            Self::Decode => "Couldn't decode this track",
+            Self::DeniedAccess => "Access denied",
+            Self::Connection => "Couldn't connect to the server",
+            Self::Output => "Audio output failed",
+            Self::Unclassified => "Could not play this track",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Error, PartialEq)]
 #[error("{message}")]
 pub struct BackendFailure {
+    kind: FailureKind,
     message: String,
 }
 
 impl BackendFailure {
     pub fn new(message: impl Into<String>) -> Self {
+        Self::with_kind(FailureKind::Unclassified, message)
+    }
+
+    pub fn with_kind(kind: FailureKind, message: impl Into<String>) -> Self {
         Self {
+            kind,
             message: message.into(),
         }
+    }
+
+    pub fn kind(&self) -> FailureKind {
+        self.kind
     }
 
     pub fn message(&self) -> &str {
@@ -479,9 +438,26 @@ impl BackendFailure {
     }
 }
 
+impl From<String> for BackendFailure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for BackendFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
+/// Called when a backend's event mailbox goes from empty to non-empty.
+pub type EventWaker = Arc<dyn Fn() + Send + Sync>;
+
 pub trait PlaybackBackend: Send {
     fn send(&mut self, command: BackendCommand) -> Result<(), BackendError>;
     fn drain_events(&mut self) -> Vec<BackendEvent>;
+
+    fn set_event_waker(&mut self, _waker: EventWaker) {}
 
     fn shutdown(&mut self) -> Result<(), BackendError> {
         Ok(())

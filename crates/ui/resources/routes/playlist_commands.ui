@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <menu id="playlist_commands">
+    <item><attribute name="label" translatable="yes">New Playlist</attribute><attribute name="action">win.new-playlist</attribute></item>
+    <item><attribute name="label" translatable="yes">New folder</attribute><attribute name="action">win.new-playlist-folder</attribute></item>
+  </menu>
+  <menu id="smart_playlist_commands">
+    <item><attribute name="label" translatable="yes">New Smart Playlist</attribute><attribute name="action">win.new-smart-playlist</attribute></item>
+    <item><attribute name="label" translatable="yes">New folder</attribute><attribute name="action">win.new-playlist-folder</attribute></item>
+  </menu>
+</interface>

@@ -18,6 +18,7 @@
   </head>
   <body>
     {% include "connect.html" %}
+    {% include "equalizer.html" %}
     <dialog id="login-dialog" aria-labelledby="login-title" {% if !page.connected %}open{% endif %}>
       <form id="login-form" method="post" action="/session">
         <div class="login-heading">
@@ -51,16 +52,16 @@
             aria-label="{{ localization::tr("Sources") }}"
             aria-haspopup="menu"
           >
-            <span class="icon" data-icon="server"></span>
+            {% call m::icon("rufin-network-server-symbolic") %}{% endcall %}
           </button>
           <button id="open-connect" class="icon-button" aria-label="{{ localization::tr("Rufin Connect") }}">⇄</button>
-          <button id="connect-continue" class="icon-button" aria-label="{{ localization::tr("Continue") }}" hidden><span class="icon" data-icon="play"></span></button>
+          <button id="connect-continue" class="text-button" hidden></button>
           <a
             class="icon-button mobile"
             id="close-navigation"
             aria-label="{{ localization::tr("Collapse sidebar") }}"
            href="#main">
-            <span class="icon" data-icon="collapse-left"></span>
+            {% call m::icon("rufin-sidebar-hide-symbolic") %}{% endcall %}
           </a>
         </div>
         <div
@@ -79,25 +80,15 @@
             <input type="hidden" name="source" value="{{ page.source }}" />
             <p class="menu-heading">{{ localization::tr("Server Library") }}</p>
             <button class="menu-item" name="library" value="">{{ localization::tr("All Music") }}</button>
-            {% for (id, name) in page.folders %}<button class="menu-item" name="library" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder() }}">{{ name }}</button>{% endfor %}
+            {% for (id, name) in page.folders %}<button class="menu-item" name="library" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder }}">{{ name }}</button>{% endfor %}
           </form>
           {% endif %}
         </div>
         <nav aria-label="{{ localization::tr("Library") }}">
-          <a data-route="home" href="{{ page.nav("home") }}" {% if page.view() == "home" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="home"></span>{{ localization::tr("Home") }}</a>
-          <a data-route="favorites" href="{{ page.nav("favorites") }}" {% if page.view() == "favorites" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="favorite"></span>{{ localization::tr("Favorites") }}</a>
-          <a data-route="albums" href="{{ page.nav("albums") }}" {% if page.view() == "albums" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="albums"></span>{{ localization::tr("Albums") }}</a>
-          <a data-route="artists" href="{{ page.nav("artists") }}" {% if page.view() == "artists" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="artists"></span>{{ localization::tr("Artists") }}</a>
-          <a data-route="tracks" href="{{ page.nav("tracks") }}" {% if page.view() == "tracks" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="tracks"></span>{{ localization::tr("Tracks") }}</a>
-          <a data-route="playlists" href="{{ page.nav("playlists") }}" {% if page.view() == "playlists" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="playlists"></span>{{ localization::tr("Playlists") }}</a>
-          <a data-route="smart-playlists" href="{{ page.nav("smart-playlists") }}" {% if page.view() == "smart-playlists" %}aria-current="page"{% endif %}>
-            <span class="icon" data-icon="smart-playlists"></span>{{ localization::tr("Smart Playlists") }}</a>
+          {% for (route, title, icon, href, current) in page.navigation() %}
+          <a data-route="{{ route }}" href="{{ href }}" {% if current %}aria-current="page"{% endif %}>
+            {% call m::icon(icon) %}{% endcall %}{{ title }}</a>
+          {% endfor %}
         </nav>
         <section id="pins" aria-labelledby="pins-title" hidden>
           <h2 id="pins-title">{{ localization::tr("Pins") }}</h2>
@@ -112,7 +103,7 @@
             aria-label="{{ localization::tr("Disconnect") }}"
             title="{{ localization::tr("Disconnect") }}"
           >
-            <span class="icon" data-icon="disconnect"></span>
+            {% call m::icon("rufin-application-exit-symbolic") %}{% endcall %}
           </button>
         </div>
       </aside>
@@ -124,14 +115,14 @@
             id="open-navigation"
             aria-label="{{ localization::tr("Expand sidebar") }}"
            href="#navigation">
-            <span class="icon" data-icon="sidebar"></span>
+            {% call m::icon("rufin-sidebar-show-symbolic") %}{% endcall %}
           </a>
-          <a class="icon-button" id="back" href="{{ page.nav(page.parent_view()) }}" aria-label="{{ localization::tr("Back") }}" {% if page.parent_view().is_empty() %}hidden{% endif %}>
-            <span class="icon" data-icon="back"></span>
+          <a class="icon-button" id="back" href="{% if let Some(back) = page.back %}{{ back }}{% endif %}" aria-label="{{ localization::tr("Back") }}" {% if page.back.is_none() %}hidden{% endif %}>
+            {% call m::icon("rufin-go-previous-symbolic") %}{% endcall %}
           </a>
           <div class="heading">
             <span id="source-name" class="eyebrow">{{ page.source_name() }}</span>
-            <h1 id="title">{{ page.title() }}</h1>
+            <h1 id="title">{{ page.title }}</h1>
           </div>
           <button
             class="icon-button"
@@ -139,45 +130,46 @@
             title="{{ localization::tr("Refresh source") }}"
             aria-label="{{ localization::tr("Refresh source") }}"
           >
-            <span class="icon" data-icon="refresh"></span>
+            {% call m::icon("rufin-view-refresh-symbolic") %}{% endcall %}
           </button>
         </header>
-        <form class="toolbar" id="library-toolbar" data-enhanced-form method="get" action="/" {% if page.view() == "home" %}hidden{% endif %}>
-          {% for (key, value) in page.parameters %}{% if key != "q" && key != "offset" && key != "view" && key != "sort" %}<input type="hidden" name="{{ key }}" value="{{ value }}" />{% endif %}{% endfor %}
-          <input type="hidden" name="view" value="{% if page.view() == "home" %}tracks{% else %}{{ page.view() }}{% endif %}" />
+        <form class="toolbar" id="library-toolbar" data-enhanced-form method="get" action="/" {% if page.home() %}hidden{% endif %}>
+          <input type="hidden" name="page" value="{{ page.page_json() }}" />
           <input
             type="search"
             id="search" name="q" value="{{ page.query() }}"
             placeholder="{{ localization::tr("Search tracks") }}"
             aria-label="{{ localization::tr("Search library") }}"
           />
-          <noscript><button class="without-js" type="submit">{{ localization::tr("Search") }}</button></noscript>
+          <!-- The form's first submit button, so Enter searches rather than reversing the order. -->
+          <button class="without-js" type="submit">{{ localization::tr("Search") }}</button>
           <select id="sort" name="sort" aria-label="{{ localization::tr("Sort by") }}">
-            <option value="title" {% if page.sort() == "title" %}selected{% endif %}>{{ localization::tr("Title") }}</option>
-            {% if page.view() == "album" %}<option value="track_number" {% if page.sort() == "track_number" %}selected{% endif %}>{{ localization::tr("Track number") }}</option>{% endif %}
-            {% if page.view() == "playlist" %}<option value="position" {% if page.sort() == "position" %}selected{% endif %}>{{ localization::tr("Position") }}</option>{% endif %}
+            {% for (name, title, selected) in page.sorts %}<option value="{{ name }}" {% if selected %}selected{% endif %}>{{ title }}</option>{% endfor %}
           </select>
           <button
             class="icon-button"
             type="submit" name="reverse" value="true" id="descending"
             title="{{ localization::tr("Change sort order") }}"
             aria-label="{{ localization::tr("Change sort order") }}"
-            aria-pressed="{{ page.descending() }}"
+            aria-pressed="{{ page.descending }}"
+            {% if page.sort == "definition" %}hidden{% endif %}
           >
-            <span class="icon" data-icon="sort-ascending"></span>
+            {% call m::icon("rufin-sort-name-symbolic") %}{% endcall %}
           </button>
-          <button type="button" class="primary" id="play-collection" {% if !page.can_play_collection() %}hidden{% endif %}>
-            <span class="icon" data-icon="play"></span>{{ localization::tr("Play") }}</button>
-          <button type="button" id="new-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>
-            <span class="icon" data-icon="add"></span>{{ localization::tr("New Playlist") }}</button>
-          <button type="button" id="import-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
+          <button type="button" class="primary" id="play-collection" {% if !page.play %}hidden{% endif %}>
+            {% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
+          <button type="button" id="new-playlist" {% if !page.playlists %}hidden{% endif %}>
+            {% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("New Playlist") }}</button>
+          <button type="button" id="import-playlist" {% if !page.playlists %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
         </form>
-        <div id="source-progress" role="status" hidden></div>
-        <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
+        <div id="source-progress" role="status" hidden>
+          <span id="source-progress-label"></span>
+        </div>
+        <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
           {% if !page.error.is_empty() %}<p class="empty-note" role="alert">{{ page.error }}</p>{% endif %}
           {% if page.connected && page.needs_source() %}
           <div class="empty">
-            <span class="icon" data-icon="home"></span>
+            {% call m::icon("rufin-home-symbolic") %}{% endcall %}
             <h2>{{ localization::tr("Your music belongs here") }}</h2>
             <p>{{ localization::tr("Add a music source to start listening.") }}</p>
             <button type="button" class="primary" data-open-source>{{ localization::tr("Add Source") }}</button>
@@ -192,7 +184,7 @@
 
       <aside id="right-panel" aria-label="{{ localization::tr("Queue") }}">
         <div class="panel-header">
-          <h2><span class="icon" data-icon="queue" aria-hidden="true"></span>{{ localization::tr("Queue") }} <span class="queue-total"><span id="queue-count" class="count">{{ page.queue_total }}</span><span id="queue-loading" class="queue-loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden></span></span></h2>
+          <h2>{% call m::icon("rufin-music-queue-symbolic") %}{% endcall %}{{ localization::tr("Queue") }} <span class="queue-total"><span id="queue-count" class="count">{{ page.queue_total }}</span><span id="queue-loading" class="loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" pathLength="100"/><circle cx="8" cy="8" pathLength="100"/></svg></span></span></h2>
           <label class="queue-limit" for="queue-limit"
             >{{ localization::tr("Show") }}<select id="queue-limit" aria-label="{{ localization::tr("Queue tracks to show") }}">
               <option selected>5</option>
@@ -202,23 +194,23 @@
               <option>100</option>
             </select></label
           >
-          <button id="clear-queue" form="transport-form" formaction="/api/queue/clear" class="icon-button" title="{{ localization::tr("Clear queue") }}" aria-label="{{ localization::tr("Clear queue") }}"><span class="icon" data-icon="clear" aria-hidden="true"></span></button>
+          <button id="clear-queue" form="transport-form" formaction="/api/queue/clear" class="icon-button" title="{{ localization::tr("Clear queue") }}" aria-label="{{ localization::tr("Clear queue") }}">{% call m::icon("rufin-edit-clear-symbolic") %}{% endcall %}</button>
           <a
             id="close-right"
             class="icon-button mobile"
             aria-label="{{ localization::tr("Collapse sidebar") }}"
            href="#main">
-            <span class="icon" data-icon="collapse-right"></span>
+            {% call m::icon("rufin-sidebar-collapse-right-symbolic") %}{% endcall %}
           </a>
         </div>
         <ol id="queue" aria-label="{{ localization::tr("Queue") }}">
           {% for row in page.queue %}
-          <li class="queue-row" data-id="{{ row.id }}">
+          <li class="queue-row" data-position="{{ row.position }}">
             <span class="number">{{ loop.index }}</span>
             <form class="queue-track" method="post" action="/api/queue/activate">
               <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-              <input type="hidden" name="return" value="{{ page.current() }}" />
-              <input type="hidden" name="id" value="{{ row.id }}" />
+              <input type="hidden" name="return" value="{{ page.here }}" />
+              <input type="hidden" name="position" value="{{ row.position }}" />
               <button class="queue-select" formaction="/api/queue/activate"><strong>{{ row.title }}</strong></button>
               <span class="metadata-link queue-artist">{{ row.artist }}</span>
             </form>
@@ -236,24 +228,24 @@
       <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
         <input type="hidden" name="id" value="{{ page.source }}" />
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-        <input type="hidden" name="return" value="{{ page.current() }}" />
+        <input type="hidden" name="return" value="{{ page.here }}" />
       </form>
       <form id="current-track-form" data-enhanced-form method="post" action="/api/queue/activate" hidden>
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-        <input type="hidden" name="return" value="{{ page.current() }}" />
-        <input type="hidden" name="id" value="{{ page.current_id() }}" />
+        <input type="hidden" name="return" value="{{ page.here }}" />
+        <input type="hidden" name="position" value="{{ page.current_position() }}" />
         <input type="hidden" name="payload" value="{{ page.current_selection() }}" />
       </form>
       <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
         <div class="player-track">
           <div class="cover mini" id="mini-cover">
-            <span class="icon" data-icon="cover-fallback"></span>
+            {% if page.preview.is_empty() %}{% call m::icon("rufin-symbolic") %}{% endcall %}{% else %}<img src="{{ page.preview }}" alt="" />{% endif %}
           </div>
           <div>
             <div class="player-title-row">
               <strong id="player-title">{% if page.playing.is_empty() %}{{ localization::tr("Nothing playing") }}{% else %}{{ page.playing }}{% endif %}</strong>
               <button type="button" id="player-menu" class="icon-button" popovertarget="track-menu" aria-haspopup="menu" aria-label="{{ localization::tr("More actions") }}" title="{{ localization::tr("More actions") }}" {% if !page.has_current() %}disabled{% endif %}>
-                <span class="icon" data-icon="player-more"></span>
+                {% call m::icon("rufin-player-more-symbolic") %}{% endcall %}
               </button>
             </div>
             <button class="metadata-link" id="player-artist">{{ page.artist }}</button
@@ -269,7 +261,7 @@
               aria-pressed="{{ page.enabled("auto_dj") }}"
               title="{{ localization::tr("Auto DJ") }}"
             >
-              <span class="icon" data-icon="auto-dj"></span>
+              {% call m::icon("rufin-auto-dj-symbolic") %}{% endcall %}
             </button>
             <button
               id="shuffle" form="transport-form" formaction="/api/playback/shuffle" name="payload" value='{"enabled":{{ !page.enabled("shuffle") }}}'
@@ -278,20 +270,21 @@
               aria-pressed="{{ page.enabled("shuffle") }}"
               title="{{ localization::tr("Shuffle") }}"
             >
-              <span class="icon" data-icon="shuffle"></span>
+              {% call m::icon("rufin-shuffle-symbolic") %}{% endcall %}
             </button>
             <button
               id="previous" form="transport-form" formaction="/api/playback/previous"
               class="icon-button"
               aria-label="{{ localization::tr("Previous") }}"
             >
-              <span class="icon" data-icon="previous"></span>
+              {% call m::icon("rufin-media-skip-backward-symbolic") %}{% endcall %}
             </button>
             <button id="play-pause" form="transport-form" formaction="/api/playback/{% if page.paused %}play{% else %}pause{% endif %}" class="play-button" aria-label="{% if page.paused %}{{ localization::tr("Play") }}{% else %}{{ localization::tr("Pause") }}{% endif %}">
-              <span class="icon" data-icon="{% if page.paused %}play{% else %}pause{% endif %}"></span>
+              {% if page.paused %}{% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}{% else %}{% call m::icon("rufin-media-playback-pause-symbolic") %}{% endcall %}{% endif %}
+              <span class="loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" pathLength="100"/><circle cx="8" cy="8" pathLength="100"/></svg></span>
             </button>
             <button id="next" form="transport-form" formaction="/api/playback/next" class="icon-button" aria-label="{{ localization::tr("Next") }}">
-              <span class="icon" data-icon="next"></span>
+              {% call m::icon("rufin-media-skip-forward-symbolic") %}{% endcall %}
             </button>
             <button
               id="repeat" form="transport-form" formaction="/api/playback/repeat" name="payload" value='{"mode":"{% if page.controls["repeat"] == "off" %}all{% else if page.controls["repeat"] == "all" %}one{% else %}off{% endif %}"}'
@@ -300,7 +293,7 @@
               aria-pressed="false"
               title="{{ page.repeat_title() }}"
             >
-              <span class="icon" data-icon="repeat"></span>
+              {% call m::icon("rufin-repeat-symbolic") %}{% endcall %}
             </button>
             <div class="random-buttons">
               <button
@@ -310,7 +303,7 @@
                 title="{{ localization::tr("Play random") }}"
                 aria-haspopup="dialog"
               >
-                <span class="icon" data-icon="random"></span>
+                {% call m::icon("rufin-random-symbolic") %}{% endcall %}
               </button>
             </div>
           </div>
@@ -328,6 +321,7 @@
           </div>
         </div>
         <div class="volume">
+          <button id="open-equalizer" type="button">{{ localization::tr("Equalizer") }}</button>
           <button
             id="current-favorite" form="current-track-form" formaction="/api/favorite"
             class="icon-button"
@@ -335,7 +329,7 @@
             aria-pressed="{{ page.current_favorite }}"
             {% if !page.has_current() %}disabled{% endif %}
           >
-            <span class="icon" data-icon="favorite"></span>
+            {% call m::icon("rufin-heart-outline-symbolic") %}{% endcall %}
           </button>
           <a
             class="icon-button"
@@ -343,7 +337,7 @@
             aria-label="{{ localization::tr("Collapse/expand sidebar") }}"
             aria-expanded="true"
            href="#right-panel">
-            <span class="icon" data-icon="collapse-right"></span>
+            {% call m::icon("rufin-sidebar-collapse-right-symbolic") %}{% endcall %}
           </a>
           <button
             id="mute" form="transport-form" formaction="/api/playback/mute" name="payload" value='{"muted":{{ !page.enabled("muted") }}}'
@@ -351,7 +345,7 @@
             aria-label="{{ localization::tr("Mute") }}"
             aria-pressed="{{ page.enabled("muted") }}"
           >
-            <span class="icon" data-icon="volume"></span></button
+            {% call m::icon("rufin-audio-volume-high-symbolic") %}{% endcall %}</button
           ><input
             id="volume" form="transport-form" name="volume"
             type="range"
@@ -365,7 +359,6 @@
       </footer>
       <div id="toast" role="status" hidden></div>
       <div id="connect-progress" role="status" hidden><span id="connect-progress-text"></span><button id="connect-progress-open">{{ localization::tr("Open Rufin Connect") }}</button><button id="connect-progress-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
-      <div id="connect-offer" role="status" hidden><span id="connect-offer-text"></span><button id="connect-offer-accept">{{ localization::tr("Continue") }}</button><button id="connect-offer-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
     </div>
 
     <div
@@ -374,7 +367,7 @@
       role="dialog"
       aria-labelledby="random-title"
     >
-      <button id="random-close" class="icon-button" type="button" data-close="random-dialog" aria-label="{{ localization::tr("Close") }}"><span class="icon" data-icon="close"></span></button>
+      <button id="random-close" class="icon-button" type="button" data-close="random-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button>
       <form id="random-form">
         <h2 id="random-title">{{ localization::tr("Play random") }}</h2>
         <div class="random-row">
@@ -432,11 +425,11 @@
         </div>
         <div class="dialog-actions">
           <button type="submit" value="next">
-            <span class="icon" data-icon="play-next"></span>{{ localization::tr("Play Next") }}</button>
+            {% call m::icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
           <button type="submit" value="replace" class="primary">
-            <span class="icon" data-icon="play"></span>{{ localization::tr("Play") }}</button>
+            {% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
           <button type="submit" value="append">
-            <span class="icon" data-icon="play-last"></span>{{ localization::tr("Play Later") }}</button>
+            {% call m::icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
         </div>
       </form>
     </div>
@@ -452,6 +445,22 @@
         </div>
       </form>
     </dialog>
+    <template id="download-quality-template">{% include "download_quality.html" %}</template>
+    <template id="cache-settings-template">
+      <fieldset class="source-actions">
+        <legend>{{ localization::tr("Cache") }}</legend>
+        <div class="download-quality-controls">
+          <label>{{ localization::tr("Artwork") }}<select data-setting="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="artwork" hidden></output></label>
+          <label>{{ localization::tr("Lyrics") }}<select data-setting="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="lyrics" hidden></output></label>
+        </div>
+      </fieldset>
+      <fieldset class="source-actions">
+        <legend>{{ localization::tr("Metadata") }}</legend>
+        <div class="download-quality-controls">
+          <label>{{ localization::tr("Use sort tags") }}<select data-setting="sort_tags" disabled><option value="false">{{ localization::tr("Off") }}</option><option value="true">{{ localization::tr("On") }}</option></select></label>
+        </div>
+      </fieldset>
+    </template>
     <dialog id="source-dialog" aria-labelledby="source-title">
       <form id="source-form" hx-post="/api/sources" hx-ext="source-form" hx-swap="none" hx-disabled-elt="find button[type='submit']" hx-sync="this:drop">
         <h2 id="source-title">{{ localization::tr("Add Source") }}</h2>
@@ -475,6 +484,11 @@
             rows="3"
             placeholder="{{ localization::tr("One path per line") }}"
           ></textarea>
+        </div>
+        <div id="source-exclusions" hidden>
+          <label for="excluded-folders">{{ localization::tr("Excluded folders") }}</label>
+          <textarea id="excluded-folders" rows="3" placeholder="{{ localization::tr("One path per line") }}"></textarea>
+          <p>{{ localization::tr("Relative paths start at the music folder or source URL. Local paths can also be absolute.") }}</p>
         </div>
         <div id="remote-fields" hidden>
           <label for="server-url">{{ localization::tr("Server Address") }}</label
@@ -569,7 +583,7 @@
     >
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/activate">{{ localization::tr("Play") }}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/next">{{ localization::tr("Play Next") }}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/reorder" name="payload" value='{"ids":["{{ page.current_id() }}"]}'>{{ localization::tr("Play Later") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/reorder" name="payload" value='{"positions":[{{ page.current_position() }}]}'>{{ localization::tr("Play Later") }}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/favorite">{% if page.current_favorite %}{{ localization::tr("Remove from Favorites") }}{% else %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
       <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/item">{{ localization::tr("Remove from Queue") }}</button>
     </div>

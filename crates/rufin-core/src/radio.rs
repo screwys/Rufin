@@ -1,28 +1,123 @@
-//! Provider-first Radio/AutoDJ with bounded Database fallback; Random is Database-owned.
+//! Provider-first Radio/AutoDJ with bounded Catalog fallback; Random is Catalog-owned.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use library::{Database, RadioSeed, ReadCancellation, SourceKey};
-use playback::{
-    AutoDjRequest, Batch, Placement, Playback, Provenance, RadioPlayRequest, RandomPlayRequest,
-};
+use crate::playback::RandomPlayRequest;
+use library::{Catalog, RadioSeed, ReadCancellation, SourceKey};
+use playback::QueueProvenance;
 use sources::{Source, SourceRadioSeed};
-use tracing::warn;
 
 use crate::playback::random_u64;
-use crate::source::{SourceOwner, WeakActiveSource};
+use crate::runtime::SelectedLibrary;
+use crate::settings::RandomPlaySettings;
+use crate::source::SourceOwner;
 
-const MANUAL_RADIO_COUNT: usize = 20;
+/// Plays the saved Random Play settings in the selected library. True means nothing matched.
+pub async fn play_saved_random(
+    queue: &Arc<crate::playback::PlaybackOwner>,
+    settings: RandomPlaySettings,
+    placement: crate::playback::QueuePlacement,
+) -> Result<bool, String> {
+    let queue = Arc::clone(queue);
+    queue
+        .source
+        .clone()
+        .reply(move |owner, catalog| async move {
+            let selected = owner.selected_library().ok_or("No source selected")?;
+            let genre = saved_random_genre(&catalog, &settings, &selected).await?;
+            let request = RandomPlayRequest {
+                placement,
+                requested: settings.limit,
+                criteria: library::RandomCriteria {
+                    min_year: settings.min_year.map(i64::from),
+                    max_year: settings.max_year.map(i64::from),
+                    genre: genre.map(|genre| library::GenreKey::from_raw(genre.key)),
+                    played: settings.played_filter,
+                    variation: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |duration| duration.as_nanos() as i64),
+                },
+            };
+            queue_random(&catalog, &selected, request, &queue).await
+        })
+        .recv()
+        .await
+        .map_err(|error| error.to_string())?
+}
 
+/// The source and music folder Random Play reads in `selected`: it is query-built, so the
+/// folder narrows it (decisions.md, 2026-11-06).
+fn random_library(selected: &SelectedLibrary) -> (SourceKey, Option<library::FolderKey>) {
+    (selected.source_key, selected.music_folder_key)
+}
+
+/// The genres Random Play offers in `selected` whose names hold `filter`, and how many there
+/// are.
+pub async fn random_genres(
+    catalog: &Catalog,
+    selected: &SelectedLibrary,
+    filter: &str,
+    range: std::ops::Range<usize>,
+    cancellation: &ReadCancellation,
+) -> library::LibraryResult<(usize, Vec<library::GenreChoice>)> {
+    let (source, folder) = random_library(selected);
+    catalog
+        .genre_choices(source, folder, filter, range, cancellation)
+        .await
+}
+
+/// Finds the saved Random Play genre when it was saved for `selected`: a source and one of
+/// its music folders.
+pub async fn saved_random_genre(
+    catalog: &Catalog,
+    settings: &RandomPlaySettings,
+    selected: &SelectedLibrary,
+) -> Result<Option<library::TagRow>, String> {
+    let Some(object_id) = settings.selected_genre_id(
+        &selected.source_id,
+        selected.music_folder_object_id.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+    let cancellation = ReadCancellation::new();
+    let Some(key) = catalog
+        .catalog_keys(
+            library::CatalogKind::Genre,
+            Some(selected.source_key),
+            &[object_id.to_owned()],
+            &cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .pop()
+    else {
+        return Ok(None);
+    };
+    Ok(catalog
+        .rows_of(
+            &[library::Item::Genre(library::GenreKey::from_raw(key))],
+            false,
+            &cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find_map(|row| match row {
+            library::Row::Tag(tag) => Some(tag),
+            _ => None,
+        }))
+}
+
+/// Plays what `request` picks at random in `selected`. True means nothing matched.
 pub async fn queue_random(
-    database: &Database,
-    source: SourceKey,
-    folder: Option<library::FolderKey>,
+    catalog: &Catalog,
+    selected: &SelectedLibrary,
     request: RandomPlayRequest,
-    queue: &playback::QueueHandle,
+    queue: &crate::playback::PlaybackOwner,
 ) -> Result<bool, String> {
     let cancellation = ReadCancellation::new();
-    let order = database
+    let (source, folder) = random_library(selected);
+    let order = catalog
         .random_candidates(
             source,
             folder,
@@ -36,135 +131,23 @@ pub async fn queue_random(
     if order.is_empty() {
         return Ok(true);
     }
-    queue.play(playback::PlayRequest::ordered(
-        library::QueueInput::MediaUris {
-            order: order.into(),
-            provenance: Provenance::Random,
-        },
-        0,
+    queue.play_selection(crate::playback::PlayRequest::from_input(
+        library::QueueLoad::track_keys(order, QueueProvenance::Random),
         request.placement,
-        false,
     ));
     Ok(false)
 }
 
-pub(crate) fn request_auto_dj(
-    runtime: tokio::runtime::Handle,
-    database: Arc<Database>,
-    source_owner: Weak<SourceOwner>,
-    playback: Playback,
-    request: AutoDjRequest,
-) {
-    runtime.spawn(async move {
-        let candidates = radio_candidates(
-            &database,
-            source_owner,
-            RadioSeed::Track(request.seed_media_uri),
-            request.requested_count,
-            &ReadCancellation::new(),
-        )
-        .await;
-        match candidates {
-            Ok(candidates) => {
-                let media = database
-                    .queue_items_for_uris(&candidates, &ReadCancellation::new())
-                    .await
-                    .unwrap_or_default();
-                let _ = playback.complete_auto_dj_candidates(
-                    request.seed_occurrence,
-                    media,
-                    request.requested_count,
-                    random_u64(),
-                );
-            }
-            Err(error) => {
-                let _ = playback.auto_dj_unavailable(request.seed_occurrence, Some(error));
-            }
-        }
-    });
-}
-
-pub(crate) fn play_radio(
-    runtime: tokio::runtime::Handle,
-    database: Arc<Database>,
-    source_owner: Weak<SourceOwner>,
-    playback: Playback,
-    request: RadioPlayRequest,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let placement = request.placement;
-    let reservation = playback.reserve_materialization(placement).ok()?;
-    Some(runtime.spawn(async move {
-        let candidates = radio_candidates(
-            &database,
-            source_owner,
-            request.seed,
-            MANUAL_RADIO_COUNT,
-            &ReadCancellation::new(),
-        )
-        .await;
-        complete_materialization(
-            playback,
-            reservation,
-            placement,
-            candidates,
-            Provenance::Radio,
-        )
-        .await;
-    }))
-}
-
-pub(crate) fn play_random(
-    runtime: tokio::runtime::Handle,
-    selected: WeakActiveSource,
-    playback: Playback,
-    request: RandomPlayRequest,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let placement = request.placement;
-    let current = selected.upgrade()?.resolve()?;
-    let reservation = playback.reserve_materialization(placement).ok()?;
-    Some(runtime.spawn(async move {
-        let excluded = reservation
-            .current_media_uri
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        let candidates = current
-            .database
-            .random_candidates(
-                current.source_key,
-                current.music_folder_key,
-                &request.criteria,
-                &excluded,
-                request.requested,
-                &ReadCancellation::new(),
-            )
-            .await
-            .map_err(|error| error.to_string());
-        complete_materialization(
-            playback,
-            reservation,
-            placement,
-            candidates,
-            Provenance::Random,
-        )
-        .await;
-    }))
-}
-
 pub(crate) async fn radio_candidates(
-    database: &Database,
-    source_owner: Weak<SourceOwner>,
+    catalog: &Catalog,
+    source_owner: Arc<SourceOwner>,
+    selected: Option<SelectedLibrary>,
     seed: RadioSeed,
     requested: usize,
     cancellation: &ReadCancellation,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<library::TrackKey>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
-    let owner = source_owner.upgrade();
-    let selected = owner
-        .as_ref()
-        .and_then(|owner| owner.current_session())
-        .and_then(|session| session.resolve());
-    let seed_source = database
+    let seed_source = catalog
         .radio_source(&seed, cancellation)
         .await
         .map_err(|error| error.to_string())?;
@@ -172,7 +155,8 @@ pub(crate) async fn radio_candidates(
     let seed_source_key = seed_source.as_ref().map(|(key, _, _)| *key);
     let mut fallback_sources = Vec::new();
     if let Some((source_key, source_id, object_id)) = seed_source {
-        let source = tokio::task::spawn_blocking(move || owner?.client(&source_id).ok())
+        let seed_owner = Arc::clone(&source_owner);
+        let source = tokio::task::spawn_blocking(move || seed_owner.client(&source_id).ok())
             .await
             .map_err(|error| error.to_string())?;
         let native_seed = source_seed(source.as_deref(), &seed, object_id);
@@ -181,30 +165,29 @@ pub(crate) async fn radio_candidates(
                 .generated_track_object_ids(&native_seed, requested.min(256))
                 .await
         {
-            candidates = database
-                .admit_radio_candidates(source_key, &seed, &ids, cancellation)
+            candidates = catalog
+                .recommended_track_keys(source_key, &seed, &ids, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
         }
-        fallback_sources.push((source_key, source.is_none()));
+        fallback_sources.push(source_key);
     }
     if let Some(selected) = selected
         && Some(selected.source_key) != seed_source_key
     {
-        fallback_sources.push((selected.source_key, selected.source.is_none()));
+        fallback_sources.push(selected.source_key);
     }
     candidates.truncate(requested);
-    for (source_key, require_media) in fallback_sources {
+    for source_key in fallback_sources {
         if candidates.len() == requested {
             break;
         }
-        let fallback = database
+        let fallback = catalog
             .radio_candidates(
                 source_key,
                 seed.clone(),
                 &candidates,
                 requested - candidates.len(),
-                require_media,
                 random_u64() as i64,
                 cancellation,
             )
@@ -231,32 +214,5 @@ fn source_seed(
         RadioSeed::Artist(_) | RadioSeed::AlbumArtist(_) => object_id.map(SourceRadioSeed::Artist),
         RadioSeed::Genre(_) => object_id.map(SourceRadioSeed::Genre),
         RadioSeed::Playlist(_) => object_id.map(SourceRadioSeed::Playlist),
-    }
-}
-
-async fn complete_materialization(
-    playback: Playback,
-    reservation: playback::MaterializationReservation,
-    placement: Placement,
-    candidates: Result<Vec<String>, String>,
-    provenance: Provenance,
-) {
-    match candidates {
-        Ok(candidates) if !candidates.is_empty() => {
-            let batch = Batch::from_input(library::QueueInput::MediaUris {
-                order: candidates.into(),
-                provenance,
-            });
-            if let Err(error) = playback.complete_materialization(reservation.id, batch, placement)
-            {
-                warn!(%error, "could not complete queue materialization");
-            }
-        }
-        Ok(_) => {
-            let _ = playback.cancel_materialization(reservation.id, placement);
-        }
-        Err(error) => {
-            let _ = playback.fail_materialization(reservation.id, placement, error);
-        }
     }
 }

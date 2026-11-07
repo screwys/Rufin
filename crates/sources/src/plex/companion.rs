@@ -162,7 +162,7 @@ impl PlexSource {
             profile_id: self.config.profile_id.clone(),
             base_url: self.config.base_url.clone(),
             client_id: self.login.lock().await.client_id().to_string(),
-            trust_invalid_certificate: self.config.trust_invalid_cert,
+            trust_invalid_certificate: self.config.trust_invalid_certificate(),
         }
     }
 

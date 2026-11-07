@@ -375,11 +375,10 @@ impl SmbClient {
         let failed = Arc::clone(&self.failed);
         let target = self.path(path)?;
         blocking(move || {
-            let mut args = FileCreateArgs::make_create_new(
+            let args = FileCreateArgs::make_create_new(
                 Default::default(),
                 CreateOptions::new().with_directory_file(true),
             );
-            args.disposition = smb_msg::CreateDisposition::OpenIf;
             let resource = client
                 .create_file(&target, &args)
                 .map_err(|error| record_error(&failed, error))?;

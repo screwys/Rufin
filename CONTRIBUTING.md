@@ -42,6 +42,26 @@ and Windows packages.
 just container setup
 ```
 
+### Android
+
+Android development runs on Linux or macOS. Install rustup, a Gradle-compatible
+JDK 17 or newer, `just`, CMake 3.25 or newer, Make, `pkg-config`, gettext, curl,
+tar, xz, and the Android SDK command-line tools. On Linux, `nix develop`
+provides the host build tools. Set `ANDROID_HOME` to your SDK directory, then install:
+
+```bash
+sdkmanager "platforms;android-37.2" "build-tools;36.1.0" "ndk;29.0.14206865" "platform-tools"
+rustup toolchain install stable --target aarch64-linux-android
+```
+
+The first build downloads GStreamer 1.28.7 into `android/.toolchains/gstreamer-1.28.7`
+and reuses it afterward. To use an existing SDK, set `GSTREAMER_ROOT_ANDROID` or
+`gstreamer.dir` in `android/local.properties`.
+That file also accepts `sdk.dir` for the Android SDK.
+
+Run `just test android` for JVM unit tests and Android lint, without an emulator.
+Run `just build apk-dev` to build the development APK.
+
 ## Project structure
 
 Rufin's crates try to follow a product ownership model. The goal is to separate parts that can grow vertically (or parts we want to scale) and work on them independently, while only doing minimal or no work for their integration with other parts.
@@ -51,9 +71,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `app-identity` | single-file crate to separate development builds |
 | `artwork` | artwork selection, loading, and caching |
 | `audio-processing` | waveform, loudness, transcoding and spectrum analysis |
-| `backup` | backup archives, encryption, staging and scheduling rules |
-| `desktop-integration` | MPRIS, notifications, the tray, and Discord RPC |
-| `downloads` | server track downloads and download management |
+| `desktop-integration` | desktop media controls, notifications, the tray, and Discord IPC |
 | `library` | music items, listening activity, and the database |
 | `localization` | translation tooling and locales |
 | `lyrics` | lyrics documents, parsing, lookup and reading aids |
@@ -62,28 +80,28 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
-| `rufin-core` | shared application runtime, operations, settings, sources and HTTP API |
+| `rufin-core` | shared application runtime, operations, settings and sources |
 | `rufin-connect` | Connect networking, pairing, and profile synchronization|
 | `rufin-controller` | headless executable with optional HTTP access |
-| `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `ui-shell` | desktop window composition, navigation admission, preferences and native actions |
-| `ui-library` | browsing pages, bounded projections, models and page selection |
-| `ui-shared` | shared GTK controls, menus, editors, artwork presentation and resources |
-| `ui-player` | persistent playback, queue, lyrics, outputs and visualizer presentation |
+| `ui` | the GTK desktop client: window composition, pages, player, menus, editors, preferences and resources |
+| `web` | HTTP routes, server lifetime and embedded browser presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |
 
 The `web/` directory contains the browser interface: Askama templates,
 HTMX, JavaScript and CSS. Assets are bundled into the executable.
-The HTTP command reference is in `crates/rufin-core/src/api/help.json` and served by `GET /api`.
+The HTTP command reference is in `crates/web/src/help.json` and served by `GET /api`.
 
 ## Development commands
 
 ```bash
 just build # builds the native binary, macOS disk image, or Windows installer
 just build headless # builds the headless development executable
+just build apk # builds the optimized Android release with the stable app identity
+just build apk-dev # builds the debug Android APK with the development app identity
+just install android # installs the most recently built APK, retaining app data
 just build arch # builds the Arch package
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64
@@ -94,6 +112,7 @@ just debug headless # runs the headless development executable on the host
 just debug headless --listen # also enables browser and HTTP API access; requires RUFIN_API_TOKEN
 just fmt # formats Rust code
 just test # runs the test suite
+just test android # runs Android development unit tests and lint without an emulator
 just i18n # regenerates the shared desktop and web translation template
 just i18n --check # checks the translation template without changing it
 ```
@@ -128,10 +147,9 @@ This selects the same gettext runtime as GTK and loads the GME, OpenMPT, and
 WavPack plugins built by CMake. Installed macOS app bundles include and load
 these plugins automatically.
 
-Run `just deps` after changing Linux package dependencies or AUR metadata; `just check deps`
-validates the generated metadata. Direct `makepkg --printsrcinfo` also works on
-Arch-based systems, while `just deps` handles a Nix-provided `makepkg` without
-`/etc/makepkg.conf`.
+Edit native dependencies in the package definition for each platform. After changing
+`packaging/aur/rufin-git/PKGBUILD`, run `makepkg --printsrcinfo > .SRCINFO` from that
+directory in an Arch build environment.
 
 Broader native checks additionally need rustfmt, clippy, cargo-deny, and `msgfmt`
 from gettext.
@@ -139,8 +157,8 @@ from gettext.
 
 To enable the debug logging, refer to [README.md#troubleshooting](README.md#troubleshooting).
 
-Most commands work the same for local and container development. Linux builds plus dependency,
-formatting, test, and check commands use the host by default or the development container after it
+Most commands work the same for local and container development. Linux builds, formatting,
+test, and check commands use the host by default or the development container after it
 is set up; macOS and Windows package builds always run on their matching host. Flatpak uses a
 privileged container for nested sandboxing only during that command. RPM mounts the selected host
 engine socket only during its command; that socket can control the engine. Disposable package work

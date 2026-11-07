@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <object class="GtkBox" id="band">
+    <property name="orientation">vertical</property>
+    <property name="spacing">8</property>
+    <property name="hexpand">true</property>
+    <child>
+      <object class="GtkEntry" id="gain">
+        <property name="width-chars">3</property>
+        <property name="max-width-chars">5</property>
+        <property name="xalign">0.5</property>
+        <property name="input-purpose">number</property>
+        <accessibility>
+          <property name="label" translatable="yes">Gain</property>
+        </accessibility>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="track">
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+        <property name="margin-bottom">24</property>
+        <property name="layout-manager">
+          <object class="RufinGainTrackLayout" id="track_layout" />
+        </property>
+        <child>
+          <object class="GtkScale" id="scale">
+            <property name="orientation">vertical</property>
+            <property name="inverted">true</property>
+            <property name="draw-value">false</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <property name="adjustment">
+              <object class="GtkAdjustment">
+                <property name="lower">-24</property>
+                <property name="upper">12</property>
+                <property name="step-increment">0.1</property>
+                <property name="page-increment">1</property>
+              </object>
+            </property>
+            <style>
+              <class name="equalizer-surface-scale" />
+            </style>
+            <property name="round-digits">1</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <style>
+      <class name="equalizer-band" />
+    </style>
+  </object>
+</interface>

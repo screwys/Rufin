@@ -10,10 +10,18 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+uniffi = { workspace = true, optional = true }
 sources.workspace = true
+library.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+blake3.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde_json.workspace = true
+serde.workspace = true
 tracing.workspace = true
 
 [lints]

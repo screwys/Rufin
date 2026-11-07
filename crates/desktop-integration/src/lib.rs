@@ -1,12 +1,13 @@
-//! Desktop protocols driven by Rufin's accepted playback projection.
+//! Native desktop services and playback integrations.
 //!
 //! Each integration keeps only the state required by its external protocol.
 //! GTK window policy and Rufin's current-media authority remain with their
 //! existing owners.
 
-mod discord;
+mod folders;
 mod media_controls;
 mod notification;
+mod path_display;
 mod tray;
 
 #[cfg(target_os = "windows")]
@@ -18,11 +19,14 @@ use tracing::warn;
 ))]
 pub(crate) use app_identity::APP_ID;
 
-pub use discord::{DEFAULT_CLIENT_ID, Discord, DisplayType, LinkType, Settings};
+#[cfg(target_os = "macos")]
+pub use folders::open_in_finder;
+pub use folders::{FolderTarget, folder_target};
 pub use media_controls::MediaControls;
 pub use notification::{
     Notifications, now_playing_notification_can_send, now_playing_notification_should_withdraw,
 };
+pub use path_display::display_path;
 pub use tray::{Tray, TrayIntent};
 
 pub struct Platform {

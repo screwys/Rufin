@@ -20,6 +20,11 @@ use crate::{SourceError, SourceResult};
 pub(crate) enum FileInput {
     Smb(Arc<SmbClient>),
     WebDav(Arc<WebDavClient>),
+    Documents(Arc<crate::file::documents::DocumentAccess>),
+    Link {
+        peer: crate::peer::PeerSource,
+        encoding: Option<library::AudioEncoding>,
+    },
 }
 
 pub(crate) struct FileInputServer {
@@ -81,14 +86,20 @@ impl FileInputServer {
         }))
     }
 
-    pub fn stream(self: &Arc<Self>, path: &str, media_uri: &str) -> playback::ResolvedStream {
+    pub fn stream(
+        self: &Arc<Self>,
+        path: &str,
+        media_uri: &str,
+    ) -> audio_processing::ResolvedStream {
         let mut url = self.base.clone();
         url.path_segments_mut()
             .expect("HTTP URL")
             .pop_if_empty()
             .push(path);
-        playback::ResolvedStream::with_redacted(url.as_str(), media_uri)
-            .with_resource(Arc::clone(self) as Arc<dyn Send + Sync>)
+        let mut stream = audio_processing::ResolvedStream::with_redacted(url.as_str(), media_uri)
+            .with_resource(Arc::clone(self) as Arc<dyn Send + Sync>);
+        stream.local_input = matches!(&*self.input, FileInput::Documents(_));
+        stream
     }
 
     pub async fn playback_stream(
@@ -96,7 +107,17 @@ impl FileInputServer {
         path: &str,
         revision: &str,
         media_uri: &str,
-    ) -> SourceResult<playback::ResolvedStream> {
+    ) -> SourceResult<audio_processing::ResolvedStream> {
+        if let FileInput::Documents(access) = &*self.input {
+            let access = Arc::clone(access);
+            let path_owned = path.to_owned();
+            let lease = tokio::task::spawn_blocking(move || access.open(&path_owned))
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))??;
+            // The decoder, preloader, and analysis consumers keep both owners alive.
+            let resource = Arc::new((Arc::clone(self), lease));
+            return Ok(self.stream(path, media_uri).with_resource(resource));
+        }
         let FileInput::WebDav(client) = &*self.input else {
             return Ok(self.stream(path, media_uri));
         };
@@ -172,8 +193,11 @@ async fn serve(
     let result = match input {
         FileInput::Smb(client) => smb_response(client, &path, &request).await,
         FileInput::WebDav(client) => dav_response(client, &path, &request).await,
+        FileInput::Documents(access) => document_response(access, &path, &request).await,
+        FileInput::Link { peer, encoding } => link_response(peer, *encoding, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
+        tracing::warn!(%error, "file input request failed");
         empty(match error {
             SourceError::NotFound => StatusCode::NOT_FOUND,
             SourceError::Auth(_) => StatusCode::UNAUTHORIZED,
@@ -186,6 +210,205 @@ async fn serve(
             _ => StatusCode::BAD_GATEWAY,
         })
     })
+}
+
+async fn link_response(
+    peer: &crate::peer::PeerSource,
+    encoding: Option<library::AudioEncoding>,
+    object: &str,
+    request: &Request<hyper::body::Incoming>,
+) -> SourceResult<Response<Body>> {
+    if request.method() == Method::HEAD
+        && let Some(encoding) = encoding
+    {
+        let mut response = empty(StatusCode::OK);
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            encoding.codec.content_type().parse().unwrap(),
+        );
+        response.headers_mut().insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("none"),
+        );
+        return Ok(response);
+    }
+    let mut range = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("bytes="))
+        .and_then(|value| value.split_once('-'))
+        .and_then(|(start, end)| {
+            Some((
+                start.parse().ok()?,
+                if end.is_empty() {
+                    None
+                } else {
+                    Some(end.parse::<u64>().ok()?.saturating_add(1))
+                },
+            ))
+        });
+    let time = |name: &str| {
+        request.uri().query().and_then(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .find(|(key, _)| key == name)
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+        })
+    };
+    let window = time("start_ms").map(|start| (start, time("end_ms")));
+    let mut audio = peer.audio(object, encoding, range, window).await?;
+    let etag = |audio: &crate::PeerAudio| {
+        audio
+            .validator
+            .as_ref()
+            .map(|validator| format!("\"{}\"", blake3::hash(validator.as_bytes()).to_hex()))
+    };
+    if range.is_some()
+        && request
+            .headers()
+            .get(header::IF_RANGE)
+            .is_some_and(|value| etag(&audio).is_none_or(|etag| value != etag.as_str()))
+    {
+        range = None;
+        audio = peer.audio(object, encoding, None, window).await?;
+    }
+    let etag = etag(&audio);
+    if let Some(length) = audio.length
+        && range.is_some_and(|(start, _)| start >= length)
+    {
+        let mut response = empty(StatusCode::RANGE_NOT_SATISFIABLE);
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            format!("bytes */{length}").parse().unwrap(),
+        );
+        if let Some(etag) = etag {
+            response
+                .headers_mut()
+                .insert(header::ETAG, etag.parse().unwrap());
+        }
+        return Ok(response);
+    }
+    let partial = audio.length.is_some() && range.is_some();
+    let mut response = empty(if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    });
+    let headers = response.headers_mut();
+    if let Some(length) = audio.length {
+        let end = range.and_then(|(_, end)| end).unwrap_or(length).min(length);
+        headers.insert(
+            header::CONTENT_LENGTH,
+            end.saturating_sub(audio.offset).into(),
+        );
+        headers.insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("bytes"),
+        );
+        if partial {
+            headers.insert(
+                header::CONTENT_RANGE,
+                format!("bytes {}-{}/{length}", audio.offset, end.saturating_sub(1))
+                    .parse()
+                    .unwrap(),
+            );
+        }
+    } else {
+        headers.insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("none"),
+        );
+    }
+    if let Some(content_type) = audio.content_type.and_then(|value| value.parse().ok()) {
+        headers.insert(header::CONTENT_TYPE, content_type);
+    }
+    if let Some(etag) = etag {
+        headers.insert(header::ETAG, etag.parse().unwrap());
+    }
+    if request.method() != Method::HEAD {
+        let stream = tokio_util::io::ReaderStream::new(audio.reader).map_ok(Frame::data);
+        *response.body_mut() = StreamBody::new(stream).boxed_unsync();
+    }
+    Ok(response)
+}
+
+async fn document_response(
+    access: &Arc<crate::file::documents::DocumentAccess>,
+    path: &str,
+    request: &Request<hyper::body::Incoming>,
+) -> SourceResult<Response<Body>> {
+    let access = Arc::clone(access);
+    let path = path.to_owned();
+    let lease = tokio::task::spawn_blocking(move || access.open(&path))
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))??;
+    let length = lease.length;
+    let (start, end, partial) = match request.headers().get(header::RANGE) {
+        Some(range) => match range
+            .to_str()
+            .ok()
+            .and_then(|value| byte_range(value, length))
+        {
+            Some((start, end)) => (start, end, true),
+            None => {
+                let mut response = empty(StatusCode::RANGE_NOT_SATISFIABLE);
+                response.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes */{length}").parse().unwrap(),
+                );
+                return Ok(response);
+            }
+        },
+        None => (0, length, false),
+    };
+    let mut response = empty(if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    });
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, (end - start).into());
+    response.headers_mut().insert(
+        header::ACCEPT_RANGES,
+        header::HeaderValue::from_static("bytes"),
+    );
+    if partial {
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{}/{length}", end - 1)
+                .parse()
+                .unwrap(),
+        );
+    }
+    if request.method() != Method::HEAD && start < end {
+        let stream =
+            futures_util::stream::try_unfold((lease, start), move |(lease, offset)| async move {
+                if offset >= end {
+                    return Ok::<_, io::Error>(None);
+                }
+                let read_lease = Arc::clone(&lease);
+                let bytes = tokio::task::spawn_blocking(move || {
+                    read_lease.read(offset, (end - offset).min(65536) as u32)
+                })
+                .await
+                .map_err(io::Error::other)?
+                .map_err(io::Error::other)?;
+                if bytes.is_empty() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Document ended before its reported length",
+                    ));
+                }
+                let count = bytes.len();
+                Ok(Some((
+                    Frame::data(Bytes::from(bytes)),
+                    (lease, offset + count as u64),
+                )))
+            });
+        *response.body_mut() = StreamBody::new(stream).boxed_unsync();
+    }
+    Ok(response)
 }
 
 async fn smb_response(
@@ -357,9 +580,12 @@ fn io_error(error: io::Error) -> SourceError {
 fn temporary_stream(
     path: Arc<tempfile::TempPath>,
     media_uri: &str,
-) -> SourceResult<playback::ResolvedStream> {
+) -> SourceResult<audio_processing::ResolvedStream> {
     let uri = Url::from_file_path(path.as_ref()).map_err(|_| {
         SourceError::Other("Temporary media path could not be represented as a URI".into())
     })?;
-    Ok(playback::ResolvedStream::with_redacted(uri.as_str(), media_uri).with_resource(path))
+    Ok(
+        audio_processing::ResolvedStream::with_redacted(uri.as_str(), media_uri)
+            .with_resource(path),
+    )
 }

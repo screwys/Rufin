@@ -11,12 +11,18 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi", "library/bindings"]
+
 [dependencies]
+audio-processing.workspace = true
+uniffi = { workspace = true, optional = true }
 lyrics.workspace = true
 async-channel.workspace = true
 base64.workspace = true
 blake3.workspace = true
 bytes.workspace = true
+chrono.workspace = true
 digest_auth.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -25,15 +31,17 @@ futures-util.workspace = true
 getrandom.workspace = true
 gstreamer-pbutils = { workspace = true, features = ["v1_26"] }
 if-addrs.workspace = true
+image.workspace = true
+jxl-image-rs-integration.workspace = true
 library.workspace = true
+localization.workspace = true
 lofty.workspace = true
-md5.workspace = true
 md5_digest.workspace = true
 notify.workspace = true
 playback.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true
-reqwest = { workspace = true, features = ["json", "stream", "form", "query"] }
+reqwest = { workspace = true, features = ["json", "stream", "form", "query", "multipart"] }
 sha2.workspace = true
 smb.workspace = true
 smb-fscc.workspace = true
@@ -52,6 +60,7 @@ url = { workspace = true, features = ["serde"] }
 walkdir.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 tokio-rustls.workspace = true
 wiremock.workspace = true
 

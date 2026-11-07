@@ -14,5 +14,8 @@ build = "build.rs"
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(not(target_os = "android"))'.dependencies]
 gettext-rs.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+spiritless_po.workspace = true

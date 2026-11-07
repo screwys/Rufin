@@ -6,6 +6,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub fn local_media_identity_path(path: &Path) -> PathBuf {
+    let access = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let host = library::playlist_host_path(&access);
+    if host == access {
+        access
+    } else {
+        fs::canonicalize(&host).unwrap_or(host)
+    }
+}
+
+pub fn read_local_track_reference(path: &Path) -> Option<library::TrackReference> {
+    let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.to_owned(), None)
+    else {
+        return None;
+    };
+    let uri = url::Url::from_file_path(path).ok()?.to_string();
+    Some(crate::file::media::track_reference(*track, uri))
+}
+
 pub(crate) fn read_media(
     worker: &mut Worker,
     path: PathBuf,
@@ -18,22 +37,35 @@ pub(crate) fn read_media(
         Ok(file) => file,
         Err(_) => return MediaRead::Unreadable,
     };
-    let Ok(uri) = url::Url::from_file_path(&path) else {
+    let identity = local_media_identity_path(&path);
+    let Ok(uri) = url::Url::from_file_path(&identity) else {
         return MediaRead::Unreadable;
     };
-    let mut read = read_media_input(worker, path.clone(), &mut file, uri.as_str(), sidecar);
+    let Ok(access_uri) = url::Url::from_file_path(&path) else {
+        return MediaRead::Unreadable;
+    };
+    let mut read = read_media_input(worker, path, &mut file, access_uri.as_str(), sidecar);
     if let MediaRead::Accepted(track) = &mut read {
-        track.local_uri = Some(uri.into());
-        track.audio_revision = audio_revision(&path);
+        crate::file::lyrics::read_local(track);
+        track.track.object_id = crate::file::media::track_id(&identity);
+        track.track.media_uri = Some(uri.into());
+        track.audio_revision = audio_revision(
+            track
+                .track
+                .source_path
+                .as_deref()
+                .expect("file source path"),
+            &identity,
+        );
     }
     read
 }
 
-fn audio_revision(path: &Path) -> blake3::Hasher {
+pub(crate) fn audio_revision(access: &str, identity: &Path) -> blake3::Hasher {
     let mut hash = blake3::Hasher::new();
     hash.update(b"rufin-local-audio-v1\0");
-    hash.update(path.to_string_lossy().as_bytes());
-    if let Ok(metadata) = fs::metadata(path) {
+    hash.update(identity.to_string_lossy().as_bytes());
+    if let Ok(metadata) = fs::metadata(access) {
         hash.update(&metadata.len().to_le_bytes());
         let modified = metadata
             .modified()
@@ -49,6 +81,7 @@ fn audio_revision(path: &Path) -> blake3::Hasher {
             hash.update(&metadata.ino().to_le_bytes());
         }
     }
-    hash.update(&super::scan::LOCAL_PARSER_VERSION.to_le_bytes());
+    // Lyrics indexing does not change the interpreted audio.
+    hash.update(&18_u32.to_le_bytes());
     hash
 }

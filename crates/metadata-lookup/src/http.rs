@@ -50,7 +50,7 @@ pub(crate) fn fetch_json(client: &Client, url: Url, context: &str) -> Result<Val
     decode_json(get(client, url, context)?, context)
 }
 
-fn decode_json(response: Response, context: &str) -> Result<Value, String> {
+pub(crate) fn decode_json(response: Response, context: &str) -> Result<Value, String> {
     if !response.status().is_success() {
         return Err(format!(
             "{context} failed with status {}",
@@ -160,4 +160,13 @@ fn read_bounded(mut reader: impl Read, limit: usize, context: &str) -> Result<Ve
         }
         bytes.extend_from_slice(&buffer[..read]);
     }
+}
+
+pub(crate) fn wait_for_slot(slot: &std::sync::Mutex<Option<Instant>>, interval: Duration) {
+    let mut next = slot.lock().unwrap_or_else(|error| error.into_inner());
+    let now = Instant::now();
+    let start = next.map_or(now, |next| next.max(now));
+    *next = Some(start + interval);
+    drop(next);
+    std::thread::sleep(start.saturating_duration_since(now));
 }

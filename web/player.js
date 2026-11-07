@@ -14,7 +14,7 @@ import {
 
 import { api, session, state } from "./connection.js";
 
-import { goToMedia, markCurrent, setFavorite } from "./library.js";
+import { markCurrent, openLinks, setFavorite } from "./library.js";
 import { showQueueMenu } from "./queue.js";
 
 let receivedAt = 0;
@@ -22,8 +22,6 @@ let receivedAt = 0;
 let seeking = false;
 
 let seekPreview = null;
-
-let currentFavoriteRequest = Promise.resolve();
 
 let lyricsDocument = null;
 
@@ -35,7 +33,8 @@ function showPlayback(value) {
   if (
     seekPreview != null &&
     !seeking &&
-    (value?.current?.id !== state.currentId ||
+    (value?.current?.media_uri !== state.currentMediaUri ||
+      value?.current?.run !== state.currentRun ||
       !value?.can_seek ||
       Math.abs((value?.position_ms || 0) - seekPreview) <= 1500 ||
       value?.error)
@@ -53,7 +52,8 @@ function showPlayback(value) {
     "aria-label",
     playing ? tr("Pause") : tr("Play"),
   );
-  setIcon($("play-pause").firstElementChild, playing ? "pause" : "play");
+  setIcon($("play-pause").firstElementChild, playing ? "rufin-media-playback-pause-symbolic" : "rufin-media-playback-start-symbolic");
+  $("play-pause").lastElementChild.hidden = !value?.refilling;
   $("shuffle").setAttribute("aria-pressed", String(value?.shuffle || false));
   $("repeat").setAttribute(
     "aria-pressed",
@@ -61,7 +61,7 @@ function showPlayback(value) {
   );
   setIcon(
     $("repeat").firstElementChild,
-    value?.repeat === "one" ? "repeat-one" : "repeat",
+    value?.repeat === "one" ? "rufin-repeat-one-symbolic" : "rufin-repeat-symbolic",
   );
   const repeatLabel = {
     off: tr("Repeat off"),
@@ -82,43 +82,74 @@ function showPlayback(value) {
   $("seek").max = Math.max(1, value?.duration_ms || 0);
   $("seek").disabled = !track || !value.can_seek;
   $("duration").textContent = time(value?.duration_ms);
-  if (state.currentId !== (value?.current?.id || null)) {
-    state.currentId = value?.current?.id || null;
+  if (
+    state.currentMediaUri !== (value?.current?.media_uri ?? null) ||
+    state.currentRun !== (value?.current?.run ?? null)
+  ) {
+    state.currentMediaUri = value?.current?.media_uri ?? null;
+    state.currentRun = value?.current?.run ?? null;
     $("current-favorite").disabled = !track;
-    $("current-favorite").dataset.favoriteUri = track?.uri || "";
-    if (!track) showFavorite($("current-favorite"), false);
     lyricsDocument = null;
     activeLine = -1;
     showLyrics({ state: "empty" });
     coverRequest?.abort();
     coverRequest = new AbortController();
-    $("mini-cover").replaceChildren(icon("cover-fallback"));
+    if (!track) {
+      $("mini-cover").replaceChildren(icon("rufin-symbolic"));
+      delete $("mini-cover").dataset.coverIdentity;
+      delete $("mini-cover").dataset.coverFull;
+    }
     if (track) {
-      const id = state.currentId;
-      currentFavoriteRequest = (async () => {
-        const metadata = await api(
-          `/media?${new URLSearchParams({ uri: track.uri })}`,
-        );
-        if (state.currentId !== id) return;
-        showFavorite($("current-favorite"), metadata.favorite);
-      })();
-      run(() => currentFavoriteRequest);
       const signal = AbortSignal.any([session.signal, coverRequest.signal]);
-      run(() => cover($("mini-cover"), track.uri, signal));
+      run(async () => {
+        const shown = await cover(
+          $("mini-cover"),
+          { uri: track.uri, original: true },
+          signal,
+          track.artwork_previews?.[0],
+        );
+        if (!shown && !signal.aborted)
+          $("mini-cover").replaceChildren(icon("rufin-symbolic"));
+      });
       run(async () => {
         await api("/lyrics", "POST", {});
         showLyrics(await api("/lyrics"));
       });
     }
   }
-  for (const notice of value?.notices || [])
-    if (notice.type === "operation_failed") noticeError(notice.error);
+  // The heart shows the playback row's favorite, which follows every committed change.
+  showFavorite($("current-favorite"), !!track?.favorite);
+  for (const notice of value?.notices || []) {
+    if (notice.type !== "operation_failed") continue;
+    const message = [
+      "Not Found",
+      "File not found",
+      "Resource not found",
+      "Resource not found.",
+      "the configured source no longer exists",
+      "Could not play this track",
+    ].includes(notice.error)
+      ? tr("Could not play this track")
+      : ({
+          "Track unavailable": tr("Track unavailable"),
+          "Format not supported": tr("Format not supported"),
+          "Couldn't decode this track": tr("Couldn't decode this track"),
+          "Access denied": tr("Access denied"),
+          "Couldn't connect to the server": tr("Couldn't connect to the server"),
+          "Audio output failed": tr("Audio output failed"),
+        })[notice.error] || notice.error;
+    noticeError(message);
+  }
   markCurrent();
   updatePosition();
 }
 
 function showLyrics(value) {
-  if (value.id && value.id !== state.currentId) return;
+  if (
+    value.media_uri &&
+    (value.media_uri !== state.currentMediaUri || value.run !== state.currentRun)
+  )
+    return;
   lyricsDocument = value.document || null;
   activeLine = -1;
   $("lyrics").replaceChildren();
@@ -253,12 +284,12 @@ function updateVolumeIcon() {
   setIcon(
     $("mute").firstElementChild,
     state.playback?.muted || volume <= 0
-      ? "muted"
+      ? "rufin-audio-volume-muted-symbolic"
       : volume <= 1 / 3
-        ? "volume-low"
+        ? "rufin-audio-volume-low-symbolic"
         : volume <= 2 / 3
-          ? "volume-medium"
-          : "volume",
+          ? "rufin-audio-volume-medium-symbolic"
+          : "rufin-audio-volume-high-symbolic",
   );
 }
 
@@ -291,13 +322,12 @@ function init() {
       run(() => showQueueMenu(state.playback.current, $("player-menu")));
   });
   new ResizeObserver(scrollLyrics).observe($("lyrics"));
-  for (const [id, kind] of [
-    ["player-artist", "artists"],
-    ["player-album", "albums"],
+  for (const [id, field] of [
+    ["player-artist", "artist"],
+    ["player-album", "album"],
   ]) {
     $(id).addEventListener("click", () => {
-      if (state.playback?.current?.track)
-        run(() => goToMedia(state.playback.current.track, kind, $(id)));
+      if (state.playback?.current?.track) openLinks(state.playback.current.track, field, $(id));
     });
   }
   $("play-pause").addEventListener("click", () =>
@@ -340,19 +370,8 @@ function init() {
       volumeEditing = false;
     });
   $("current-favorite").addEventListener("click", () => {
-    const id = state.currentId;
-    if (state.playback?.current?.track)
-      run(async () => {
-        await currentFavoriteRequest;
-        if (state.currentId !== id) return;
-        await setFavorite([
-          {
-            ...state.playback.current.track,
-            favorite:
-              $("current-favorite").getAttribute("aria-pressed") === "true",
-          },
-        ]);
-      });
+    const track = state.playback?.current?.track;
+    if (track) run(() => setFavorite(track));
   });
   $("seek").addEventListener("input", () => {
     seeking = true;
@@ -378,6 +397,7 @@ function init() {
   document.addEventListener("keydown", (event) => {
     if (
       event.code === "Space" &&
+      !event.defaultPrevented &&
       !["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"].includes(
         event.target.tagName,
       ) &&

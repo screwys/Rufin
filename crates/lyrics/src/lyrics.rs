@@ -3,7 +3,6 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -12,7 +11,7 @@ use tracing::debug;
 use crate::{
     ExternalLyricsProvider, LyricsBundle as Lyrics, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine as LyricLine, LyricsOrigin, LyricsRole, LyricsSearchContent, LyricsSearchResult,
-    normalize_language_tag,
+    UserPreferences, normalize_language_tag,
 };
 
 const EXTERNAL_LYRICS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -67,17 +66,17 @@ impl crate::Settings {
 
     fn lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         let external_enabled =
-            self.external_lyrics_enabled && !self.auto_lyrics_suppressed(track_id);
+            self.preferences.external_lyrics_enabled && !self.auto_lyrics_suppressed(track_id);
         let external_network = external_enabled && !private_mode;
         LyricsPlan {
             external_providers: external_enabled
-                .then(|| self.external_lyrics_providers.clone())
+                .then(|| self.preferences.external_lyrics_providers.clone())
                 .unwrap_or_default(),
             allow_external_fallback: external_network,
-            prefer_server: self.prefer_server_lyrics,
-            require_word_timing: self.karaoke_mode,
-            prefer_translations: self.prefer_translations,
-            preferred_translation_language: self.preferred_translation_language.clone(),
+            prefer_server: self.preferences.prefer_server_lyrics,
+            require_word_timing: self.preferences.karaoke_mode,
+            prefer_translations: self.preferences.prefer_translations,
+            preferred_translation_language: self.preferences.preferred_translation_language.clone(),
         }
     }
 
@@ -105,7 +104,9 @@ impl crate::Settings {
     ) -> bool {
         origin.is_some_and(|origin| {
             matches!(origin, LyricsOrigin::External(_))
-                && self.external_lyrics_network_allowed(private_mode)
+                && self
+                    .preferences
+                    .external_lyrics_network_allowed(private_mode)
                 && !self.auto_lyrics_suppressed(track_id)
         })
     }
@@ -493,7 +494,7 @@ fn lrclib_result(value: &Value) -> Option<LyricsSearchResult> {
         },
     })
 }
-pub(crate) fn lrclib_search(
+pub(crate) async fn lrclib_search(
     artist_name: &str,
     track_name: &str,
 ) -> Result<Vec<LyricsSearchResult>, String> {
@@ -502,8 +503,9 @@ pub(crate) fn lrclib_search(
         artist_name,
         track_name,
     )
+    .await
 }
-pub(crate) fn lrclib_automatic_search(
+pub(crate) async fn lrclib_automatic_search(
     artist_name: &str,
     track_name: &str,
 ) -> Result<Vec<LyricsSearchResult>, String> {
@@ -512,6 +514,7 @@ pub(crate) fn lrclib_automatic_search(
         artist_name,
         track_name,
     )
+    .await
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LyricsLookup {
@@ -615,7 +618,7 @@ fn primary_artist_name(artist_name: &str) -> Option<String> {
         Some(primary.to_string())
     }
 }
-pub fn search_lyrics(
+pub async fn search_lyrics(
     providers: &[ExternalLyricsProvider],
     artist_name: &str,
     track_name: &str,
@@ -624,87 +627,53 @@ pub fn search_lyrics(
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut had_success = false;
-    std::thread::scope(|scope| {
-        let handles = providers
+    let batches = futures_util::future::join_all(
+        providers
             .iter()
-            .copied()
-            .map(|provider| {
-                let lookup = &lookup;
-                scope.spawn(move || {
-                    (
-                        provider,
-                        external_provider_search_for_lookup(provider, lookup, false, None),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        for handle in handles {
-            let Ok((provider, result)) = handle.join() else {
-                errors.push("lyric provider worker panicked".to_string());
-                continue;
-            };
-            match result {
-                Ok(mut batch) => {
-                    had_success = true;
-                    filter_external_results_for_lookup(&mut batch, &lookup);
-                    order_external_provider_results(&mut batch, &lookup);
-                    results.extend(batch);
-                }
-                Err(error) => errors.push(format!("{}: {error}", provider.title())),
+            .map(|&provider| external_provider_search_for_lookup(provider, &lookup, false)),
+    )
+    .await;
+    for (provider, result) in providers.iter().zip(batches) {
+        match result {
+            Ok(mut batch) => {
+                had_success = true;
+                filter_external_results_for_lookup(&mut batch, &lookup);
+                order_external_provider_results(&mut batch, &lookup);
+                results.extend(batch);
             }
+            Err(error) => errors.push(format!("{}: {error}", provider.title())),
         }
-    });
+    }
     if !had_success && !errors.is_empty() {
         return Err(errors.join("; "));
     }
     Ok(results)
 }
-pub fn external_best_lyrics(
+pub async fn external_best_lyrics(
     lookup: &LyricsLookup,
     providers: &[ExternalLyricsProvider],
     require_word_timing: bool,
     prefer_translations: bool,
     preferred_translation_language: &str,
-    cancelled: &AtomicBool,
+    has_existing_lyrics: bool,
 ) -> Result<Option<Lyrics>, String> {
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(None);
-    }
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut had_success = false;
-    std::thread::scope(|scope| {
-        let handles = providers
+    let batches = futures_util::future::join_all(
+        providers
             .iter()
-            .copied()
-            .map(|provider| {
-                let lookup = &lookup;
-                scope.spawn(move || {
-                    (
-                        provider,
-                        external_best_lyrics_for_provider(lookup, provider, cancelled),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        for handle in handles {
-            let Ok((provider, result)) = handle.join() else {
-                errors.push("lyric provider worker panicked".to_string());
-                continue;
-            };
-            match result {
-                Ok(batch) => {
-                    had_success = true;
-                    if !batch.is_empty() {
-                        results.extend(batch);
-                    }
-                }
-                Err(error) => errors.push(format!("{}: {error}", provider.title())),
+            .map(|&provider| external_best_lyrics_for_provider(lookup, provider)),
+    )
+    .await;
+    for (provider, result) in providers.iter().zip(batches) {
+        match result {
+            Ok(batch) => {
+                had_success = true;
+                results.extend(batch);
             }
+            Err(error) => errors.push(format!("{}: {error}", provider.title())),
         }
-    });
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(None);
     }
     dedupe_external_results(&mut results);
     if results.is_empty() {
@@ -718,27 +687,24 @@ pub fn external_best_lyrics(
         return Ok(None);
     }
     order_external_results(&mut results, &lookup, providers);
-    let selection = crate::Settings {
+    let selection = crate::UserPreferences {
         karaoke_mode: require_word_timing,
         prefer_translations,
         preferred_translation_language: preferred_translation_language.to_string(),
-        ..crate::Settings::default()
+        ..crate::UserPreferences::default()
     };
-    Ok(select_external_lyrics(results, &selection, cancelled))
+    Ok(select_external_lyrics(results, &selection, has_existing_lyrics).await)
 }
 
-fn select_external_lyrics(
+async fn select_external_lyrics(
     results: Vec<LyricsSearchResult>,
-    selection: &crate::Settings,
-    cancelled: &AtomicBool,
+    selection: &crate::UserPreferences,
+    has_existing_lyrics: bool,
 ) -> Option<Lyrics> {
     let mut fallback = None;
     let mut fallback_satisfies_selection = false;
     let mut deferred_attempts = HashMap::<ExternalLyricsProvider, usize>::new();
     for result in results {
-        if cancelled.load(Ordering::Acquire) {
-            return None;
-        }
         if matches!(result.content, LyricsSearchContent::Deferred) {
             let attempts = deferred_attempts.entry(result.provider).or_default();
             if *attempts >= EXTERNAL_LYRICS_FETCH_CANDIDATES_PER_PROVIDER {
@@ -746,9 +712,9 @@ fn select_external_lyrics(
             }
             *attempts += 1;
         }
-        match lyrics_from_search_result(&result) {
+        match lyrics_from_search_result(&result).await {
             Ok(Some(lyrics)) if lyrics.is_instrumental() => {
-                if fallback.is_none() {
+                if !has_existing_lyrics && fallback.is_none() {
                     return Some(lyrics);
                 }
             }
@@ -774,29 +740,17 @@ fn select_external_lyrics(
     }
     fallback
 }
-fn external_best_lyrics_for_provider(
+async fn external_best_lyrics_for_provider(
     lookup: &LyricsLookup,
     provider: ExternalLyricsProvider,
-    cancelled: &AtomicBool,
 ) -> Result<Vec<LyricsSearchResult>, String> {
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(Vec::new());
-    }
     let mut results = Vec::new();
     if provider == ExternalLyricsProvider::Lrclib
-        && let Some(result) = lrclib_exact_result(lookup)?
+        && let Some(result) = lrclib_exact_result(lookup).await?
     {
         results.push(result);
     }
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(Vec::new());
-    }
-    results.extend(external_provider_search_for_lookup(
-        provider,
-        lookup,
-        true,
-        Some(cancelled),
-    )?);
+    results.extend(external_provider_search_for_lookup(provider, lookup, true).await?);
     dedupe_external_results(&mut results);
     Ok(results)
 }
@@ -825,43 +779,33 @@ fn external_result_matches_lookup(result: &LyricsSearchResult, lookup: &LyricsLo
     }
     true
 }
-fn lrclib_exact_result(lookup: &LyricsLookup) -> Result<Option<LyricsSearchResult>, String> {
+async fn lrclib_exact_result(lookup: &LyricsLookup) -> Result<Option<LyricsSearchResult>, String> {
     let Some((artist_name, track_name)) = lookup.queries().into_iter().next() else {
         return Ok(None);
     };
     let Some(url) = lrclib_get_url(&artist_name, &track_name, lookup.duration_seconds)? else {
         return Ok(None);
     };
-    lrclib_fetch_get(external_lyrics_client()?, url)
+    lrclib_fetch_get(external_lyrics_client()?, url).await
 }
-fn external_provider_search_for_lookup(
+async fn external_provider_search_for_lookup(
     provider: ExternalLyricsProvider,
     lookup: &LyricsLookup,
     automatic: bool,
-    cancelled: Option<&AtomicBool>,
 ) -> Result<Vec<LyricsSearchResult>, String> {
-    if request_cancelled(cancelled) {
-        return Ok(Vec::new());
-    }
     let queries = lookup.queries();
     if queries.is_empty() {
         return Ok(Vec::new());
     }
     if queries.len() == 1 {
         let (artist_name, track_name) = &queries[0];
-        if request_cancelled(cancelled) {
-            return Ok(Vec::new());
-        }
-        return external_provider_search(provider, artist_name, track_name, automatic);
+        return external_provider_search(provider, artist_name, track_name, automatic).await;
     }
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut had_success = false;
     for (artist_name, track_name) in queries {
-        if request_cancelled(cancelled) {
-            return Ok(Vec::new());
-        }
-        match external_provider_search(provider, &artist_name, &track_name, automatic) {
+        match external_provider_search(provider, &artist_name, &track_name, automatic).await {
             Ok(batch) => {
                 had_success = true;
                 results.extend(batch);
@@ -876,14 +820,11 @@ fn external_provider_search_for_lookup(
     Ok(results)
 }
 
-fn request_cancelled(cancelled: Option<&AtomicBool>) -> bool {
-    cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
-}
 fn dedupe_external_results(results: &mut Vec<LyricsSearchResult>) {
     let mut seen = HashSet::new();
     results.retain(|result| seen.insert((result.provider, result.id.clone())));
 }
-fn external_provider_search(
+async fn external_provider_search(
     provider: ExternalLyricsProvider,
     artist_name: &str,
     track_name: &str,
@@ -892,21 +833,21 @@ fn external_provider_search(
     match provider {
         ExternalLyricsProvider::Lrclib => {
             if automatic {
-                lrclib_automatic_search(artist_name, track_name)
+                lrclib_automatic_search(artist_name, track_name).await
             } else {
-                lrclib_search(artist_name, track_name)
+                lrclib_search(artist_name, track_name).await
             }
         }
-        ExternalLyricsProvider::Netease => netease_search(artist_name, track_name),
-        ExternalLyricsProvider::Genius => genius_search(artist_name, track_name),
-        ExternalLyricsProvider::SimpMusic => simpmusic_search(artist_name, track_name),
+        ExternalLyricsProvider::Netease => netease_search(artist_name, track_name).await,
+        ExternalLyricsProvider::Genius => genius_search(artist_name, track_name).await,
+        ExternalLyricsProvider::SimpMusic => simpmusic_search(artist_name, track_name).await,
     }
 }
-fn external_lyrics_client() -> Result<&'static reqwest::blocking::Client, String> {
-    static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
+fn external_lyrics_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            reqwest::blocking::Client::builder()
+            reqwest::Client::builder()
                 .timeout(EXTERNAL_LYRICS_REQUEST_TIMEOUT)
                 .user_agent(format!("Rufin/{}", env!("CARGO_PKG_VERSION")))
                 .build()
@@ -915,7 +856,10 @@ fn external_lyrics_client() -> Result<&'static reqwest::blocking::Client, String
         .as_ref()
         .map_err(Clone::clone)
 }
-fn netease_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearchResult>, String> {
+async fn netease_search(
+    artist_name: &str,
+    track_name: &str,
+) -> Result<Vec<LyricsSearchResult>, String> {
     let query = [artist_name.trim(), track_name.trim()]
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -933,7 +877,7 @@ fn netease_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearc
         pairs.append_pair("limit", "5");
         pairs.append_pair("offset", "0");
     }
-    let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric search")?;
+    let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric search").await?;
     parse_netease_search_body(&body)
 }
 pub(crate) fn parse_netease_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
@@ -967,16 +911,16 @@ pub(crate) fn parse_netease_search_body(body: &str) -> Result<Vec<LyricsSearchRe
         })
         .collect())
 }
-fn netease_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
-    Ok(netease_fetch_lyrics_response(id)?["lrc"]["lyric"]
+async fn netease_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
+    Ok(netease_fetch_lyrics_response(id).await?["lrc"]["lyric"]
         .as_str()
         .filter(|lyrics| !lyrics.trim().is_empty())
         .map(str::to_owned))
 }
-fn netease_fetch_lyrics_bundle(id: &str) -> Result<Option<Lyrics>, String> {
-    Ok(lyrics_from_netease_response(netease_fetch_lyrics_response(
-        id,
-    )?))
+async fn netease_fetch_lyrics_bundle(id: &str) -> Result<Option<Lyrics>, String> {
+    Ok(lyrics_from_netease_response(
+        netease_fetch_lyrics_response(id).await?,
+    ))
 }
 fn lyrics_from_netease_response(response: Value) -> Option<Lyrics> {
     if response["lrc"]["lyric"].as_str().is_some_and(|content| {
@@ -1058,7 +1002,7 @@ fn lyrics_from_netease_response(response: Value) -> Option<Lyrics> {
         documents,
     ))
 }
-fn netease_fetch_lyrics_response(id: &str) -> Result<Value, String> {
+async fn netease_fetch_lyrics_response(id: &str) -> Result<Value, String> {
     let mut url = reqwest::Url::parse("https://music.163.com/api/song/lyric")
         .map_err(|error| error.to_string())?;
     {
@@ -1070,7 +1014,7 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<Value, String> {
         pairs.append_pair("yv", "-1");
         pairs.append_pair("rv", "-1");
     }
-    let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric lookup")?;
+    let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric lookup").await?;
     let response = serde_json::from_str::<Value>(&body)
         .map_err(|error| format!("NetEase lyric lookup returned invalid data: {error}"))?;
     debug!(
@@ -1081,7 +1025,10 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<Value, String> {
     );
     Ok(response)
 }
-fn genius_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearchResult>, String> {
+async fn genius_search(
+    artist_name: &str,
+    track_name: &str,
+) -> Result<Vec<LyricsSearchResult>, String> {
     let query = [artist_name.trim(), track_name.trim()]
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -1097,7 +1044,7 @@ fn genius_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearch
         pairs.append_pair("q", &query);
         pairs.append_pair("per_page", "5");
     }
-    let body = fetch_text(external_lyrics_client()?, url, "Genius lyric search")?;
+    let body = fetch_text(external_lyrics_client()?, url, "Genius lyric search").await?;
     parse_genius_search_body(&body)
 }
 pub(crate) fn parse_genius_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
@@ -1136,11 +1083,11 @@ pub(crate) fn parse_genius_search_body(body: &str) -> Result<Vec<LyricsSearchRes
     }
     Ok(results)
 }
-fn genius_fetch_lyrics(url: &str) -> Result<Option<String>, String> {
+async fn genius_fetch_lyrics(url: &str) -> Result<Option<String>, String> {
     let Some(url) = trusted_genius_lyrics_url(url) else {
         return Ok(None);
     };
-    let body = fetch_text(external_lyrics_client()?, url, "Genius lyric lookup")?;
+    let body = fetch_text(external_lyrics_client()?, url, "Genius lyric lookup").await?;
     Ok(extract_genius_lyrics(&body).filter(|lyrics| !lyrics.trim().is_empty()))
 }
 fn trusted_genius_lyrics_url(raw: &str) -> Option<reqwest::Url> {
@@ -1152,7 +1099,7 @@ fn trusted_genius_lyrics_url(raw: &str) -> Option<reqwest::Url> {
         && url.password().is_none())
     .then_some(url)
 }
-fn simpmusic_search(
+async fn simpmusic_search(
     artist_name: &str,
     track_name: &str,
 ) -> Result<Vec<LyricsSearchResult>, String> {
@@ -1167,7 +1114,7 @@ fn simpmusic_search(
     let mut url = reqwest::Url::parse("https://api-lyrics.simpmusic.org/v1/search")
         .map_err(|error| error.to_string())?;
     url.query_pairs_mut().append_pair("q", &query);
-    let body = fetch_text(external_lyrics_client()?, url, "SimpMusic lyric search")?;
+    let body = fetch_text(external_lyrics_client()?, url, "SimpMusic lyric search").await?;
     parse_simpmusic_search_body(&body)
 }
 pub(crate) fn parse_simpmusic_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
@@ -1202,10 +1149,10 @@ pub(crate) fn parse_simpmusic_search_body(body: &str) -> Result<Vec<LyricsSearch
         })
         .collect())
 }
-fn simpmusic_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
+async fn simpmusic_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
     let url = reqwest::Url::parse(&format!("https://api-lyrics.simpmusic.org/v1/{id}"))
         .map_err(|error| error.to_string())?;
-    let body = fetch_text(external_lyrics_client()?, url, "SimpMusic lyric lookup")?;
+    let body = fetch_text(external_lyrics_client()?, url, "SimpMusic lyric lookup").await?;
     parse_simpmusic_lyrics_body(&body)
 }
 fn parse_simpmusic_lyrics_body(body: &str) -> Result<Option<String>, String> {
@@ -1227,23 +1174,25 @@ fn parse_simpmusic_lyrics_body(body: &str) -> Result<Option<String>, String> {
             .map(str::to_owned)
     }))
 }
-fn fetch_text(
-    client: &reqwest::blocking::Client,
+async fn fetch_text(
+    client: &reqwest::Client,
     url: reqwest::Url,
     context: &str,
 ) -> Result<String, String> {
     let response = send_get(client, url, context)
-        .and_then(reqwest::blocking::Response::error_for_status)
+        .await
+        .and_then(reqwest::Response::error_for_status)
         .map_err(|error| format!("{context} failed: {error}"))?;
     read_response_text_bounded(response, LRCLIB_RESPONSE_MAX_BYTES, context)
+        .await
         .map_err(|error| format!("{context} failed: {error}"))
 }
 
-fn send_get(
-    client: &reqwest::blocking::Client,
+async fn send_get(
+    client: &reqwest::Client,
     url: reqwest::Url,
     context: &str,
-) -> Result<reqwest::blocking::Response, reqwest::Error> {
+) -> Result<reqwest::Response, reqwest::Error> {
     debug!(
         service = "lyrics",
         method = "GET",
@@ -1252,7 +1201,7 @@ fn send_get(
         "sending remote request"
     );
     let started = Instant::now();
-    let response = client.get(url).send()?;
+    let response = client.get(url).send().await?;
     debug!(
         service = "lyrics",
         method = "GET",
@@ -1263,7 +1212,7 @@ fn send_get(
     );
     Ok(response)
 }
-fn lrclib_search_with_urls(
+async fn lrclib_search_with_urls(
     urls: Vec<reqwest::Url>,
     artist_name: &str,
     track_name: &str,
@@ -1274,7 +1223,7 @@ fn lrclib_search_with_urls(
     let mut had_success = false;
     let mut errors = Vec::new();
     for url in urls {
-        match lrclib_fetch_search(client, url) {
+        match lrclib_fetch_search(client, url).await {
             Ok(batch) => {
                 debug!(results = batch.len(), "received LRCLIB lyric search batch");
                 had_success = true;
@@ -1293,7 +1242,7 @@ fn lrclib_search_with_urls(
     order_lrclib_results(&mut results, artist_name, track_name);
     Ok(results)
 }
-fn lrclib_search_priority_urls(
+async fn lrclib_search_priority_urls(
     urls: Vec<reqwest::Url>,
     artist_name: &str,
     track_name: &str,
@@ -1305,7 +1254,7 @@ fn lrclib_search_priority_urls(
     let mut errors = Vec::new();
     let mut had_success = false;
     for url in urls {
-        match lrclib_fetch_search(client, url) {
+        match lrclib_fetch_search(client, url).await {
             Ok(mut results) => {
                 debug!(
                     results = results.len(),
@@ -1326,7 +1275,9 @@ fn lrclib_search_priority_urls(
         Err(errors.join("; "))
     }
 }
-pub fn lyrics_from_search_result(result: &LyricsSearchResult) -> Result<Option<Lyrics>, String> {
+pub async fn lyrics_from_search_result(
+    result: &LyricsSearchResult,
+) -> Result<Option<Lyrics>, String> {
     match &result.content {
         LyricsSearchContent::Instrumental => {
             return Ok(Some(Lyrics::instrumental(LyricsOrigin::External(
@@ -1335,13 +1286,13 @@ pub fn lyrics_from_search_result(result: &LyricsSearchResult) -> Result<Option<L
         }
         LyricsSearchContent::Unavailable => return Ok(None),
         LyricsSearchContent::Deferred if result.provider == ExternalLyricsProvider::Netease => {
-            return netease_fetch_lyrics_bundle(&result.id);
+            return netease_fetch_lyrics_bundle(&result.id).await;
         }
         LyricsSearchContent::Inline { .. } | LyricsSearchContent::Deferred => {}
     }
     let content = match lyrics_result_content(result) {
         Some(content) => Some(content.to_string()),
-        None => external_fetch_lyrics(result)?,
+        None => external_fetch_lyrics(result).await?,
     };
     let Some(content) = content.filter(|lyrics| !lyrics.trim().is_empty()) else {
         return Ok(None);
@@ -1349,12 +1300,12 @@ pub fn lyrics_from_search_result(result: &LyricsSearchResult) -> Result<Option<L
     let lyrics = lyrics_from_text_content(LyricsOrigin::External(result.provider), &content);
     Ok(lyrics_with_displayable_content(lyrics))
 }
-fn external_fetch_lyrics(result: &LyricsSearchResult) -> Result<Option<String>, String> {
+async fn external_fetch_lyrics(result: &LyricsSearchResult) -> Result<Option<String>, String> {
     match result.provider {
         ExternalLyricsProvider::Lrclib => Ok(None),
-        ExternalLyricsProvider::Netease => netease_fetch_lyrics(&result.id),
-        ExternalLyricsProvider::Genius => genius_fetch_lyrics(&result.id),
-        ExternalLyricsProvider::SimpMusic => simpmusic_fetch_lyrics(&result.id),
+        ExternalLyricsProvider::Netease => netease_fetch_lyrics(&result.id).await,
+        ExternalLyricsProvider::Genius => genius_fetch_lyrics(&result.id).await,
+        ExternalLyricsProvider::SimpMusic => simpmusic_fetch_lyrics(&result.id).await,
     }
 }
 pub(crate) fn lrclib_get_url(
@@ -1379,11 +1330,11 @@ pub(crate) fn lrclib_get_url(
     }
     Ok(Some(url))
 }
-pub(crate) fn lrclib_fetch_get(
-    client: &reqwest::blocking::Client,
+pub(crate) async fn lrclib_fetch_get(
+    client: &reqwest::Client,
     url: reqwest::Url,
 ) -> Result<Option<LyricsSearchResult>, String> {
-    let response = match send_get(client, url, "Lyric lookup") {
+    let response = match send_get(client, url, "Lyric lookup").await {
         Ok(response) => response,
         Err(error) => return Err(format!("Lyric lookup failed: {error}")),
     };
@@ -1394,6 +1345,7 @@ pub(crate) fn lrclib_fetch_get(
         .error_for_status()
         .map_err(|error| format!("Lyric lookup failed: {error}"))?;
     let body = read_response_text_bounded(response, LRCLIB_RESPONSE_MAX_BYTES, "Lyric lookup")
+        .await
         .map_err(|error| format!("Lyric lookup failed: {error}"))?;
     parse_lrclib_get_body(&body).map(Some)
 }
@@ -1461,11 +1413,11 @@ fn push_unique_lrclib_search_url(urls: &mut Vec<reqwest::Url>, url: reqwest::Url
 pub(crate) fn lrclib_search_base_url() -> Result<reqwest::Url, String> {
     reqwest::Url::parse("https://lrclib.net/api/search").map_err(|error| error.to_string())
 }
-pub(crate) fn lrclib_fetch_search(
-    client: &reqwest::blocking::Client,
+pub(crate) async fn lrclib_fetch_search(
+    client: &reqwest::Client,
     url: reqwest::Url,
 ) -> Result<Vec<LyricsSearchResult>, String> {
-    let body = fetch_text(client, url, "Lyric search")?;
+    let body = fetch_text(client, url, "Lyric search").await?;
     parse_lrclib_search_body(&body)
 }
 pub(crate) fn parse_lrclib_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
@@ -1711,20 +1663,6 @@ fn result_has_plain_lyrics(result: &LyricsSearchResult) -> bool {
         .plain_lyrics()
         .is_some_and(|lyrics| !lyrics.trim().is_empty())
 }
-pub fn save_lyrics_search_result(
-    result: &LyricsSearchResult,
-    output_path: PathBuf,
-) -> Result<Option<(PathBuf, Lyrics)>, String> {
-    let Some(lyrics) = lyrics_from_search_result(result)? else {
-        return Ok(None);
-    };
-    let Some(document) = lyrics.selected_document(&crate::Settings::default()) else {
-        return Ok(None);
-    };
-    fs::write(&output_path, lyrics_to_lrc_text(document, 0)).map_err(|error| error.to_string())?;
-    debug!(path = %output_path.display(), "saved lyric file");
-    Ok(Some((output_path, lyrics)))
-}
 pub fn save_current_lyrics(
     lyrics: &LyricsDocument,
     offset_millis: i64,
@@ -1763,6 +1701,7 @@ pub fn lyrics_to_lrc_text(lyrics: &LyricsDocument, offset_millis: i64) -> String
         .join("\n")
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn shift_lrc_text_timestamps(text: &str, offset_delta_millis: i64) -> String {
     let mut output = String::with_capacity(text.len());
     let mut cursor = 0;
@@ -1851,13 +1790,34 @@ pub struct LocalLyricsInput {
     pub cue_track: bool,
 }
 
-pub fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
-    for path in local_sidecar_candidates(input) {
-        if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
-            return Some(lyrics);
-        }
+pub fn local_file_lyrics(
+    input: &LocalLyricsInput,
+    preferences: &UserPreferences,
+    embedded: impl FnOnce() -> Option<Lyrics>,
+) -> Option<Lyrics> {
+    let sidecar = local_sidecar_candidates(input)
+        .iter()
+        .find_map(|path| lyrics_from_sidecar_file(path));
+    if input.cue_track
+        || sidecar
+            .as_ref()
+            .is_some_and(|lyrics| lyrics.acquisition_complete(preferences))
+    {
+        return sidecar;
     }
-    None
+    match embedded() {
+        Some(embedded)
+            if sidecar.as_ref().is_none_or(|current| {
+                !embedded.is_instrumental()
+                    && (embedded.acquisition_complete(preferences)
+                        || !current.satisfies_preferences(preferences)
+                            && embedded.satisfies_preferences(preferences))
+            }) =>
+        {
+            Some(embedded)
+        }
+        _ => sidecar,
+    }
 }
 
 pub fn lyrics_from_edited_text(content: &str) -> Option<Lyrics> {
@@ -1875,7 +1835,7 @@ fn lyrics_from_sidecar_file(path: &Path) -> Option<Lyrics> {
     let content = read_text_file_bounded(path, LOCAL_LYRICS_MAX_BYTES).ok()?;
     lyrics_from_local_text(&content)
 }
-fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
+pub fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if !input.cue_track {
         paths.push(input.audio_path.with_extension("lrc"));
@@ -1896,8 +1856,8 @@ fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
     }
     paths
 }
-fn read_response_text_bounded(
-    response: reqwest::blocking::Response,
+async fn read_response_text_bounded(
+    mut response: reqwest::Response,
     limit: usize,
     context: &str,
 ) -> Result<String, String> {
@@ -1910,7 +1870,16 @@ fn read_response_text_bounded(
             bytes_to_mib(limit)
         ));
     }
-    let bytes = read_bytes_bounded(response, limit, context).map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(format!(
+                "{context} exceeded {} MiB limit",
+                bytes_to_mib(limit)
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 fn read_text_file_bounded(path: &Path, limit: usize) -> io::Result<String> {
@@ -1953,8 +1922,8 @@ fn bytes_to_mib(bytes: usize) -> usize {
 mod tests {
     use super::*;
 
-    #[test]
-    fn vocal_and_instrumental_versions_follow_the_requested_recording() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn vocal_and_instrumental_versions_follow_the_requested_recording() {
         let candidates = parse_lrclib_search_body(
             r#"[
                 {"id":1,"trackName":"Hikaru nara -instrumental-","artistName":"Goose house","duration":252.16,"instrumental":true},
@@ -1964,10 +1933,10 @@ mod tests {
         .unwrap();
         for karaoke_mode in [false, true] {
             for prefer_translations in [false, true] {
-                let selection = crate::Settings {
+                let selection = crate::UserPreferences {
                     karaoke_mode,
                     prefer_translations,
-                    ..crate::Settings::default()
+                    ..crate::UserPreferences::default()
                 };
                 for (title, instrumental) in
                     [("Hikaru nara", false), ("Hikaru nara -instrumental-", true)]
@@ -1980,9 +1949,9 @@ mod tests {
                         &lookup,
                         &[ExternalLyricsProvider::Lrclib],
                     );
-                    let lyrics =
-                        select_external_lyrics(results, &selection, &AtomicBool::new(false))
-                            .unwrap();
+                    let lyrics = select_external_lyrics(results, &selection, false)
+                        .await
+                        .unwrap();
                     assert_eq!(lyrics.is_instrumental(), instrumental);
                     if !instrumental {
                         assert_eq!(lyrics.documents()[0].lines[0].text, "Vocal lyrics");
@@ -1992,8 +1961,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn instrumental_candidate_does_not_stop_the_search_for_word_timing() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn instrumental_candidate_does_not_stop_the_search_for_word_timing() {
         let candidates = parse_lrclib_search_body(
             r#"[
                 {"id":1,"syncedLyrics":"[00:01.000]Vocal lyrics"},
@@ -2002,12 +1971,13 @@ mod tests {
             ]"#,
         )
         .unwrap();
-        let selection = crate::Settings {
+        let selection = crate::UserPreferences {
             karaoke_mode: true,
-            ..crate::Settings::default()
+            ..crate::UserPreferences::default()
         };
-        let lyrics =
-            select_external_lyrics(candidates, &selection, &AtomicBool::new(false)).unwrap();
+        let lyrics = select_external_lyrics(candidates, &selection, false)
+            .await
+            .unwrap();
         assert!(lyrics.documents()[0].has_word_timing());
     }
 
@@ -2060,8 +2030,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn provider_searches_keep_valid_siblings_and_independent_metadata() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_searches_keep_valid_siblings_and_independent_metadata() {
         let lrclib = parse_lrclib_search_body(
             r#"[
             {"id":1,"trackName":"Song","albumName":[],"duration":"bad","plainLyrics":"Words"},
@@ -2085,7 +2055,7 @@ mod tests {
             r#"{"id":1,"albumName":false,"duration":{},"syncedLyrics":[],"plainLyrics":"Words"}"#,
         )
         .unwrap();
-        assert!(lyrics_from_search_result(&exact).unwrap().is_some());
+        assert!(lyrics_from_search_result(&exact).await.unwrap().is_some());
 
         let netease = parse_netease_search_body(r#"{"result":{"songs":[
             {"id":1,"name":"Song","artists":[false,{"name":7},{"name":"Artist"}],"album":[],"duration":"bad"},
@@ -2113,7 +2083,7 @@ mod tests {
             {"videoId":false}, {"videoId":"two","artistName":{}}
         ]}"#).unwrap();
         assert_eq!(simp.len(), 2);
-        assert!(lyrics_from_search_result(&simp[0]).unwrap().is_some());
+        assert!(lyrics_from_search_result(&simp[0]).await.unwrap().is_some());
         assert_eq!(simp[0].duration_seconds, 0);
         assert!(matches!(simp[1].content, LyricsSearchContent::Deferred));
     }
@@ -2230,7 +2200,7 @@ mod tests {
         .expect("NetEase response");
         let lyrics = lyrics_from_netease_response(response).expect("lyrics");
         let original = lyrics
-            .selected_document(&crate::Settings::default())
+            .selected_document(&crate::UserPreferences::default())
             .expect("original lyrics");
         let pronunciation = lyrics
             .pronunciation_for(original)

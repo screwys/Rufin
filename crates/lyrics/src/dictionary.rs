@@ -4,11 +4,19 @@ use std::time::Duration;
 
 use lindera::dictionary::load_fs_dictionary;
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(PathBuf, String, {
+    remote,
+    lower: |path| path.to_string_lossy().into_owned(),
+    try_lift: |path| Ok(PathBuf::from(path)),
+});
+
 const DICTIONARY_DIRECTORY: &str = "ipadic-6.0.0";
 const DICTIONARY_URL: &str =
     "https://github.com/lindera/lindera/releases/download/v6.0.0/lindera-ipadic-6.0.0.zip";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum JapaneseDictionaryStatus {
     #[default]
     Idle,
@@ -22,12 +30,16 @@ pub fn prepare_dictionary(directory: &Path, downloading: impl FnOnce()) -> Resul
     install_dictionary(directory, DICTIONARY_URL, downloading).map_err(|error| error.to_string())
 }
 
+pub fn japanese_dictionary_path(directory: &Path) -> PathBuf {
+    directory.join(DICTIONARY_DIRECTORY)
+}
+
 fn install_dictionary(
     directory: &Path,
     url: &str,
     downloading: impl FnOnce(),
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let destination = directory.join(DICTIONARY_DIRECTORY);
+    let destination = japanese_dictionary_path(directory);
     if destination.is_dir() {
         load_fs_dictionary(&destination)?;
         return Ok(destination);

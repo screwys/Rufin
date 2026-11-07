@@ -1,18 +1,32 @@
-//! Owns one bounded, consistent Home read over provider and Rufin-defined sections.
-
-use std::collections::BTreeMap;
+//! One bounded Home read: provider sections from the Store, Rufin's own blocks from the
+//! resident Catalog.
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, FromRow, SqliteConnection};
+use sqlx::Connection;
 
+use crate::catalog::snapshot::Packed;
+use crate::catalog::snapshot::{AlbumRec, TrackRec};
+use crate::catalog::views::Context;
 use crate::{
-    AlbumKey, AlbumRow, Database, FolderKey, GenreKey, LibraryResult, ReadCancellation, SourceKey,
-    TrackKey, TrackRow,
+    AlbumKey, AlbumRow, Catalog, FolderKey, Item, LibraryResult, ReadCancellation, Row, SourceKey,
+    TagRow, TrackKey, TrackRow,
 };
 
 const HOME_LIMIT: i64 = 24;
 
+/// The first rows of `items` in `order`, sorted, without sorting the rest.
+fn first<T>(mut items: Vec<T>, order: impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
+    let limit = HOME_LIMIT as usize;
+    if items.len() > limit {
+        items.select_nth_unstable_by(limit - 1, &order);
+        items.truncate(limit);
+    }
+    items.sort_by(order);
+    items
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum HomeBlockKind {
     Showcase,
     Explore,
@@ -57,7 +71,28 @@ impl HomeBlockKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+impl HomeSectionKind {
+    /// The sections a source provides, in the order it lists them.
+    pub const SOURCE_SECTIONS: [Self; 4] = [
+        Self::MostPlayed,
+        Self::NewlyAdded,
+        Self::RecentlyPlayed,
+        Self::RecentlyReleased,
+    ];
+
+    /// The id a source's own section of this kind is stored under. Explore is Rufin's only.
+    pub const fn source_section(self) -> Option<&'static str> {
+        match self {
+            Self::Explore => None,
+            Self::MostPlayed => Some("most-played"),
+            Self::NewlyAdded => Some("newly-added"),
+            Self::RecentlyPlayed => Some("recently-played"),
+            Self::RecentlyReleased => Some("recently-released"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HomeEntryKind {
     Track,
     Album,
@@ -76,9 +111,8 @@ impl HomeEntryKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HomeEntryInput {
-    pub section_id: String,
     pub position: i64,
     pub kind: HomeEntryKind,
     pub entity_object_id: String,
@@ -98,38 +132,10 @@ pub struct HomeAlbumRow {
     pub title: String,
 }
 
-#[derive(Clone, Debug, FromRow)]
-struct HomeTrackFact {
-    track_key: TrackKey,
-    title: String,
-}
-
-#[derive(Clone, Debug, FromRow)]
-struct HomeAlbumFact {
-    album_key: AlbumKey,
-    title: String,
-}
-
-#[derive(Clone, Debug, FromRow, PartialEq)]
-pub struct HomeGenreRow {
-    pub genre_key: GenreKey,
-    pub object_id: String,
-    pub name: String,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub album_count: i64,
-    pub track_count: i64,
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HomeSectionRows {
     pub tracks: Vec<HomeTrackRow>,
     pub albums: Vec<HomeAlbumRow>,
-}
-
-#[derive(Default)]
-struct HomeSectionFacts {
-    tracks: Vec<HomeTrackFact>,
-    albums: Vec<HomeAlbumFact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -137,23 +143,6 @@ pub struct HomeProviderSection {
     pub section_id: String,
     pub title: Option<String>,
     pub rows: HomeSectionRows,
-}
-
-struct HomeProviderFacts {
-    section_id: String,
-    title: Option<String>,
-    rows: HomeSectionFacts,
-}
-
-struct HomePageFacts {
-    showcase: Option<HomeAlbumFact>,
-    explore: Vec<HomeAlbumFact>,
-    most_played: HomeSectionFacts,
-    newly_added: HomeSectionFacts,
-    recently_played: HomeSectionFacts,
-    recently_released: HomeSectionFacts,
-    genres: Vec<HomeGenreRow>,
-    provider_sections: Vec<HomeProviderFacts>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -164,11 +153,22 @@ pub struct HomePage {
     pub newly_added: HomeSectionRows,
     pub recently_played: HomeSectionRows,
     pub recently_released: HomeSectionRows,
-    pub genres: Vec<HomeGenreRow>,
+    pub genres: Vec<TagRow>,
     pub provider_sections: Vec<HomeProviderSection>,
 }
 
-impl Database {
+/// Album keys and titles of each Home block, chosen from the resident Catalog.
+#[derive(Default)]
+struct Chosen {
+    showcase: Vec<(AlbumKey, String)>,
+    explore: Vec<(AlbumKey, String)>,
+    most_played: Vec<(TrackKey, String)>,
+    recently_played: Vec<(TrackKey, String)>,
+    newly_added: Vec<(AlbumKey, String)>,
+    recently_released: Vec<(AlbumKey, String)>,
+}
+
+impl Catalog {
     pub async fn home_page(
         &self,
         source: SourceKey,
@@ -178,246 +178,363 @@ impl Database {
         blocks: &[HomeBlockKind],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<HomePage> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let mut transaction = connection.begin().await?;
-
-        let showcase = if blocks.contains(&HomeBlockKind::Showcase) {
-            let album_count = sqlx::query_scalar::<_, i64>(
-                "SELECT count(*) FROM albums album
-             WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (
-               SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-               WHERE track.album_key=album.album_key AND scope.folder_key=?2))",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_one(&mut *transaction)
-            .await?;
-            let showcase_offset = if album_count == 0 {
-                0
-            } else {
-                showcase_variation.rem_euclid(album_count)
-            };
-            sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title FROM albums
-             WHERE source_key=?1 AND (?3 IS NULL OR EXISTS (
-               SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-               WHERE track.album_key=albums.album_key AND scope.folder_key=?3))
-             ORDER BY album_key LIMIT 1 OFFSET ?2",
-            )
-            .bind(source)
-            .bind(showcase_offset)
-            .bind(folder)
-            .fetch_optional(&mut *transaction)
-            .await?
-        } else {
-            None
-        };
-
-        let explore = if blocks.contains(&HomeBlockKind::Explore) {
-            // Seek into the indexed shuffled order, rather than sorting the library
-            // on every refresh or selecting neighboring import IDs.
-            let pivot = explore_album_pivot(source, explore_variation);
-            let mut explore = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title FROM albums
-             WHERE source_key=?1 AND ((album_key*1103515245)%2147483647)>=?2
-               AND (?3 IS NULL OR EXISTS (
-                 SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-                 WHERE track.source_key=albums.source_key
-                   AND track.album_key=albums.album_key AND scope.folder_key=?3))
-             ORDER BY ((album_key*1103515245)%2147483647),album_key LIMIT ?4",
-            )
-            .bind(source)
-            .bind(pivot)
-            .bind(folder)
-            .bind(HOME_LIMIT)
-            .fetch_all(&mut *transaction)
-            .await?;
-            if explore.len() < HOME_LIMIT as usize {
-                let rest = sqlx::query_as::<_, HomeAlbumFact>(
-                    "SELECT album_key,title FROM albums
-                 WHERE source_key=?1 AND ((album_key*1103515245)%2147483647)<?2
-                   AND (?4 IS NULL OR EXISTS (
-                     SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-                     WHERE track.source_key=albums.source_key
-                       AND track.album_key=albums.album_key AND scope.folder_key=?4))
-                 ORDER BY ((album_key*1103515245)%2147483647),album_key LIMIT ?3",
-                )
-                .bind(source)
-                .bind(pivot)
-                .bind(HOME_LIMIT - explore.len() as i64)
-                .bind(folder)
-                .fetch_all(&mut *transaction)
-                .await?;
-                explore.extend(rest);
-            }
-
-            explore
-        } else {
-            Vec::new()
-        };
-
-        let most_played = if blocks.contains(&HomeBlockKind::MostPlayed) {
-            let mut most_played =
-                provider_section(&mut transaction, source, folder, "most-played").await?;
-            if most_played.tracks.is_empty() && most_played.albums.is_empty() {
-                most_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
-                "WITH listen_count AS (
-                   SELECT listen.media_uri,count(*) plays FROM tracks track
-                   CROSS JOIN listens listen ON listen.media_uri=track.media_uri
-                   WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
-                     SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-                   GROUP BY listen.media_uri)
-                 SELECT track.track_key,track.title
-                 FROM tracks track
-                 LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'
-                 LEFT JOIN listen_count listen USING(media_uri)
-                 WHERE track.source_key=?1
-                   AND COALESCE(baseline.play_count,0)+COALESCE(listen.plays,0)>0
-                   AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-                 ORDER BY COALESCE(baseline.play_count,0)+COALESCE(listen.plays,0) DESC,track.sort_text,track.track_key LIMIT 24",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
-            }
-
-            most_played
-        } else {
-            HomeSectionFacts::default()
-        };
-
-        let newly_added = if blocks.contains(&HomeBlockKind::NewlyAdded) {
-            let mut newly_added =
-                provider_section(&mut transaction, source, folder, "newly-added").await?;
-            if newly_added.tracks.is_empty() && newly_added.albums.is_empty() {
-                newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title FROM albums
-                 WHERE source_key=?1 AND (?2 IS NULL OR EXISTS (
-                   SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-                   WHERE track.album_key=albums.album_key AND scope.folder_key=?2))
-                 ORDER BY COALESCE(unixepoch(date_added),first_seen_at) DESC NULLS LAST,sort_text,album_key LIMIT 24",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
-            }
-
-            newly_added
-        } else {
-            HomeSectionFacts::default()
-        };
-
-        let recently_played = if blocks.contains(&HomeBlockKind::RecentlyPlayed) {
-            let mut recently_played =
-                provider_section(&mut transaction, source, folder, "recently-played").await?;
-            if recently_played.tracks.is_empty() && recently_played.albums.is_empty() {
-                recently_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
-                "WITH latest AS (
-                   SELECT listen.media_uri,max(listen.started_at) played_at FROM tracks track
-                   CROSS JOIN listens listen ON listen.media_uri=track.media_uri
-                   WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
-                     SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-                   GROUP BY listen.media_uri)
-                 SELECT track.track_key,track.title
-                 FROM latest JOIN tracks track USING(media_uri)
-                 WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-                 ORDER BY latest.played_at DESC,track.track_key LIMIT 24",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
-            }
-
-            recently_played
-        } else {
-            HomeSectionFacts::default()
-        };
-
-        let recently_released = if blocks.contains(&HomeBlockKind::RecentlyReleased) {
-            let mut recently_released =
-                provider_section(&mut transaction, source, folder, "recently-released").await?;
-            if recently_released.tracks.is_empty() && recently_released.albums.is_empty() {
-                recently_released.albums = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title FROM albums
-                 WHERE source_key=?1 AND (release_date IS NOT NULL OR COALESCE(year,0)<>0)
-                   AND (?2 IS NULL OR EXISTS (
-                     SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-                     WHERE track.album_key=albums.album_key AND scope.folder_key=?2))
-                 ORDER BY release_date DESC NULLS LAST,year DESC NULLS LAST,sort_text,album_key LIMIT 24",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
-            }
-
-            recently_released
-        } else {
-            HomeSectionFacts::default()
-        };
-
-        let genres = if blocks.contains(&HomeBlockKind::Genres) {
-            sqlx::query_as::<_, HomeGenreRow>(
-                "SELECT genre.genre_key,genre.object_id,genre.name,genre.artwork_binding,
-                    count(DISTINCT track.album_key) album_count,
-                    count(DISTINCT track.track_key) track_count
-             FROM genres genre
-             LEFT JOIN tracks track ON track.track_key IN (SELECT track_key FROM track_genres WHERE genre_key=genre.genre_key UNION SELECT track_key FROM album_genres JOIN tracks USING(album_key) WHERE genre_key=genre.genre_key)
-               AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-             WHERE genre.source_key=?1 AND (?2 IS NULL OR track.track_key IS NOT NULL)
-             GROUP BY genre.genre_key
-             ORDER BY count(track.track_key) DESC,genre.sort_text,genre.genre_key LIMIT 12",
-            )
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?
-        } else {
-            Vec::new()
-        };
-
-        let provider_section_ids = sqlx::query_as::<_, (String, Option<String>)>(
-            "SELECT section_id,max(section_title) FROM home_entries
-             WHERE source_key=?1 AND section_id NOT IN ('most-played','newly-added','recently-played','recently-released')
-             GROUP BY section_id ORDER BY section_id LIMIT 12",
+        // Provider sections by id: title, then track and album entries in position order.
+        let mut provider = std::collections::BTreeMap::<
+            String,
+            (Option<String>, Vec<(i64, String)>, Vec<(i64, String)>),
+        >::new();
+        for (section, section_title, kind, key, title) in sqlx::query_as::<_, (String, Option<String>, String, i64, String)>(
+            "SELECT section_id,section_title,entity_kind,entity_key,title FROM home_entries WHERE source_key=?1 ORDER BY section_id,position",
         )
         .bind(source)
         .fetch_all(&mut *transaction)
-        .await?;
-        let mut provider_sections = Vec::with_capacity(provider_section_ids.len());
-        for (section_id, title) in provider_section_ids {
-            let rows = provider_section(&mut transaction, source, folder, &section_id).await?;
-            provider_sections.push(HomeProviderFacts {
-                section_id,
-                title,
-                rows,
-            });
+        .await?
+        {
+            let entry = provider.entry(section).or_default();
+            entry.0 = entry.0.take().max(section_title);
+            match kind.as_str() {
+                "track" => entry.1.push((key, title)),
+                "album" => entry.2.push((key, title)),
+                _ => {}
+            }
         }
-
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        drop(connection);
-        drop(_permit);
-        enrich_home_page(
-            self,
-            source,
+        let (chosen, sections, genres) = {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot);
+            let Some(owner) = snapshot.source_slot(source) else {
+                return Ok(HomePage::default());
+            };
+            let scope = match folder {
+                Some(folder) => match snapshot.folders.slot(folder.raw()) {
+                    Some(slot) => Some(slot),
+                    None => return Ok(HomePage::default()),
+                },
+                None => None,
+            };
+            let derived = self.derived(&context, scope);
+            let albums = snapshot
+                .albums
+                .iter()
+                .filter(|(slot, album)| {
+                    album.source == owner && derived.albums[*slot as usize].tracks > 0
+                })
+                .collect::<Vec<_>>();
+            let title = |album: &AlbumRec| snapshot.text(album.title).to_owned();
+            let visible_track = |key: i64| {
+                snapshot.tracks.get(key).is_some_and(|track| {
+                    track.indexed()
+                        && scope
+                            .is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
+                })
+            };
+            let visible_album = |key: i64| {
+                snapshot
+                    .albums
+                    .slot(key)
+                    .is_some_and(|slot| derived.albums[slot as usize].tracks > 0)
+            };
+            let sections = provider
+                .into_iter()
+                .map(|(section, (title, tracks, albums))| {
+                    let tracks = tracks
+                        .into_iter()
+                        .filter(|(key, _)| visible_track(*key))
+                        .take(HOME_LIMIT as usize)
+                        .map(|(key, title)| (TrackKey::from_raw(key), title))
+                        .collect::<Vec<_>>();
+                    let albums = albums
+                        .into_iter()
+                        .filter(|(key, _)| visible_album(*key))
+                        .take(HOME_LIMIT as usize)
+                        .map(|(key, title)| (AlbumKey::from_raw(key), title))
+                        .collect::<Vec<_>>();
+                    (section, (title, tracks, albums))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let mut chosen = Chosen::default();
+            if blocks.contains(&HomeBlockKind::Showcase) && !albums.is_empty() {
+                let mut ordered = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
+                let index = showcase_variation.rem_euclid(ordered.len() as i64) as usize;
+                let album = *ordered
+                    .select_nth_unstable_by_key(index, |album| album.key)
+                    .1;
+                chosen
+                    .showcase
+                    .push((AlbumKey::from_raw(i64::from(album.key)), title(album)));
+            }
+            if blocks.contains(&HomeBlockKind::Explore) {
+                // A fixed shuffle of album keys, entered at a point the variation picks.
+                let pivot = explore_album_pivot(source, explore_variation);
+                let ordered = albums
+                    .iter()
+                    .map(|(_, album)| {
+                        let hash = i64::from(album.key).wrapping_mul(1_103_515_245) % 2_147_483_647;
+                        ((hash < pivot, hash, album.key), *album)
+                    })
+                    .collect::<Vec<_>>();
+                chosen.explore = first(ordered, |a, b| a.0.cmp(&b.0))
+                    .into_iter()
+                    .map(|(_, album)| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
+                    .collect();
+            }
+            let tracks = || {
+                snapshot.tracks.iter().filter(|(_, track)| {
+                    track.source == owner
+                        && track.indexed()
+                        && scope
+                            .is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
+                })
+            };
+            if blocks.contains(&HomeBlockKind::MostPlayed) {
+                let played = tracks()
+                    .map(|(slot, track)| (context.played(slot, track).plays, track))
+                    .filter(|(plays, _)| *plays > 0)
+                    .collect::<Vec<_>>();
+                let order = |a: &(u32, &TrackRec), b: &(u32, &TrackRec)| {
+                    (b.0.cmp(&a.0))
+                        .then_with(|| snapshot.track_sort(a.1).cmp(&snapshot.track_sort(b.1)))
+                        .then(a.1.key.cmp(&b.1.key))
+                };
+                chosen.most_played = first(played, order)
+                    .into_iter()
+                    .map(|(_, track)| {
+                        (
+                            TrackKey::from_raw(i64::from(track.key)),
+                            snapshot.text(track.title).to_owned(),
+                        )
+                    })
+                    .collect();
+            }
+            if blocks.contains(&HomeBlockKind::RecentlyPlayed) {
+                let played = tracks()
+                    .filter_map(|(slot, track)| {
+                        Some((
+                            (
+                                std::cmp::Reverse(context.played(slot, track).last?),
+                                track.key,
+                            ),
+                            track,
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                chosen.recently_played = first(played, |a, b| a.0.cmp(&b.0))
+                    .into_iter()
+                    .map(|(_, track)| {
+                        (
+                            TrackKey::from_raw(i64::from(track.key)),
+                            snapshot.text(track.title).to_owned(),
+                        )
+                    })
+                    .collect();
+            }
+            if blocks.contains(&HomeBlockKind::NewlyAdded) {
+                let added = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
+                let order = |a: &&AlbumRec, b: &&AlbumRec| {
+                    (a.added == u32::MAX)
+                        .cmp(&(b.added == u32::MAX))
+                        .then(b.added.cmp(&a.added))
+                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
+                        .then(a.key.cmp(&b.key))
+                };
+                chosen.newly_added = first(added, order)
+                    .into_iter()
+                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
+                    .collect();
+            }
+            if blocks.contains(&HomeBlockKind::RecentlyReleased) {
+                let released = albums
+                    .iter()
+                    .map(|(_, album)| *album)
+                    .filter(|album| {
+                        album.release != 0 || (album.year != i16::MIN && album.year != 0)
+                    })
+                    .collect::<Vec<_>>();
+                let dated = |value: u32| (value != 0).then_some(value);
+                let year = |value: i16| (value != i16::MIN).then_some(value);
+                let order = |a: &&AlbumRec, b: &&AlbumRec| {
+                    dated(a.release)
+                        .is_none()
+                        .cmp(&dated(b.release).is_none())
+                        .then(b.release.cmp(&a.release))
+                        .then(year(a.year).is_none().cmp(&year(b.year).is_none()))
+                        .then(b.year.cmp(&a.year))
+                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
+                        .then(a.key.cmp(&b.key))
+                };
+                chosen.recently_released = first(released, order)
+                    .into_iter()
+                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
+                    .collect();
+            }
+            (chosen, sections, blocks.contains(&HomeBlockKind::Genres))
+        };
+        let mut sections = sections;
+        // A provider section replaces Rufin's own block when it has rows. It holds the
+        // server's top rows of the whole library, so a selected folder keeps Rufin's own.
+        let mut provided = |kind: HomeBlockKind| {
+            kind.section_kind()
+                .filter(|_| folder.is_none())
+                .and_then(HomeSectionKind::source_section)
+                .and_then(|section| sections.remove(section))
+                .filter(|(_, tracks, albums)| {
+                    blocks.contains(&kind) && (!tracks.is_empty() || !albums.is_empty())
+                })
+                .map(|(_, tracks, albums)| (tracks, albums))
+        };
+        let most_played =
+            provided(HomeBlockKind::MostPlayed).unwrap_or((chosen.most_played, Vec::new()));
+        let newly_added =
+            provided(HomeBlockKind::NewlyAdded).unwrap_or((Vec::new(), chosen.newly_added));
+        let recently_played =
+            provided(HomeBlockKind::RecentlyPlayed).unwrap_or((chosen.recently_played, Vec::new()));
+        let recently_released = provided(HomeBlockKind::RecentlyReleased)
+            .unwrap_or((Vec::new(), chosen.recently_released));
+        let genres = if genres {
+            let read = crate::ListRead {
+                folder,
+                descending: true,
+                ..crate::ListRead::new(
+                    crate::ListKind::Genres,
+                    Some(source),
+                    crate::LibraryField::SongCount,
+                )
+            };
+            self.order_on(&mut transaction, &crate::Read::List(read))
+                .await?
+                .items(0..12)
+        } else {
+            Vec::new()
+        };
+        let others = sections
+            .into_iter()
+            .filter(|(section, _)| {
+                !matches!(
+                    section.as_str(),
+                    "most-played" | "newly-added" | "recently-played" | "recently-released"
+                )
+            })
+            .take(12)
+            .collect::<Vec<_>>();
+        // Every block's rows in one statement.
+        let tracks = |members: &[(TrackKey, String)]| {
+            members
+                .iter()
+                .map(|(key, _)| Item::Track {
+                    key: *key,
+                    entry: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let albums = |members: &[(AlbumKey, String)]| {
+            members
+                .iter()
+                .map(|(key, _)| Item::Album(*key))
+                .collect::<Vec<_>>()
+        };
+        let mut items = albums(&chosen.showcase);
+        items.extend(albums(&chosen.explore));
+        for (tracked, albumed) in [
+            &most_played,
+            &newly_added,
+            &recently_played,
+            &recently_released,
+        ] {
+            items.extend(tracks(tracked));
+            items.extend(albums(albumed));
+        }
+        for (_, (_, tracked, albumed)) in &others {
+            items.extend(tracks(tracked));
+            items.extend(albums(albumed));
+        }
+        items.extend(genres.iter().copied());
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert(*item));
+        // Each row counts in the music folder as the one rule narrows its kind.
+        let shape = crate::read::Shape {
             folder,
-            HomePageFacts {
-                showcase,
-                explore,
-                most_played,
-                newly_added,
-                recently_played,
-                recently_released,
-                genres,
-                provider_sections,
-            },
-            cancellation,
-        )
-        .await
+            ..crate::read::Shape::of(None)
+        };
+        let rows = self
+            .rows_of_on(&mut transaction, &items, &shape, true)
+            .await?;
+        let mut track_rows = std::collections::HashMap::new();
+        let mut album_rows = std::collections::HashMap::new();
+        let mut tag_rows = std::collections::HashMap::new();
+        for row in rows {
+            match row {
+                Row::Track(row) => {
+                    track_rows.insert(row.track_key, row);
+                }
+                Row::Album(row) => {
+                    album_rows.insert(row.album_key, row);
+                }
+                Row::Tag(row) => {
+                    tag_rows.insert(row.key, row);
+                }
+                _ => {}
+            }
+        }
+        let home_tracks = |members: Vec<(TrackKey, String)>| {
+            members
+                .into_iter()
+                .filter_map(|(key, title)| {
+                    Some(HomeTrackRow {
+                        track: track_rows.get(&key)?.clone(),
+                        title,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let home_albums = |members: Vec<(AlbumKey, String)>| {
+            members
+                .into_iter()
+                .filter_map(|(key, title)| {
+                    let album = album_rows.get(&key)?.clone();
+                    let title = if title.is_empty() {
+                        album.title.clone()
+                    } else {
+                        title
+                    };
+                    Some(HomeAlbumRow { album, title })
+                })
+                .collect::<Vec<_>>()
+        };
+        let section_rows =
+            |(tracks, albums): (Vec<(TrackKey, String)>, Vec<(AlbumKey, String)>)| {
+                HomeSectionRows {
+                    tracks: home_tracks(tracks),
+                    albums: home_albums(albums),
+                }
+            };
+        let page = HomePage {
+            showcase: home_albums(chosen.showcase).pop(),
+            explore: home_albums(chosen.explore),
+            most_played: section_rows(most_played),
+            newly_added: section_rows(newly_added),
+            recently_played: section_rows(recently_played),
+            recently_released: section_rows(recently_released),
+            genres: genres
+                .into_iter()
+                .filter_map(|item| match item {
+                    Item::Genre(key) => tag_rows.get(&key.raw()).cloned(),
+                    _ => None,
+                })
+                .collect(),
+            provider_sections: others
+                .into_iter()
+                .map(
+                    |(section_id, (title, tracks, albums))| HomeProviderSection {
+                        section_id,
+                        title,
+                        rows: section_rows((tracks, albums)),
+                    },
+                )
+                .collect(),
+        };
+        transaction.commit().await?;
+        Ok(page)
     }
 }
 
@@ -428,155 +545,4 @@ fn explore_album_pivot(source: SourceKey, variation: i64) -> i64 {
     mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     mixed ^= mixed >> 31;
     (mixed % 2_147_483_647) as i64
-}
-
-async fn enrich_home_page(
-    database: &Database,
-    source: SourceKey,
-    folder: Option<FolderKey>,
-    facts: HomePageFacts,
-    cancellation: &ReadCancellation,
-) -> LibraryResult<HomePage> {
-    let mut track_keys = Vec::new();
-    let mut album_keys = facts
-        .showcase
-        .iter()
-        .chain(&facts.explore)
-        .map(|row| row.album_key)
-        .collect::<Vec<_>>();
-    for section in [
-        &facts.most_played,
-        &facts.newly_added,
-        &facts.recently_played,
-        &facts.recently_released,
-    ] {
-        track_keys.extend(section.tracks.iter().map(|row| row.track_key));
-        album_keys.extend(section.albums.iter().map(|row| row.album_key));
-    }
-    for section in &facts.provider_sections {
-        track_keys.extend(section.rows.tracks.iter().map(|row| row.track_key));
-        album_keys.extend(section.rows.albums.iter().map(|row| row.album_key));
-    }
-    track_keys.sort_unstable();
-    track_keys.dedup();
-    album_keys.sort_unstable();
-    album_keys.dedup();
-
-    let mut tracks = BTreeMap::new();
-    for keys in track_keys.chunks(128) {
-        for row in database.track_rows(keys, cancellation).await? {
-            tracks.insert(row.track_key, row);
-        }
-    }
-    let mut albums = BTreeMap::new();
-    for keys in album_keys.chunks(128) {
-        for row in database
-            .album_rows(source, keys, folder, cancellation)
-            .await?
-        {
-            albums.insert(row.album_key, row);
-        }
-    }
-
-    let section = |facts: HomeSectionFacts| HomeSectionRows {
-        tracks: facts
-            .tracks
-            .into_iter()
-            .filter_map(|fact| {
-                tracks
-                    .get(&fact.track_key)
-                    .cloned()
-                    .map(|track| HomeTrackRow {
-                        track,
-                        title: fact.title,
-                    })
-            })
-            .collect(),
-        albums: facts
-            .albums
-            .into_iter()
-            .filter_map(|fact| {
-                albums
-                    .get(&fact.album_key)
-                    .cloned()
-                    .map(|album| HomeAlbumRow {
-                        album,
-                        title: fact.title,
-                    })
-            })
-            .collect(),
-    };
-    Ok(HomePage {
-        showcase: facts.showcase.and_then(|fact| {
-            albums
-                .get(&fact.album_key)
-                .cloned()
-                .map(|album| HomeAlbumRow {
-                    album,
-                    title: fact.title,
-                })
-        }),
-        explore: facts
-            .explore
-            .into_iter()
-            .filter_map(|fact| {
-                albums
-                    .get(&fact.album_key)
-                    .cloned()
-                    .map(|album| HomeAlbumRow {
-                        album,
-                        title: fact.title,
-                    })
-            })
-            .collect(),
-        most_played: section(facts.most_played),
-        newly_added: section(facts.newly_added),
-        recently_played: section(facts.recently_played),
-        recently_released: section(facts.recently_released),
-        genres: facts.genres,
-        provider_sections: facts
-            .provider_sections
-            .into_iter()
-            .map(|provider| HomeProviderSection {
-                section_id: provider.section_id,
-                title: provider.title,
-                rows: section(provider.rows),
-            })
-            .collect(),
-    })
-}
-
-async fn provider_section(
-    connection: &mut SqliteConnection,
-    source: SourceKey,
-    folder: Option<FolderKey>,
-    section_id: &str,
-) -> LibraryResult<HomeSectionFacts> {
-    let tracks = sqlx::query_as::<_, HomeTrackFact>(
-        "SELECT track.track_key,entry.title
-         FROM home_entries entry JOIN tracks track ON track.track_key=entry.entity_key
-         WHERE entry.source_key=?1 AND entry.section_id=?2 AND entry.entity_kind='track'
-           AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-         ORDER BY entry.position LIMIT 24",
-    )
-    .bind(source)
-    .bind(section_id)
-    .bind(folder)
-    .fetch_all(&mut *connection)
-    .await?;
-    let albums = sqlx::query_as::<_, HomeAlbumFact>(
-        "SELECT album.album_key,entry.title
-         FROM home_entries entry JOIN albums album ON album.album_key=entry.entity_key
-         WHERE entry.source_key=?1 AND entry.section_id=?2 AND entry.entity_kind='album'
-           AND (?3 IS NULL OR EXISTS (
-             SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
-             WHERE track.album_key=album.album_key AND scope.folder_key=?3))
-         ORDER BY entry.position LIMIT 24",
-    )
-    .bind(source)
-    .bind(section_id)
-    .bind(folder)
-    .fetch_all(&mut *connection)
-    .await?;
-    Ok(HomeSectionFacts { tracks, albums })
 }

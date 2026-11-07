@@ -10,37 +10,39 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindings", "metadata-lookup/bindings", "library/bindings"]
+
 [dependencies]
+uniffi = { workspace = true, optional = true }
 rufin-connect.workspace = true
 age.workspace = true
-axum.workspace = true
-askama.workspace = true
+chrono.workspace = true
+flate2.workspace = true
+tar.workspace = true
+# Bundle age error translations in development packages too.
+rust-embed.workspace = true
 image.workspace = true
+base64.workspace = true
+resvg.workspace = true
 thiserror.workspace = true
-backup.workspace = true
 audio-processing.workspace = true
 app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
-bytes.workspace = true
 blake3.workspace = true
 futures-util.workspace = true
-flate2.workspace = true
-http-body-util.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
 artwork.workspace = true
-desktop-integration.workspace = true
+pulldown-cmark = { workspace = true, features = ["html"] }
 directories.workspace = true
-downloads.workspace = true
 getrandom.workspace = true
+httpdate.workspace = true
 glib.workspace = true
 gio.workspace = true
-md5.workspace = true
 playback.workspace = true
 playback-cast.workspace = true
-reqwest = { workspace = true, features = ["blocking", "json"] }
-scrobbling.workspace = true
+reqwest = { workspace = true, features = ["blocking", "form", "json"] }
+md5_digest.workspace = true
 sources.workspace = true
 secrets.workspace = true
 library.workspace = true
@@ -49,7 +51,8 @@ lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+notify.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
@@ -62,4 +65,6 @@ windows-updater.workspace = true
 workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+wiremock.workspace = true
 image.workspace = true

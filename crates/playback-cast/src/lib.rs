@@ -4,6 +4,7 @@ pub mod plex;
 mod relay;
 mod upnp;
 mod upnp_transport;
+mod visualizer;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,12 +16,10 @@ use std::time::{Duration, Instant};
 use chromecast::GoogleCastController;
 use discovery::{DiscoveredTarget, discover_google_cast, discover_upnp};
 use playback::{
-    BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, RemoteOutput,
-    RemoteOutputProtocol,
+    BackendCommand, BackendError, BackendEvent, BackendFailure, EventWaker, PlaybackBackend,
+    ProcessingRequest, RemoteOutput, RemoteOutputProtocol,
 };
-use relay::{
-    ArtworkResolver, RelayServer, available_networks, network_address, network_binding_for,
-};
+use relay::{RelayServer, available_networks, network_address, network_binding_for};
 use upnp::UpnpController;
 use upnp_transport::UpnpDevice;
 
@@ -32,7 +31,6 @@ pub struct CastManager {
     targets: Mutex<HashMap<String, DiscoveredTarget>>,
     proxy_media: Arc<AtomicBool>,
     network_interface: Mutex<Option<String>>,
-    artwork_resolver: ArtworkResolver,
 }
 
 pub fn network_addresses() -> Result<Vec<std::net::IpAddr>, String> {
@@ -40,26 +38,12 @@ pub fn network_addresses() -> Result<Vec<std::net::IpAddr>, String> {
         .map(|interfaces| interfaces.into_iter().map(|(_, address)| address).collect())
 }
 
-impl Default for CastManager {
-    fn default() -> Self {
-        Self::new(false, None, |_| None)
-    }
-}
-
 impl CastManager {
-    pub fn new(
-        proxy_media: bool,
-        network_interface: Option<String>,
-        artwork_resolver: impl Fn(&playback::PreparedStream) -> Option<std::path::PathBuf>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
+    pub fn new(proxy_media: bool, network_interface: Option<String>) -> Self {
         Self {
             targets: Mutex::new(HashMap::new()),
             proxy_media: Arc::new(AtomicBool::new(proxy_media)),
             network_interface: Mutex::new(network_interface),
-            artwork_resolver: Arc::new(artwork_resolver),
         }
     }
 
@@ -159,7 +143,11 @@ impl CastManager {
         Ok(outputs)
     }
 
-    pub fn connect(&self, output: &RemoteOutput) -> Result<CastPlaybackBackend, String> {
+    pub fn connect(
+        &self,
+        output: &RemoteOutput,
+        processing: tokio::sync::watch::Receiver<ProcessingRequest>,
+    ) -> Result<CastPlaybackBackend, String> {
         let target = self
             .targets
             .lock()
@@ -176,14 +164,20 @@ impl CastManager {
             target,
             Arc::clone(&self.proxy_media),
             network_interface,
-            Arc::clone(&self.artwork_resolver),
+            processing,
         )
     }
 }
 
+#[derive(Default)]
+struct Mailbox {
+    ready: Vec<BackendEvent>,
+    waker: Option<EventWaker>,
+}
+
 pub struct CastPlaybackBackend {
     commands: SyncSender<WorkerCommand>,
-    events: Arc<Mutex<Vec<BackendEvent>>>,
+    events: Arc<Mutex<Mailbox>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -192,7 +186,7 @@ impl CastPlaybackBackend {
         target: DiscoveredTarget,
         proxy_media: Arc<AtomicBool>,
         network_interface: Option<String>,
-        artwork_resolver: ArtworkResolver,
+        processing: tokio::sync::watch::Receiver<ProcessingRequest>,
     ) -> Result<Self, String> {
         let (selected_local_address, bound_network_interface) =
             if let Some(network_interface) = network_interface.as_deref() {
@@ -203,8 +197,7 @@ impl CastPlaybackBackend {
                 (None, None)
             };
         let relay =
-            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?
-                .with_artwork_resolver(artwork_resolver);
+            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?;
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
                 let device = if device.local_address() == selected_local_address
@@ -227,11 +220,11 @@ impl CastPlaybackBackend {
             }
         };
         let (commands, receiver) = sync_channel(64);
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Mailbox::default()));
         let worker_events = Arc::clone(&events);
         let thread = thread::Builder::new()
             .name("rufin-cast-output".to_string())
-            .spawn(move || run_controller(controller, relay, receiver, worker_events))
+            .spawn(move || run_controller(controller, relay, receiver, worker_events, processing))
             .map_err(|error| error.to_string())?;
         Ok(Self {
             commands,
@@ -265,11 +258,26 @@ impl PlaybackBackend for CastPlaybackBackend {
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
         std::mem::take(
-            &mut *self
+            &mut self
                 .events
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .ready,
         )
+    }
+
+    fn set_event_waker(&mut self, waker: EventWaker) {
+        let pending = {
+            let mut events = self
+                .events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            events.waker = Some(Arc::clone(&waker));
+            !events.ready.is_empty()
+        };
+        if pending {
+            waker();
+        }
     }
 
     fn shutdown(&mut self) -> Result<(), BackendError> {
@@ -300,6 +308,13 @@ enum Controller {
 }
 
 impl Controller {
+    fn current_run(&self) -> Option<playback::RunId> {
+        match self {
+            Self::Upnp(controller) => controller.current_run(),
+            Self::GoogleCast(controller) => controller.current_run(),
+        }
+    }
+
     fn poll_interval(&self) -> Duration {
         match self {
             Self::Upnp(_) => UPNP_STATUS_INTERVAL,
@@ -332,10 +347,28 @@ impl Controller {
         }
     }
 
+    fn set_processing(
+        &mut self,
+        request: ProcessingRequest,
+        relay: &RelayServer,
+    ) -> Result<Vec<BackendEvent>, String> {
+        match self {
+            Self::Upnp(controller) => controller.set_processing(request, relay),
+            Self::GoogleCast(controller) => controller.set_processing(request, relay),
+        }
+    }
+
     fn shutdown(&mut self) {
         match self {
             Self::Upnp(controller) => controller.shutdown(),
             Self::GoogleCast(controller) => controller.shutdown(),
+        }
+    }
+
+    fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        match self {
+            Self::Upnp(controller) => controller.visualizer(relay),
+            Self::GoogleCast(controller) => controller.visualizer(relay),
         }
     }
 }
@@ -344,57 +377,110 @@ fn run_controller(
     mut controller: Controller,
     mut relay: RelayServer,
     commands: Receiver<WorkerCommand>,
-    events: Arc<Mutex<Vec<BackendEvent>>>,
+    events: Arc<Mutex<Mailbox>>,
+    mut processing: tokio::sync::watch::Receiver<ProcessingRequest>,
 ) {
     publish(&events, controller.initial_events());
-    let mut active_run = None;
     let mut last_poll = Instant::now();
+    let mut last_frame = Instant::now();
+    let mut visualizing = false;
+    let mut initial_processing = true;
     loop {
-        match commands.recv_timeout(Duration::from_millis(100)) {
+        let command =
+            commands.recv_timeout(Duration::from_millis(if visualizing { 33 } else { 100 }));
+        if initial_processing || processing.has_changed().unwrap_or(false) {
+            initial_processing = false;
+            let request = processing.borrow_and_update().clone();
+            let output = request.output.clone();
+            match controller.set_processing(request, &relay) {
+                Ok(update) => publish(&events, update),
+                Err(message) => publish(
+                    &events,
+                    vec![BackendEvent::ProcessingFailed { output, message }],
+                ),
+            }
+        }
+        match command {
             Ok(WorkerCommand::Backend(command)) => {
-                let run = command.run();
-                if matches!(*command, BackendCommand::Start { .. }) {
-                    active_run = run;
-                } else if matches!(*command, BackendCommand::Stop { .. }) {
-                    active_run = None;
+                if let BackendCommand::ConfigureAudio(settings) = command.as_ref() {
+                    relay.visualizer_fft_size = settings.visualizer_fft_size as usize;
                 }
+                let run = command.run().or_else(|| controller.current_run());
+                let requested_playing = match command.as_ref() {
+                    BackendCommand::Play { .. } => Some(true),
+                    BackendCommand::Pause { .. } => Some(false),
+                    _ => None,
+                };
                 match controller.handle(*command, &relay) {
                     Ok(update) => publish(&events, update),
-                    Err(error) => publish_error(&events, active_run.or(run), error),
+                    Err(error) => publish_error(
+                        &events,
+                        run,
+                        controller.current_run(),
+                        requested_playing,
+                        error,
+                    ),
                 }
             }
             Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
         }
         if last_poll.elapsed() >= controller.poll_interval() {
+            let run = controller.current_run();
             match controller.poll(&relay) {
                 Ok(update) => publish(&events, update),
-                Err(error) => publish_error(&events, active_run, error),
+                Err(error) => publish_error(&events, run, controller.current_run(), None, error),
             }
             last_poll = Instant::now();
+        }
+        if last_frame.elapsed() >= Duration::from_millis(33) {
+            let frame = controller.visualizer(&relay);
+            visualizing = frame.is_some();
+            if let Some(frame) = frame {
+                publish(&events, vec![frame]);
+            }
+            last_frame = Instant::now();
         }
     }
     controller.shutdown();
     relay.shutdown();
 }
 
-fn publish(events: &Mutex<Vec<BackendEvent>>, mut update: Vec<BackendEvent>) {
-    events
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .append(&mut update);
+fn publish(events: &Mutex<Mailbox>, mut update: Vec<BackendEvent>) {
+    if update.is_empty() {
+        return;
+    }
+    let waker = {
+        let mut events = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let wake = events.ready.is_empty();
+        events.ready.append(&mut update);
+        wake.then(|| events.waker.clone()).flatten()
+    };
+    if let Some(waker) = waker {
+        waker();
+    }
 }
 
-fn publish_error(events: &Mutex<Vec<BackendEvent>>, run: Option<playback::RunId>, error: String) {
-    if let Some(run) = run {
-        publish(
-            events,
-            vec![BackendEvent::Error {
-                run,
-                error: BackendFailure::new(error),
-            }],
-        );
+fn publish_error(
+    events: &Mutex<Mailbox>,
+    run: Option<playback::RunId>,
+    current_run: Option<playback::RunId>,
+    requested_playing: Option<bool>,
+    error: String,
+) {
+    let error = BackendFailure::new(error);
+    let event = if let Some(run) = run.filter(|run| Some(*run) != current_run) {
+        BackendEvent::Error { run, error }
+    } else if let (Some(run), Some(requested_playing)) = (run, requested_playing) {
+        BackendEvent::TransportRejected {
+            run,
+            requested_playing,
+            error,
+        }
     } else {
-        tracing::warn!(%error, "network output command failed");
-    }
+        BackendEvent::OperationFailed { run, error }
+    };
+    publish(events, vec![event]);
 }

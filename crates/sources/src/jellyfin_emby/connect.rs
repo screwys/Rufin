@@ -464,17 +464,15 @@ mod tests {
         let edited = edit(
             configuration.clone(),
             credential.clone(),
-            JellyfinEmbySettingsInput {
-                connect_manually: false,
-                use_instant_mix: false,
-                credentials: crate::CredentialSettingsInput {
-                    name: "Renamed".into(),
-                    base_url: server.uri(),
-                    username: "Listener".into(),
-                    password: String::new(),
-                    trust_invalid_cert: false,
-                },
+            false,
+            crate::CredentialInput {
+                source_name: Some("Renamed".into()),
+                server_url: server.uri(),
+                username: "Listener".into(),
+                secret: String::new(),
+                trust_invalid_cert: false,
             },
+            false,
             Some("device".into()),
         )
         .await
@@ -483,10 +481,6 @@ mod tests {
             panic!("reopened settings")
         };
         let (next, _, next_credential) = edited.into_parts();
-        assert_eq!(
-            next.input_identity().unwrap(),
-            configuration.input_identity().unwrap()
-        );
         assert_eq!(next.name, "Renamed");
         assert!(next_credential.is_none());
         assert!(
@@ -504,7 +498,7 @@ mod tests {
             "reopened-token"
         );
         let stream = source
-            .emby_stream("emby:track:track", StreamQuality::Original, None, false)
+            .emby_stream("emby:track:track", StreamQuality::Original, None)
             .await
             .unwrap();
         assert!(stream.uri().contains("reopened-token"));
@@ -540,17 +534,15 @@ mod tests {
         let result = edit(
             current.clone(),
             Some("old-credential".into()),
-            JellyfinEmbySettingsInput {
-                connect_manually: true,
-                use_instant_mix: false,
-                credentials: crate::CredentialSettingsInput {
-                    name: "Home".into(),
-                    base_url: server.uri(),
-                    username: "Listener".into(),
-                    password: String::new(),
-                    trust_invalid_cert: false,
-                },
+            true,
+            crate::CredentialInput {
+                source_name: Some("Home".into()),
+                server_url: server.uri(),
+                username: "Listener".into(),
+                secret: String::new(),
+                trust_invalid_cert: false,
             },
+            false,
             Some("device".into()),
         )
         .await
@@ -560,10 +552,6 @@ mod tests {
         };
         let (configuration, _, credential) = connected.into_parts();
         assert_eq!(configuration.source_id, current.source_id);
-        assert_eq!(
-            configuration.input_identity().unwrap(),
-            current.input_identity().unwrap()
-        );
         assert!(
             !JellyfinEmbySourceConfig::from_configuration(&configuration)
                 .unwrap()

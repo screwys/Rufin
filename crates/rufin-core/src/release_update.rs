@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate};
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -38,6 +38,7 @@ struct ReleaseCheckRequest {
     feedback: Vec<Sender<bool>>,
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ReleaseUpdateOwner {
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
@@ -95,7 +96,7 @@ impl ReleaseUpdateOwner {
         })
     }
 
-    pub(crate) fn initial_history(&self) -> ReleaseHistory {
+    pub fn initial_history(&self) -> ReleaseHistory {
         let installed_version = mutex_lock(&self.effective_installed_version).clone();
         release_history(
             &mutex_lock(&self.cache),
@@ -240,16 +241,6 @@ impl ReleaseUpdateOwner {
 }
 
 impl ReleaseUpdateOwner {
-    pub fn check(&self) {
-        self.check_with_automatic_update(false, None);
-    }
-
-    pub fn check_now(&self) -> Receiver<bool> {
-        let (sender, receiver) = async_channel::bounded(1);
-        self.check_with_automatic_update(false, Some(sender));
-        receiver
-    }
-
     pub fn check_and_update(&self) {
         self.check_with_automatic_update(true, None);
     }
@@ -291,10 +282,6 @@ impl ReleaseUpdateOwner {
             installer,
             version,
         );
-    }
-
-    pub fn mark_seen(&self, version: String) -> Result<(), String> {
-        mark_release_notification_seen(&self.settings, &version)
     }
 
     pub fn ready_version(&self) -> Option<String> {
@@ -465,7 +452,7 @@ fn release_history(
     installed_version: &str,
 ) -> ReleaseHistory {
     ReleaseHistory {
-        notes: cache.notes.clone().into(),
+        notes: cache.notes.clone(),
         installed_version: installed_version.to_string(),
         available_version: release_update_available(cache, updates_supported, installed_version)
             .map(str::to_string),
@@ -581,7 +568,7 @@ fn release_note_from_github_json(value: &serde_json::Value) -> Option<ReleaseNot
 }
 
 fn release_check_allowed(settings: &crate::settings::Settings) -> bool {
-    !settings.private_mode
+    !settings.application.private_mode
 }
 
 fn release_notification_due(
@@ -589,7 +576,7 @@ fn release_notification_due(
     latest: &str,
     current: &str,
 ) -> bool {
-    settings.release_notifications_enabled
+    settings.application.release_notifications_enabled
         && release_check_allowed(settings)
         && release_version_is_newer(latest, current)
         && settings.release_notification_seen_version.as_deref() != Some(latest)
@@ -796,7 +783,7 @@ mod tests {
             None
         );
         settings.automatic_updates_enabled = true;
-        settings.private_mode = true;
+        settings.application.private_mode = true;
         assert_eq!(
             automatic_update_target(&cache, &settings, true, "1.0.0", None),
             None
@@ -883,22 +870,25 @@ mod tests {
         settings.release_notification_seen_version = Some("2.0.0".to_string());
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
         settings.release_notification_seen_version = None;
-        settings.release_notifications_enabled = false;
+        settings.application.release_notifications_enabled = false;
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
-        settings.release_notifications_enabled = true;
-        settings.private_mode = true;
+        settings.application.release_notifications_enabled = true;
+        settings.application.private_mode = true;
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
     }
 
     #[test]
     fn release_acquisition_is_gated_only_by_private_mode() {
         let mut settings = crate::settings::Settings {
-            release_notifications_enabled: false,
+            application: crate::settings::ApplicationPreferences {
+                release_notifications_enabled: false,
+                ..Default::default()
+            },
             ..crate::settings::Settings::default()
         };
 
         assert!(release_check_allowed(&settings));
-        settings.private_mode = true;
+        settings.application.private_mode = true;
         assert!(!release_check_allowed(&settings));
     }
 
@@ -908,7 +898,10 @@ mod tests {
             notes: vec![note("2.0.0")],
         };
         let mut settings = crate::settings::Settings {
-            release_notifications_enabled: false,
+            application: crate::settings::ApplicationPreferences {
+                release_notifications_enabled: false,
+                ..Default::default()
+            },
             ..crate::settings::Settings::default()
         };
 
@@ -920,7 +913,7 @@ mod tests {
             Some("2.0.0")
         );
 
-        settings.release_notifications_enabled = true;
+        settings.application.release_notifications_enabled = true;
         settings.release_notification_seen_version = Some("2.0.0".to_string());
         assert!(!release_notification_due(&settings, "2.0.0", "1.0.0"));
         assert_eq!(
@@ -1024,8 +1017,8 @@ mod tests {
         let settings = SettingsFile::open(path.clone()).expect("open settings");
         settings
             .update(|stored| {
-                stored.ui.private_mode = true;
-                stored.ui.notifications_enabled = true;
+                stored.ui.application.private_mode = true;
+                stored.ui.application.notifications_enabled = true;
                 Ok(())
             })
             .expect("prepare unrelated settings");
@@ -1037,8 +1030,8 @@ mod tests {
             reopened.ui.release_notification_seen_version.as_deref(),
             Some("2.0.0")
         );
-        assert!(reopened.ui.private_mode);
-        assert!(reopened.ui.notifications_enabled);
+        assert!(reopened.ui.application.private_mode);
+        assert!(reopened.ui.application.notifications_enabled);
     }
 
     #[test]
@@ -1060,5 +1053,66 @@ mod tests {
             release_update_available(&cache, true, "1.0.0"),
             Some("2.0.0")
         );
+    }
+}
+
+/// Keeps periodic release checks running until it is dropped.
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct PeriodicReleaseChecks(tokio::task::AbortHandle);
+
+impl Drop for PeriodicReleaseChecks {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ReleaseUpdateOwner {
+    pub fn check(&self) {
+        self.check_with_automatic_update(false, None);
+    }
+
+    /// Checks once per configured interval. Changing the interval starts a new wait.
+    pub fn check_periodically(self: Arc<Self>) -> Arc<PeriodicReleaseChecks> {
+        fn interval(settings: &crate::settings::Settings) -> Duration {
+            Duration::from_secs(
+                u64::from(settings.application.release_check_interval_hours) * 60 * 60,
+            )
+        }
+        let mut changes = self.settings.changes();
+        let task = self.runtime.clone().spawn(async move {
+            let mut period = interval(&changes.borrow_and_update().ui);
+            let wait = tokio::time::sleep(period);
+            tokio::pin!(wait);
+            loop {
+                tokio::select! {
+                    () = &mut wait => {
+                        self.check();
+                        wait.as_mut().reset(tokio::time::Instant::now() + period);
+                    }
+                    changed = changes.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        let next = interval(&changes.borrow_and_update().ui);
+                        if next != period {
+                            period = next;
+                            wait.as_mut().reset(tokio::time::Instant::now() + period);
+                        }
+                    }
+                }
+            }
+        });
+        Arc::new(PeriodicReleaseChecks(task.abort_handle()))
+    }
+
+    pub async fn check_now(&self) -> bool {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.check_with_automatic_update(false, Some(sender));
+        receiver.recv().await.unwrap_or(false)
+    }
+
+    pub fn mark_seen(&self, version: String) -> Result<(), crate::settings::SettingsError> {
+        mark_release_notification_seen(&self.settings, &version).map_err(Into::into)
     }
 }

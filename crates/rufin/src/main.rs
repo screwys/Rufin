@@ -5,7 +5,6 @@ use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::process::{Command, ExitCode};
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::{
     fs,
@@ -16,6 +15,7 @@ use tracing::info;
 const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
 
 fn main() -> ExitCode {
+    process_memory::configure_allocator();
     let headless = env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless"));
     #[cfg(target_os = "windows")]
     if headless {
@@ -41,7 +41,9 @@ fn main() -> ExitCode {
         None => false,
     };
     let settings = app::startup_settings(&paths::roots());
-    if let Some(result) = restart_with_language(&settings.load().ui.language, updated_restart) {
+    if let Some(result) =
+        restart_with_language(&settings.load().ui.appearance.language, updated_restart)
+    {
         return result;
     }
     if headless {
@@ -57,43 +59,69 @@ fn main() -> ExitCode {
 
     let initial_settings = settings.load().ui.clone();
     let bootstrap = move || async move {
-        let discord = Arc::new(desktop_integration::Discord::new());
-        let presence = Arc::clone(&discord);
         app::runtime_inputs(
             diagnostics,
             !updated_restart,
             settings,
             paths::roots(),
-            || {
-                playback_gstreamer::GStreamerPlaybackBackend::new()
-                    .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                    .map_err(|error| error.to_string())
-            },
+            playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
-            Arc::new(move |projection, discontinuity| {
-                presence.observe(projection.map(|p| &p.view), discontinuity)
-            }),
-            Arc::new(move |settings, projection| {
-                discord.update(
-                    settings.rich_presence.clone(),
-                    !settings.private_mode,
-                    &settings.lastfm_api_key,
-                    projection.map(|p| &p.view),
-                )
-            }),
         )
         .await
     };
-    match app::with_runtime(|_| {
-        if updated_restart {
-            ui_shell::run_application_after_update(initial_settings, bootstrap, || {})
-        } else {
-            ui_shell::run_application(initial_settings, bootstrap)
+    let runtime = match app::worker_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return finish_storage_reset(ui::run_startup_error_application(error.to_string()));
         }
-    }) {
-        Ok(exit) => exit,
-        Err(error) => ui_shell::run_startup_error_application(error.to_string()),
+    };
+    let result = {
+        let _guard = runtime.enter();
+        if updated_restart {
+            ui::run_application_after_update(initial_settings, bootstrap, || {})
+        } else {
+            ui::run_application(initial_settings, bootstrap)
+        }
+    };
+    if result.storage_reset.is_some() {
+        // Wait for file workers too; deleting data while they run can recreate it.
+        drop(runtime);
+        drop(_stderr_guard);
+        return finish_storage_reset(result);
     }
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    result.code
+}
+
+fn finish_storage_reset(mut result: ui::ApplicationExit) -> ExitCode {
+    loop {
+        let Some(reset) = result.storage_reset else {
+            return result.code;
+        };
+        let reset = reset
+            .and_then(|request| request.apply(&paths::roots()))
+            .and_then(|()| restart_after_storage_reset().map_err(|error| error.to_string()));
+        match reset {
+            Ok(code) => return code,
+            Err(error) => result = ui::run_startup_error_application(error),
+        }
+    }
+}
+
+fn restart_after_storage_reset() -> io::Result<ExitCode> {
+    env::current_exe().and_then(|executable| {
+        let mut command = Command::new(executable);
+        command.env_remove(UPDATED_RESTART_VERSION_ENV);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            Err(command.exec())
+        }
+        #[cfg(not(unix))]
+        {
+            command.spawn().map(|_| ExitCode::SUCCESS)
+        }
+    })
 }
 
 fn restart_with_language(saved_language: &str, updated_restart: bool) -> Option<ExitCode> {

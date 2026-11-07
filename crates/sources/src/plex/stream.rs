@@ -1,6 +1,7 @@
 use super::*;
 use crate::remote_json::{boolean, field, items};
-use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
+use audio_processing::ResolvedStream;
+use playback::{SourceReportFact, SourceReportPhase, StreamQuality};
 
 impl PlexSource {
     pub(crate) async fn resolve_stream(
@@ -9,18 +10,41 @@ impl PlexSource {
         quality: StreamQuality,
         session_identifier: Option<&str>,
     ) -> SourceResult<ResolvedStream> {
+        self.resolve_audio(object, quality, session_identifier, None)
+            .await
+    }
+
+    async fn resolve_audio(
+        &self,
+        object: &str,
+        quality: StreamQuality,
+        session_identifier: Option<&str>,
+        encoding: Option<library::AudioEncoding>,
+    ) -> SourceResult<ResolvedStream> {
         let metadata = self.metadata(object).await?;
         let media = items(&metadata["Media"])
             .first()
             .ok_or(SourceError::NotFound)?;
         let part = items(&media["Part"]).first().ok_or(SourceError::NotFound)?;
         let bitrate = field::<u32>(media, "bitrate");
-        let transcode = quality
-            .max_bitrate_kbps()
-            .filter(|limit| bitrate.is_none_or(|bitrate| bitrate > *limit));
+        let transcode = if let Some(encoding) = encoding {
+            let same_codec = media["audioCodec"].as_str() == Some(encoding.codec.name());
+            let same_channels = !encoding.stereo()
+                || field::<u32>(media, "audioChannels").is_some_and(|channels| channels <= 2);
+            (!same_codec
+                || !same_channels
+                || encoding
+                    .bitrate_kbps
+                    .is_some_and(|limit| bitrate.is_none_or(|rate| rate > limit)))
+            .then_some(encoding.bitrate_kbps.unwrap_or(0))
+        } else {
+            quality
+                .max_bitrate_kbps()
+                .filter(|limit| bitrate.is_none_or(|bitrate| bitrate > *limit))
+        };
         let (path, params, content_type) = if let Some(bitrate) = transcode {
             let session = new_session()?;
-            let mut params = music_params(object, bitrate, &session);
+            let mut params = music_params(object, bitrate, &session, encoding);
             params.push(("X-Plex-Platform", "Generic".into()));
             if let Some(identifier) = session_identifier {
                 if let Some((_, value)) = params
@@ -42,6 +66,11 @@ impl PlexSource {
             .iter()
             .any(|key| field::<u32>(container, key).is_some_and(|code| code >= 2000))
             {
+                if encoding.is_some() {
+                    return Err(SourceError::InvalidRequest(
+                        "Plex cannot produce this audio profile",
+                    ));
+                }
                 return Err(SourceError::Other(
                     container["generalDecisionText"]
                         .as_str()
@@ -50,9 +79,19 @@ impl PlexSource {
                 ));
             }
             (
-                "/music/:/transcode/universal/start.mp3".to_string(),
+                format!(
+                    "/music/:/transcode/universal/start.{}",
+                    encoding.map_or("mp3", |encoding| match encoding.codec {
+                        library::AudioCodec::Opus | library::AudioCodec::Vorbis => "ogg",
+                        _ => encoding.codec.extension(),
+                    })
+                ),
                 params,
-                Some("audio/mpeg".into()),
+                Some(
+                    encoding
+                        .map_or("audio/mpeg", |encoding| encoding.codec.content_type())
+                        .into(),
+                ),
             )
         } else {
             (
@@ -91,7 +130,7 @@ impl PlexSource {
         }
         let mut stream = ResolvedStream::new(url.to_string())
             .with_content_type(content_type)
-            .with_trust_invalid_certificate(self.config.trust_invalid_cert);
+            .with_trust_invalid_certificate(self.config.trust_invalid_certificate());
         if let Some((_, session)) = params.iter().find(|(key, _)| *key == "session") {
             let mut ping = reqwest::Url::parse(&self.config.base_url)
                 .map_err(|error| SourceError::InvalidConfig(error.to_string()))?
@@ -143,7 +182,8 @@ impl PlexSource {
     pub(crate) async fn resolve_download(
         &self,
         object: &str,
-        quality: StreamQuality,
+        quality: crate::DownloadQuality,
+        channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
         if self.config.relay {
             return Err(SourceError::Other(
@@ -151,7 +191,6 @@ impl PlexSource {
                     .into(),
             ));
         }
-        let root = self.get("/", &[]).await?;
         let subscription = self
             .login
             .lock()
@@ -160,23 +199,48 @@ impl PlexSource {
         if !subscription {
             return Err(SourceError::Other("Plex downloads require an active Plex Pass for this listening profile or its Plex Home administrator".into()));
         }
-        if !self.config.owned
-            && !boolean(&root["MediaContainer"]["allowSync"])
-                .or_else(|| {
-                    field::<u8>(&root["MediaContainer"], "allowSync").map(|value| value != 0)
-                })
+        // A shared server says whether it allows downloads; an owned one always does.
+        let allowed = |root: Value| {
+            boolean(&root["MediaContainer"]["allowSync"])
+                .or_else(|| field::<u8>(&root["MediaContainer"], "allowSync").map(|v| v != 0))
                 .unwrap_or(false)
-        {
+        };
+        if !self.config.owned && !allowed(self.get("/", &[]).await?) {
             return Err(SourceError::Other(
                 "This Plex server has not allowed downloads for this listening profile".into(),
             ));
         }
-        let stream = self.resolve_stream(object, quality, None).await?;
-        let extension = stream
-            .uri()
-            .contains("/music/:/transcode/")
-            .then_some("mp3");
-        Ok(crate::ResolvedDownload::new(stream, extension))
+        let encoding = quality.encoding();
+        if encoding.is_some_and(|encoding| {
+            !encoding.stereo() && channels.is_some_and(|channels| channels > 2)
+        }) {
+            return Ok(crate::ResolvedDownload::encode(
+                self.resolve_stream(object, StreamQuality::Original, None)
+                    .await?,
+                quality,
+            ));
+        }
+        match self
+            .resolve_audio(object, StreamQuality::Original, None, encoding)
+            .await
+        {
+            Ok(stream) => {
+                let codec = stream
+                    .uri()
+                    .contains("/music/:/transcode/")
+                    .then(|| encoding.map(|encoding| encoding.codec))
+                    .flatten();
+                Ok(crate::ResolvedDownload::ready(stream, codec))
+            }
+            Err(SourceError::InvalidRequest("Plex cannot produce this audio profile")) => {
+                Ok(crate::ResolvedDownload::encode(
+                    self.resolve_stream(object, StreamQuality::Original, None)
+                        .await?,
+                    quality,
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
     pub(crate) async fn report_playback(
         &self,
@@ -204,14 +268,23 @@ impl PlexSource {
                 "X-Plex-Session-Identifier",
                 report.session_identifier.clone(),
             ),
-            ("volume", (report.volume * 100.0).round().to_string()),
+            (
+                "volume",
+                if report.muted {
+                    0.0
+                } else {
+                    report.volume * 100.0
+                }
+                .round()
+                .to_string(),
+            ),
             ("shuffle", u8::from(report.shuffle).to_string()),
             (
                 "repeat",
                 match report.repeat_mode {
-                    playback::RepeatMode::Off => "0",
-                    playback::RepeatMode::All => "1",
-                    playback::RepeatMode::One => "2",
+                    playback::QueueRepeatMode::Off => "0",
+                    playback::QueueRepeatMode::All => "1",
+                    playback::QueueRepeatMode::One => "2",
                 }
                 .into(),
             ),
@@ -243,9 +316,42 @@ fn new_session() -> SourceResult<String> {
     getrandom::fill(&mut bytes).map_err(|error| SourceError::Other(error.to_string()))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
-fn music_params(object: &str, bitrate: u32, session: &str) -> Vec<(&'static str, String)> {
-    vec![("hasMDE", "1".into()), ("path", format!("/library/metadata/{}", crate::policy::raw_item_id(object))), ("mediaIndex", "0".into()), ("partIndex", "0".into()), ("protocol", "http".into()), ("directPlay", "0".into()), ("directStream", "0".into()), ("musicBitrate", bitrate.to_string()), ("session", session.into()), ("X-Plex-Session-Identifier", session.into()), ("X-Plex-Client-Profile-Extra", "add-transcode-target(type=musicProfile&context=streaming&protocol=http&container=mp3&audioCodec=mp3)".into())]
+fn music_params(
+    object: &str,
+    bitrate: u32,
+    session: &str,
+    encoding: Option<library::AudioEncoding>,
+) -> Vec<(&'static str, String)> {
+    let codec = encoding.map_or(library::AudioCodec::Mp3, |encoding| encoding.codec);
+    let container = match codec {
+        library::AudioCodec::Opus | library::AudioCodec::Vorbis => "ogg",
+        library::AudioCodec::Aac => "adts",
+        _ => codec.name(),
+    };
+    vec![
+        ("hasMDE", "1".into()),
+        (
+            "path",
+            format!("/library/metadata/{}", crate::policy::raw_item_id(object)),
+        ),
+        ("mediaIndex", "0".into()),
+        ("partIndex", "0".into()),
+        ("protocol", "http".into()),
+        ("directPlay", "0".into()),
+        ("directStream", "0".into()),
+        ("musicBitrate", bitrate.to_string()),
+        ("session", session.into()),
+        ("X-Plex-Session-Identifier", session.into()),
+        (
+            "X-Plex-Client-Profile-Extra",
+            format!(
+                "add-transcode-target(type=musicProfile&context=streaming&protocol=http&container={container}&audioCodec={})",
+                codec.name()
+            ),
+        ),
+    ]
 }
+
 fn mime(container: Option<&str>) -> Option<&'static str> {
     match container? {
         "flac" => Some("audio/flac"),
@@ -286,11 +392,12 @@ mod tests {
             phase: SourceReportPhase::Ended,
             started_at_unix_seconds: 1,
             position_millis: 179000,
+            playback_rate: 1.0,
             paused: false,
             muted: false,
             volume: 0.5,
             shuffle: false,
-            repeat_mode: playback::RepeatMode::Off,
+            repeat_mode: playback::QueueRepeatMode::Off,
             failed: false,
         };
         source
@@ -469,13 +576,13 @@ mod tests {
                 .is_err()
         );
         source
-            .resolve_download("plex:track:track", StreamQuality::Original)
+            .resolve_download("plex:track:track", crate::DownloadQuality::Original, None)
             .await
             .unwrap();
         source.config.relay = true;
         assert!(
             source
-                .resolve_download("plex:track:track", StreamQuality::Original)
+                .resolve_download("plex:track:track", crate::DownloadQuality::Original, None)
                 .await
                 .is_err()
         );

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwPreferencesGroup" id="group">
+    <property name="title" translatable="yes">Excluded folders</property>
+    <property name="description" translatable="yes">Relative paths start at the music folder or source URL. Local paths can also be absolute.</property>
+    <property name="header-suffix">
+      <object class="GtkBox">
+        <property name="spacing">6</property>
+        <property name="valign">center</property>
+        <child><object class="GtkButton" id="add"><property name="label" translatable="yes">Add</property></object></child>
+        <child><object class="GtkButton" id="save"><property name="label" translatable="yes">Save</property><property name="visible">false</property><style><class name="suggested-action"/></style></object></child>
+      </object>
+    </property>
+    <child><object class="GtkLabel" id="status"><property name="visible">false</property><property name="wrap">true</property><property name="xalign">0</property><style><class name="error"/></style></object></child>
+  </object>
+  <object class="AdwEntryRow" id="path">
+    <property name="title" translatable="yes">Folder path</property>
+    <child type="suffix"><object class="GtkButton" id="browse"><property name="icon-name">rufin-document-open-symbolic</property><property name="tooltip-text" translatable="yes">Choose folder</property><property name="valign">center</property><style><class name="flat"/></style></object></child>
+    <child type="suffix"><object class="GtkButton" id="remove"><property name="icon-name">rufin-window-close-symbolic</property><property name="tooltip-text" translatable="yes">Remove</property><property name="valign">center</property><style><class name="flat"/></style></object></child>
+  </object>
+  <object class="GtkFileDialog" id="chooser"><property name="title" translatable="yes">Choose folder</property></object>
+</interface>

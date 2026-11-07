@@ -1,799 +1,394 @@
 //! Owns Playlist identity, exact duplicate occurrences, ordering, filtering, and edits.
-//! Playback queue state is a separate SQLite owner.
+//! Entries keep song references; song metadata belongs to the shared library.
 
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, FromRow, SqliteConnection};
 
+use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, Packed, SOURCE_OWNED, WRITABLE};
+use crate::catalog::write::{Scope, Write};
 use crate::{
-    Database, FolderKey, LibraryError, LibraryResult, PlaylistEntryKey, PlaylistKey,
-    ReadCancellation, RouteSeedWindow, SourceKey,
+    Catalog, LibraryError, LibraryResult, MemberSelection, PlaylistEntryKey, PlaylistKey,
+    ReadCancellation, SourceKey, TrackKey,
 };
 
-const PLAYLIST_ROW_LIMIT: usize = 128;
-const PLAYLIST_ENTRY_ROW_LIMIT: usize = 256;
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistAccess {
+    pub source_key: Option<SourceKey>,
+    pub source_id: Option<String>,
+    /// The server's id of a playlist its source owns.
+    pub object_id: Option<String>,
+    pub source_owned: bool,
+    pub writable: bool,
+    pub metadata_writable: bool,
+}
+
 const PLAYLIST_DELETE_BATCH: usize = 400;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PlaylistSort {
-    Position,
-    Title,
-    TrackCount,
-    Duration,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum PlaylistEntrySort {
-    Position,
-    Title,
-    Artist,
-    Album,
-}
-
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
     pub source_key: Option<SourceKey>,
     pub source_id: Option<String>,
+    pub source_owned: bool,
     pub object_id: String,
     pub name: String,
     pub writable: bool,
+    pub metadata_writable: bool,
     pub artwork_binding: Option<Vec<u8>>,
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
-    pub representative_artwork: Vec<Vec<u8>>,
     pub genres: Vec<PlaylistGenreLink>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistGenreLink {
     pub genre_key: crate::GenreKey,
     pub name: String,
 }
 
-impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
-    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            playlist_key: row.try_get("playlist_key")?,
-            source_key: row.try_get("source_key")?,
-            source_id: row.try_get("source_id")?,
-            object_id: row.try_get("object_id")?,
-            name: row.try_get("name")?,
-            writable: row.try_get("writable")?,
-            artwork_binding: row.try_get("artwork_binding")?,
-            track_count: row.try_get("track_count")?,
-            duration_millis: row.try_get("duration_millis")?,
-            downloaded_count: row.try_get("downloaded_count")?,
-            representative_artwork: Vec::new(),
-            genres: Vec::new(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, FromRow, PartialEq)]
-pub struct PlaylistEntryRow {
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistEditEntry {
     pub playlist_entry_key: PlaylistEntryKey,
-    pub position: i64,
-    pub media_uri: String,
-    pub source_id: Option<String>,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub album_media_uri: Option<String>,
-    #[sqlx(skip)]
-    pub artists: Vec<crate::TrackArtistLink>,
-    #[sqlx(skip)]
-    pub album_artists: Vec<crate::TrackArtistLink>,
-    pub album_display_artist: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub duration_millis: i64,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub bpm: Option<i64>,
-    pub genre: String,
-    pub play_count: i64,
-    pub last_played: Option<i64>,
-    pub source_format: Option<String>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub is_downloaded: bool,
+    pub track_key: TrackKey,
+    pub object_id: String,
+    /// The entry's index in the playlist's order.
+    pub position: usize,
 }
 
-#[derive(Clone)]
-pub struct PlaylistDetailPage {
-    pub summary: PlaylistRow,
-    pub count: usize,
-    pub first_row_position: usize,
-    pub first_rows: Vec<PlaylistEntryRow>,
-}
-
-pub(crate) async fn selected_playlist_entries_on(
-    connection: &mut SqliteConnection,
-    input: &crate::QueueInput,
-) -> LibraryResult<Vec<PlaylistEntryKey>> {
-    match input {
-        crate::QueueInput::PlaylistEntries { order, .. } => Ok(order.to_vec()),
-        crate::QueueInput::PlaylistSelection {
-            key,
-            filter,
-            sort,
-            descending,
-            ranges,
-            ..
-        } => {
-            let query = playlist_query(*key, None, *sort, *descending, filter);
-            crate::source_window::selected_values_on(connection, &query, &query.entry_key, ranges)
-                .await
-        }
-        _ => unreachable!("playlist entry selection"),
-    }
-}
-
-impl Database {
-    pub async fn selected_playlist_entries(
-        &self,
-        input: &crate::QueueInput,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = selected_playlist_entries_on(&mut connection, input).await;
-        Database::clear_progress(&mut connection).await?;
-        result
-    }
-    pub async fn playlist_count(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count =
-            playlist_order_query(source, folder, PlaylistSort::Position, false, filter, true)
-                .build_query_scalar::<i64>()
-                .fetch_one(&mut *connection)
-                .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
-    }
-
-    pub async fn playlist_entries_count(
+impl Catalog {
+    /// Who owns a playlist and what may change, from its resident record. Only a playlist its
+    /// source owns reads its server id.
+    pub async fn playlist_access(
         &self,
         playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count = playlist_query(playlist, folder, PlaylistEntrySort::Position, false, filter)
-            .count(&mut connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(count)
+        _cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<PlaylistAccess>> {
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let Some(record) = snapshot.playlists.get(playlist.raw()) else {
+            return Ok(None);
+        };
+        let source_key = snapshot.source_key(record.source);
+        let source_owned = record.flags & SOURCE_OWNED != 0;
+        Ok(Some(PlaylistAccess {
+            source_key,
+            source_id: source_key
+                .and_then(|key| snapshot.source(key))
+                .map(|source| source.object.clone()),
+            object_id: source_owned.then(|| snapshot.text(record.object).to_owned()),
+            source_owned,
+            writable: record.flags & WRITABLE != 0,
+            metadata_writable: record.flags & METADATA_WRITABLE != 0,
+        }))
     }
 
-    pub async fn playlist_owner(
+    /// A playlist's name from its resident record. An unnamed playlist has none.
+    pub async fn playlist_name(&self, playlist: PlaylistKey) -> Option<String> {
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let name = snapshot.text(snapshot.playlists.get(playlist.raw())?.name);
+        (!name.is_empty()).then(|| name.to_owned())
+    }
+
+    /// The object ids of these playlists, from their resident records.
+    pub fn playlist_objects(&self, playlists: &[PlaylistKey]) -> Vec<String> {
+        let snapshot = self.snapshot();
+        playlists
+            .iter()
+            .filter_map(|key| snapshot.playlists.get(key.raw()))
+            .map(|record| snapshot.text(record.object).to_owned())
+            .collect()
+    }
+
+    /// The track a playlist entry holds, from its resident entries.
+    pub fn playlist_entry_track(
         &self,
         playlist: PlaylistKey,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<(Option<SourceKey>, Option<String>)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, (Option<SourceKey>, Option<String>)>(
-            "SELECT playlist.source_key,source.object_id
-             FROM playlists playlist LEFT JOIN sources source USING(source_key)
-             WHERE playlist.playlist_key=?1",
-        )
-        .bind(playlist)
-        .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        entry: PlaylistEntryKey,
+    ) -> Option<TrackKey> {
+        let snapshot = self.snapshot();
+        let record = snapshot.playlists.get(playlist.raw())?;
+        let slot = record
+            .entries
+            .iter()
+            .find(|candidate| candidate.key == entry.raw())?
+            .track;
+        snapshot.tracks.key_of(slot).map(TrackKey::from_raw)
     }
 
-    pub async fn playlist_route_page(
-        &self,
-        source: impl Into<Option<SourceKey>>,
-        folder: Option<FolderKey>,
-        sort: PlaylistSort,
-        descending: bool,
-        filter: &str,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize, Vec<PlaylistRow>)> {
-        let source = source.into();
-        let count = self
-            .playlist_count(source, folder, filter, cancellation)
-            .await?
-            .max(0) as usize;
-        let range = window.range(count);
-        let rows = self
-            .playlist_page(
-                source,
-                folder,
-                sort,
-                descending,
-                filter,
-                range.start,
-                range.len(),
-                cancellation,
-            )
-            .await?;
-        Ok((count, range.start, rows))
+    /// Whether a playlist holds a track its source no longer lists, from its resident entries.
+    pub fn playlist_holds_hidden(&self, playlist: PlaylistKey) -> bool {
+        let snapshot = self.snapshot();
+        snapshot
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| {
+                record.entries.iter().any(|entry| {
+                    snapshot
+                        .tracks
+                        .live(entry.track)
+                        .is_some_and(|track| !track.indexed())
+                })
+            })
     }
 
-    pub async fn playlist_key_by_object(
-        &self,
-        source: SourceKey,
-        object_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
-            "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
-        )
-        .bind(source)
-        .bind(object_id)
-        .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn playlist_key_by_identity(
-        &self,
-        source_id: Option<&crate::SourceId>,
-        object_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
-            "SELECT playlist_key FROM main.playlists
-             WHERE source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=?1)
-               AND (?1 IS NULL OR source_key IS NOT NULL) AND object_id=?2 AND name IS NOT NULL
-             UNION ALL
-             SELECT -playlist_key FROM catalog.native_playlists
-             WHERE source_key=(SELECT source_key FROM catalog.sources WHERE object_id=?1)
-               AND object_id=?2 LIMIT 1",
-        )
-        .bind(source_id.map(crate::SourceId::as_str))
-        .bind(object_id)
-        .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
+    /// URIs of a source's tracks that some playlist holds, by title. A music folder does not
+    /// filter playlists.
     pub async fn all_playlist_track_order(
         &self,
         source: SourceKey,
-        folder: Option<FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, String>(
-            "SELECT track.media_uri FROM tracks track
-             WHERE track.source_key=?1
-               AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.media_uri=track.media_uri)
-               AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
-             ORDER BY track.sort_text,track.track_key",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        self.loaded().await;
+        let keys = {
+            let snapshot = self.snapshot();
+            let Some(owner) = snapshot.source_slot(source) else {
+                return Ok(Vec::new());
+            };
+            let held = snapshot
+                .playlists
+                .iter()
+                .flat_map(|(_, playlist)| playlist.entries.iter().map(|entry| entry.track))
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut tracks = held
+                .into_iter()
+                .filter_map(|slot| snapshot.tracks.live(slot))
+                .filter(|record| record.source == owner)
+                .map(|record| (snapshot.track_sort(record), record.key))
+                .collect::<Vec<_>>();
+            tracks.sort();
+            tracks.into_iter().map(|(_, key)| key).collect::<Vec<_>>()
+        };
+        let mut connection = self.acquire_cancellable(cancellation).await?;
+        Ok(sqlx::query_scalar("SELECT track.media_uri FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+            .bind(serde_json::to_string(&keys)?)
+            .fetch_all(&mut *connection)
+            .await?)
     }
 
-    pub async fn playlist_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        sort: PlaylistSort,
-        descending: bool,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_order(
-            &mut connection,
-            Some(source),
-            folder,
-            sort,
-            descending,
-            filter,
-        )
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        result
-    }
-
-    async fn load_playlist_order(
-        connection: &mut SqliteConnection,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        sort: PlaylistSort,
-        descending: bool,
-        filter: &str,
-    ) -> LibraryResult<Vec<PlaylistKey>> {
-        Ok(
-            playlist_order_query(source, folder, sort, descending, filter, false)
-                .build_query_scalar()
-                .persistent(false)
-                .fetch_all(connection)
-                .await?,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn playlist_page(
-        &self,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
-        sort: PlaylistSort,
-        descending: bool,
-        filter: &str,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let keys = playlist_order_query(source, folder, sort, descending, filter, false)
-            .push(" LIMIT ")
-            .push_bind(limit.min(PLAYLIST_ROW_LIMIT) as i64)
-            .push(" OFFSET ")
-            .push_bind(offset.min(i64::MAX as usize) as i64)
-            .build_query_scalar::<PlaylistKey>()
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = Self::load_playlist_rows(&mut transaction, &keys).await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn playlist_entries_page(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
-        descending: bool,
-        filter: &str,
-        offset: usize,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let query = playlist_query(playlist, folder, sort, descending, filter);
-        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select(&query.entry_key));
-        let keys = sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(sql))
-            .bind(limit.min(PLAYLIST_ENTRY_ROW_LIMIT) as i64)
-            .bind(offset.min(i64::MAX as usize) as i64)
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows)
-    }
-
+    /// Playlists the user can add tracks to whose names hold `filter`, as the playlist list
+    /// orders them: how many there are, and the rows of those in `window`.
     pub async fn playlist_destinations(
         &self,
         source: Option<SourceKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let order = Self::load_playlist_order(
-            &mut transaction,
-            source,
-            None,
-            PlaylistSort::Position,
-            false,
-            "",
-        )
-        .await?;
-        let mut rows = Vec::with_capacity(order.len());
-        for keys in order.chunks(PLAYLIST_ROW_LIMIT) {
-            rows.extend(Self::load_playlist_rows(&mut transaction, keys).await?);
-        }
-        rows.retain(|row| row.writable);
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows)
-    }
-
-    pub async fn playlist_entry_order(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
-        descending: bool,
         filter: &str,
+        window: std::ops::Range<usize>,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_entry_order(
-            &mut connection,
-            playlist,
-            folder,
-            sort,
-            descending,
-            filter,
-        )
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        result
-    }
-
-    pub async fn playlist_detail_page(
-        &self,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
-        descending: bool,
-        window: RouteSeedWindow,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistDetailPage>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let summary = Self::load_playlist_rows(&mut transaction, &[playlist])
-            .await?
-            .pop();
-        let page = if let Some(summary) = summary {
-            let query = playlist_query(playlist, folder, sort, descending, "");
-            let count = query.count(&mut transaction).await?.max(0) as usize;
-            let range = window.range(count);
-            let first_row_position = range.start;
-            let keys = crate::source_window::selected_values_on(
-                &mut transaction,
-                &query,
-                &query.entry_key,
-                &[range],
+    ) -> LibraryResult<(usize, Vec<PlaylistRow>)> {
+        let order = self
+            .order(
+                &crate::Read::List(crate::ListRead::new(
+                    crate::ListKind::Playlists,
+                    source,
+                    crate::LibraryField::RowIndex,
+                )),
+                cancellation,
             )
             .await?;
-            let first_rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
-            Some(PlaylistDetailPage {
-                summary,
-                count,
-                first_row_position,
-                first_rows,
-            })
-        } else {
-            None
+        let holds = name_holds(filter);
+        let writable = {
+            let snapshot = self.snapshot();
+            order
+                .items(0..order.len())
+                .into_iter()
+                .filter(|item| match item {
+                    crate::Item::Playlist(key) => {
+                        snapshot.playlists.get(key.raw()).is_some_and(|playlist| {
+                            playlist.flags & WRITABLE != 0 && holds(snapshot.text(playlist.name))
+                        })
+                    }
+                    _ => false,
+                })
+                .collect::<Vec<_>>()
         };
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(page)
+        // Only the rows shown are built.
+        let shown = &writable[window.start.min(writable.len())..window.end.min(writable.len())];
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let shape = crate::read::Shape {
+            totals: order.totals(),
+            ..crate::read::Shape::of(None)
+        };
+        let rows = self
+            .rows_of_on(&mut connection, shown, &shape, true)
+            .await?
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::Row::Playlist(crate::PlaylistListRow::Playlist(row)) => Some(row),
+                _ => None,
+            })
+            .collect();
+        Ok((writable.len(), rows))
     }
 
-    async fn load_playlist_entry_order(
-        connection: &mut SqliteConnection,
-        playlist: PlaylistKey,
-        folder: Option<FolderKey>,
-        sort: PlaylistEntrySort,
-        descending: bool,
-        filter: &str,
-    ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let query = playlist_query(playlist, folder, sort, descending, filter);
-        Ok(
-            sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(
-                query.select(&query.entry_key),
-            ))
-            .fetch_all(connection)
-            .await?,
-        )
-    }
-
-    pub async fn playlist_media_uri_order(
+    pub async fn playlist_edit_entries(
         &self,
         playlist: PlaylistKey,
-        folder: Option<FolderKey>,
+        selection: &MemberSelection,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, String>(
-            "SELECT entry.media_uri FROM playlist_entries entry
-             JOIN playlists playlist USING(playlist_key)
-             LEFT JOIN tracks track USING(media_uri)
-             WHERE playlist.playlist_key=?1
-               AND (playlist.source_key IS NULL OR ?2 IS NULL OR EXISTS (
-                 SELECT 1 FROM track_folders scope
-                 WHERE scope.track_key=track.track_key AND scope.folder_key=?2
-               ))
-             ORDER BY entry.position,entry.playlist_entry_key",
+    ) -> LibraryResult<Vec<PlaylistEditEntry>> {
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let selected =
+            crate::selection::selected_tracks_on(self, &mut connection, &[selection]).await?;
+        let keys = selected
+            .into_iter()
+            .flatten()
+            .map(|(_, entry)| {
+                entry.ok_or_else(|| {
+                    LibraryError::InvalidRequest(
+                        "Selection does not contain playlist entries".into(),
+                    )
+                })
+            })
+            .collect::<LibraryResult<Vec<_>>>()?;
+        let found: Vec<(PlaylistEntryKey, TrackKey, String)> = sqlx::query_as(
+            "SELECT entry.playlist_entry_key,entry.track_key,entry.object_id
+             FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value
+             WHERE entry.playlist_key=?2"
+        ).bind(serde_json::to_string(&keys)?).bind(playlist).fetch_all(&mut *connection).await?;
+        drop(connection);
+        let positions = self.entry_positions(playlist);
+        let mut entries = found
+            .into_iter()
+            .filter_map(|(playlist_entry_key, track_key, object_id)| {
+                Some(PlaylistEditEntry {
+                    position: *positions.get(&playlist_entry_key.raw())?,
+                    playlist_entry_key,
+                    track_key,
+                    object_id,
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.position);
+        Ok(entries)
+    }
+
+    /// Each entry's index in its playlist's order.
+    fn entry_positions(&self, playlist: PlaylistKey) -> std::collections::HashMap<i64, usize> {
+        self.snapshot()
+            .playlists
+            .get(playlist.raw())
+            .map(|record| {
+                record
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .map(|(position, entry)| (entry.key, position))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A page of a playlist's entries and their URIs, in order, from `offset`.
+    pub async fn playlist_entry_uri_page(
+        &self,
+        playlist: PlaylistKey,
+        offset: usize,
+    ) -> LibraryResult<Vec<(PlaylistEntryKey, String)>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT playlist_entry_key,media_uri FROM playlist_entries JOIN tracks USING(track_key)
+            WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key LIMIT ?3 OFFSET ?2",
         )
         .bind(playlist)
-        .bind(folder)
+        .bind(offset as i64)
+        .bind(256_i64)
         .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        .await?)
     }
 
-    pub async fn playlist_rows(
-        &self,
-        keys: &[PlaylistKey],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = Self::load_playlist_rows(&mut connection, keys).await;
-        Database::clear_progress(&mut connection).await?;
-        result
-    }
-
-    async fn load_playlist_rows(
-        connection: &mut SqliteConnection,
-        keys: &[PlaylistKey],
-    ) -> LibraryResult<Vec<PlaylistRow>> {
-        if keys.len() > PLAYLIST_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(format!(
-                "Playlist row reads are limited to {PLAYLIST_ROW_LIMIT} keys"
-            )));
-        }
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut result = Vec::<PlaylistRow>::with_capacity(keys.len());
-        for key in keys {
-            if result.iter().any(|row| row.playlist_key == *key) {
-                continue;
-            }
-            // Native identities are negative in the public view. Restrict the
-            // physical owner before joining so its positive-key index is usable.
-            let (entries, source_identity) = if key.raw() < 0 {
-                (
-                    "catalog.native_playlist_entries",
-                    "(SELECT object_id FROM sources WHERE source_key=playlist.source_key)",
-                )
-            } else {
-                (
-                    "main.playlist_entries",
-                    "(SELECT source.object_id FROM main.playlists owned JOIN main.source_ids source USING(source_key) WHERE owned.playlist_key=playlist.playlist_key)",
-                )
-            };
-            let Some(mut row) = sqlx::query_as::<_, PlaylistRow>(sqlx::AssertSqlSafe(format!(
-                "SELECT playlist.playlist_key,playlist.source_key,{source_identity} source_id,playlist.object_id,
-                        playlist.name,playlist.writable,playlist.artwork_binding,
-                        count(entry.playlist_entry_key) track_count,
-                        COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0) duration_millis,
-                        count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access
-                          WHERE access.media_uri=entry.media_uri AND access.origin='download') THEN 1 END) downloaded_count
-                 FROM playlists playlist
-                 LEFT JOIN {entries} entry ON entry.playlist_key=?2
-                 LEFT JOIN tracks track USING(media_uri)
-                 WHERE playlist.playlist_key=?1 GROUP BY playlist.playlist_key"
-            )))
-            .bind(key).bind(key.raw().checked_abs()).fetch_optional(&mut *connection).await? else {
-                continue;
-            };
-            row.representative_artwork = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT track.artwork_binding FROM {entries} entry
-                 CROSS JOIN tracks track USING(media_uri)
-                 WHERE entry.playlist_key=?1 AND track.artwork_binding IS NOT NULL
-                 ORDER BY entry.position LIMIT 4"
-            )))
-            .bind(key.raw().checked_abs())
-            .fetch_all(&mut *connection)
-            .await?;
-            row.genres =
-                sqlx::query_as::<_, (crate::GenreKey, String)>(sqlx::AssertSqlSafe(format!(
-                    "SELECT genre.genre_key,genre.name FROM {entries} entry
-                 CROSS JOIN tracks track USING(media_uri)
-                 CROSS JOIN track_genres relation USING(track_key)
-                 JOIN genres genre USING(genre_key)
-                 WHERE entry.playlist_key=?1 GROUP BY genre.genre_key
-                 ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2"
-                )))
-                .bind(key.raw().checked_abs())
-                .fetch_all(&mut *connection)
-                .await?
-                .into_iter()
-                .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
-                .collect();
-            result.push(row);
-        }
-        Ok(result)
-    }
-
-    pub async fn playlist_entry_rows(
-        &self,
-        keys: &[PlaylistEntryKey],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistEntryRow>> {
-        if keys.len() > PLAYLIST_ENTRY_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(format!(
-                "Playlist entry reads are limited to {PLAYLIST_ENTRY_ROW_LIMIT} keys"
-            )));
-        }
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut connection = tokio::select! {
-            result = self.acquire_reader() => result?,
-            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
-        };
-        let mut transaction = connection.begin().await?;
-        let rows = load_playlist_entry_rows(&mut transaction, keys).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn playlist_entry_media_uris(
+    /// The object ids of a playlist's tracks from an index of its order to the end.
+    pub async fn playlist_track_ids_from(
         &self,
         playlist: PlaylistKey,
-        entries: &[PlaylistEntryKey],
-        cancellation: &ReadCancellation,
+        position: usize,
     ) -> LibraryResult<Vec<String>> {
-        if entries.len() > PLAYLIST_ENTRY_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(format!(
-                "Playlist entry reads are limited to {PLAYLIST_ENTRY_ROW_LIMIT} keys"
-            )));
-        }
-        if entries.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(playlist_entry_key,ordinal) AS (");
-        query.push_values(entries.iter().enumerate(), |mut row, (ordinal, entry)| {
-            row.push_bind(*entry).push_bind(ordinal as i64);
-        });
-        query
-            .push(") SELECT entry.media_uri FROM requested JOIN playlist_entries entry USING(playlist_entry_key) WHERE entry.playlist_key=")
-            .push_bind(playlist)
-            .push(" ORDER BY requested.ordinal");
-        let result = query
-            .build_query_scalar::<String>()
-            .persistent(false)
+        let keys = self
+            .snapshot()
+            .playlists
+            .get(playlist.raw())
+            .map(|record| {
+                record.entries[position.min(record.entries.len())..]
+                    .iter()
+                    .map(|entry| entry.key)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT track.object_id FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value JOIN tracks track USING(track_key) ORDER BY CAST(requested.key AS INTEGER)")
+            .bind(serde_json::to_string(&keys)?)
             .fetch_all(&mut *connection)
-            .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+            .await?)
     }
 
+    /// Object ids of a source's named playlists that Rufin owns or the source lists, by name.
     pub async fn source_playlist_object_ids(
         &self,
         source: SourceKey,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
-            "SELECT object_id FROM playlists WHERE source_key=?1 ORDER BY sort_text,playlist_key",
-        )
-        .bind(source)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+        }
+        let snapshot = self.snapshot();
+        let Some(owner) = snapshot.source_slot(source) else {
+            return Ok(Vec::new());
+        };
+        let mut playlists = snapshot
+            .playlists
+            .iter()
+            .map(|(_, record)| record)
+            .filter(|record| {
+                record.source == owner
+                    && !snapshot.text(record.name).is_empty()
+                    && (record.flags & SOURCE_OWNED == 0 || record.indexed())
+            })
+            .map(|record| {
+                (
+                    snapshot.text(record.name).to_ascii_lowercase(),
+                    record.key,
+                    snapshot.text(record.object),
+                )
+            })
+            .collect::<Vec<_>>();
+        playlists.sort_unstable();
+        Ok(playlists
+            .into_iter()
+            .map(|(.., object)| object.to_owned())
+            .collect())
     }
 
-    pub async fn source_playlist_object_id(
-        &self,
-        source: SourceKey,
-        playlist: PlaylistKey,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar(
-            "SELECT object_id FROM playlists
-             WHERE source_key=?1 AND playlist_key=?2",
-        )
-        .bind(source)
-        .bind(playlist)
-        .fetch_optional(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn source_playlist_media_object_ids(
+    /// The selected tracks of a source with their object ids, as the source names them.
+    pub async fn source_playlist_track_ids(
         &self,
         source: SourceKey,
         playlist: Option<PlaylistKey>,
-        media_uris: &[String],
+        songs: &MemberSelection,
         skip_existing: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        if media_uris.len() > PLAYLIST_ENTRY_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Playlist provider Track page exceeds 256 entries".to_string(),
-            ));
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(media_uri,ordinal) AS (");
-        query.push_values(
-            media_uris.iter().enumerate(),
-            |mut row, (ordinal, media_uri)| {
-                row.push_bind(media_uri).push_bind(ordinal as i64);
-            },
-        );
-        query.push(") SELECT track.object_id,track.source_key,(")
-            .push_bind(!skip_existing)
-            .push(" OR ")
-            .push_bind(playlist)
-            .push(" IS NULL OR NOT EXISTS(SELECT 1 FROM playlist_entries existing WHERE existing.playlist_key=")
-            .push_bind(playlist)
-            .push(" AND existing.media_uri=requested.media_uri)) accepted FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri")
-            .push(" ORDER BY requested.ordinal");
-        let mut result = Vec::with_capacity(media_uris.len());
-        for (object_id, track_source, accepted) in query
-            .build_query_as::<(Option<String>, Option<SourceKey>, bool)>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
+    ) -> LibraryResult<Vec<(TrackKey, String)>> {
+        let mut connection = self.acquire_reader().await?;
+        let mut transaction = connection.begin().await?;
+        let tracks = playlist_tracks_on(self, &mut transaction, Some(source), songs)
             .await?
-        {
-            let Some(object_id) = object_id else {
-                Database::clear_progress(&mut connection).await?;
-                return Err(LibraryError::InvalidRequest(
-                    "Playlist Track is no longer current".to_string(),
-                ));
-            };
-            if track_source != Some(source) {
-                let source_id: String =
-                    sqlx::query_scalar("SELECT object_id FROM sources WHERE source_key=?1")
-                        .bind(source)
-                        .fetch_one(&mut *connection)
-                        .await?;
-                Database::clear_progress(&mut connection).await?;
-                return Err(LibraryError::PlaylistSourceMismatch(crate::SourceId::new(
-                    source_id,
-                )));
-            }
-            if accepted {
-                result.push(object_id);
-            }
-        }
-        Database::clear_progress(&mut connection).await?;
-        Ok(result)
+            .ok_or_else(|| {
+                LibraryError::InvalidRequest("Playlist Track is no longer current".into())
+            })?;
+        let ids = sqlx::query_as("SELECT track.track_key,track.object_id FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value
+            WHERE NOT ?2 OR ?3 IS NULL OR NOT EXISTS(SELECT 1 FROM playlist_entries existing WHERE existing.playlist_key=?3 AND existing.track_key=track.track_key)
+            ORDER BY CAST(requested.key AS INTEGER)")
+            .bind(serde_json::to_string(&tracks)?).bind(skip_existing).bind(playlist)
+            .fetch_all(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(ids)
     }
 
-    pub async fn source_playlist_entry_object_ids(
-        &self,
-        source: SourceKey,
-        playlist: PlaylistKey,
-        entries: &[PlaylistEntryKey],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        if entries.len() > PLAYLIST_ENTRY_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Playlist provider entry page exceeds 256 entries".to_string(),
-            ));
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(playlist_entry_key,ordinal) AS (");
-        query.push_values(entries.iter().enumerate(), |mut row, (ordinal, entry)| {
-            row.push_bind(*entry).push_bind(ordinal as i64);
-        });
-        query.push(") SELECT entry.object_id FROM requested JOIN playlist_entries entry USING(playlist_entry_key) JOIN playlists playlist USING(playlist_key) WHERE playlist.source_key=")
-            .push_bind(source)
-            .push(" AND playlist.playlist_key=")
-            .push_bind(playlist)
-            .push(" ORDER BY requested.ordinal");
-        let result = query
-            .build_query_scalar::<String>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result)
-    }
-
+    /// A new Rufin playlist. Rufin playlists hold tracks of any source.
     pub async fn create_playlist(
         &self,
-        source: Option<SourceKey>,
         name: &str,
-        media_uris: &[String],
+        songs: &MemberSelection,
     ) -> LibraryResult<Option<(PlaylistKey, String)>> {
         let name = name.trim();
         if name.is_empty() {
@@ -801,670 +396,643 @@ impl Database {
                 "Playlist name cannot be empty".to_string(),
             ));
         }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        if let Some(source) = source
-            && !media_uris_exist(&mut transaction, source, media_uris).await?
-        {
-            transaction.rollback().await?;
+        let mut write = self.write().await?;
+        remember_uris(&mut write, songs).await?;
+        let connection = write.connection().await?;
+        let Some(tracks) = playlist_tracks_on(self, connection, None, songs).await? else {
             return Ok(None);
-        }
-        let (playlist, object_id) = sqlx::query_as::<_, (PlaylistKey, String)>(
-            "INSERT INTO main.playlists(
-                 source_key, object_id, name, normalized_name, sort_text, position
-             ) SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),id,?2,lower(?2),lower(?2),
-                      (SELECT COALESCE(max(position)+1,0) FROM playlists)
-               FROM (SELECT 'rufin:playlist:' || lower(hex(randomblob(16))) id)
-               RETURNING playlist_key,object_id",
-        )
-        .bind(source)
-        .bind(name)
-        .fetch_one(&mut *transaction)
-        .await?;
-        insert_playlist_media(&mut transaction, playlist, 0, media_uris, false).await?;
-        transaction.commit().await?;
+        };
+        let (playlist, object_id) = create_playlist_identity(&mut write, name).await?;
+        insert_playlist_tracks(self, &mut write, playlist, &tracks, false).await?;
+        write.commit().await?;
         Ok(Some((playlist, object_id)))
     }
 
-    pub async fn rename_playlist(
+    pub async fn update_playlist(
         &self,
-        source: Option<SourceKey>,
         playlist: PlaylistKey,
-        name: &str,
+        name: Option<&str>,
+        artwork: Option<Option<(&[u8], Option<&str>)>>,
     ) -> LibraryResult<bool> {
-        let name = name.trim();
-        if name.is_empty() {
+        let name = name.map(str::trim);
+        if name.is_some_and(str::is_empty) {
             return Err(LibraryError::InvalidRequest(
-                "Playlist name cannot be empty".to_string(),
+                "Playlist name cannot be empty".into(),
             ));
         }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let changed = sqlx::query(
-            "UPDATE main.playlists SET name=?3, normalized_name=lower(?3), sort_text=lower(?3)
-             WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
-               AND playlist_key=?2 AND name IS NOT ?3",
-        )
-        .bind(source)
-        .bind(playlist)
-        .bind(name)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        if changed {
-            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+        let mut write = self.write().await?;
+        let transaction = write.connection().await?;
+        let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE main.playlists SET name=?2 WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable AND ?2 IS NOT NULL AND name IS NOT ?2 RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
+            .bind(playlist).bind(name).fetch_optional(&mut *transaction).await?;
+        let mut changed = row.is_some();
+        if let Some(row) = row {
+            crate::playlist_links::mark_dirty_on(self, transaction, playlist).await?;
+            write.put_playlist(row);
+            write.changed(Scope::Playlist {
+                key: playlist,
+                entries: false,
+            });
         }
-        transaction.commit().await?;
+        if let Some(image) = artwork {
+            let object: Option<String> = sqlx::query_scalar("SELECT object_id FROM playlists WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable").bind(playlist).fetch_optional(write.connection().await?).await?;
+            if let Some(object_id) = object {
+                let (bytes, content_type) = image.unzip();
+                let image = PlaylistArtworkRecord {
+                    source_id: None,
+                    object_id,
+                    bytes: bytes.map(<[u8]>::to_vec),
+                    content_type: content_type.flatten().map(str::to_owned),
+                    artwork_binding: None,
+                    mosaic: None,
+                };
+                changed |= write_playlist_artwork(&mut write, &image).await?;
+            }
+        }
+        write.commit().await?;
         Ok(changed)
     }
 
-    pub async fn move_playlist(
-        &self,
-        source: impl Into<Option<SourceKey>>,
-        dragged: PlaylistKey,
-        target: PlaylistKey,
-    ) -> LibraryResult<bool> {
-        let source = source.into();
-        if dragged == target {
-            return Ok(false);
+    /// Deletes Rufin playlists in one Write, and returns how many went.
+    pub async fn delete_playlists(&self, playlists: &[PlaylistKey]) -> LibraryResult<usize> {
+        if playlists.is_empty() {
+            return Ok(0);
         }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        sqlx::query("INSERT OR IGNORE INTO main.source_ids(object_id) SELECT object_id FROM catalog.sources")
-            .execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO main.playlists(source_key,object_id,position)
-          SELECT durable.source_key,observed.object_id,(SELECT COALESCE(max(position)+1,0) FROM main.playlists)+row_number() OVER(ORDER BY observed.playlist_key)-1
-          FROM catalog.native_playlists observed JOIN catalog.sources source USING(source_key)
-          JOIN main.source_ids durable ON durable.object_id=source.object_id
-          WHERE NOT EXISTS(SELECT 1 FROM main.playlists owned WHERE owned.source_key=durable.source_key AND owned.object_id=observed.object_id)")
-          .execute(&mut *transaction).await?;
-        let visible = sqlx::query_as::<_, (PlaylistKey, PlaylistKey, i64)>(
-            "SELECT visible.playlist_key,owned.playlist_key,visible.position FROM playlists visible
-             LEFT JOIN catalog.sources source ON source.source_key=visible.source_key
-             LEFT JOIN main.source_ids durable ON durable.object_id=source.object_id
-             JOIN main.playlists owned ON owned.object_id=visible.object_id AND owned.source_key IS durable.source_key
-             WHERE ?1 IS NULL OR visible.source_key=?1 OR visible.source_key IS NULL
-             ORDER BY visible.position,visible.playlist_key",
+        let mut write = self.write().await?;
+        let deleted: Vec<i64> = sqlx::query_scalar(
+            "DELETE FROM playlists WHERE owner='rufin' AND playlist_key IN(SELECT value FROM json_each(?1)) RETURNING playlist_key",
         )
-        .bind(source)
-        .fetch_all(&mut *transaction)
+        .bind(serde_json::to_string(playlists)?)
+        .fetch_all(write.connection().await?)
         .await?;
-        let Some(dragged_index) = visible.iter().position(|(key, _, _)| *key == dragged) else {
-            transaction.rollback().await?;
-            return Ok(false);
-        };
-        let Some(target_index) = visible.iter().position(|(key, _, _)| *key == target) else {
-            transaction.rollback().await?;
-            return Ok(false);
-        };
-        let mut order = visible.iter().map(|(_, key, _)| *key).collect::<Vec<_>>();
-        let dragged = order.remove(dragged_index);
-        let insertion = if dragged_index < target_index {
-            target_index - 1
-        } else {
-            target_index
-        };
-        order.insert(insertion, dragged);
-        let max_position =
-            sqlx::query_scalar::<_, Option<i64>>("SELECT max(position) FROM playlists")
-                .fetch_one(&mut *transaction)
-                .await?
-                .unwrap_or_default();
-        let offset = max_position + 1;
-        sqlx::query(
-            "UPDATE main.playlists SET position=position+?2 WHERE ?1 IS NULL OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1) OR source_key IS NULL",
-        )
-        .bind(source)
-        .bind(offset)
-        .execute(&mut *transaction)
-        .await?;
-        for (key, (_, _, position)) in order.into_iter().zip(visible) {
-            sqlx::query("UPDATE main.playlists SET position=?2 WHERE playlist_key=?1")
-                .bind(key)
-                .bind(position)
-                .execute(&mut *transaction)
-                .await?;
+        for key in &deleted {
+            write.remove_playlist(*key);
         }
-        transaction.commit().await?;
-        Ok(true)
+        write.commit().await?;
+        Ok(deleted.len())
     }
 
-    pub async fn delete_playlist(
+    pub async fn add_playlist_tracks(
         &self,
-        source: Option<SourceKey>,
         playlist: PlaylistKey,
-    ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query(
-            "DELETE FROM main.playlists
-             WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=(SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1))
-               AND playlist_key=?2",
-        )
-        .bind(source)
-        .bind(playlist)
-        .execute(connection)
-        .await?
-        .rows_affected()
-            == 1)
-    }
-
-    pub async fn add_playlist_media(
-        &self,
-        source: Option<SourceKey>,
-        playlist: PlaylistKey,
-        media_uris: &[String],
+        songs: &MemberSelection,
         skip_existing: bool,
     ) -> LibraryResult<usize> {
-        if media_uris.is_empty() {
+        let mut write = self.write().await?;
+        if !self.editable_playlist(playlist) {
             return Ok(0);
         }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        if !editable_playlist_exists(&mut transaction, source, playlist).await?
-            || match source {
-                Some(source) => !media_uris_exist(&mut transaction, source, media_uris).await?,
-                None => false,
-            }
-        {
-            transaction.rollback().await?;
+        remember_uris(&mut write, songs).await?;
+        let connection = write.connection().await?;
+        let Some(tracks) = playlist_tracks_on(self, connection, None, songs).await? else {
             return Ok(0);
-        }
-        let next_position = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(position) + 1, 0)
-             FROM playlist_entries WHERE playlist_key=?1",
-        )
-        .bind(playlist)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let accepted = insert_playlist_media(
-            &mut transaction,
-            playlist,
-            next_position,
-            media_uris,
-            skip_existing,
-        )
-        .await?;
+        };
+        let accepted =
+            insert_playlist_tracks(self, &mut write, playlist, &tracks, skip_existing).await?;
         if accepted > 0 {
-            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(accepted)
     }
 
     pub async fn remove_playlist_entries(
         &self,
-        source: Option<SourceKey>,
         playlist: PlaylistKey,
         entries: &[PlaylistEntryKey],
     ) -> LibraryResult<usize> {
         if entries.is_empty() {
             return Ok(0);
         }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        if !editable_playlist_exists(&mut transaction, source, playlist).await? {
-            transaction.rollback().await?;
+        let mut write = self.write().await?;
+        if !self.editable_playlist(playlist) {
             return Ok(0);
         }
-        let mut removed = 0usize;
-        for batch in entries.chunks(PLAYLIST_DELETE_BATCH) {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "DELETE FROM main.playlist_entries WHERE playlist_key=",
-            );
-            query
-                .push_bind(playlist)
-                .push(" AND playlist_entry_key IN (");
-            let mut separated = query.separated(", ");
-            for entry in batch {
-                separated.push_bind(*entry);
-            }
-            separated.push_unseparated(")");
-            removed += query
-                .build()
-                .persistent(false)
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected() as usize;
+        let count = remove_entries_on(&mut write, playlist, entries).await?;
+        if count > 0 {
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         }
-        if removed > 0 {
-            // Vacate the compact range before assigning positions in row-key order.
-            sqlx::query("UPDATE main.playlist_entries SET position=position+(SELECT COALESCE(max(position)+1,0) FROM playlist_entries WHERE playlist_key=?1) WHERE playlist_key=?1")
-                .bind(playlist).execute(&mut *transaction).await?;
-            sqlx::query(
-                "WITH positions AS MATERIALIZED (
-                 SELECT playlist_entry_key,
-                        row_number() OVER (ORDER BY position) - 1 AS next_position
-                 FROM playlist_entries WHERE playlist_key=?1
-             ) UPDATE main.playlist_entries SET position=(
-                 SELECT next_position FROM positions
-                 WHERE positions.playlist_entry_key=playlist_entries.playlist_entry_key
-             ) WHERE playlist_key=?1",
-            )
-            .bind(playlist)
-            .execute(&mut *transaction)
-            .await?;
-            crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
-        }
-        transaction.commit().await?;
-        Ok(removed)
+        write.commit().await?;
+        Ok(count)
     }
 
+    /// Moves an entry to an index of the playlist's order. Only the moved entry is written: it
+    /// gets a rank between its new neighbours.
     pub async fn move_playlist_entry(
         &self,
-        source: Option<SourceKey>,
         playlist: PlaylistKey,
         entry: PlaylistEntryKey,
         new_position: usize,
     ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        if !editable_playlist_exists(&mut transaction, source, playlist).await? {
-            transaction.rollback().await?;
+        let mut write = self.write().await?;
+        if !self.editable_playlist(playlist) {
             return Ok(false);
         }
-        let Some(old_position) = sqlx::query_scalar::<_, i64>(
-            "SELECT position FROM playlist_entries
-             WHERE playlist_key=?1 AND playlist_entry_key=?2",
-        )
-        .bind(playlist)
-        .bind(entry)
-        .fetch_optional(&mut *transaction)
-        .await?
-        else {
-            transaction.rollback().await?;
+        if !move_entry_on(self, &mut write, playlist, entry, new_position).await? {
             return Ok(false);
-        };
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM playlist_entries WHERE playlist_key=?1",
-        )
-        .bind(playlist)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let new_position = i64::try_from(new_position)
-            .unwrap_or(i64::MAX)
-            .min(count.saturating_sub(1));
-        if old_position == new_position {
-            transaction.commit().await?;
-            return Ok(true);
         }
-        let offset = count + 1;
-        sqlx::query("UPDATE main.playlist_entries SET position=position+?2 WHERE playlist_key=?1")
-            .bind(playlist)
-            .bind(offset)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(
-            "UPDATE main.playlist_entries SET position=CASE
-                 WHEN playlist_entry_key=?2 THEN ?4
-                 WHEN ?4 < ?3 AND position-?5 >= ?4 AND position-?5 < ?3
-                     THEN position-?5+1
-                 WHEN ?4 > ?3 AND position-?5 > ?3 AND position-?5 <= ?4
-                     THEN position-?5-1
-                 ELSE position-?5 END
-             WHERE playlist_key=?1",
-        )
-        .bind(playlist)
-        .bind(entry)
-        .bind(old_position)
-        .bind(new_position)
-        .bind(offset)
-        .execute(&mut *transaction)
-        .await?;
-        crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
-        transaction.commit().await?;
+        crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
+        write.commit().await?;
         Ok(true)
     }
-}
 
-async fn editable_playlist_exists(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    source: Option<SourceKey>,
-    playlist: PlaylistKey,
-) -> LibraryResult<bool> {
-    Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM playlists
-         WHERE ((?1 IS NULL AND source_key IS NULL) OR source_key=?1)
-           AND playlist_key=?2",
-    )
-    .bind(source)
-    .bind(playlist)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .is_some())
-}
-
-async fn media_uris_exist(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    source: SourceKey,
-    media_uris: &[String],
-) -> LibraryResult<bool> {
-    if media_uris.is_empty() {
-        return Ok(true);
+    /// Writes an entry edit the server has applied, from the resident entries, in one Write.
+    /// The playlist's revision is cleared, so the next sync reads this playlist once.
+    pub async fn edit_source_playlist(
+        &self,
+        playlist: PlaylistKey,
+        edit: SourceEntryEdit,
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        let owned = self
+            .snapshot()
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| record.flags & SOURCE_OWNED != 0);
+        if !owned {
+            return Err(LibraryError::InvalidRequest(
+                "The playlist does not belong to a source".into(),
+            ));
+        }
+        match edit {
+            SourceEntryEdit::Add { tracks } => {
+                insert_playlist_tracks(self, &mut write, playlist, &tracks, false).await?;
+            }
+            SourceEntryEdit::Move { entry, position } => {
+                move_entry_on(self, &mut write, playlist, entry, position).await?;
+            }
+            SourceEntryEdit::Remove { entries } => {
+                remove_entries_on(&mut write, playlist, &entries).await?;
+            }
+        }
+        sqlx::query("UPDATE playlists SET provider_revision=NULL WHERE playlist_key=?1 AND provider_revision IS NOT NULL")
+            .bind(playlist)
+            .execute(write.connection().await?)
+            .await?;
+        write.commit().await?;
+        Ok(())
     }
-    for media_uri in media_uris {
-        let Some(track_source) =
-            sqlx::query_scalar::<_, SourceKey>("SELECT source_key FROM tracks WHERE media_uri=?1")
-                .bind(media_uri)
-                .fetch_optional(&mut **transaction)
-                .await?
-        else {
+
+    /// Whether the user can change the playlist's entries: a writable Rufin playlist.
+    fn editable_playlist(&self, playlist: PlaylistKey) -> bool {
+        self.snapshot()
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| record.flags & (SOURCE_OWNED | WRITABLE) == WRITABLE)
+    }
+}
+
+/// An entry edit of a server playlist, as the server applied it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SourceEntryEdit {
+    /// Tracks appended at the end.
+    Add {
+        tracks: Vec<TrackKey>,
+    },
+    /// An entry moved to an index of the order.
+    Move {
+        entry: PlaylistEntryKey,
+        position: usize,
+    },
+    Remove {
+        entries: Vec<PlaylistEntryKey>,
+    },
+}
+
+async fn remove_entries_on(
+    write: &mut Write<'_>,
+    playlist: PlaylistKey,
+    entries: &[PlaylistEntryKey],
+) -> LibraryResult<usize> {
+    let mut removed = Vec::new();
+    for batch in entries.chunks(PLAYLIST_DELETE_BATCH) {
+        removed.extend(
+            sqlx::query_scalar::<_, i64>(
+                "DELETE FROM playlist_entries WHERE playlist_key=?1 AND playlist_entry_key IN(SELECT value FROM json_each(?2)) RETURNING playlist_entry_key",
+            )
+            .bind(playlist)
+            .bind(serde_json::to_string(batch)?)
+            .fetch_all(write.connection().await?)
+            .await?,
+        );
+    }
+    let count = removed.len();
+    write.remove_entries(playlist.raw(), removed);
+    Ok(count)
+}
+
+/// Gives the entry a rank between its neighbours at the new index. Returns whether the
+/// playlist holds the entry.
+async fn move_entry_on(
+    catalog: &Catalog,
+    write: &mut Write<'_>,
+    playlist: PlaylistKey,
+    entry: PlaylistEntryKey,
+    new_position: usize,
+) -> LibraryResult<bool> {
+    let (rank, track) = {
+        let snapshot = catalog.snapshot();
+        let Some(record) = snapshot.playlists.get(playlist.raw()) else {
             return Ok(false);
         };
-        if track_source != source {
-            let source_id: String =
-                sqlx::query_scalar("SELECT object_id FROM sources WHERE source_key=?1")
-                    .bind(source)
-                    .fetch_one(&mut **transaction)
-                    .await?;
-            return Err(LibraryError::PlaylistSourceMismatch(crate::SourceId::new(
-                source_id,
-            )));
+        let mut order = record.entries.iter().collect::<Vec<_>>();
+        let Some(old_position) = order.iter().position(|other| other.key == entry.raw()) else {
+            return Ok(false);
+        };
+        let new_position = new_position.min(order.len() - 1);
+        if old_position == new_position {
+            return Ok(true);
         }
-    }
+        let moved = order.remove(old_position);
+        let low = new_position.checked_sub(1).map(|index| &*order[index].rank);
+        let high = order.get(new_position).map(|other| &*other.rank);
+        let Some(track) = snapshot.tracks.key_of(moved.track) else {
+            return Ok(false);
+        };
+        (
+            crate::rank::distinct(crate::rank::between(low, high), high),
+            TrackKey::from_raw(track),
+        )
+    };
+    sqlx::query("UPDATE playlist_entries SET rank=?2 WHERE playlist_entry_key=?1")
+        .bind(entry)
+        .bind(&rank)
+        .execute(write.connection().await?)
+        .await?;
+    write.put_entries(
+        playlist.raw(),
+        vec![Entry {
+            key: entry.raw(),
+            rank: rank.into(),
+            track,
+        }],
+    );
     Ok(true)
 }
 
-// Every branch is driven by the bounded requested URI set before the UNION. A
-// LEFT JOIN of the public compound view can otherwise materialize every entry.
-pub(crate) const PLAYLIST_URI_SNAPSHOTS: &str = r#"
-playlist_snapshot_candidates AS (
-    SELECT entry.* FROM requested
-    JOIN main.playlist_entries entry ON entry.playlist_entry_key=(
-        SELECT playlist_entry_key FROM main.playlist_entries WHERE media_uri=requested.media_uri
-        ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC LIMIT 1)
-    UNION ALL
-    SELECT -entry.playlist_entry_key,-entry.playlist_key,entry.object_id,entry.media_uri,
-           entry.title,entry.artist,entry.album,entry.album_display_artist,entry.snapshot_at,
-           entry.duration_millis,entry.disc_number,entry.track_number,entry.year,entry.release_date,
-           entry.source_format,entry.musicbrainz_recording_id,entry.musicbrainz_release_track_id,entry.position
-    FROM requested JOIN catalog.native_playlist_entries entry ON entry.playlist_entry_key=(
-        SELECT playlist_entry_key FROM catalog.native_playlist_entries WHERE media_uri=requested.media_uri
-        ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key ASC LIMIT 1)
-),
-playlist_snapshot_ranked AS (
-    SELECT *,row_number() OVER(PARTITION BY media_uri ORDER BY title IS NULL,snapshot_at DESC,playlist_entry_key DESC) snapshot_rank
-    FROM playlist_snapshot_candidates
-),
-playlist_snapshots AS (SELECT * FROM playlist_snapshot_ranked WHERE snapshot_rank=1)
-"#;
-
-#[cfg(test)]
-mod point_projection_tests {
-    use super::*;
-    use sqlx::Row;
-
-    #[tokio::test]
-    async fn small_native_playlist_reads_stay_bounded_as_unrelated_catalog_grows() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.sqlite3"))
-            .await
-            .unwrap();
-        let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));
-          INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)
-          VALUES(1,1,'small','Small','small','small'),(2,1,'large','Large','large','large');
-          WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<15)
-          INSERT INTO catalog.tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
-          SELECT x,1,CAST(x AS TEXT),'Title','title','','','title',1000,'track:'||x,X'01' FROM n;
-          INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,position)
-          SELECT 1,object_id,media_uri,track_key FROM tracks;")
-            .execute(&mut *connection).await.unwrap();
-        for grow in [false, true] {
-            if grow {
-                sqlx::raw_sql("WITH RECURSIVE n(x) AS (VALUES(16) UNION ALL SELECT x+1 FROM n WHERE x<10000)
-                  INSERT INTO catalog.tracks(track_key,source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,artwork_binding)
-                  SELECT x,1,CAST(x AS TEXT),'Title','title','','','title',1000,'track:'||x,X'01' FROM n;
-                  INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,position)
-                  SELECT 2,object_id,media_uri,track_key FROM tracks;")
-                    .execute(&mut *connection).await.unwrap();
+/// Selected URIs no track has yet become reference tracks.
+async fn remember_uris(
+    write: &mut crate::catalog::write::Write<'_>,
+    selection: &MemberSelection,
+) -> LibraryResult<()> {
+    let mut pending = vec![selection];
+    while let Some(selection) = pending.pop() {
+        match selection {
+            MemberSelection::Concat(parts) => pending.extend(parts.iter().rev()),
+            MemberSelection::Uris(uris) => {
+                let references = uris
+                    .iter()
+                    .map(|uri| crate::TrackReference {
+                        media_uri: uri.clone(),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                write.put_references(&references).await?;
             }
-            let work = Arc::new(AtomicUsize::new(0));
-            let counter = work.clone();
-            connection
-                .lock_handle()
-                .await
-                .unwrap()
-                .set_progress_handler(100, move || {
-                    counter.fetch_add(100, Ordering::Relaxed);
-                    true
-                });
-            let rows = Database::load_playlist_rows(connection, &[PlaylistKey::from_raw(-1)])
-                .await
-                .unwrap();
-            let entry: String = sqlx::query_scalar(
-                "SELECT media_uri FROM playlist_entries WHERE playlist_entry_key=-1",
-            )
-            .fetch_one(&mut *connection)
-            .await
-            .unwrap();
-            let order: Vec<i64> = sqlx::query_scalar("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_key=-1 ORDER BY position,playlist_entry_key")
-                .fetch_all(&mut *connection).await.unwrap();
-            connection
-                .lock_handle()
-                .await
-                .unwrap()
-                .remove_progress_handler();
-            assert_eq!(rows[0].track_count, 15);
-            assert_eq!(rows[0].representative_artwork.len(), 4);
-            assert_eq!(entry, "track:1");
-            assert_eq!(order.len(), 15);
-            assert!(
-                work.load(Ordering::Relaxed) < 5000,
-                "small playlist visited unrelated rows: {} instructions",
-                work.load(Ordering::Relaxed)
-            );
+            _ => {}
         }
     }
-
-    #[tokio::test]
-    async fn latest_snapshots_probe_both_physical_uri_indexes_before_union() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.sqlite3"))
-            .await
-            .unwrap();
-        let mut connection = database.acquire_reader().await.unwrap();
-        let sql = format!(
-            "EXPLAIN QUERY PLAN WITH requested(media_uri) AS (VALUES(?1)), {PLAYLIST_URI_SNAPSHOTS} SELECT * FROM playlist_snapshots"
-        );
-        let plan = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind("https://example.test/known")
-            .fetch_all(&mut *connection)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|row| row.get::<String, _>("detail"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            plan.iter()
-                .filter(|detail| detail.contains("SEARCH entry USING INTEGER PRIMARY KEY"))
-                .count(),
-            2
-        );
-        assert!(
-            plan.iter()
-                .any(|detail| detail.contains("playlist_entries_media_idx")
-                    && detail.contains("media_uri=?"))
-        );
-        assert!(
-            plan.iter()
-                .any(|detail| detail.contains("native_playlist_entries_media")
-                    && detail.contains("media_uri=?"))
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|detail| detail.contains("LAST TERM OF ORDER BY")),
-            "snapshot ties must also come directly from the URI indexes"
-        );
-    }
+    Ok(())
 }
 
-pub(crate) fn playlist_entries_query(keys: &[PlaylistEntryKey]) -> QueryBuilder<Sqlite> {
-    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(playlist_entry_key,ordinal) AS (");
-    query.push_values(keys.iter().enumerate(), |mut row, (ordinal, key)| {
-        row.push_bind(*key).push_bind(ordinal as i64);
-    });
-    query.push("),entries AS (
-        SELECT requested.ordinal,entry.* FROM requested JOIN main.playlist_entries entry
-          ON entry.playlist_entry_key=requested.playlist_entry_key WHERE requested.playlist_entry_key>0
-        UNION ALL
-        SELECT requested.ordinal,-entry.playlist_entry_key,-entry.playlist_key,entry.object_id,entry.media_uri,
-          entry.title,entry.artist,entry.album,entry.album_display_artist,entry.snapshot_at,
-          entry.duration_millis,entry.disc_number,entry.track_number,entry.year,entry.release_date,
-          entry.source_format,entry.musicbrainz_recording_id,entry.musicbrainz_release_track_id,entry.position
-        FROM requested JOIN catalog.native_playlist_entries entry
-          ON entry.playlist_entry_key=-requested.playlist_entry_key WHERE requested.playlist_entry_key<0
-    ) SELECT ");
-    query
-}
-
-pub(crate) async fn load_playlist_entry_rows(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    keys: &[PlaylistEntryKey],
-) -> LibraryResult<Vec<PlaylistEntryRow>> {
-    if keys.is_empty() {
-        return Ok(Vec::new());
+async fn playlist_tracks_on(
+    catalog: &Catalog,
+    connection: &mut SqliteConnection,
+    source: Option<SourceKey>,
+    selection: &MemberSelection,
+) -> LibraryResult<Option<Vec<TrackKey>>> {
+    // A source's playlist takes only tracks the Store has.
+    let mut pending = vec![selection];
+    while let Some(selection) = pending.pop() {
+        match selection {
+            MemberSelection::Concat(parts) => pending.extend(parts),
+            MemberSelection::Uris(uris) if source.is_some() => {
+                let missing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM json_each(?1) requested WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=requested.value))").bind(serde_json::to_string(uris)?).fetch_one(&mut *connection).await?;
+                if missing {
+                    return Ok(None);
+                }
+            }
+            _ => {}
+        }
     }
-    let mut query = playlist_entries_query(keys);
-    query.push(crate::tracks::TRACK_LINK_COLUMNS);
-    query.push("entry.playlist_entry_key,entry.media_uri,entry.position,source.object_id source_id,
-                      COALESCE(track.title,entry.title,'') title,
-                      COALESCE(track.display_artist,entry.artist,'') artist,
-                      COALESCE(track.display_album,entry.album,'') album,
-                      COALESCE(album.display_artist,entry.album_display_artist) album_display_artist,
-                      track.artwork_binding,COALESCE(track.duration_millis,entry.duration_millis,0) duration_millis,
-                      COALESCE(track.disc_number,entry.disc_number) disc_number,
-                      COALESCE(track.track_number,entry.track_number) track_number,
-                      COALESCE(track.year,entry.year) year,
-                      COALESCE(track.release_date,entry.release_date) release_date,
-                      track.date_added,track.bpm,
-                      (SELECT COALESCE(group_concat(name, ', '),'') FROM (
-                         SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
-                         WHERE credit.track_key=track.track_key ORDER BY credit.position
-                      )) genre,
-                      COALESCE((SELECT baseline.play_count FROM activity_baseline baseline
-                                WHERE baseline.source_key=track.source_key
-                                  AND baseline.track_object_id=track.object_id
-                                  AND baseline.period='lifetime' AND baseline.item_kind='track'),0)
-                        +(SELECT count(*) FROM listens listen WHERE listen.media_uri=entry.media_uri) play_count,
-                      (SELECT max(value) FROM (
-                         SELECT baseline.last_played_at value FROM activity_baseline baseline
-                         WHERE baseline.source_key=track.source_key
-                           AND baseline.track_object_id=track.object_id
-                           AND baseline.period='lifetime' AND baseline.item_kind='track'
-                         UNION ALL SELECT (SELECT listen.started_at FROM listens listen
-                           WHERE listen.media_uri=entry.media_uri
-                           ORDER BY listen.started_at DESC,listen.listen_key DESC LIMIT 1)
-                      )) last_played,
-                      COALESCE(track.source_format,entry.source_format) source_format,
-                      COALESCE(track.musicbrainz_recording_id,entry.musicbrainz_recording_id) musicbrainz_recording_id,
-                      COALESCE(track.musicbrainz_release_track_id,entry.musicbrainz_release_track_id) musicbrainz_release_track_id,
-                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=entry.media_uri),track.source_favorite,0) favorite,
-                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=entry.media_uri),track.source_rating)/10 rating,
-                      EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=entry.media_uri AND access.origin='download') is_downloaded
-               FROM entries entry
-               LEFT JOIN tracks track USING(media_uri)
-               LEFT JOIN sources source ON source.source_key=track.source_key
-               LEFT JOIN albums album ON album.album_key=track.album_key
-               ORDER BY entry.ordinal");
-    query
-        .build()
-        .persistent(false)
-        .fetch_all(&mut **transaction)
+    let tracks = crate::selection::selected_tracks_on(catalog, connection, &[selection])
         .await?
-        .iter()
-        .map(|row| {
-            let mut entry = PlaylistEntryRow::from_row(row)?;
-            entry.artists = serde_json::from_str(row.try_get("artists")?)?;
-            entry.album_artists = serde_json::from_str(row.try_get("album_artists")?)?;
-            Ok(entry)
-        })
-        .collect()
+        .into_iter()
+        .flatten()
+        .map(|(track, _)| track)
+        .collect::<Vec<_>>();
+    if let Some(source) = source
+        && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM json_each(?1) requested JOIN tracks ON tracks.track_key=requested.value WHERE tracks.source_key IS NOT ?2)")
+            .bind(serde_json::to_string(&tracks)?).bind(source).fetch_one(&mut *connection).await?
+    {
+        let id: String = sqlx::query_scalar("SELECT object_id FROM sources WHERE source_key=?1").bind(source).fetch_one(&mut *connection).await?;
+        return Err(LibraryError::PlaylistSourceMismatch(crate::SourceId::new(id)));
+    }
+    Ok(Some(tracks))
 }
 
-async fn insert_playlist_media(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+pub(crate) async fn create_playlist_identity(
+    write: &mut Write<'_>,
+    name: &str,
+) -> LibraryResult<(PlaylistKey, String)> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(LibraryError::InvalidRequest(
+            "Playlist name cannot be empty".into(),
+        ));
+    }
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO main.playlists(object_id,name)
+         VALUES('rufin:playlist:'||lower(hex(randomblob(16))),?1)
+         RETURNING {}",
+        crate::catalog::write::PLAYLIST_COLUMNS
+    )))
+    .bind(name)
+    .fetch_one(write.connection().await?)
+    .await?;
+    let header = crate::catalog::write::PlaylistRow::from_row(&row)?;
+    let object_id = header.10.clone();
+    let key = PlaylistKey::from_raw(header.0);
+    write.put_playlist(header);
+    Ok((key, object_id))
+}
+
+/// Appends tracks after the playlist's last rank, in one INSERT. With `skip_existing`, tracks the
+/// playlist already holds are left out.
+async fn insert_playlist_tracks(
+    catalog: &Catalog,
+    write: &mut Write<'_>,
     playlist: PlaylistKey,
-    start: i64,
-    media_uris: &[String],
+    tracks: &[TrackKey],
     skip_existing: bool,
 ) -> LibraryResult<usize> {
-    let initial_max = start - 1;
-    let mut accepted = 0;
-    for media_uri in media_uris {
-        let inserted = sqlx::query(
-            "INSERT INTO main.playlist_entries(
-                 playlist_key,object_id,media_uri,title,artist,
-                 album,album_display_artist,duration_millis,
-                 disc_number,track_number,year,release_date,source_format,
-                 musicbrainz_recording_id,musicbrainz_release_track_id,
-                 position
-             ) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),?2,
-                      track.title,track.display_artist,track.display_album,
-                      album.display_artist,track.duration_millis,track.disc_number,
-                      track.track_number,track.year,track.release_date,track.source_format,
-                      track.musicbrainz_recording_id,track.musicbrainz_release_track_id,?3
-               FROM (SELECT ?2 media_uri) requested
-               LEFT JOIN tracks track USING(media_uri) LEFT JOIN albums album USING(album_key)
-               WHERE ?4=0 OR NOT EXISTS (
-                   SELECT 1 FROM playlist_entries existing
-                   WHERE existing.playlist_key=?1 AND existing.media_uri=?2
-                     AND existing.position<=?5
-                 )",
-        )
-        .bind(playlist)
-        .bind(media_uri)
-        .bind(start + accepted as i64)
-        .bind(skip_existing)
-        .bind(initial_max)
-        .execute(&mut **transaction)
-        .await?
-        .rows_affected();
-        accepted += inserted as usize;
+    let (tracks, last) = {
+        let snapshot = catalog.snapshot();
+        let entries = snapshot
+            .playlists
+            .get(playlist.raw())
+            .map_or(&[][..], |record| record.entries.as_slice());
+        let held = entries
+            .iter()
+            .filter(|_| skip_existing)
+            .map(|entry| entry.track)
+            .collect::<std::collections::HashSet<_>>();
+        let tracks = tracks
+            .iter()
+            .copied()
+            .filter(|track| {
+                snapshot
+                    .tracks
+                    .slot(track.raw())
+                    .is_none_or(|slot| !held.contains(&slot))
+            })
+            .collect::<Vec<_>>();
+        (tracks, entries.last().map(|entry| entry.rank.clone()))
+    };
+    if tracks.is_empty() {
+        return Ok(0);
     }
-    Ok(accepted)
+    let ranks = crate::rank::spread(last.as_deref(), None, tracks.len());
+    let rows = tracks
+        .iter()
+        .zip(ranks.iter().enumerate())
+        .map(|(track, (index, rank))| {
+            let rank = crate::rank::distinct(rank.clone(), ranks.get(index + 1).map(Vec::as_slice));
+            (track.raw(), crate::rank::hex(&rank))
+        })
+        .collect::<Vec<_>>();
+    let inserted: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
+        "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
+        SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),value->>0,unhex(value->>1)
+        FROM json_each(?2) ORDER BY CAST(key AS INTEGER) RETURNING playlist_entry_key,rank,track_key",
+    )
+    .bind(playlist)
+    .bind(serde_json::to_string(&rows)?)
+    .fetch_all(write.connection().await?)
+    .await?;
+    let count = inserted.len();
+    write.put_entries(
+        playlist.raw(),
+        inserted
+            .into_iter()
+            .map(|(key, rank, track)| Entry {
+                key,
+                rank: rank.into(),
+                track: TrackKey::from_raw(track),
+            })
+            .collect(),
+    );
+    Ok(count)
 }
 
-/// Rufin-authored names and global/native rank are durable; native observations are not.
+/// Makes a playlist's entries the wanted object ids and tracks, in order, and writes only what
+/// differs. An entry is kept for a wanted one with its object id, else for the next one with its
+/// track. Kept entries that are already in order keep their ranks; the rest get ranks between
+/// their new neighbours. With `keep_ids`, kept entries keep their object ids, as a playlist file
+/// or a Subsonic server names tracks rather than entries; other sources' ids are the source's.
+/// An empty wanted id names no entry: a new entry gets its own.
+pub(crate) async fn write_entries(
+    write: &mut Write<'_>,
+    playlist: i64,
+    wanted: &[(String, TrackKey)],
+    keep_ids: bool,
+) -> LibraryResult<bool> {
+    let existing: Vec<(i64, String, TrackKey, Vec<u8>)> = sqlx::query_as(
+        "SELECT playlist_entry_key,object_id,track_key,rank FROM playlist_entries WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key",
+    )
+    .bind(playlist)
+    .fetch_all(write.connection().await?)
+    .await?;
+    let mut by_object = std::collections::HashMap::new();
+    let mut by_track =
+        std::collections::HashMap::<TrackKey, std::collections::VecDeque<usize>>::new();
+    for (index, (_, object, track, _)) in existing.iter().enumerate() {
+        by_object.insert(object.as_str(), index);
+        by_track.entry(*track).or_default().push_back(index);
+    }
+    let mut used = vec![false; existing.len()];
+    let mut matched = wanted
+        .iter()
+        .map(|(object, _)| {
+            let index = by_object.remove(object.as_str())?;
+            used[index] = true;
+            Some(index)
+        })
+        .collect::<Vec<_>>();
+    for (slot, (_, track)) in matched.iter_mut().zip(wanted) {
+        if slot.is_none() {
+            let unused = by_track.get_mut(track).and_then(|indexes| {
+                while let Some(index) = indexes.pop_front() {
+                    if !used[index] {
+                        return Some(index);
+                    }
+                }
+                None
+            });
+            if let Some(index) = unused {
+                used[index] = true;
+                *slot = Some(index);
+            }
+        }
+    }
+    let kept = in_order(&matched);
+    let mut ranks: Vec<Option<Vec<u8>>> = matched
+        .iter()
+        .zip(&kept)
+        .map(|(index, kept)| kept.then(|| existing[index.unwrap()].3.clone()))
+        .collect();
+    let mut start = 0;
+    while start < ranks.len() {
+        if ranks[start].is_some() {
+            start += 1;
+            continue;
+        }
+        let end = (start..ranks.len())
+            .find(|index| ranks[*index].is_some())
+            .unwrap_or(ranks.len());
+        let low = start.checked_sub(1).and_then(|index| ranks[index].clone());
+        let high = ranks.get(end).cloned().flatten();
+        for (index, rank) in (start..end).zip(crate::rank::spread(
+            low.as_deref(),
+            high.as_deref(),
+            end - start,
+        )) {
+            ranks[index] = Some(rank);
+        }
+        start = end;
+    }
+    let removed = existing
+        .iter()
+        .zip(&used)
+        .filter(|(_, used)| !**used)
+        .map(|((key, ..), _)| *key)
+        .collect::<Vec<_>>();
+    // Object ids stay unique in a playlist: a repeated wanted id gets a new one.
+    let mut taken = matched
+        .iter()
+        .flatten()
+        .filter(|_| keep_ids)
+        .map(|index| existing[*index].1.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut changed = Vec::new();
+    let mut inserted = Vec::new();
+    for ((object, track), (index, rank)) in wanted.iter().zip(matched.iter().zip(ranks)) {
+        let rank = rank.expect("every wanted entry has a rank");
+        let object = match index {
+            Some(index) if keep_ids => Some(existing[*index].1.clone()),
+            _ => (!object.is_empty() && taken.insert(object.as_str())).then(|| object.clone()),
+        };
+        match index {
+            Some(index) => {
+                let (key, old_object, old_track, old_rank) = &existing[*index];
+                if (Some(old_object), old_track, old_rank) != (object.as_ref(), track, &rank) {
+                    changed.push((*key, object, *track, rank));
+                }
+            }
+            None => inserted.push((object, *track, rank)),
+        }
+    }
+    if removed.is_empty() && changed.is_empty() && inserted.is_empty() {
+        return Ok(false);
+    }
+    let connection = write.connection().await?;
+    if !removed.is_empty() {
+        sqlx::query(
+            "DELETE FROM playlist_entries WHERE playlist_entry_key IN(SELECT value FROM json_each(?1))",
+        )
+        .bind(serde_json::to_string(&removed)?)
+        .execute(&mut *connection)
+        .await?;
+    }
+    if !changed.is_empty() {
+        let rows = changed
+            .iter()
+            .map(|(key, object, track, rank)| (key, object, track, crate::rank::hex(rank)))
+            .collect::<Vec<_>>();
+        sqlx::query("UPDATE playlist_entries SET object_id=coalesce(input.value->>1,'rufin:entry:'||lower(hex(randomblob(16)))),track_key=input.value->>2,rank=unhex(input.value->>3) FROM json_each(?1) input WHERE playlist_entry_key=input.value->>0")
+            .bind(serde_json::to_string(&rows)?)
+            .execute(&mut *connection)
+            .await?;
+    }
+    let added: Vec<(i64, Vec<u8>, TrackKey)> = if inserted.is_empty() {
+        Vec::new()
+    } else {
+        let rows = inserted
+            .iter()
+            .map(|(object, track, rank)| (object, track, crate::rank::hex(rank)))
+            .collect::<Vec<_>>();
+        sqlx::query_as(
+            "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
+            SELECT ?1,coalesce(value->>0,'rufin:entry:'||lower(hex(randomblob(16)))),value->>1,unhex(value->>2) FROM json_each(?2) WHERE true
+            RETURNING playlist_entry_key,rank,track_key",
+        )
+        .bind(playlist)
+        .bind(serde_json::to_string(&rows)?)
+        .fetch_all(&mut *connection)
+        .await?
+    };
+    write.remove_entries(playlist, removed);
+    write.put_entries(
+        playlist,
+        changed
+            .into_iter()
+            .map(|(key, _, track, rank)| (key, rank, track))
+            .chain(added)
+            .map(|(key, rank, track)| Entry {
+                key,
+                rank: rank.into(),
+                track,
+            })
+            .collect(),
+    );
+    Ok(true)
+}
+
+/// Which matched entries keep their place: the longest run of them already in order.
+fn in_order(matched: &[Option<usize>]) -> Vec<bool> {
+    // Patience sorting: tails[length] ends the best increasing run of that length + 1.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous = vec![None; matched.len()];
+    for (position, index) in matched.iter().enumerate() {
+        let Some(index) = index else {
+            continue;
+        };
+        let length = tails.partition_point(|tail| matched[*tail].unwrap() < *index);
+        previous[position] = length.checked_sub(1).map(|length| tails[length]);
+        if length == tails.len() {
+            tails.push(position);
+        } else {
+            tails[length] = position;
+        }
+    }
+    let mut kept = vec![false; matched.len()];
+    let mut next = tails.last().copied();
+    while let Some(position) = next {
+        kept[position] = true;
+        next = previous[position];
+    }
+    kept
+}
+
+/// Playlist identity in backups and exported files. Backups keep the position field of their
+/// format; restoring does not read it, since the list sorts by creation.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistIdentity {
+    #[serde(default)]
+    pub source_owned: bool,
     pub source_id: Option<String>,
     pub object_id: String,
     pub name: Option<String>,
+    #[serde(default)]
     pub position: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistEntryWrite {
     pub object_id: String,
-    pub media_uri: String,
-    pub title: Option<String>,
-    pub artist: Option<String>,
-    pub album: Option<String>,
-    pub album_display_artist: Option<String>,
-    pub snapshot_at: i64,
-    pub duration_millis: Option<i64>,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub source_format: Option<String>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
     pub position: i64,
+    #[serde(flatten)]
+    #[sqlx(flatten)]
+    pub track: crate::TrackReference,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1472,68 +1040,360 @@ pub struct PlaylistEntryWrite {
 enum PlaylistRecord {
     Playlist(PlaylistIdentity),
     File(crate::playlist_links::PlaylistFileRecord),
+    Artwork(PlaylistArtworkRecord),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub(crate) struct PlaylistArtworkRecord {
+    pub(crate) source_id: Option<String>,
+    pub(crate) object_id: String,
+    #[serde(default)]
+    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) content_type: Option<String>,
+    #[serde(default)]
+    pub(crate) artwork_binding: Option<Vec<u8>>,
+    #[serde(default)]
+    pub(crate) mosaic: Option<String>,
+}
+
+/// An entry of a Rufin playlist by object ids, with its track's URI and copy.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistEntryCopy {
+    pub playlist: String,
+    pub object_id: String,
+    pub rank: Vec<u8>,
+    pub track: crate::TrackReference,
+}
+
+impl Catalog {
+    /// The entries of Rufin playlists in rank order: those of `playlists` or of all of them,
+    /// and only those of `entries` when given.
+    pub async fn playlist_entry_copies(
+        &self,
+        playlists: Option<&[PlaylistKey]>,
+        entries: Option<&[String]>,
+    ) -> LibraryResult<Vec<PlaylistEntryCopy>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, Vec<u8>, String, String, String, String, i64)> =
+            sqlx::query_as(
+                "SELECT playlist.object_id,entry.object_id,entry.rank,track.media_uri,track.title,track.display_artist,track.display_album,track.duration_millis
+                 FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key)
+                 WHERE playlist.owner='rufin' AND (?1 IS NULL OR playlist.playlist_key IN(SELECT value FROM json_each(?1)))
+                   AND (?2 IS NULL OR entry.object_id IN(SELECT value FROM json_each(?2)))
+                 ORDER BY entry.playlist_key,entry.rank,entry.playlist_entry_key",
+            )
+            .bind(playlists.map(serde_json::to_string).transpose()?)
+            .bind(entries.map(serde_json::to_string).transpose()?)
+            .fetch_all(&mut *connection)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(playlist, object_id, rank, uri, title, artist, album, duration)| {
+                    PlaylistEntryCopy {
+                        playlist,
+                        object_id,
+                        rank,
+                        track: crate::TrackReference::direct(uri, title, artist, album, duration),
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// Writes Rufin playlist entries by object id with their ranks and tracks, in one Write.
+    /// A track the Store does not know is remembered from the entry's copy; an entry whose
+    /// playlist is not here is left out. Returns how many entries changed.
+    pub async fn put_playlist_entries(&self, entries: &[PlaylistEntryCopy]) -> LibraryResult<u64> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+        let mut write = self.write().await?;
+        let references = entries
+            .iter()
+            .map(|entry| entry.track.clone())
+            .collect::<Vec<_>>();
+        let tracks = write.put_references(&references).await?;
+        let rows = entries
+            .iter()
+            .zip(tracks)
+            .map(|(entry, track)| {
+                (
+                    &entry.playlist,
+                    &entry.object_id,
+                    track,
+                    crate::rank::hex(&entry.rank),
+                )
+            })
+            .collect::<Vec<_>>();
+        let written: Vec<(PlaylistKey, i64, Vec<u8>, TrackKey)> = sqlx::query_as(
+            "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
+             SELECT playlist.playlist_key,input.value->>1,input.value->>2,unhex(input.value->>3)
+             FROM json_each(?1) input JOIN playlists playlist ON playlist.object_id=input.value->>0 AND playlist.source_key IS NULL AND playlist.owner='rufin'
+             WHERE true
+             ON CONFLICT(playlist_key,object_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank
+             WHERE (track_key,rank) IS NOT (excluded.track_key,excluded.rank)
+             RETURNING playlist_key,playlist_entry_key,rank,track_key",
+        )
+        .bind(serde_json::to_string(&rows)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        let count = written.len() as u64;
+        let mut by_playlist = std::collections::BTreeMap::<PlaylistKey, Vec<_>>::new();
+        for (playlist, key, rank, track) in written {
+            by_playlist.entry(playlist).or_default().push(Entry {
+                key,
+                rank: rank.into(),
+                track,
+            });
+        }
+        for (playlist, entries) in by_playlist {
+            write.put_entries(playlist.raw(), entries);
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
+        }
+        write.commit().await?;
+        Ok(count)
+    }
+
+    /// Removes Rufin playlist entries by object id, in one Write.
+    pub async fn remove_playlist_entries_by_object(&self, ids: &[String]) -> LibraryResult<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut write = self.write().await?;
+        let mut by_playlist = std::collections::BTreeMap::<PlaylistKey, Vec<i64>>::new();
+        for batch in ids.chunks(PLAYLIST_DELETE_BATCH) {
+            let removed: Vec<(PlaylistKey, i64)> = sqlx::query_as(
+                "DELETE FROM playlist_entries WHERE object_id IN(SELECT value FROM json_each(?1))
+                 AND playlist_key IN(SELECT playlist_key FROM playlists WHERE owner='rufin')
+                 RETURNING playlist_key,playlist_entry_key",
+            )
+            .bind(serde_json::to_string(batch)?)
+            .fetch_all(write.connection().await?)
+            .await?;
+            for (playlist, key) in removed {
+                by_playlist.entry(playlist).or_default().push(key);
+            }
+        }
+        let mut count = 0;
+        for (playlist, keys) in by_playlist {
+            count += keys.len() as u64;
+            write.remove_entries(playlist.raw(), keys);
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
+        }
+        write.commit().await?;
+        Ok(count)
+    }
+
+    /// Rufin playlists by object id, all of them or those of these object ids.
+    pub async fn playlist_copies(
+        &self,
+        objects: Option<&[String]>,
+    ) -> LibraryResult<Vec<PlaylistCopy>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, Option<String>, i64, Option<String>)> = sqlx::query_as(
+            "SELECT playlist.object_id,coalesce(playlist.name,''),folder.object_id,playlist.created_at,playlist.mosaic
+             FROM playlists playlist LEFT JOIN playlist_folders folder ON folder.folder_key=playlist.playlist_folder_key
+             WHERE playlist.owner='rufin' AND playlist.source_key IS NULL
+               AND (?1 IS NULL OR playlist.object_id IN(SELECT value FROM json_each(?1)))
+             ORDER BY playlist.object_id",
+        )
+        .bind(objects.map(serde_json::to_string).transpose()?)
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(object_id, name, folder, created_at, mosaic)| PlaylistCopy {
+                    object_id,
+                    name,
+                    folder,
+                    created_at,
+                    mosaic,
+                },
+            )
+            .collect())
+    }
+
+    /// Writes Rufin playlists by object id, in one Write. A folder that is not here leaves the
+    /// playlist outside folders; a missing mosaic keeps the stored one.
+    pub async fn put_playlist_copies(&self, playlists: &[PlaylistCopy]) -> LibraryResult<()> {
+        if playlists.is_empty() {
+            return Ok(());
+        }
+        let rows = playlists
+            .iter()
+            .map(|playlist| {
+                (
+                    &playlist.object_id,
+                    &playlist.name,
+                    &playlist.folder,
+                    playlist.created_at,
+                    &playlist.mosaic,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut write = self.write().await?;
+        let written: Vec<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO playlists(owner,object_id,name,created_at,playlist_folder_key,mosaic)
+             SELECT 'rufin',input.value->>0,input.value->>1,input.value->>3,
+                 (SELECT folder_key FROM playlist_folders WHERE object_id=input.value->>2 AND NOT smart),input.value->>4
+             FROM json_each(?1) input WHERE true
+             ON CONFLICT(object_id) WHERE source_key IS NULL DO UPDATE SET name=excluded.name,created_at=excluded.created_at,
+                 playlist_folder_key=excluded.playlist_folder_key,mosaic=coalesce(excluded.mosaic,mosaic)
+             WHERE owner='rufin' AND (name,created_at,playlist_folder_key,mosaic) IS NOT
+                 (excluded.name,excluded.created_at,excluded.playlist_folder_key,coalesce(excluded.mosaic,mosaic))
+             RETURNING {}",
+            crate::catalog::write::PLAYLIST_COLUMNS
+        )))
+        .bind(serde_json::to_string(&rows)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        for row in written {
+            let key = PlaylistKey::from_raw(row.0);
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, key).await?;
+            write.put_playlist(row);
+        }
+        write.commit().await?;
+        Ok(())
+    }
+
+    /// The images people chose for Rufin and smart playlists, all of them or those of
+    /// `objects`, by object id. Bytes are read only when asked for.
+    pub async fn playlist_images(
+        &self,
+        objects: Option<&[String]>,
+        bytes: bool,
+    ) -> LibraryResult<Vec<PlaylistImage>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT object_id,artwork_mime mime,artwork_revision revision,CASE WHEN ?2 THEN artwork_bytes END bytes
+             FROM playlists WHERE owner='rufin' AND source_key IS NULL AND artwork_bytes IS NOT NULL
+               AND (?1 IS NULL OR object_id IN(SELECT value FROM json_each(?1)))
+             UNION ALL SELECT object_id,NULL,artwork_revision,CASE WHEN ?2 THEN artwork_bytes END
+             FROM smart_playlists WHERE artwork_bytes IS NOT NULL
+               AND (?1 IS NULL OR object_id IN(SELECT value FROM json_each(?1)))
+             ORDER BY 1",
+        )
+        .bind(objects.map(serde_json::to_string).transpose()?)
+        .bind(bytes)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
+    /// Sets or clears the chosen images of Rufin and smart playlists by object id, in one
+    /// Write.
+    pub async fn put_playlist_images(
+        &self,
+        images: Vec<(String, Option<(Vec<u8>, Option<String>)>)>,
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for (object_id, image) in images {
+            let (bytes, content_type) = image.unzip();
+            write_playlist_artwork(
+                &mut write,
+                &PlaylistArtworkRecord {
+                    source_id: None,
+                    object_id,
+                    bytes,
+                    content_type: content_type.flatten(),
+                    artwork_binding: None,
+                    mosaic: None,
+                },
+            )
+            .await?;
+        }
+        write.commit().await?;
+        Ok(())
+    }
+}
+
+/// A Rufin playlist's shared identity: its folder by object id, its creation time and the
+/// mosaic's track URIs as a JSON list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistCopy {
+    pub object_id: String,
+    pub name: String,
+    pub folder: Option<String>,
+    pub created_at: i64,
+    pub mosaic: Option<String>,
+}
+
+/// A playlist or smart playlist image a person chose. Smart playlists keep no MIME type.
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
+pub struct PlaylistImage {
+    pub object_id: String,
+    pub mime: Option<String>,
+    pub revision: String,
+    pub bytes: Option<Vec<u8>>,
 }
 
 pub(crate) async fn write_playlist_identity(
-    connection: &mut SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     identity: &PlaylistIdentity,
 ) -> LibraryResult<PlaylistKey> {
-    if identity.object_id.is_empty() || identity.position < 0 {
+    if identity.object_id.is_empty() {
         return Err(LibraryError::InvalidRequest(
-            "invalid playlist identity or order".into(),
+            "invalid playlist identity".into(),
         ));
     }
-    let source = if let Some(source_id) = &identity.source_id {
-        Some(crate::db::write_source_identity(connection, source_id).await?)
-    } else {
-        None
+    let source_owned = identity.source_owned || identity.name.is_none();
+    let source = match &identity.source_id {
+        Some(source_id) if source_owned => Some(write.source_identity(source_id).await?),
+        _ => None,
     };
-    // Reimporting an exact identity retains its current global rank and pins.
+    if let Some(source) = source {
+        return source_playlist_identity(write, source, &identity.object_id).await;
+    }
+    let columns = crate::catalog::write::PLAYLIST_COLUMNS;
+    let connection = write.connection().await?;
+    // Rufin playlists are global, whatever source a backup scoped them to.
     let existing = sqlx::query_scalar::<_, PlaylistKey>(
-        "SELECT playlist_key FROM main.playlists WHERE object_id=?1 AND source_key IS ?2",
+        "SELECT playlist_key FROM playlists WHERE object_id=?1 AND source_key IS NULL",
     )
     .bind(&identity.object_id)
-    .bind(source)
     .fetch_optional(&mut *connection)
     .await?;
-    if let Some(key) = existing {
-        sqlx::query("UPDATE main.playlists SET name=?2,normalized_name=lower(?2),sort_text=lower(?2) WHERE playlist_key=?1")
-            .bind(key).bind(&identity.name).execute(&mut *connection).await?;
-        return Ok(key);
+    let (key, row) = match existing {
+        Some(key) if source_owned => (key, None),
+        Some(key) => (key, sqlx::query_as::<_, crate::catalog::write::PlaylistRow>(sqlx::AssertSqlSafe(format!("UPDATE playlists SET name=?2 WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT ?2 RETURNING {columns}")))
+            .bind(key).bind(&identity.name).fetch_optional(&mut *connection).await?),
+        None => {
+            let row: crate::catalog::write::PlaylistRow = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlists(owner,object_id,name,indexed) VALUES (?1,?2,?3,?4) RETURNING {columns}")))
+                .bind(if source_owned { "source" } else { "rufin" }).bind(&identity.object_id).bind(&identity.name)
+                .bind(!source_owned)
+                .fetch_one(connection).await?;
+            (PlaylistKey::from_raw(row.0), Some(row))
+        }
+    };
+    if let Some(row) = row {
+        write.put_playlist(row);
     }
-    Ok(sqlx::query_scalar("INSERT INTO main.playlists(source_key,object_id,name,normalized_name,sort_text,position)
-        VALUES(?1,?2,?3,lower(?3),lower(?3),CASE WHEN EXISTS(SELECT 1 FROM main.playlists WHERE position=?4)
-        THEN (SELECT COALESCE(max(position)+1,0) FROM main.playlists) ELSE ?4 END) RETURNING playlist_key")
-        .bind(source).bind(&identity.object_id).bind(&identity.name).bind(identity.position)
-        .fetch_one(connection).await?)
+    Ok(key)
 }
-
-pub(crate) async fn write_playlist_entry(
-    connection: &mut SqliteConnection,
-    playlist: PlaylistKey,
-    entry: &PlaylistEntryWrite,
-) -> LibraryResult<()> {
-    if entry.object_id.is_empty() || entry.media_uri.is_empty() || entry.position < 0 {
-        return Err(LibraryError::InvalidRequest(
-            "invalid playlist occurrence identity or order".into(),
-        ));
+/// A playlist a source owns, known by identity before the source describes it.
+async fn source_playlist_identity(
+    write: &mut Write<'_>,
+    source: SourceKey,
+    object_id: &str,
+) -> LibraryResult<PlaylistKey> {
+    let connection = write.connection().await?;
+    let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlists(source_key,owner,object_id,indexed) VALUES (?1,'source',?2,0) ON CONFLICT(source_key,object_id) DO NOTHING RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
+        .bind(source).bind(object_id).fetch_optional(&mut *connection).await?;
+    match row {
+        Some(row) => {
+            let key = PlaylistKey::from_raw(row.0);
+            write.put_playlist(row);
+            Ok(key)
+        }
+        None => Ok(sqlx::query_scalar(
+            "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
+        )
+        .bind(source)
+        .bind(object_id)
+        .fetch_one(connection)
+        .await?),
     }
-    sqlx::query("INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,title,artist,album,
-        album_display_artist,snapshot_at,duration_millis,disc_number,track_number,year,release_date,
-        source_format,musicbrainz_recording_id,musicbrainz_release_track_id,position)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-        ON CONFLICT(playlist_key,object_id) DO UPDATE SET media_uri=excluded.media_uri,title=excluded.title,
-        artist=excluded.artist,album=excluded.album,album_display_artist=excluded.album_display_artist,
-        snapshot_at=excluded.snapshot_at,duration_millis=excluded.duration_millis,disc_number=excluded.disc_number,
-        track_number=excluded.track_number,year=excluded.year,release_date=excluded.release_date,
-        source_format=excluded.source_format,musicbrainz_recording_id=excluded.musicbrainz_recording_id,
-        musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,position=excluded.position")
-        .bind(playlist).bind(&entry.object_id).bind(&entry.media_uri).bind(&entry.title).bind(&entry.artist)
-        .bind(&entry.album).bind(&entry.album_display_artist).bind(entry.snapshot_at).bind(entry.duration_millis)
-        .bind(entry.disc_number).bind(entry.track_number).bind(entry.year).bind(&entry.release_date)
-        .bind(&entry.source_format).bind(&entry.musicbrainz_recording_id).bind(&entry.musicbrainz_release_track_id)
-        .bind(entry.position).execute(connection).await?;
-    Ok(())
 }
 
 pub(crate) async fn export_playlist_order_jsonl_on(
@@ -1541,7 +1401,7 @@ pub(crate) async fn export_playlist_order_jsonl_on(
     mut output: impl std::io::Write,
 ) -> LibraryResult<u64> {
     use futures_util::TryStreamExt;
-    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT source.object_id source_id,playlist.object_id,playlist.name,playlist.position FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) ORDER BY playlist.position").fetch(&mut *connection);
+    let mut rows=sqlx::query_as::<_,PlaylistIdentity>("SELECT playlist.owner='source' source_owned,source.object_id source_id,playlist.object_id,CASE WHEN playlist.owner='rufin' THEN playlist.name END name,row_number() OVER(ORDER BY playlist.created_at,playlist.playlist_key)-1 position FROM main.playlists playlist LEFT JOIN sources source USING(source_key) ORDER BY playlist.created_at,playlist.playlist_key").fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &PlaylistRecord::Playlist(row))?;
@@ -1549,6 +1409,13 @@ pub(crate) async fn export_playlist_order_jsonl_on(
         count += 1;
     }
     drop(rows);
+    let mut images = sqlx::query_as::<_, PlaylistArtworkRecord>("SELECT source.object_id source_id,playlist.object_id,playlist.artwork_bytes bytes,playlist.artwork_mime content_type,playlist.artwork_binding,playlist.mosaic FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.artwork_binding IS NOT NULL OR playlist.mosaic IS NOT NULL").fetch(&mut *connection);
+    while let Some(image) = images.try_next().await? {
+        serde_json::to_writer(&mut output, &PlaylistRecord::Artwork(image))?;
+        output.write_all(b"\n")?;
+    }
+    drop(images);
+
     crate::playlist_links::backup_records_on(connection, |record| {
         serde_json::to_writer(&mut output, &PlaylistRecord::File(record))?;
         output.write_all(b"\n")?;
@@ -1558,130 +1425,91 @@ pub(crate) async fn export_playlist_order_jsonl_on(
     Ok(count)
 }
 pub(crate) async fn import_playlists_jsonl_on(
-    connection: &mut SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     input: impl std::io::BufRead,
 ) -> LibraryResult<u64> {
     let mut count = 0;
     for line in input.lines() {
         match serde_json::from_str(&line?)? {
             PlaylistRecord::Playlist(identity) => {
-                write_playlist_identity(connection, &identity).await?;
+                write_playlist_identity(write, &identity).await?;
                 count += 1;
             }
+            PlaylistRecord::Artwork(image) => {
+                write_playlist_artwork(write, &image).await?;
+            }
             PlaylistRecord::File(record) => {
-                crate::playlist_links::restore_record_on(connection, record).await?
+                crate::playlist_links::restore_record_on(write.connection().await?, record).await?;
             }
         }
     }
     Ok(count)
 }
 
-pub(crate) fn playlist_query(
-    key: PlaylistKey,
-    folder: Option<FolderKey>,
-    sort: PlaylistEntrySort,
-    descending: bool,
-    filter: &str,
-) -> crate::source_window::SourceQuery {
-    let native = key.raw() < 0;
-    let mut query = crate::source_window::SourceQuery {
-        from: format!(
-            "{} entry JOIN {} playlist USING(playlist_key)",
-            if native {
-                "catalog.native_playlist_entries"
-            } else {
-                "main.playlist_entries"
-            },
-            if native {
-                "catalog.native_playlists"
-            } else {
-                "main.playlists"
-            }
-        ),
-        predicate: format!(
-            "entry.playlist_key={}",
-            key.raw()
-                .checked_abs()
-                .map_or_else(|| "NULL".into(), |key| key.to_string())
-        ),
-        uri: "entry.media_uri".into(),
-        entry_key: if native {
-            "-entry.playlist_entry_key"
-        } else {
-            "entry.playlist_entry_key"
-        }
-        .into(),
-        order: vec![format!(
-            "{} {}",
-            match sort {
-                PlaylistEntrySort::Position => "entry.position",
-                PlaylistEntrySort::Title => "lower(entry.title)",
-                PlaylistEntrySort::Artist => "lower(entry.artist)",
-                PlaylistEntrySort::Album => "lower(entry.album)",
-            },
-            if descending { "DESC" } else { "ASC" },
-        )],
+/// The one image writer of playlists and smart playlists by object id: a playlist of the
+/// record's source, else, for a record with no source, the smart playlist. A missing mosaic keeps
+/// the stored one. Returns whether it changed one.
+pub(crate) async fn write_playlist_artwork(
+    write: &mut Write<'_>,
+    image: &PlaylistArtworkRecord,
+) -> LibraryResult<bool> {
+    let matched = "object_id=?1 AND (owner='rufin' OR source_key IS (SELECT source_key FROM sources WHERE object_id=?2))";
+    let revision = image
+        .bytes
+        .as_ref()
+        .map(|bytes| blake3::hash(bytes).to_hex().to_string());
+    let stored = image
+        .artwork_binding
+        .as_deref()
+        .map(crate::normalize_artwork_binding)
+        .transpose()?;
+    // The binding names the matched playlist's own source: a restored Rufin playlist has none.
+    let source: Option<Option<String>> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT (SELECT object_id FROM sources WHERE source_key=playlists.source_key) FROM main.playlists WHERE {matched}")))
+        .bind(&image.object_id).bind(&image.source_id).fetch_optional(write.connection().await?).await?;
+    let binding = |smart| {
+        stored.clone().or_else(|| {
+            revision.as_ref().map(|revision| {
+                crate::artwork::playlist_binding(
+                    smart,
+                    source.clone().flatten(),
+                    image.object_id.clone(),
+                    revision.clone(),
+                )
+            })
+        })
     };
-    if sort != PlaylistEntrySort::Position {
-        query.order.push("entry.position ASC".into());
+    let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5,artwork_binding=?6,mosaic=coalesce(?7,mosaic) WHERE {matched} AND (artwork_bytes,artwork_mime,artwork_revision,artwork_binding,mosaic) IS NOT (?3,?4,?5,?6,coalesce(?7,mosaic)) RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
+        .bind(&image.object_id).bind(&image.source_id).bind(&image.bytes).bind(&image.content_type).bind(&revision).bind(binding(false)).bind(&image.mosaic).fetch_optional(write.connection().await?).await?;
+    if let Some(row) = row {
+        let key = PlaylistKey::from_raw(row.0);
+        write.put_playlist(row);
+        // The image itself is read by key.
+        write.changed(Scope::Playlist {
+            key,
+            entries: false,
+        });
+        return Ok(true);
     }
-    if let Some(folder) = folder {
-        query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.media_uri=entry.media_uri AND scope.folder_key={}))",folder.raw()));
+    if image.source_id.is_some() {
+        return Ok(false);
     }
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    if !filter.is_empty() {
-        let filter = crate::source_window::quote(&filter);
-        query.predicate.push_str(&format!(" AND (instr(lower(entry.title||' '||entry.artist||' '||entry.album),{filter})>0 OR CAST(entry.year AS TEXT)={filter})"));
+    let smart: Option<crate::catalog::write::SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE smart_playlists SET artwork_bytes=?2,artwork_revision=?3,artwork_binding=?4,mosaic=coalesce(?5,mosaic) WHERE object_id=?1 AND (artwork_bytes,artwork_revision,artwork_binding,mosaic) IS NOT (?2,?3,?4,coalesce(?5,mosaic)) RETURNING {}", crate::catalog::write::SMART_COLUMNS)))
+        .bind(&image.object_id).bind(&image.bytes).bind(&revision).bind(binding(true)).bind(&image.mosaic).fetch_optional(write.connection().await?).await?;
+    let changed = smart.is_some();
+    if let Some(row) = smart {
+        let key = crate::SmartPlaylistKey::from_raw(row.0);
+        write.put_smart(row);
+        write.changed(Scope::Smart {
+            key,
+            object: image.object_id.clone(),
+        });
     }
-    query
+    Ok(changed)
 }
 
-fn playlist_order_query(
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-    sort: PlaylistSort,
-    descending: bool,
-    filter: &str,
-    count: bool,
-) -> QueryBuilder<Sqlite> {
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    let aggregate = matches!(sort, PlaylistSort::TrackCount | PlaylistSort::Duration);
-    let mut query = QueryBuilder::<Sqlite>::new(if count {
-        "SELECT count(*) FROM playlists playlist"
-    } else {
-        "SELECT playlist.playlist_key FROM playlists playlist"
-    });
-    if aggregate {
-        query.push(" LEFT JOIN playlist_entries entry USING(playlist_key) LEFT JOIN tracks track USING(media_uri)");
-    }
-    query.push(" WHERE (playlist.source_key=").push_bind(source)
-            .push(" OR playlist.source_key IS NULL) AND (playlist.source_key IS NULL OR ")
-            .push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM playlist_entries scoped_entry JOIN tracks scoped_track USING(media_uri) JOIN track_folders scope USING(track_key) WHERE scoped_entry.playlist_key=playlist.playlist_key AND scope.folder_key=").push_bind(folder).push("))");
-    if !filter.is_empty() {
-        query
-            .push(" AND instr(playlist.normalized_name,")
-            .push_bind(filter)
-            .push(")>0");
-    }
-    if count {
-        return query;
-    }
-    if aggregate {
-        query.push(" AND (playlist.source_key IS NULL OR ").push_bind(folder)
-                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
-                .push_bind(folder).push(")) GROUP BY playlist.playlist_key");
-    }
-    query.push(" ORDER BY ").push(match sort {
-        PlaylistSort::Position => "playlist.position",
-        PlaylistSort::Title => "playlist.sort_text",
-        PlaylistSort::TrackCount => "count(entry.playlist_entry_key)",
-        PlaylistSort::Duration => {
-            "COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0)"
-        }
-    });
-    if descending {
-        query.push(" DESC");
-    }
-    query.push(",playlist.sort_text,playlist.playlist_key");
-    query
+/// Whether a playlist or playlist folder name holds `filter`, ignoring case: the one filter of
+/// Add to Playlist and Add to folder choices.
+pub(crate) fn name_holds(filter: &str) -> impl Fn(&str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    move |name| filter.is_empty() || name.to_lowercase().contains(&filter)
 }

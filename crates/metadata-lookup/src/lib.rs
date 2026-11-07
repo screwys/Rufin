@@ -1,9 +1,21 @@
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
+mod acoustid;
+mod cache;
+pub use acoustid::{FingerprintMatches, lookup_fingerprint};
+pub use cache::{CacheMode, LookupCache, cache_time};
 mod cover;
 mod http;
+mod images;
 mod musicbrainz;
 
-pub use cover::{AlbumCover, AlbumCoverPolicy, lookup_album_cover, public_album_cover_url};
+pub use images::{
+    ArtworkQuery, ArtworkResult, download_artwork, lookup_artist_image, search_artwork,
+};
+
+pub use cover::{AlbumCoverPolicy, lookup_album_cover, public_album_cover_url};
 pub use musicbrainz::{
-    AlbumReleaseMetadata, identify_album_metadata, identify_artist_metadata,
-    identify_track_metadata, lookup_album_release,
+    AlbumReleaseMetadata, MetadataCandidate, MetadataLookup, MetadataMatchKind,
+    lookup_album_release, lookup_metadata, metadata_identity, search_metadata,
 };

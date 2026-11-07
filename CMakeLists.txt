@@ -80,6 +80,7 @@ pkg_check_modules(RUFIN_GSTREAMER REQUIRED IMPORTED_TARGET
   gstreamer-1.0>=1.26
   gstreamer-app-1.0>=1.26
   gstreamer-audio-1.0>=1.26
+  gstreamer-controller-1.0>=1.26
   gstreamer-pbutils-1.0>=1.26
 )
 
@@ -89,8 +90,8 @@ endif()
 # This minimum covers documented formats and the factories Rufin uses directly.
 set(RUFIN_REQUIRED_GSTREAMER_PLUGINS
   coreelements playback typefindfunctions
-  app audiobuffersplit audioconvert audioresample audiofx equalizer level volume
-  lame debugutilsbad
+  app audiobuffersplit audioconvert audioresample audiofx bs2b equalizer insertbin level volume
+  lame debugutilsbad chromaprint
   soup hls mpegtsdemux rtp rtpmanager rtsp srtp udp
   aiff alaw apetag asf audioparsers autodetect fdkaac flac gme id3demux
   isomp4 libav matroska mpg123 musepack mulaw ogg openmpt opus opusparse
@@ -133,6 +134,10 @@ if(RUFIN_ENABLE_PACKAGING AND (APPLE OR WIN32))
       list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_OPENMPT_PLUGIN}")
     elseif(APPLE AND RUFIN_PLUGIN STREQUAL "wavpack")
       list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_WAVPACK_PLUGIN}")
+    elseif(APPLE AND RUFIN_PLUGIN STREQUAL "bs2b")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_BS2B_PLUGIN}")
+    elseif(APPLE AND RUFIN_PLUGIN STREQUAL "chromaprint")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_CHROMAPRINT_PLUGIN}")
     else()
       execute_process(
         COMMAND "${RUFIN_GST_INSPECT}" --no-colors --plugin "${RUFIN_PLUGIN}"
@@ -159,11 +164,11 @@ endif()
 if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
   find_program(RUFIN_GST_INSPECT gst-inspect-1.0 REQUIRED)
   execute_process(
-    COMMAND "${RUFIN_GST_INSPECT}" --exists playbin
+    COMMAND "${RUFIN_GST_INSPECT}" --exists playbin3
     RESULT_VARIABLE RUFIN_PLAYBIN_STATUS
   )
   if(NOT RUFIN_PLAYBIN_STATUS EQUAL 0)
-    message(FATAL_ERROR "GStreamer playbin is required to run Rufin")
+    message(FATAL_ERROR "GStreamer playbin3 is required to run Rufin")
   endif()
 
   if(APPLE)
@@ -177,11 +182,15 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
     audioresample
     "${RUFIN_AUDIO_SINK}"
     equalizer-nbands
+    insertbin
+    level
     scaletempo
     souphttpsrc
   )
   if(APPLE)
     list(APPEND RUFIN_REQUIRED_GSTREAMER_ELEMENTS avdec_aac)
+  else()
+    list(APPEND RUFIN_REQUIRED_GSTREAMER_ELEMENTS bs2b chromaprint)
   endif()
   foreach(RUFIN_GSTREAMER_ELEMENT IN LISTS RUFIN_REQUIRED_GSTREAMER_ELEMENTS)
     execute_process(
@@ -242,6 +251,31 @@ else()
 endif()
 
 file(GLOB RUFIN_PO_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/locales/*.po")
+file(GLOB RUFIN_PREVIOUS_LOCALES LIST_DIRECTORIES true "${CMAKE_CURRENT_BINARY_DIR}/locale/*")
+foreach(RUFIN_PREVIOUS_LOCALE IN LISTS RUFIN_PREVIOUS_LOCALES)
+  get_filename_component(RUFIN_LANGUAGE "${RUFIN_PREVIOUS_LOCALE}" NAME)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/locales/${RUFIN_LANGUAGE}.po")
+    file(REMOVE_RECURSE "${RUFIN_PREVIOUS_LOCALE}")
+  endif()
+endforeach()
+find_program(RUFIN_MSGFMT msgfmt HINTS "${RUFIN_GETTEXT_PREFIX}/bin")
+set(RUFIN_TRANSLATION_OUTPUTS)
+foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
+  get_filename_component(RUFIN_LANGUAGE "${RUFIN_PO_FILE}" NAME_WE)
+  set(RUFIN_CATALOG_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/${RUFIN_LANGUAGE}/LC_MESSAGES")
+  set(RUFIN_CATALOG "${RUFIN_CATALOG_DIRECTORY}/rufin.mo")
+  if(RUFIN_MSGFMT)
+    add_custom_command(OUTPUT "${RUFIN_CATALOG}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${RUFIN_CATALOG_DIRECTORY}"
+      COMMAND "${RUFIN_MSGFMT}" --check "${RUFIN_PO_FILE}" -o "${RUFIN_CATALOG}"
+      DEPENDS "${RUFIN_PO_FILE}"
+      VERBATIM)
+    list(APPEND RUFIN_TRANSLATION_OUTPUTS "${RUFIN_CATALOG}")
+  endif()
+endforeach()
+add_custom_target(rufin-translations DEPENDS ${RUFIN_TRANSLATION_OUTPUTS})
+add_dependencies(rufin rufin-translations)
+add_dependencies(rufin-controller rufin-translations)
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/"
   DESTINATION "${RUFIN_INSTALL_LOCALEDIR}")
 

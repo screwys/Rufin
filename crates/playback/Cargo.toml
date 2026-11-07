@@ -10,7 +10,12 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi", "library/bindings", "audio-processing/bindings"]
+
 [dependencies]
+audio-processing.workspace = true
+uniffi = { workspace = true, optional = true }
 library.workspace = true
 serde.workspace = true
 thiserror.workspace = true

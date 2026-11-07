@@ -1,61 +1,16 @@
 //! External album artwork discovery.
 
+use library::AlbumCover;
 use reqwest::Url;
 use serde_json::Value;
 
 use crate::http::{client, download, fetch_optional_json};
-use crate::musicbrainz::{search_album_release_group_ids, search_album_release_ids, usable_mbid};
+use crate::musicbrainz::{search_album_release_group_ids, search_album_release_ids};
 
 const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
-const LASTFM_IMAGE_HOST: &str = "lastfm.freetls.fastly.net";
 const LASTFM_PLACEHOLDER_IMAGE_ID: &str = "2a96cbd8b46e442fc41c2b86b821562f";
 const RELEASE_URL: &str = "https://coverartarchive.org/release";
 const RELEASE_GROUP_URL: &str = "https://coverartarchive.org/release-group";
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct AlbumCover {
-    artist: Option<String>,
-    album: Option<String>,
-    release_group_id: Option<String>,
-    release_id: Option<String>,
-}
-
-impl AlbumCover {
-    pub fn new(
-        artist: &str,
-        album: &str,
-        release_group_id: Option<&str>,
-        release_id: Option<&str>,
-    ) -> Option<Self> {
-        let artist = lookup_text(artist).map(ToString::to_string);
-        let album = lookup_text(album).map(ToString::to_string);
-        let release_group_id = release_group_id
-            .and_then(usable_mbid)
-            .map(ToString::to_string);
-        let release_id = release_id.and_then(usable_mbid).map(ToString::to_string);
-        (release_group_id.is_some() || release_id.is_some() || artist.is_some() && album.is_some())
-            .then_some(Self {
-                artist,
-                album,
-                release_group_id,
-                release_id,
-            })
-    }
-
-    pub fn stable_identity(&self) -> String {
-        format!(
-            "album\0{}\0{}\0{}\0{}",
-            self.artist.as_deref().unwrap_or_default(),
-            self.album.as_deref().unwrap_or_default(),
-            self.release_group_id.as_deref().unwrap_or_default(),
-            self.release_id.as_deref().unwrap_or_default()
-        )
-    }
-
-    fn text(&self) -> Option<(&str, &str)> {
-        Some((self.artist.as_deref()?, self.album.as_deref()?))
-    }
-}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AlbumCoverPolicy {
@@ -77,17 +32,18 @@ impl AlbumCoverPolicy {
 /// Exact Cover Art Archive identities remain ahead of Last.fm and text
 /// searches so a known album identity cannot be replaced by an approximate
 /// result.
+/// A missing size requests the original Cover Art Archive image.
 pub fn lookup_album_cover(
     album: &AlbumCover,
-    size: u32,
+    size: Option<u32>,
     policy: &AlbumCoverPolicy,
 ) -> Result<Option<Vec<u8>>, String> {
     let client = client()?;
     let mut failures = Vec::new();
     if policy.allow_musicbrainz {
         for (root, id) in [
-            (RELEASE_GROUP_URL, album.release_group_id.as_deref()),
-            (RELEASE_URL, album.release_id.as_deref()),
+            (RELEASE_GROUP_URL, album.release_group_id()),
+            (RELEASE_URL, album.release_id()),
         ] {
             if let Some(id) = id {
                 match download(client, &cover_art_url(root, id, size), "album cover") {
@@ -136,46 +92,50 @@ pub fn lookup_album_cover(
     missing_or_errors(failures)
 }
 
-/// Finds a public URL suitable for Discord rich presence.
-///
-/// Discord cannot use Rufin's cached bytes, so its established Last.fm-first
-/// order intentionally differs from visible artwork selection.
+/// Finds a public cover URL for Discord, which cannot use Rufin's cached bytes.
 pub fn public_album_cover_url(
     album: &AlbumCover,
-    size: u32,
-    policy: &AlbumCoverPolicy,
+    lastfm_api_key: &str,
 ) -> Result<Option<String>, String> {
-    let client = client()?;
     let mut failures = Vec::new();
-    if !policy.lastfm_api_key.trim().is_empty()
-        && let Some((artist, title)) = album.text()
-    {
-        match lastfm_url(client, artist, title, &policy.lastfm_api_key) {
-            Ok(Some(url)) => return Ok(Some(url)),
+    for (root, id) in [
+        (RELEASE_GROUP_URL, album.release_group_id()),
+        (RELEASE_URL, album.release_id()),
+    ] {
+        let Some(id) = id else {
+            continue;
+        };
+        let url = Url::parse(&format!("{root}/{id}")).map_err(|error| error.to_string())?;
+        match fetch_optional_json(client()?, url, "Cover Art Archive listing") {
+            Ok(Some(listing)) => {
+                if let Some(url) = listing
+                    .get("images")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|image| image.get("front").and_then(Value::as_bool) == Some(true))
+                    .find_map(|image| {
+                        image
+                            .pointer("/thumbnails/250")
+                            .or_else(|| image.get("image"))
+                            .and_then(Value::as_str)
+                            .filter(|url| !url.is_empty())
+                    })
+                {
+                    return Ok(Some(url.to_string()));
+                }
+            }
             Ok(None) => {}
             Err(error) => failures.push(error),
         }
     }
-    if policy.allow_musicbrainz {
-        for (root, id) in [
-            (RELEASE_GROUP_URL, album.release_group_id.as_deref()),
-            (RELEASE_URL, album.release_id.as_deref()),
-        ] {
-            if let Some(id) = id {
-                return Ok(Some(cover_art_url(root, id, size)));
-            }
-        }
-        if let Some((artist, title)) = album.text() {
-            match search_album_release_ids(artist, title) {
-                Ok(ids) => {
-                    if let Some(id) = ids.into_iter().find_map(|id| {
-                        usable_mbid(&id).map(|valid| cover_art_url(RELEASE_URL, valid, size))
-                    }) {
-                        return Ok(Some(id));
-                    }
-                }
-                Err(error) => failures.push(error),
-            }
+    if !lastfm_api_key.trim().is_empty()
+        && let Some((artist, title)) = album.text()
+    {
+        match lastfm_url(client()?, artist, title, lastfm_api_key) {
+            Ok(Some(url)) => return Ok(Some(url)),
+            Ok(None) => {}
+            Err(error) => failures.push(error),
         }
     }
     missing_or_errors(failures)
@@ -185,11 +145,11 @@ fn download_identities(
     client: &reqwest::blocking::Client,
     root: &str,
     ids: Vec<String>,
-    size: u32,
+    size: Option<u32>,
     failures: &mut Vec<String>,
 ) -> Option<Vec<u8>> {
     for id in ids {
-        let Some(id) = usable_mbid(&id) else {
+        let Some(id) = AlbumCover::usable_mbid(&id) else {
             continue;
         };
         match download(client, &cover_art_url(root, id, size), "album cover") {
@@ -250,11 +210,12 @@ fn lastfm_image_url(
     Ok(None)
 }
 
-fn cover_art_url(root: &str, id: &str, size: u32) -> String {
-    let suffix = if size <= 250 {
-        "front-250"
-    } else {
-        "front-500"
+fn cover_art_url(root: &str, id: &str, size: Option<u32>) -> String {
+    let suffix = match size {
+        Some(size) if size <= 250 => "front-250",
+        Some(size) if size <= 500 => "front-500",
+        Some(size) if size <= 1200 => "front-1200",
+        _ => "front",
     };
     format!("{root}/{id}/{suffix}")
 }
@@ -265,25 +226,10 @@ fn public_lastfm_url(raw: &str) -> Option<String> {
     }
     let url = Url::parse(raw).ok()?;
     (url.scheme() == "https"
-        && url.host_str() == Some(LASTFM_IMAGE_HOST)
         && url.port_or_known_default() == Some(443)
         && url.username().is_empty()
         && url.password().is_none())
     .then(|| url.to_string())
-}
-
-fn lookup_text(value: &str) -> Option<&str> {
-    let value = value.trim();
-    if value.is_empty()
-        || matches!(
-            value.to_ascii_lowercase().as_str(),
-            "unknown" | "unknown album" | "unknown artist" | "untitled album" | "untitled track"
-        )
-    {
-        None
-    } else {
-        Some(value)
-    }
 }
 
 fn missing_or_errors<T>(failures: Vec<String>) -> Result<Option<T>, String> {
@@ -322,11 +268,15 @@ mod tests {
     }
 
     #[test]
-    fn lastfm_urls_are_limited_to_the_public_image_host() {
+    fn lastfm_urls_accept_image_hosts_but_reject_placeholders() {
+        assert!(
+            public_lastfm_url("https://lastfm-img.freetls.fastly.net/i/u/300x300/cover.png")
+                .is_some()
+        );
         assert!(
             public_lastfm_url("https://lastfm.freetls.fastly.net/i/u/300x300/cover.jpg").is_some()
         );
-        assert!(public_lastfm_url("https://example.com/cover.jpg").is_none());
+        assert!(public_lastfm_url("https://example.com/cover.jpg").is_some());
         assert!(public_lastfm_url("http://lastfm.freetls.fastly.net/cover.jpg").is_none());
         assert!(
             public_lastfm_url(
@@ -337,23 +287,35 @@ mod tests {
     }
 
     #[test]
-    fn public_url_prefers_the_release_group_without_a_remote_lookup() {
-        let album = AlbumCover::new(
-            "Artist",
-            "Album",
-            Some("11111111-1111-1111-1111-111111111111"),
-            Some("22222222-2222-2222-2222-222222222222"),
-        )
-        .expect("album cover");
-        let url = public_album_cover_url(&album, 250, &AlbumCoverPolicy::new("", true))
-            .unwrap_or_else(|error| panic!("public URL: {error}"));
-
-        assert_eq!(
-            url.as_deref(),
-            Some(
-                "https://coverartarchive.org/release-group/11111111-1111-1111-1111-111111111111/front-250"
-            )
-        );
+    fn artwork_urls_preserve_requested_sizes_and_provider_availability() {
+        let album = AlbumCover::new("Artist", "Album", None, None).expect("album cover");
+        assert_eq!(public_album_cover_url(&album, ""), Ok(None));
+        for (size, suffix) in [
+            (Some(96), "front-250"),
+            (Some(250), "front-250"),
+            (Some(251), "front-500"),
+            (Some(500), "front-500"),
+            (Some(512), "front-1200"),
+            (Some(1024), "front-1200"),
+            (Some(1200), "front-1200"),
+            (Some(1201), "front"),
+            (Some(2048), "front"),
+            (None, "front"),
+        ] {
+            assert_eq!(
+                cover_art_url(RELEASE_URL, "release", size),
+                format!("{RELEASE_URL}/release/{suffix}")
+            );
+            let url = crate::images::artist_image_url("File:Artist portrait.jpg", size).unwrap();
+            let params = url
+                .query_pairs()
+                .collect::<std::collections::BTreeMap<_, _>>();
+            assert_eq!(params["titles"], "File:Artist portrait.jpg");
+            assert_eq!(
+                params.get("iiurlwidth").map(|value| value.as_ref()),
+                size.map(|size| size.to_string()).as_deref()
+            );
+        }
     }
 
     #[test]

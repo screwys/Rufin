@@ -1,0 +1,4 @@
+[bindings.kotlin]
+android = true
+package_name = "io.github.screwys.rufin.shared.metadata_lookup"
+cdylib_name = "rufin_android"

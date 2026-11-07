@@ -121,6 +121,10 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" DESTINATION "${RUFIN_MACO
 install(FILES "${RUFIN_MACOS_ICON}"
   DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources")
 install(FILES LICENSE DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources")
+install(FILES "${RUFIN_BS2B_PREFIX}/COPYING"
+  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/licenses/libbs2b")
+install(FILES "${RUFIN_CHROMAPRINT_PREFIX}/LICENSE.md"
+  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/licenses/chromaprint")
 find_library(RUFIN_MACOS_SOUP_LIBRARY NAMES soup-3.0
   PATHS ${RUFIN_SOUP_LIBRARY_DIRS} NO_DEFAULT_PATH REQUIRED)
 # GStreamer's Soup plugin loads libsoup dynamically, so fixup_bundle cannot discover it.

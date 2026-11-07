@@ -1,0 +1,1560 @@
+use crate::widgets::media_drag::{MediaDragSource, install_media_drag_source};
+use crate::widgets::view_model::{item_at_from_item, object_item};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+use ::library::{ArtistRow, Row, TrackRow};
+use adw::prelude::*;
+use artwork::ArtworkBinding;
+use gtk::glib;
+
+use super::collection_context::present_track_context_menu;
+use crate::favorites::{
+    FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active,
+};
+use crate::library::CatalogUi;
+use crate::library::{LibraryField, LibraryListKey};
+use crate::menus::media_menus::present_row_menu;
+use crate::widgets::artwork::ArtworkTile;
+use crate::widgets::interactions::install_context_menu_openers;
+use crate::widgets::localization::localized_column;
+
+use crate::widgets::selection::PlayTarget;
+
+use super::table_links::mapped_track_link_column;
+use crate::widgets::library_fields::{
+    add_field_skeleton_class, column_fit_width, column_width, opaque_artwork,
+};
+use crate::widgets::recycled_cells::{
+    RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
+};
+use crate::widgets::view_model::connect_row_bind;
+use rufin_core::route::detail_links::DetailLinks;
+use rufin_core::route::detail_links::album_row_artist_links;
+use rufin_core::settings::presentation::{album_field, artist_field};
+
+const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
+
+/// What a collection title cell of `factory` shows as playing: a step of the column's one
+/// render, given the item, its label and what the row plays.
+pub fn collection_title_playing(
+    factory: &gtk::SignalListItemFactory,
+    shell: &Rc<CatalogUi>,
+) -> Rc<dyn Fn(&gtk::ListItem, &gtk::Label, Option<PlayTarget>)> {
+    let bindings = Rc::new(RefCell::new(HashMap::<
+        usize,
+        Rc<super::grid_cells::MediaPlayingBinding>,
+    >::new()));
+    let unbind = Rc::clone(&bindings);
+    factory.connect_unbind(move |_, item| {
+        if let Some(binding) = unbind.borrow_mut().remove(&(item.as_ptr() as usize)) {
+            binding.refresh(None);
+        }
+    });
+    let shell = Rc::clone(shell);
+    Rc::new(move |item, label, target| {
+        let binding = bindings
+            .borrow_mut()
+            .entry(item.as_ptr() as usize)
+            .or_insert_with(|| super::grid_cells::MediaPlayingBinding::new(&shell, label))
+            .clone();
+        binding.bind(&shell, target);
+    })
+}
+
+mod collection_index_cell_imp {
+    use super::*;
+    use gtk::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct CollectionIndexCell {
+        pub(super) overlay: std::cell::OnceCell<gtk::Overlay>,
+        pub(super) playing: std::cell::OnceCell<Rc<super::super::grid_cells::MediaPlayingBinding>>,
+        pub(super) target: RefCell<Option<PlayTarget>>,
+        pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for CollectionIndexCell {
+        const NAME: &'static str = "RufinCollectionIndexCell";
+        type Type = super::CollectionIndexCell;
+        type ParentType = gtk::Widget;
+
+        fn class_init(class: &mut Self::Class) {
+            class.set_layout_manager_type::<gtk::BinLayout>();
+        }
+    }
+
+    impl ObjectImpl for CollectionIndexCell {
+        fn dispose(&self) {
+            if let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for CollectionIndexCell {}
+}
+
+glib::wrapper! {
+    pub struct CollectionIndexCell(ObjectSubclass<collection_index_cell_imp::CollectionIndexCell>)
+        @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl CollectionIndexCell {
+    fn new(shell: &Rc<CatalogUi>) -> Self {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        let cell: Self = glib::Object::new();
+        cell.imp().shell.replace(Rc::downgrade(shell));
+        let weak = cell.downgrade();
+        let overlay = track_row_index_cell("", move |_| {
+            let Some(cell) = weak.upgrade() else { return };
+            let target = cell.imp().target.borrow().clone();
+            if let (Some(shell), Some(target)) = (cell.imp().shell.borrow().upgrade(), target) {
+                crate::menus::media_menus::play_target(
+                    &shell.products,
+                    &target,
+                    library::QueuePlacement::Replace { anchor_index: 0 },
+                    false,
+                );
+            }
+        });
+        let binding = super::grid_cells::MediaPlayingBinding::new(shell, &overlay);
+        cell.imp().playing.set(binding).ok().unwrap();
+        overlay.set_parent(&cell);
+        cell.imp().overlay.set(overlay).unwrap();
+        cell
+    }
+
+    fn bind(&self, position: u32, target: Option<PlayTarget>) {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        let imp = self.imp();
+        set_track_row_index_text(
+            imp.overlay.get().unwrap(),
+            &target
+                .as_ref()
+                .map_or_else(String::new, |_| (position + 1).to_string()),
+        );
+        imp.target.replace(target.clone());
+        if let Some(shell) = imp.shell.borrow().upgrade() {
+            imp.playing.get().unwrap().bind(&shell, target);
+        }
+    }
+}
+
+fn set_cover_placeholder(shell: &Rc<CatalogUi>, cover: &ArtworkTile, placeholder: bool) {
+    if placeholder {
+        shell.artwork.clear_artwork_tile(cover);
+        cover
+            .widget()
+            .add_css_class("collection-grid-cover-skeleton");
+        cover.widget().set_opacity(1.0);
+    } else {
+        cover
+            .widget()
+            .remove_css_class("collection-grid-cover-skeleton");
+    }
+    cover.widget().set_sensitive(!placeholder);
+}
+
+fn clear_merged_artwork(shell: &Rc<CatalogUi>, cover: &ArtworkTile) {
+    shell.artwork.clear_artwork_tile(cover);
+    cover
+        .widget()
+        .remove_css_class("collection-grid-cover-skeleton");
+}
+
+fn set_placeholder_favorite(button: &gtk::Button, favorite: Option<bool>) {
+    set_favorite_button_active(button, favorite.unwrap_or(false));
+    button.set_visible(favorite.is_some());
+    button.set_sensitive(favorite.is_some());
+}
+
+pub fn album_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    factory.connect_setup(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            item.set_child(Some(&AlbumTableCell::new(&shell, field)));
+        }
+    });
+    connect_row_bind(&factory, |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(cell) = list_cell::<AlbumTableCell>(item) {
+            let row = item
+                .item()
+                .and_downcast::<crate::widgets::view_model::RowItem>()
+                .and_then(|item| item.row());
+            cell.bind(item.position(), row);
+        }
+    });
+    factory.connect_unbind(|_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<AlbumTableCell>(item)
+        {
+            cell.bind(0, None);
+        }
+    });
+    if field == LibraryField::Tools {
+        return crate::widgets::recycled_cells::row_actions_column(&factory);
+    }
+    let title = rufin_core::settings::presentation::library_column_title(field).unwrap_or_default();
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(column_width(field));
+    column
+}
+
+pub(super) enum AlbumCellView {
+    Index(CollectionIndexCell),
+    Image(RecycledArtworkCell),
+    Text(RecycledBadgedTextCell),
+    Merged(RecycledMergedCell),
+    Favorite(gtk::Button),
+    Tools(crate::widgets::recycled_cells::RowActions),
+}
+
+impl AlbumCellView {
+    fn widget(&self) -> &gtk::Widget {
+        match self {
+            Self::Index(cell) => cell.upcast_ref(),
+            Self::Image(cell) => cell.upcast_ref(),
+            Self::Text(cell) => cell.upcast_ref(),
+            Self::Merged(cell) => cell.upcast_ref(),
+            Self::Favorite(cell) => cell.upcast_ref(),
+            Self::Tools(cell) => cell.upcast_ref(),
+        }
+    }
+}
+
+mod album_table_cell_imp {
+    use super::*;
+    use gtk::subclass::prelude::*;
+    #[derive(Default)]
+    pub struct AlbumTableCell {
+        pub(super) view: RefCell<Option<AlbumCellView>>,
+        pub(super) row: RefCell<Option<std::sync::Arc<Row>>>,
+        pub(super) field: std::cell::Cell<Option<LibraryField>>,
+        pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
+        pub(super) title_playing:
+            RefCell<Option<Rc<super::super::grid_cells::MediaPlayingBinding>>>,
+    }
+    #[glib::object_subclass]
+    impl ObjectSubclass for AlbumTableCell {
+        const NAME: &'static str = "RufinAlbumTableCell";
+        type Type = super::AlbumTableCell;
+        type ParentType = gtk::Widget;
+        fn class_init(class: &mut Self::Class) {
+            class.set_layout_manager_type::<gtk::BinLayout>();
+        }
+    }
+    impl ObjectImpl for AlbumTableCell {
+        fn dispose(&self) {
+            if let Some(view) = self.view.take() {
+                view.widget().unparent();
+            }
+            self.row.take();
+        }
+    }
+    impl WidgetImpl for AlbumTableCell {}
+}
+
+glib::wrapper! {
+    pub struct AlbumTableCell(ObjectSubclass<album_table_cell_imp::AlbumTableCell>)
+        @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl AlbumTableCell {
+    pub(crate) fn new(shell: &Rc<CatalogUi>, field: LibraryField) -> Self {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        let cell: Self = glib::Object::new();
+        cell.imp().field.set(Some(field));
+        cell.imp().shell.replace(Rc::downgrade(shell));
+        let view = match field {
+            LibraryField::RowIndex => AlbumCellView::Index(CollectionIndexCell::new(shell)),
+            LibraryField::Image => AlbumCellView::Image(RecycledArtworkCell::new(48)),
+            LibraryField::TitleMerged => {
+                let view =
+                    RecycledMergedCell::new(shell.route_navigation(), &shell.downloads, 48, true);
+                view.subtitle().add_css_class("artist-label");
+                view.subtitle().set_visible(false);
+                AlbumCellView::Merged(view)
+            }
+            LibraryField::Tools => {
+                AlbumCellView::Tools(crate::widgets::recycled_cells::RowActions::menu_only())
+            }
+            LibraryField::Favorite => {
+                let button = row_favorite_icon_button("Favorite album");
+                let weak = cell.downgrade();
+                button.connect_clicked(move |button| {
+                    let Some(cell) = weak.upgrade() else {
+                        return;
+                    };
+                    let row = cell.imp().row.borrow().clone();
+                    if let (Some(shell), Some(Row::Album(row))) =
+                        (cell.imp().shell.borrow().upgrade(), row.as_deref())
+                    {
+                        shell.set_favorite(
+                            library::FavoriteTarget::Album(row.media_uri.clone()),
+                            !favorite_button_is_active(button),
+                        );
+                    }
+                });
+                AlbumCellView::Favorite(button)
+            }
+            _ => {
+                let view = RecycledBadgedTextCell::with_downloads(&shell.downloads);
+                add_field_skeleton_class(&view, field);
+                AlbumCellView::Text(view)
+            }
+        };
+        if field != LibraryField::RowIndex {
+            let weak = cell.downgrade();
+            install_media_drag_source(view.widget(), move || {
+                let cell = weak.upgrade()?;
+                let row = cell.imp().row.borrow().clone()?;
+                let Row::Album(row) = row.as_ref() else {
+                    return None;
+                };
+                Some((
+                    MediaDragSource::capture_target(PlayTarget::of_album(&row)),
+                    row.title.clone(),
+                ))
+            });
+            let weak = cell.downgrade();
+            install_context_menu_openers(
+                view.widget(),
+                Rc::new(move |target, position| {
+                    let Some(cell) = weak.upgrade() else {
+                        return;
+                    };
+                    let row = cell.imp().row.borrow().as_deref().cloned();
+                    if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
+                        present_row_menu(target, shell.shell(), row, None, position);
+                    }
+                }),
+            );
+        }
+        let title = match &view {
+            AlbumCellView::Merged(view) => Some(view.title()),
+            AlbumCellView::Text(view) if field == LibraryField::Title => Some(view.label()),
+            _ => None,
+        };
+        if let Some(title) = title {
+            cell.imp()
+                .title_playing
+                .replace(Some(super::grid_cells::MediaPlayingBinding::new(
+                    shell, &title,
+                )));
+        }
+        view.widget().set_parent(&cell);
+        cell.imp().view.replace(Some(view));
+        cell.bind(0, None);
+        cell
+    }
+
+    pub fn bind(&self, position: u32, row: Option<std::sync::Arc<Row>>) {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        let imp = self.imp();
+        imp.row.replace(row.clone());
+        let row = match row.as_deref() {
+            Some(Row::Album(album)) => Some(album),
+            _ => None,
+        };
+        let Some(shell) = imp.shell.borrow().upgrade() else {
+            return;
+        };
+        let view = imp.view.borrow();
+        let target = row.map(PlayTarget::of_album);
+        if let Some(playing) = imp.title_playing.borrow().as_ref() {
+            playing.bind(&shell, target.clone());
+        }
+        match view.as_ref().unwrap() {
+            AlbumCellView::Index(cell) => cell.bind(position, target),
+            AlbumCellView::Image(cell) => {
+                let cover = cell.artwork();
+                set_cover_placeholder(&shell, &cover, row.is_none());
+                if let Some(row) = row {
+                    shell.artwork.bind_artwork_tile(
+                        &cover,
+                        opaque_artwork(row.artwork_binding.as_deref()),
+                        48,
+                    );
+                }
+            }
+            AlbumCellView::Text(cell) => {
+                if let Some(row) = row {
+                    cell.label()
+                        .set_text(&album_field(row, imp.field.get().unwrap()));
+                    shell.downloads.bind_download_badge(
+                        &cell.downloaded(),
+                        imp.field.get() == Some(LibraryField::Title) && row.summary.downloaded(),
+                    );
+                } else {
+                    cell.clear();
+                }
+            }
+            AlbumCellView::Merged(cell) => {
+                let cover = cell.cover();
+                if let Some(row) = row {
+                    set_cover_placeholder(&shell, &cover, false);
+                    shell.artwork.bind_artwork_tile(
+                        &cover,
+                        opaque_artwork(row.artwork_binding.as_deref()),
+                        48,
+                    );
+                    cell.title().set_text(&row.title);
+                    cell.bind_subtitle(album_row_artist_links(row));
+                    cell.subtitle().set_visible(!row.artist.trim().is_empty());
+                    shell
+                        .downloads
+                        .bind_download_badge(&cell.downloaded().unwrap(), row.summary.downloaded());
+                } else {
+                    cell.title().set_text("");
+                    cell.downloaded().unwrap().set_visible(false);
+                    cell.clear_subtitle();
+                    clear_merged_artwork(&shell, &cover);
+                }
+            }
+            AlbumCellView::Favorite(button) => {
+                set_placeholder_favorite(button, row.map(|row| row.state.favorite))
+            }
+            AlbumCellView::Tools(cell) => cell.set_sensitive(row.is_some()),
+        }
+    }
+}
+
+pub fn artist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
+    match field {
+        LibraryField::RowIndex => {
+            mapped_row_index_column::<ArtistRow>(shell, column_width(field), move |row| {
+                Some(PlayTarget::of_artist(row))
+            })
+        }
+        LibraryField::Image => artist_image_column(shell),
+        LibraryField::TitleMerged | LibraryField::Title => {
+            artist_text_column(shell, field, "Title", 220, |artist| artist.name.clone())
+        }
+        LibraryField::Favorite | LibraryField::Tools => artist_actions_column(shell, field),
+        _ => artist_text_column(
+            shell,
+            field,
+            rufin_core::settings::presentation::library_field_title(field),
+            column_width(field),
+            move |artist| artist_field(artist, field),
+        ),
+    }
+}
+pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation>(
+    shell: &Rc<CatalogUi>,
+    key: LibraryListKey,
+    field: LibraryField,
+    playing: &TrackRowPlayingIndicator,
+) -> gtk::ColumnViewColumn {
+    let width = track_column_width(key, field);
+    match field {
+        LibraryField::RowIndex => mapped_track_row_index_column_with_width::<T, _>(
+            width,
+            playing.clone(),
+            |item| Some(item.media_uri()),
+            move |position, item| {
+                Some(if key == LibraryListKey::AlbumDetailTracks {
+                    item.track_number()
+                        .filter(|number| *number > 0)
+                        .map(|number| number.to_string())
+                        .unwrap_or_else(|| (position + 1).to_string())
+                } else {
+                    (position + 1).to_string()
+                })
+            },
+        ),
+        LibraryField::Image => mapped_track_image_column::<T, _, _>(
+            shell,
+            "Image",
+            width,
+            |item| item.track_row(),
+            |item| opaque_artwork(item.artwork()),
+        ),
+        LibraryField::TitleMerged => track_merged_column(
+            shell,
+            "Title",
+            width,
+            playing.clone(),
+            TrackMergedColumnValues {
+                track: T::track_row,
+                downloaded: |item: &T| item.download_badge(),
+                artwork: |item: &T| opaque_artwork(item.artwork()),
+                title: |item: &T| item.title().to_string(),
+                subtitle: |item: &T| item.artist().to_string(),
+                subtitle_links: |item: &T| Some(item.links(LibraryField::Artist)),
+                context_menu: true,
+            },
+        ),
+        LibraryField::Title => {
+            let column = mapped_track_position_text_column(
+                shell,
+                field,
+                "Title",
+                width,
+                0.0,
+                Some(playing.clone()),
+                |item: &T| item.track_row(),
+                |item: &T| item.download_badge(),
+                |_, item: &T| item.title().to_string(),
+            );
+            if matches!(
+                key,
+                LibraryListKey::PlaylistTracks | LibraryListKey::SmartPlaylistTracks
+            ) && let Some(factory) = column
+                .factory()
+                .and_then(|factory| factory.downcast::<gtk::SignalListItemFactory>().ok())
+            {
+                factory.connect_setup(|_, item| {
+                    if let Some(label) = item
+                        .downcast_ref::<gtk::ListItem>()
+                        .and_then(gtk::ListItem::child)
+                    {
+                        label.add_css_class("playlist-entry-title");
+                    }
+                });
+            }
+            column
+        }
+        LibraryField::Favorite | LibraryField::Tools => mapped_track_actions_column(
+            shell,
+            field,
+            |item: &T| item.track_row(),
+            |item: &T| Some((item.media_uri().to_string(), item.favorite())),
+        ),
+        LibraryField::Artist => mapped_track_link_column(
+            shell,
+            "Artist",
+            width,
+            |item: &T| item.track_row(),
+            |item: &T| item.links(LibraryField::Artist),
+        ),
+        LibraryField::AlbumArtist => mapped_track_link_column(
+            shell,
+            rufin_core::settings::presentation::library_field_title(LibraryField::AlbumArtist),
+            width,
+            |item: &T| item.track_row(),
+            |item: &T| item.links(LibraryField::AlbumArtist),
+        ),
+        LibraryField::Album => mapped_track_link_column(
+            shell,
+            "Album",
+            width,
+            |item: &T| item.track_row(),
+            |item: &T| item.links(LibraryField::Album),
+        ),
+        _ => mapped_track_position_text_column(
+            shell,
+            field,
+            track_column_title(field),
+            width,
+            0.0,
+            None,
+            |item: &T| item.track_row(),
+            |item: &T| item.download_badge(),
+            move |_, item: &T| {
+                if key == LibraryListKey::AlbumDetailTracks && field == LibraryField::TrackNumber {
+                    item.track_number()
+                        .map(|number| number.to_string())
+                        .unwrap_or_default()
+                } else {
+                    item.field(field)
+                }
+            },
+        ),
+    }
+}
+
+pub fn track_column_title(field: LibraryField) -> &'static str {
+    if field == LibraryField::Duration {
+        "◷"
+    } else {
+        rufin_core::settings::presentation::library_field_title(field)
+    }
+}
+
+pub fn track_column_fit_width(key: LibraryListKey, field: LibraryField) -> i32 {
+    column_fit_width(field, track_column_width(key, field))
+}
+pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
+    if matches!(
+        key,
+        LibraryListKey::AlbumDetailTracks
+            | LibraryListKey::ArtistTracks
+            | LibraryListKey::GenreTracks
+            | LibraryListKey::MoodTracks
+            | LibraryListKey::PlaylistTracks
+            | LibraryListKey::SmartPlaylistTracks
+    ) {
+        match field {
+            LibraryField::RowIndex => {
+                return DETAIL_TRACK_UTILITY_COLUMN_WIDTH;
+            }
+            LibraryField::Duration => return track_list_column_width(field),
+            LibraryField::Favorite => return FAVORITE_COLUMN_WIDTH,
+            _ => {}
+        }
+    }
+
+    match key {
+        LibraryListKey::ArtistTracks
+        | LibraryListKey::GenreTracks
+        | LibraryListKey::PlaylistTracks => return track_list_column_width(field),
+        LibraryListKey::SmartPlaylistTracks => {}
+        _ => return column_width(field),
+    }
+
+    match field {
+        LibraryField::RowIndex => 44,
+        LibraryField::Title | LibraryField::TitleMerged => 212,
+        LibraryField::Album
+        | LibraryField::Artist
+        | LibraryField::AlbumArtist
+        | LibraryField::Genre => 180,
+        LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 82,
+        LibraryField::ReleaseDate | LibraryField::DateAdded => 108,
+        LibraryField::Year
+        | LibraryField::DiscNumber
+        | LibraryField::TrackNumber
+        | LibraryField::Bpm => 62,
+        LibraryField::Duration => 70,
+        _ => column_width(field),
+    }
+}
+
+fn track_list_column_width(field: LibraryField) -> i32 {
+    match field {
+        LibraryField::RowIndex => 54,
+        LibraryField::Title | LibraryField::TitleMerged => 320,
+        LibraryField::Album => 260,
+        LibraryField::Artist | LibraryField::AlbumArtist | LibraryField::Genre => 220,
+        LibraryField::Year
+        | LibraryField::DiscNumber
+        | LibraryField::TrackNumber
+        | LibraryField::Bpm => 70,
+        LibraryField::Duration => 90,
+        LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
+        LibraryField::Tools => crate::widgets::recycled_cells::ROW_ACTIONS_WIDTH,
+        _ => column_width(field),
+    }
+}
+
+pub fn text_column<T, F>(field: LibraryField, width: i32, value: F) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    F: Fn(&T) -> String + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let value = Rc::new(value);
+    factory.connect_setup(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            let label = gtk::Label::new(None);
+            add_field_skeleton_class(&label, field);
+            label.set_xalign(0.0);
+            label.set_halign(gtk::Align::Fill);
+            label.set_hexpand(true);
+            label.set_wrap(false);
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_single_line_mode(true);
+            item.set_child(Some(&label));
+        }
+    });
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        else {
+            return;
+        };
+        let Some(text) = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| value(row)))
+        else {
+            label.set_text("");
+            return;
+        };
+        label.set_text(&text);
+    });
+    factory.connect_unbind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        {
+            label.set_text("");
+        }
+    });
+    let column = localized_column(
+        rufin_core::settings::presentation::library_field_title(field),
+        &factory,
+    );
+    column.set_fixed_width(width);
+    column
+}
+pub fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            let label = gtk::Label::new(None);
+            label.add_css_class("muted");
+            label.set_xalign(0.5);
+            label.set_halign(gtk::Align::Fill);
+            label.set_hexpand(true);
+            label.set_wrap(false);
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_single_line_mode(true);
+            item.set_child(Some(&label));
+        }
+    });
+    connect_row_bind(&factory, |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        else {
+            return;
+        };
+        label.set_text(&(item.position() + 1).to_string());
+    });
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
+    column.set_fixed_width(width);
+    column
+}
+
+pub fn mapped_row_index_column<T: Clone + 'static>(
+    shell: &Rc<CatalogUi>,
+    width: i32,
+    target: impl Fn(&T) -> Option<PlayTarget> + 'static,
+) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    factory.connect_setup(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            item.set_child(Some(&CollectionIndexCell::new(&shell)));
+        }
+    });
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<CollectionIndexCell>(item) else {
+            return;
+        };
+        let target = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, &target))
+            .flatten();
+        cell.bind(item.position(), target);
+    });
+    factory.connect_unbind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(cell) = list_cell::<CollectionIndexCell>(item) {
+            cell.bind(0, None);
+        }
+    });
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
+    column.set_fixed_width(width);
+    column
+}
+
+pub fn mapped_track_row_index_column_with_width<T, Number>(
+    width: i32,
+    playing: TrackRowPlayingIndicator,
+    track: impl Fn(&T) -> Option<&str> + 'static,
+    number: Number,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    Number: Fn(u32, &T) -> Option<String> + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            item.set_child(Some(
+                &crate::widgets::recycled_cells::track_list_row_index_cell(item),
+            ));
+        }
+    });
+    let bind_playing = playing.clone();
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Overlay>().ok())
+        else {
+            return;
+        };
+        let bound = item
+            .item()
+            .and_then(|object| {
+                object_item::<T, _>(object, |row| {
+                    let text = number(item.position(), row)?;
+                    let uri = track(row)?;
+                    set_track_row_index_text(&cell, &text);
+                    bind_playing.bind(cell.upcast_ref(), item.position(), uri);
+                    Some(())
+                })
+            })
+            .flatten();
+        if bound.is_none() {
+            set_track_row_index_text(&cell, "");
+            bind_playing.unbind(cell.upcast_ref());
+        }
+    });
+    factory.connect_unbind(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Overlay>().ok())
+        else {
+            return;
+        };
+        playing.unbind(cell.upcast_ref());
+        set_track_row_index_text(&cell, "");
+    });
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
+    column.set_fixed_width(width);
+    column
+}
+
+use crate::widgets::recycled_cells::{
+    TrackRowPlayingIndicator, set_track_row_index_text, track_row_index_cell,
+};
+
+fn install_artist_list_item_context_menu(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<CatalogUi>,
+    item: &gtk::ListItem,
+) {
+    install_collection_cell_drag(
+        target,
+        shell,
+        item,
+        Rc::new(move |artist: ArtistRow| Some((PlayTarget::of_artist(&artist), artist.name))),
+    );
+    let item = item.downgrade();
+    let shell = Rc::clone(shell);
+    install_context_menu_openers(
+        target,
+        Rc::new(move |target, position| {
+            let Some(artist) = item.upgrade().and_then(|item| item_at_from_item(&item)) else {
+                return;
+            };
+            {
+                present_row_menu(target, shell.shell(), Row::Artist(artist), None, position);
+            }
+        }),
+    );
+}
+
+fn install_collection_cell_drag<T: Clone + 'static>(
+    widget: &impl IsA<gtk::Widget>,
+    shell: &Rc<CatalogUi>,
+    item: &gtk::ListItem,
+    target: Rc<dyn Fn(T) -> Option<(PlayTarget, String)>>,
+) {
+    let shell = Rc::downgrade(shell);
+    let item = item.downgrade();
+    install_media_drag_source(widget, move || {
+        let _shell = shell.upgrade()?;
+        let (target, title) = target(item_at_from_item::<T>(&item.upgrade()?)?)?;
+        Some((MediaDragSource::capture_target(target), title))
+    });
+}
+
+pub fn artwork_column<T, F>(
+    shell: &Rc<CatalogUi>,
+    title: &str,
+    width: i32,
+    candidates: F,
+    drag: Option<Rc<dyn Fn(T) -> Option<(PlayTarget, String)>>>,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    F: Fn(&T) -> ArtworkBinding + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    let candidates = Rc::new(candidates);
+
+    let setup_shell = Rc::downgrade(&shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledArtworkCell::new(48);
+        if let Some(drag) = drag.clone()
+            && let Some(shell) = setup_shell.upgrade()
+        {
+            install_collection_cell_drag(&cell, &shell, item, drag);
+        }
+        item.set_child(Some(&cell));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<RecycledArtworkCell>(item) else {
+            return;
+        };
+        let cover = cell.artwork();
+        let Some(artwork) = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| candidates(row)))
+        else {
+            set_cover_placeholder(&bind_shell, &cover, true);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cover, false);
+        bind_shell.artwork.bind_artwork_tile(&cover, artwork, 48);
+    });
+    let unbind_shell = Rc::clone(&shell);
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<RecycledArtworkCell>(item)
+        {
+            set_cover_placeholder(&unbind_shell, &cell.artwork(), true);
+        }
+    });
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(width);
+    column
+}
+pub fn artist_image_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+
+    let setup_shell = Rc::clone(&shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledArtworkCell::new(48);
+        install_artist_list_item_context_menu(&cell, &setup_shell, item);
+        item.set_child(Some(&cell));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<RecycledArtworkCell>(item) else {
+            return;
+        };
+        let cover = cell.artwork();
+        let Some(artwork) = item.item().and_then(|object| {
+            object_item::<ArtistRow, _>(object, |row| {
+                opaque_artwork(row.artwork_binding.as_deref())
+            })
+        }) else {
+            set_cover_placeholder(&bind_shell, &cover, true);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cover, false);
+        bind_shell.artwork.bind_artwork_tile(&cover, artwork, 48);
+    });
+    let unbind_shell = Rc::clone(&shell);
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<RecycledArtworkCell>(item)
+        {
+            set_cover_placeholder(&unbind_shell, &cell.artwork(), true);
+        }
+    });
+    let column = localized_column("Image", &factory);
+    column.set_fixed_width(column_width(LibraryField::Image));
+    column
+}
+pub fn artist_text_column<F>(
+    shell: &Rc<CatalogUi>,
+    field: LibraryField,
+    title: &str,
+    width: i32,
+    value: F,
+) -> gtk::ColumnViewColumn
+where
+    F: Fn(&ArtistRow) -> String + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let playing = matches!(field, LibraryField::Title | LibraryField::TitleMerged)
+        .then(|| collection_title_playing(&factory, shell));
+    let shell = Rc::clone(shell);
+    let value = Rc::new(value);
+
+    let setup_shell = Rc::clone(&shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
+        add_field_skeleton_class(&cell, field);
+        install_artist_list_item_context_menu(&cell, &setup_shell, item);
+        item.set_child(Some(&cell));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
+            return;
+        };
+        let shown = item.item().and_then(|object| {
+            object_item::<ArtistRow, _>(object, |row| {
+                (
+                    value(row),
+                    row.summary.downloaded(),
+                    PlayTarget::of_artist(row),
+                )
+            })
+        });
+        if let Some(playing) = &playing {
+            playing(
+                item,
+                &cell.label(),
+                shown.as_ref().map(|(.., target)| target.clone()),
+            );
+        }
+        let Some((text, downloaded, _)) = shown else {
+            cell.clear();
+            return;
+        };
+        cell.label().set_text(&text);
+        bind_shell
+            .downloads
+            .bind_download_badge(&cell.downloaded(), downloaded);
+    });
+    factory.connect_unbind(|_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<RecycledBadgedTextCell>(item)
+        {
+            cell.clear();
+        }
+    });
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(width);
+    column
+}
+
+fn install_track_list_item_context_menu<T: Clone + 'static>(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<CatalogUi>,
+    item: &gtk::ListItem,
+    track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>>,
+) {
+    let item = item.downgrade();
+    let shell = Rc::clone(shell);
+    install_context_menu_openers(
+        target,
+        Rc::new(move |target, position| {
+            let Some(item) = item.upgrade() else { return };
+            let Some(track) = item
+                .item()
+                .and_then(|object| object_item::<T, _>(object, |row| track_value(row).cloned()))
+                .flatten()
+            else {
+                return;
+            };
+            present_track_context_menu(target, &shell, track, Some(item.position()), position);
+        }),
+    );
+}
+
+fn list_text_cell(item: &gtk::ListItem) -> Option<(gtk::Label, Option<gtk::Image>)> {
+    if let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) {
+        return Some((cell.label(), Some(cell.downloaded())));
+    }
+    list_cell::<RecycledTextCell>(item).map(|cell| (cell.label(), None))
+}
+
+pub fn mapped_track_image_column<T, TrackValue, ArtworkValue>(
+    shell: &Rc<CatalogUi>,
+    title: &'static str,
+    width: i32,
+    track_value: TrackValue,
+    artwork_value: ArtworkValue,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
+    ArtworkValue: Fn(&T) -> ArtworkBinding + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
+    let artwork_value = Rc::new(artwork_value);
+
+    let setup_shell = Rc::clone(&shell);
+    let setup_track_value = Rc::clone(&track_value);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledArtworkCell::new(48);
+        install_track_list_item_context_menu(
+            &cell,
+            &setup_shell,
+            item,
+            Rc::clone(&setup_track_value),
+        );
+        item.set_child(Some(&cell));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<RecycledArtworkCell>(item) else {
+            return;
+        };
+        let cover = cell.artwork();
+        let Some(artwork) = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| artwork_value(row)))
+        else {
+            set_cover_placeholder(&bind_shell, &cover, true);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cover, false);
+        bind_shell.artwork.bind_artwork_tile(&cover, artwork, 48);
+    });
+
+    let unbind_shell = Rc::clone(&shell);
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<RecycledArtworkCell>(item)
+        {
+            set_cover_placeholder(&unbind_shell, &cell.artwork(), true);
+        }
+    });
+
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(width);
+    column
+}
+pub fn mapped_track_position_text_column<T, TrackValue, Downloaded, Value>(
+    shell: &Rc<CatalogUi>,
+    field: LibraryField,
+    title: &'static str,
+    width: i32,
+    xalign: f32,
+    playing: Option<TrackRowPlayingIndicator>,
+    track_value: TrackValue,
+    downloaded_value: Downloaded,
+    value: Value,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
+    Downloaded: Fn(&T) -> bool + 'static,
+    Value: Fn(u32, &T) -> String + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    let value = Rc::new(value);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
+    let downloaded_value = Rc::new(downloaded_value);
+
+    let setup_shell = Rc::clone(&shell);
+    let setup_playing = playing.clone();
+    let setup_track_value = Rc::clone(&track_value);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let (child, label): (gtk::Widget, gtk::Label) = if setup_playing.is_some() {
+            let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
+            let label = cell.label();
+            (cell.upcast(), label)
+        } else {
+            let cell = RecycledTextCell::new();
+            let label = cell.label();
+            (cell.upcast(), label)
+        };
+        add_field_skeleton_class(&child, field);
+        if setup_playing.is_some() {
+            label.add_css_class("track-list-title");
+        }
+        label.set_xalign(xalign);
+        install_track_list_item_context_menu(
+            &child,
+            &setup_shell,
+            item,
+            Rc::clone(&setup_track_value),
+        );
+        item.set_child(Some(&child));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    let bind_playing = playing.clone();
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some((label, downloaded)) = list_text_cell(item) else {
+            return;
+        };
+        let Some((text, download, track)) = item.item().and_then(|object| {
+            object_item::<T, _>(object, |row| {
+                (
+                    value(item.position(), row),
+                    downloaded.is_some() && downloaded_value(row),
+                    bind_playing
+                        .as_ref()
+                        .and_then(|_| track_value(row).map(|track| track.media_uri.clone())),
+                )
+            })
+        }) else {
+            label.set_text("");
+            if let Some(badge) = downloaded.as_ref() {
+                badge.set_visible(false);
+            }
+            if let Some(playing) = bind_playing.as_ref() {
+                playing.unbind(label.upcast_ref());
+            }
+            return;
+        };
+        label.set_text(&text);
+        if let Some(downloaded) = downloaded.as_ref() {
+            bind_shell
+                .downloads
+                .bind_download_badge(downloaded, download);
+        }
+        if let Some(playing) = bind_playing.as_ref() {
+            if let Some(uri) = track {
+                playing.bind(label.upcast_ref(), item.position(), &uri);
+            }
+        }
+    });
+
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some((label, downloaded)) = list_text_cell(item)
+        {
+            label.set_text("");
+            if let Some(downloaded) = downloaded.as_ref() {
+                downloaded.set_visible(false);
+            }
+            if let Some(playing) = playing.as_ref() {
+                playing.unbind(label.upcast_ref());
+            }
+        }
+    });
+
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(width);
+    column
+}
+
+pub struct TrackMergedColumnValues<ItemTrack, Downloaded, Artwork, Title, Subtitle, SubtitleLinks> {
+    pub track: ItemTrack,
+    pub downloaded: Downloaded,
+    pub artwork: Artwork,
+    pub title: Title,
+    pub subtitle: Subtitle,
+    pub subtitle_links: SubtitleLinks,
+    pub context_menu: bool,
+}
+
+pub fn track_merged_column<T, ItemTrack, Downloaded, Artwork, Title, Subtitle, SubtitleLinks>(
+    shell: &Rc<CatalogUi>,
+    title: &'static str,
+    width: i32,
+    playing: TrackRowPlayingIndicator,
+    values: TrackMergedColumnValues<ItemTrack, Downloaded, Artwork, Title, Subtitle, SubtitleLinks>,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    ItemTrack: Fn(&T) -> Option<&TrackRow> + 'static,
+    Downloaded: Fn(&T) -> bool + 'static,
+    Artwork: Fn(&T) -> ArtworkBinding + 'static,
+    Title: Fn(&T) -> String + 'static,
+    Subtitle: Fn(&T) -> String + 'static,
+    SubtitleLinks: Fn(&T) -> Option<DetailLinks> + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    let TrackMergedColumnValues {
+        track: item_track,
+        downloaded: downloaded_value,
+        artwork: artwork_value,
+        title: title_value,
+        subtitle: subtitle_value,
+        subtitle_links,
+        context_menu,
+    } = values;
+    let title_value = Rc::new(title_value);
+    let downloaded_value = Rc::new(downloaded_value);
+    let item_track: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(item_track);
+    let artwork_value = Rc::new(artwork_value);
+    let subtitle_value = Rc::new(subtitle_value);
+    let subtitle_links = Rc::new(subtitle_links);
+    let context_track = Rc::clone(&item_track);
+
+    let setup_shell = Rc::clone(&shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let cell = RecycledMergedCell::new(
+            setup_shell.route_navigation(),
+            &setup_shell.downloads,
+            48,
+            true,
+        );
+        let title = cell.title();
+        title.add_css_class("track-list-title");
+        let subtitle = cell.subtitle();
+        subtitle.add_css_class("artist-label");
+        subtitle.add_css_class("table-link-label");
+        subtitle.set_visible(false);
+        if context_menu {
+            install_track_list_item_context_menu(
+                &cell,
+                &setup_shell,
+                item,
+                Rc::clone(&context_track),
+            );
+        }
+        item.set_child(Some(&cell));
+    });
+
+    let bind_shell = Rc::clone(&shell);
+    let bind_playing = playing.clone();
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(cell) = list_cell::<RecycledMergedCell>(item) else {
+            return;
+        };
+        let cover = cell.cover();
+        let title = cell.title();
+        let Some((artwork, text, subtitle, links, downloaded, track)) =
+            item.item().and_then(|object| {
+                object_item::<T, _>(object, |row| {
+                    (
+                        artwork_value(row),
+                        title_value(row),
+                        subtitle_value(row),
+                        subtitle_links(row),
+                        downloaded_value(row),
+                        item_track(row).map(|track| track.media_uri.clone()),
+                    )
+                })
+            })
+        else {
+            title.set_text("");
+            cell.downloaded()
+                .expect("track cell badge")
+                .set_visible(false);
+            bind_playing.unbind(title.upcast_ref());
+            cell.clear_subtitle();
+            clear_merged_artwork(&bind_shell, &cover);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cover, false);
+        bind_shell.artwork.bind_artwork_tile(&cover, artwork, 48);
+        title.set_text(&text);
+        bind_shell
+            .downloads
+            .bind_download_badge(&cell.downloaded().expect("track cell badge"), downloaded);
+        if let Some(uri) = track {
+            bind_playing.bind(title.upcast_ref(), item.position(), &uri);
+        }
+        if subtitle.trim().is_empty() {
+            cell.clear_subtitle();
+        } else {
+            cell.bind_subtitle(links.unwrap_or_else(|| DetailLinks::text(&subtitle)));
+            cell.subtitle().set_visible(true);
+        }
+    });
+
+    let unbind_shell = Rc::clone(&shell);
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(cell) = list_cell::<RecycledMergedCell>(item)
+        {
+            let title = cell.title();
+            title.set_text("");
+            cell.downloaded()
+                .expect("track cell badge")
+                .set_visible(false);
+            playing.unbind(title.upcast_ref());
+            cell.clear_subtitle();
+            clear_merged_artwork(&unbind_shell, &cell.cover());
+        }
+    });
+
+    let column = localized_column(title, &factory);
+    column.set_fixed_width(width);
+    column
+}
+fn favorite_cell_button(item: &gtk::ListItem) -> Option<gtk::Button> {
+    crate::widgets::recycled_cells::row_favorite_button(item)
+}
+
+pub fn artist_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let actions = crate::widgets::recycled_cells::row_action_cell(field, "Favorite artist");
+        install_artist_list_item_context_menu(&actions, &shell, item);
+        item.set_child(Some(&actions));
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
+        set_placeholder_favorite(&button, None);
+        let favorite_shell = Rc::clone(&shell);
+        let click_item = item.downgrade();
+        button.connect_clicked(move |button| {
+            let Some(artist) = click_item
+                .upgrade()
+                .and_then(|item| item_at_from_item::<ArtistRow>(&item))
+            else {
+                return;
+            };
+            let favorite = !favorite_button_is_active(button);
+            favorite_shell
+                .set_favorite(library::FavoriteTarget::Artist(artist.media_uri), favorite);
+        });
+    });
+
+    connect_row_bind(&factory, |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
+        let favorite = item
+            .item()
+            .and_then(|object| object_item::<ArtistRow, _>(object, |row| row.state.favorite));
+        set_placeholder_favorite(&button, favorite);
+    });
+
+    factory.connect_unbind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, None);
+        }
+    });
+    crate::widgets::recycled_cells::row_action_column(field, &factory)
+}
+pub fn mapped_track_actions_column<T, TrackValue, FavoriteValue>(
+    shell: &Rc<CatalogUi>,
+    field: LibraryField,
+    track_value: TrackValue,
+    favorite_value: FavoriteValue,
+) -> gtk::ColumnViewColumn
+where
+    T: Clone + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
+    FavoriteValue: Fn(&T) -> Option<(String, bool)> + 'static,
+{
+    let factory = gtk::SignalListItemFactory::new();
+    let shell = Rc::clone(shell);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
+    let favorite_value = Rc::new(favorite_value);
+
+    let setup_shell = Rc::clone(&shell);
+    let setup_track_value = Rc::clone(&track_value);
+    let setup_favorite_value = Rc::clone(&favorite_value);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let actions = crate::widgets::recycled_cells::row_action_cell(field, "Favorite track");
+        install_track_list_item_context_menu(
+            &actions,
+            &setup_shell,
+            item,
+            Rc::clone(&setup_track_value),
+        );
+        item.set_child(Some(&actions));
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
+        set_placeholder_favorite(&button, None);
+        let favorite_shell = Rc::clone(&setup_shell);
+        let click_item = item.downgrade();
+        let click_favorite_value = Rc::clone(&setup_favorite_value);
+        button.connect_clicked(move |button| {
+            let Some((track, _)) = click_item
+                .upgrade()
+                .and_then(|item| item_at_from_item::<T>(&item))
+                .and_then(|value| click_favorite_value(&value))
+            else {
+                return;
+            };
+            let favorite = !favorite_button_is_active(button);
+            favorite_shell.set_favorite(library::FavoriteTarget::Track(track), favorite);
+        });
+    });
+
+    let bind_favorite_value = Rc::clone(&favorite_value);
+    connect_row_bind(&factory, move |item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let favorite = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| bind_favorite_value(row)))
+            .flatten()
+            .map(|(_, favorite)| favorite);
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, favorite);
+        }
+        if let Some(actions) = list_cell::<crate::widgets::recycled_cells::RowActions>(item) {
+            actions.set_visible(favorite.is_some());
+            actions.set_sensitive(favorite.is_some());
+        }
+    });
+
+    factory.connect_unbind(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, None);
+        }
+        if let Some(actions) = crate::widgets::recycled_cells::list_cell::<
+            crate::widgets::recycled_cells::RowActions,
+        >(item)
+        {
+            actions.set_visible(false);
+            actions.set_sensitive(false);
+        }
+    });
+
+    crate::widgets::recycled_cells::row_action_column(field, &factory)
+}

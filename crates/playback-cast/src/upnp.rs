@@ -1,9 +1,16 @@
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use playback::{BackendCommand, BackendEvent, BackendState, PreparedNext, PreparedStream, RunId};
+use playback::{
+    BackendCommand, BackendEvent, BackendState, PreparedNext, PreparedStream, ProcessingRequest,
+    RunId,
+};
 
-use crate::relay::{PublishedResource, RelayRepresentation, RelayServer, source_content_type};
-use crate::upnp_transport::UpnpDevice;
+use crate::relay::{
+    PublishRequest, PublishedResource, RelayRepresentation, RelayServer, source_content_type,
+};
+use crate::upnp_transport::{UpnpDevice, diagnostic_value};
 
 const AV_TRANSPORT: &str = "AVTransport";
 const CONNECTION_MANAGER: &str = "ConnectionManager";
@@ -12,10 +19,11 @@ const END_POSITION_TOLERANCE_MILLIS: u64 = 2_000;
 const SEEK_POSITION_SAMPLES: u8 = 4;
 const PLAY_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAY_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+static NEXT_DIAGNOSTIC_SESSION: AtomicU64 = AtomicU64::new(1);
 
 struct PendingSeek {
-    origin_millis: u64,
     target_millis: u64,
+    requested_at: Instant,
     remaining_samples: u8,
 }
 
@@ -62,7 +70,7 @@ impl SinkProtocols {
             .iter()
             .any(|content_type| content_type == "*" || content_type == "audio/mpeg")
         {
-            return Ok(RelayRepresentation::Mp3);
+            return Ok(RelayRepresentation::Generated(library::AudioEncoding::mp3()));
         }
         Err(format!(
             "UPnP renderer does not accept {source_content_type} or audio/mpeg"
@@ -100,12 +108,13 @@ fn normalize_content_type(value: &str) -> String {
 }
 
 impl PendingSeek {
+    /// Renderers report whole seconds, and playback moves on after the seek lands.
     fn reached(&self, observed_millis: u64) -> bool {
-        if self.origin_millis <= self.target_millis {
-            observed_millis >= self.target_millis
-        } else {
-            observed_millis <= self.target_millis
-        }
+        let latest = self
+            .target_millis
+            .saturating_add(self.requested_at.elapsed().as_millis() as u64)
+            .saturating_add(1_000);
+        (self.target_millis.saturating_sub(1_000)..=latest).contains(&observed_millis)
     }
 
     fn observe(&mut self, observed_millis: u64) -> SeekObservation {
@@ -127,11 +136,17 @@ struct HeldOutput {
     muted: bool,
 }
 
+struct PendingMedia {
+    processing: ProcessingRequest,
+    previous_uri: Option<String>,
+}
+
 struct QueuedMedia {
     run: RunId,
     published: PublishedResource,
     metadata: String,
     duration_millis: Option<u64>,
+    stream: PreparedStream,
 }
 
 impl QueuedMedia {
@@ -140,10 +155,11 @@ impl QueuedMedia {
             .end_millis()
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
-                stream
-                    .occurrence
-                    .as_ref()
-                    .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
+                stream.row.as_ref().and_then(|occurrence| {
+                    u64::try_from(occurrence.track.metadata.duration_millis)
+                        .ok()
+                        .filter(|value| *value > 0)
+                })
             });
         let metadata = didl_metadata(&stream, &published);
         Self {
@@ -151,16 +167,21 @@ impl QueuedMedia {
             published,
             metadata,
             duration_millis,
+            stream,
         }
     }
 }
 
 pub(crate) struct UpnpController {
     device: UpnpDevice,
+    diagnostic_session: u64,
+    action_sequence: Cell<u64>,
     sink_protocols: SinkProtocols,
     current: Option<QueuedMedia>,
     next_media: Option<QueuedMedia>,
     last_position_millis: u64,
+    position_observed: Instant,
+    visualizer_enabled: bool,
     pending_seek: Option<PendingSeek>,
     pending_start_position_millis: Option<u64>,
     started: bool,
@@ -168,6 +189,10 @@ pub(crate) struct UpnpController {
     seekable: bool,
     startup_output: Option<HeldOutput>,
     observation_unavailable: bool,
+    processing: ProcessingRequest,
+    pending_media: Option<PendingMedia>,
+    pending_reload: bool,
+    playing: bool,
 }
 
 impl UpnpController {
@@ -180,10 +205,14 @@ impl UpnpController {
         }
         Ok(Self {
             device,
+            diagnostic_session: NEXT_DIAGNOSTIC_SESSION.fetch_add(1, Ordering::Relaxed),
+            action_sequence: Cell::new(0),
             sink_protocols: SinkProtocols(None),
             current: None,
             next_media: None,
             last_position_millis: 0,
+            position_observed: Instant::now(),
+            visualizer_enabled: false,
             pending_seek: None,
             pending_start_position_millis: None,
             started: false,
@@ -191,6 +220,10 @@ impl UpnpController {
             seekable: false,
             startup_output: None,
             observation_unavailable: false,
+            processing: ProcessingRequest::default(),
+            pending_media: None,
+            pending_reload: false,
+            playing: false,
         })
     }
 
@@ -207,6 +240,7 @@ impl UpnpController {
     }
 
     pub(crate) fn verify_connection(&mut self) -> Result<(), String> {
+        let _span = tracing::debug_span!("upnp_connect").entered();
         let result = self.action(
             AV_TRANSPORT,
             "GetTransportInfo",
@@ -222,6 +256,25 @@ impl UpnpController {
         command: BackendCommand,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let command_name = match &command {
+            BackendCommand::Start { .. } => "Start",
+            BackendCommand::Play { .. } => "Play",
+            BackendCommand::Pause { .. } => "Pause",
+            BackendCommand::Stop { .. } => "Stop",
+            BackendCommand::Seek { .. } => "Seek",
+            BackendCommand::PrepareNext { .. } => "PrepareNext",
+            BackendCommand::SetOutputVolume { .. } => "SetOutputVolume",
+            BackendCommand::SetVisualizerEnabled(_) => "SetVisualizerEnabled",
+            BackendCommand::ConfigureAudio(_) => "ConfigureAudio",
+            BackendCommand::SetPlaybackRate(_) => "SetPlaybackRate",
+        };
+        let _span = tracing::debug_span!(
+            "upnp_command",
+            command = command_name,
+            run = ?command.run(),
+        )
+        .entered();
+        tracing::debug!(session = self.diagnostic_session, "handling UPnP command");
         match command {
             BackendCommand::Start {
                 run,
@@ -231,6 +284,11 @@ impl UpnpController {
                 ..
             } => self.start(run, current, next, start_position_millis, relay),
             BackendCommand::Play { run } if self.current_run() == Some(run) => {
+                if self.pending_reload {
+                    let events = self.reload(self.last_position_millis, relay)?;
+                    self.playing = true;
+                    return Ok(events);
+                }
                 let result = if self.renderer_owned {
                     if !self.transport_action_allowed("Play") {
                         return Ok(Vec::new());
@@ -258,6 +316,8 @@ impl UpnpController {
                     return Err(error);
                 }
                 self.started = true;
+                self.position_observed = Instant::now();
+                self.playing = true;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Playing,
@@ -268,6 +328,7 @@ impl UpnpController {
                     return Ok(Vec::new());
                 }
                 self.pause()?;
+                self.playing = false;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Paused,
@@ -286,16 +347,51 @@ impl UpnpController {
                 run,
                 position_millis,
             } if self.current_run() == Some(run) && self.seekable => {
+                let native = self
+                    .current
+                    .as_ref()
+                    .is_some_and(|media| media.published.native_seek);
+                // Generated media cannot start at its end; the track is finished there.
+                if !native
+                    && self
+                        .current_duration_millis()
+                        .is_some_and(|duration| position_millis >= duration)
+                {
+                    let _ = self.stop();
+                    self.finish_current(relay);
+                    return Ok(vec![BackendEvent::Ended { run }]);
+                }
+                if !self.playing {
+                    self.last_position_millis = position_millis;
+                    self.position_observed = Instant::now();
+                    if native {
+                        // Seek while paused through the silenced startup restore, keeping
+                        // the direct representation.
+                        if let Err(error) = self.hold_startup_output() {
+                            tracing::debug!(%error, "UPnP output could not be silenced for seeking");
+                        }
+                        self.pending_start_position_millis = Some(position_millis);
+                    } else {
+                        self.pending_reload = true;
+                    }
+                    return Ok(vec![BackendEvent::Position {
+                        run,
+                        millis: position_millis,
+                    }]);
+                }
+                if !native {
+                    return self.reload(position_millis, relay);
+                }
                 let target = position_millis;
                 match self.seek_once(target) {
                     Ok(()) => Ok(vec![BackendEvent::Position {
                         run,
                         millis: position_millis,
                     }]),
-                    Err(error) => {
-                        tracing::debug!(%error, target_millis = target, "UPnP seek was rejected");
-                        Ok(Vec::new())
-                    }
+                    Err(error) => Ok(vec![BackendEvent::OperationFailed {
+                        run: Some(run),
+                        error: playback::BackendFailure::new(error),
+                    }]),
                 }
             }
             BackendCommand::PrepareNext { current_run, next }
@@ -317,10 +413,43 @@ impl UpnpController {
                     output: None,
                 }])
             }
+            BackendCommand::SetVisualizerEnabled(enabled) => {
+                if self.visualizer_enabled == enabled {
+                    return Ok(Vec::new());
+                }
+                self.visualizer_enabled = enabled;
+                if enabled
+                    && self
+                        .current
+                        .as_ref()
+                        .is_some_and(|media| media.published.native_seek)
+                {
+                    if self.playing {
+                        return self.reload(self.last_position_millis, relay);
+                    }
+                    self.pending_reload = true;
+                } else if enabled
+                    && let Some(next) = self
+                        .next_media
+                        .as_ref()
+                        .filter(|next| next.published.native_seek)
+                {
+                    let next = PreparedNext::new(
+                        next.run,
+                        next.stream.clone(),
+                        playback::NextTransition::Gapless,
+                    );
+                    return self.prepare_next(
+                        self.current_run().expect("current media"),
+                        Some(next),
+                        relay,
+                    );
+                }
+                Ok(Vec::new())
+            }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
             | BackendCommand::SetPlaybackRate(_)
-            | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
             | BackendCommand::Stop { .. }
@@ -328,10 +457,130 @@ impl UpnpController {
         }
     }
 
+    fn publish_request(
+        &self,
+        stream: &PreparedStream,
+        position: u64,
+        reload: bool,
+    ) -> Result<PublishRequest, String> {
+        let processing = self.processing.config.clone();
+        let representation = if reload
+            || self.visualizer_enabled
+            || processing != Default::default()
+            || stream.window().is_some()
+            || self.processing.cast_encoding.codec == library::AudioCodec::Flac
+        {
+            let content_type = self.processing.cast_encoding.codec.content_type();
+            if self.sink_protocols.0.as_ref().is_some_and(|types| {
+                !types
+                    .iter()
+                    .any(|value| value == "*" || value == content_type)
+            }) {
+                return Err(format!("UPnP renderer does not accept {content_type}"));
+            }
+            RelayRepresentation::Generated(self.processing.cast_encoding)
+        } else {
+            self.sink_protocols
+                .representation_for(&source_content_type(stream))?
+        };
+        Ok(PublishRequest {
+            representation,
+            processing,
+            logical_offset_millis: position,
+        })
+    }
+
+    pub(crate) fn set_processing(
+        &mut self,
+        processing: ProcessingRequest,
+        relay: &RelayServer,
+    ) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_processing").entered();
+        let changed = self.processing.config != processing.config
+            || self.processing.cast_encoding != processing.cast_encoding;
+        self.processing = processing;
+        if (!changed && !self.pending_reload) || self.current.is_none() {
+            return Ok(Vec::new());
+        }
+        self.pending_reload = true;
+        if !self.playing {
+            return Ok(Vec::new());
+        }
+        self.reload(self.last_position_millis, relay)
+    }
+
+    fn reload(&mut self, position: u64, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_reload", run = ?self.current_run()).entered();
+        let current = self
+            .current
+            .as_ref()
+            .ok_or("UPnP current media is unavailable")?;
+        let run = current.run;
+        let stream = current.stream.clone();
+        let previous_uri = Some(current.published.uri.clone());
+        let published = relay.publish(&stream, self.publish_request(&stream, position, true)?)?;
+        let metadata = didl_metadata(&stream, &published);
+        if let Err(error) = self.hold_startup_output() {
+            tracing::debug!(%error, "UPnP output could not be silenced for seeking");
+        }
+        if let Err(error) = self
+            .reset_transport()
+            .and_then(|()| self.set_uri(&published.uri, &metadata))
+            .and_then(|()| self.start_transport())
+        {
+            relay.remove(&published);
+            let _ = self.stop();
+            self.finish_current(relay);
+            return Err(error);
+        }
+        if let Some(previous) = self.current.take() {
+            relay.remove(&previous.published);
+        }
+        self.install_current(run, stream, published, previous_uri);
+        self.last_position_millis = position;
+        self.position_observed = Instant::now();
+        self.pending_reload = false;
+        self.pending_seek = None;
+        self.pending_start_position_millis = None;
+        self.started = true;
+        self.playing = true;
+        let mut events = vec![
+            BackendEvent::Position {
+                run,
+                millis: position,
+            },
+            BackendEvent::State {
+                run,
+                state: BackendState::Buffering,
+            },
+        ];
+        if let Some(next) = self.next_media.as_ref() {
+            let next = PreparedNext::new(
+                next.run,
+                next.stream.clone(),
+                playback::NextTransition::Gapless,
+            );
+            events.extend(self.prepare_next(run, Some(next), relay)?);
+        }
+        Ok(events)
+    }
+
     pub(crate) fn poll(&mut self, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_poll", run = ?self.current_run()).entered();
         let Some(run) = self.current_run() else {
             return Ok(Vec::new());
         };
+        if let Some(error) = self
+            .current
+            .as_ref()
+            .and_then(|current| relay.error(&current.published))
+        {
+            self.pending_reload = true;
+            return Ok(vec![BackendEvent::ProcessingFailed {
+                output: self.processing.output.clone(),
+                message: error,
+            }]);
+        }
         let transport = match self.action(
             AV_TRANSPORT,
             "GetTransportInfo",
@@ -357,6 +606,24 @@ impl UpnpController {
             .get("TrackURI")
             .map(String::as_str)
             .unwrap_or_default();
+        let is_current_uri = self
+            .current
+            .as_ref()
+            .is_some_and(|current| track_uri == current.published.uri);
+        // Status can still describe the previous URI after SetAVTransportURI returns.
+        if let Some(pending) = &self.pending_media
+            && ((pending.previous_uri.as_deref() == Some(track_uri) && !is_current_uri)
+                || ((track_uri.is_empty() || is_current_uri)
+                    && !matches!(
+                        transport_state,
+                        Some("PLAYING" | "PAUSED_PLAYBACK" | "PAUSED_RECORDING")
+                    )))
+        {
+            return Ok(vec![BackendEvent::TransportObserved {
+                run,
+                state: BackendState::Buffering,
+            }]);
+        }
         if self
             .next_media
             .as_ref()
@@ -370,10 +637,8 @@ impl UpnpController {
                 .as_ref()
                 .is_some_and(|current| track_uri != current.published.uri)
         {
-            self.started = false;
-            self.renderer_owned = false;
-            let _ = self.restore_startup_output();
-            return Ok(vec![BackendEvent::State {
+            self.finish_current(relay);
+            return Ok(vec![BackendEvent::TransportObserved {
                 run,
                 state: BackendState::Stopped,
             }]);
@@ -392,6 +657,14 @@ impl UpnpController {
             .unwrap_or(self.last_position_millis);
         let restore_was_pending = self.pending_start_position_millis.is_some();
         let mut seekability_changed = false;
+        if let Some(seekable) = self
+            .current
+            .as_ref()
+            .and_then(|current| relay.source_seekable(&current.published))
+        {
+            seekability_changed = self.seekable != seekable;
+            self.seekable = seekable;
+        }
         if matches!(state, BackendState::Playing | BackendState::Paused)
             && let Some(target) = self.pending_start_position_millis.take()
         {
@@ -432,9 +705,10 @@ impl UpnpController {
             }
             self.restore_startup_output()?;
         }
-        if self
-            .current_duration_millis()
-            .is_some_and(|duration| position_millis >= duration)
+        if publish_position
+            && self
+                .current_duration_millis()
+                .is_some_and(|duration| position_millis >= duration)
         {
             self.stop()?;
             self.finish_current(relay);
@@ -445,19 +719,51 @@ impl UpnpController {
                 self.finish_current(relay);
                 return Ok(vec![BackendEvent::Ended { run }]);
             }
-            self.started = false;
+            self.finish_current(relay);
         }
-        if publish_position {
+        self.playing = state == BackendState::Playing;
+        if publish_position && !self.pending_reload {
             self.last_position_millis = position_millis;
+            self.position_observed = Instant::now();
         }
-        let mut events = vec![BackendEvent::State { run, state }];
+        let mut events = vec![BackendEvent::TransportObserved { run, state }];
+        if matches!(state, BackendState::Playing | BackendState::Paused)
+            && let Some(pending) = self.pending_media.take()
+        {
+            let processing = pending.processing;
+            if self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.published.native_seek)
+            {
+                events.push(BackendEvent::ProcessingApplied {
+                    output: processing.output.clone(),
+                    config: processing.config,
+                    sample_rate: None,
+                    preamp_db: 0.0,
+                });
+                events.push(BackendEvent::ProcessingMeter {
+                    output: processing.output,
+                    peak_db: Vec::new(),
+                    spectrum_db: Vec::new(),
+                });
+            }
+            if self.pending_start_position_millis.is_none() && self.pending_seek.is_none() {
+                self.restore_startup_output()?;
+            }
+        }
+        if self.pending_media.is_none()
+            && let Some(current) = &self.current
+        {
+            events.extend(relay.processing_events(&current.published, &self.processing.output));
+        }
         if seekability_changed {
             events.push(BackendEvent::Seekable {
                 run,
-                seekable: true,
+                seekable: self.seekable,
             });
         }
-        if publish_position {
+        if publish_position && !self.pending_reload {
             events.insert(
                 0,
                 BackendEvent::Position {
@@ -470,6 +776,7 @@ impl UpnpController {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        let _span = tracing::debug_span!("upnp_shutdown").entered();
         let _ = self.stop();
         let _ = self.restore_startup_output();
         self.current = None;
@@ -499,21 +806,24 @@ impl UpnpController {
         position_millis: u64,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_start", %run).entered();
+        let previous_uri = self
+            .current
+            .as_ref()
+            .map(|current| current.published.uri.clone());
         let _ = self.restore_startup_output();
         self.reset_transport()?;
         self.finish_current(relay);
         relay.clear();
-        let representation = self
-            .sink_protocols
-            .representation_for(&source_content_type(&stream))?;
-        let media = relay.publish_at(&stream, representation, position_millis)?;
+        let request = self.publish_request(&stream, position_millis, false)?;
+        let media = relay.publish(&stream, request)?;
         if let Err(error) = self.set_uri(&media.uri, &didl_metadata(&stream, &media)) {
             relay.remove(&media);
             return Err(error);
         }
-        self.install_current(run, stream.clone(), media.clone());
+        self.install_current(run, stream.clone(), media.clone(), previous_uri);
         let hold_output = position_millis > 0
-            && media.seekable
+            && media.native_seek
             && match self.hold_startup_output() {
                 Ok(()) => true,
                 Err(error) => {
@@ -531,14 +841,16 @@ impl UpnpController {
             return Err(error);
         }
         self.pending_start_position_millis = None;
-        self.seekable = media.seekable
-            && self
+        self.seekable = !media.native_seek
+            || self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
-        if position_millis > 0 && media.seekable {
+        if position_millis > 0 && media.native_seek {
             self.pending_start_position_millis = Some(position_millis);
         }
         self.started = true;
+        self.playing = true;
+        self.pending_reload = false;
         let mut events = vec![
             BackendEvent::Started { run },
             BackendEvent::Seekable {
@@ -561,9 +873,20 @@ impl UpnpController {
         Ok(events)
     }
 
-    fn install_current(&mut self, run: RunId, stream: PreparedStream, media: PublishedResource) {
+    fn install_current(
+        &mut self,
+        run: RunId,
+        stream: PreparedStream,
+        media: PublishedResource,
+        previous_uri: Option<String>,
+    ) {
         self.last_position_millis = media.logical_offset_millis;
+        self.position_observed = Instant::now();
         self.current = Some(QueuedMedia::new(run, stream, media));
+        self.pending_media = Some(PendingMedia {
+            processing: self.processing.clone(),
+            previous_uri,
+        });
         self.renderer_owned = true;
     }
 
@@ -585,21 +908,22 @@ impl UpnpController {
             return Ok(Vec::new());
         };
         let next_run = next.run;
-        let representation = match self
-            .sink_protocols
-            .representation_for(&source_content_type(&next.stream))
-        {
-            Ok(representation) => representation,
+        let request = match self.publish_request(&next.stream, 0, false) {
+            Ok(request) => request,
             Err(error) => {
-                tracing::debug!(%error, %current_run, %next_run, "UPnP next item has no compatible representation");
-                return Ok(Vec::new());
+                return Ok(vec![BackendEvent::OperationFailed {
+                    run: Some(current_run),
+                    error: playback::BackendFailure::new(error),
+                }]);
             }
         };
-        let published = match relay.publish_as(&next.stream, representation) {
+        let published = match relay.publish(&next.stream, request) {
             Ok(published) => published,
             Err(error) => {
-                tracing::debug!(%error, %current_run, %next_run, "UPnP next item could not be published");
-                return Ok(Vec::new());
+                return Ok(vec![BackendEvent::OperationFailed {
+                    run: Some(current_run),
+                    error: playback::BackendFailure::new(error),
+                }]);
             }
         };
         if let Err(error) =
@@ -607,7 +931,10 @@ impl UpnpController {
         {
             relay.remove(&published);
             tracing::debug!(%error, %current_run, %next_run, "UPnP renderer did not accept a next item");
-            return Ok(Vec::new());
+            return Ok(vec![BackendEvent::OperationFailed {
+                run: Some(current_run),
+                error: playback::BackendFailure::new(error),
+            }]);
         }
         self.next_media = Some(QueuedMedia::new(next_run, next.stream, published));
         Ok(Vec::new())
@@ -630,17 +957,16 @@ impl UpnpController {
             relay.remove(&current.published);
         }
         let new_run = next.run;
+        let native_seek = next.published.native_seek;
         self.last_position_millis = next.published.logical_offset_millis;
+        self.position_observed = Instant::now();
         self.current = Some(next);
         self.pending_seek = None;
         self.pending_start_position_millis = None;
         self.renderer_owned = true;
         self.started = true;
-        self.seekable = self
-            .current
-            .as_ref()
-            .is_some_and(|media| media.published.seekable)
-            && self
+        self.seekable = !native_seek
+            || self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
         let position_millis = position
@@ -649,12 +975,14 @@ impl UpnpController {
             .map(|renderer_position| self.current_logical_position_millis(renderer_position))
             .unwrap_or(self.current_logical_offset_millis());
         self.last_position_millis = position_millis;
+        self.position_observed = Instant::now();
         let state = match transport_state {
             Some("PLAYING") => BackendState::Playing,
             Some("PAUSED_PLAYBACK") | Some("PAUSED_RECORDING") => BackendState::Paused,
             Some("STOPPED") | Some("NO_MEDIA_PRESENT") => BackendState::Stopped,
             _ => BackendState::Buffering,
         };
+        self.playing = state == BackendState::Playing;
         let mut events = vec![
             BackendEvent::Transitioned { old_run, new_run },
             BackendEvent::Seekable {
@@ -665,7 +993,7 @@ impl UpnpController {
                 run: new_run,
                 millis: position_millis,
             },
-            BackendEvent::State {
+            BackendEvent::TransportObserved {
                 run: new_run,
                 state,
             },
@@ -715,10 +1043,29 @@ impl UpnpController {
         self.started = false;
         self.renderer_owned = false;
         self.seekable = false;
+        self.pending_reload = false;
+        self.pending_media = None;
+        self.playing = false;
     }
 
-    fn current_run(&self) -> Option<RunId> {
+    pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|media| media.run)
+    }
+
+    pub(crate) fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        if !self.visualizer_enabled
+            || !self.playing
+            || self.pending_media.is_some()
+            || self.pending_reload
+            || self.pending_seek.is_some()
+        {
+            return None;
+        }
+        let current = self.current.as_ref()?;
+        let position = self
+            .last_position_millis
+            .saturating_add(self.position_observed.elapsed().as_millis() as u64);
+        relay.visualizer(&current.published, current.run, position)
     }
 
     fn current_logical_offset_millis(&self) -> u64 {
@@ -769,8 +1116,8 @@ impl UpnpController {
         }
         if let Ok(target_millis) = &result {
             self.pending_seek = Some(PendingSeek {
-                origin_millis: self.last_position_millis,
                 target_millis: *target_millis,
+                requested_at: Instant::now(),
                 remaining_samples: SEEK_POSITION_SAMPLES,
             });
         }
@@ -789,11 +1136,7 @@ impl UpnpController {
             return true;
         };
         match pending.observe(observed_millis) {
-            SeekObservation::Reached => {
-                self.last_position_millis = observed_millis;
-                false
-            }
-            SeekObservation::Expired => true,
+            SeekObservation::Reached | SeekObservation::Expired => true,
             SeekObservation::Waiting => {
                 if self.startup_output.is_some() {
                     let _ = self.seek_logical_position(pending.target_millis);
@@ -872,13 +1215,20 @@ impl UpnpController {
     }
 
     fn transport_action_allowed(&self, action: &str) -> bool {
-        match self.transport_actions() {
+        let allowed = match self.transport_actions() {
             Ok(actions) => actions.allows(action),
             Err(error) => {
                 tracing::debug!(%error, action, "UPnP transport action availability could not be observed");
                 true
             }
-        }
+        };
+        tracing::debug!(
+            session = self.diagnostic_session,
+            action,
+            allowed,
+            "checked UPnP action availability"
+        );
+        allowed
     }
 
     fn is_playing(&self) -> bool {
@@ -945,8 +1295,24 @@ impl UpnpController {
     }
 
     fn stop_transport(&self) -> Result<(), String> {
-        self.action(AV_TRANSPORT, "Stop", "<InstanceID>0</InstanceID>")?;
-        Ok(())
+        if self
+            .transport_state()
+            .is_ok_and(|state| state.eq_ignore_ascii_case("NO_MEDIA_PRESENT"))
+        {
+            tracing::debug!(
+                session = self.diagnostic_session,
+                "UPnP renderer has no media to stop"
+            );
+            return Ok(());
+        }
+        let result = self
+            .action(AV_TRANSPORT, "Stop", "<InstanceID>0</InstanceID>")
+            .map(|_| ());
+        if result.is_err() && tracing::enabled!(tracing::Level::DEBUG) {
+            let _span = tracing::debug_span!("upnp_status_after_failed_stop").entered();
+            let _ = self.transport_state();
+        }
+        result
     }
 
     fn volume(&self) -> Result<(f64, bool), String> {
@@ -994,6 +1360,9 @@ impl UpnpController {
     }
 
     fn hold_startup_output(&mut self) -> Result<(), String> {
+        if self.startup_output.is_some() {
+            return Ok(());
+        }
         let (volume, muted) = self.volume()?;
         self.startup_output = Some(HeldOutput { volume, muted });
         if let Err(error) = self.set_volume(volume, true) {
@@ -1016,19 +1385,39 @@ impl UpnpController {
         action: &str,
         payload: &str,
     ) -> Result<std::collections::HashMap<String, String>, String> {
+        let request = self.action_sequence.get() + 1;
+        self.action_sequence.set(request);
+        let _span = tracing::debug_span!(
+            "upnp_action",
+            session = self.diagnostic_session,
+            request,
+            service = service_type,
+            action,
+        )
+        .entered();
+        tracing::debug!("sending UPnP action");
         let started = Instant::now();
         let result = self
             .device
             .action(service_type, action, payload)
             .map_err(|error| format!("UPnP {action} failed: {error}"));
-        let elapsed = started.elapsed();
-        if result.is_err() || elapsed.as_millis() >= 250 {
-            tracing::debug!(
-                action,
-                elapsed_ms = elapsed.as_millis(),
-                "completed UPnP action"
-            );
-        }
+        let values = result.as_ref().ok();
+        let state = values
+            .and_then(|values| values.get("CurrentTransportState"))
+            .map(|value| diagnostic_value(value))
+            .or_else(|| (action == "GetTransportInfo").then_some("[not returned]"));
+        let actions = values
+            .and_then(|values| values.get("Actions"))
+            .map(|value| diagnostic_value(value))
+            .or_else(|| (action == "GetCurrentTransportActions").then_some("[not returned]"));
+        tracing::debug!(
+            success = result.is_ok(),
+            elapsed_ms = started.elapsed().as_millis(),
+            transport_state = state,
+            advertised_actions = actions,
+            error = result.as_ref().err().map(String::as_str),
+            "completed UPnP action"
+        );
         result
     }
 }
@@ -1056,10 +1445,10 @@ fn parse_upnp_time(value: &str) -> Option<u64> {
 }
 
 fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
-    let Some(occurrence) = stream.occurrence.as_ref() else {
+    let Some(occurrence) = stream.row.as_ref() else {
         return String::new();
     };
-    let track = &occurrence.item;
+    let track = &occurrence.track.metadata;
     let duration_millis = media
         .resource_duration_millis
         .unwrap_or_else(|| u64::try_from(track.duration_millis).unwrap_or_default());
@@ -1070,7 +1459,8 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
         xml_escape(&track.artist),
         xml_escape(&track.album),
     );
-    if let Some(track_number) = track.track_number.filter(|number| *number > 0) {
+    if track.track_number > 0 {
+        let track_number = track.track_number;
         fields.push_str(&format!(
             "<upnp:originalTrackNumber>{}</upnp:originalTrackNumber>",
             track_number
@@ -1111,7 +1501,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
             "<res protocolInfo=\"http-get:*:{}:{}\" duration=\"{}\"{}>{}</res>",
             "</item></DIDL-Lite>"
         ),
-        xml_escape(&track.media_uri),
+        occurrence.track.track_key,
         fields,
         xml_escape(&media.content_type),
         protocol_info,
@@ -1134,10 +1524,10 @@ fn dlna_protocol_info(media: &PublishedResource) -> String {
         "audio/mpeg" | "audio/mp3" => "DLNA.ORG_PN=MP3;",
         _ => "",
     };
-    let (operation, converted) = if media.seekable {
+    let (operation, converted) = if media.native_seek {
         ("01", "0")
     } else {
-        ("00", "1")
+        ("01", "1")
     };
     format!(
         "{profile}DLNA.ORG_OP={operation};DLNA.ORG_CI={converted};DLNA.ORG_FLAGS=01500000000000000000000000000000"
@@ -1158,11 +1548,10 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, mpsc};
-    use std::thread;
+    use std::sync::{Arc, Mutex, mpsc};
 
-    use tiny_http::{Response, Server};
     use url::Url;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::upnp_transport::service_type_matches;
@@ -1182,59 +1571,49 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_occurrence(test_occurrence().into(), Some("audio/mpeg".to_string()));
+        .with_row(test_row().into(), Some("audio/mpeg".to_string()));
         (directory, stream)
     }
 
     fn test_renderer(
         description: &'static str,
         action_count: usize,
-        mut respond: impl FnMut(&str, &str) -> Result<String, String> + Send + 'static,
+        respond: impl FnMut(&str, &str) -> Result<String, String> + Send + 'static,
     ) -> (
         std::net::SocketAddr,
         mpsc::Receiver<(String, String)>,
-        thread::JoinHandle<()>,
+        MockServer,
     ) {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let server = runtime.block_on(MockServer::start());
+        let address = *server.address();
         let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            server
-                .recv()
-                .expect("description request")
-                .respond(Response::from_string(description))
-                .expect("device description response");
-            for _ in 0..action_count {
-                let mut request = server.recv().expect("renderer request");
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let respond = Mutex::new(respond);
+        runtime.block_on(async {
+            Mock::given(wiremock::matchers::method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(description))
+                .expect(1).mount(&server).await;
+            Mock::given(wiremock::matchers::method("POST"))
+                .respond_with(move |request: &wiremock::Request| {
+                let action = request.headers.get("SOAPAction").unwrap().to_str().unwrap().to_string();
+                let body = String::from_utf8(request.body.clone()).expect("SOAP body");
                 sent.send((action.clone(), body.clone()))
                     .expect("record SOAP request");
-                match respond(&action, &body) {
-                    Ok(values) => request
-                        .respond(Response::from_string(format!(
+                match respond.lock().unwrap()(&action, &body) {
+                    Ok(values) => ResponseTemplate::new(200).set_body_string(format!(
                             r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                        )))
-                        .expect("renderer response"),
-                    Err(error) => request
-                        .respond(Response::from_string(error).with_status_code(500))
-                        .expect("renderer failure response"),
+                        )),
+                    Err(error) => ResponseTemplate::new(500).set_body_string(error),
                 }
-            }
+            }).expect(action_count as u64).mount(&server).await;
         });
-        (address, received, renderer)
+        (address, received, server)
     }
 
     #[test]
@@ -1268,7 +1647,7 @@ mod tests {
         let mp3_only = SinkProtocols::known("http-get:*:audio/mpeg:DLNA.ORG_PN=MP3");
         assert_eq!(
             mp3_only.representation_for("audio/flac"),
-            Ok(RelayRepresentation::Mp3)
+            Ok(RelayRepresentation::Generated(library::AudioEncoding::mp3()))
         );
 
         let flac = SinkProtocols::known("http-get:*:audio/flac:*");
@@ -1318,10 +1697,10 @@ mod tests {
             .expect("create track")
             .write_all(b"flac")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
+        .with_row(test_row().into(), Some("audio/flac".to_string()));
         let relay =
             RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
@@ -1351,32 +1730,36 @@ mod tests {
                 .map(|current| current.published.logical_offset_millis),
             Some(42_000)
         );
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn connection_probe_rejects_an_unusable_control_service() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let renderer = thread::spawn(move || {
-            let description = server.recv().expect("description request");
-            description
-                .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                .expect("device description response");
-            let probe = server.recv().expect("connection probe");
-            probe
-                .respond(Response::from_string("renderer unavailable").with_status_code(500))
-                .expect("connection failure response");
-        });
-        let device = test_device(address);
-        let mut controller = UpnpController::new(device).expect("controller");
+        for (body, expected) in [
+            (
+                "renderer unavailable",
+                "The renderer responded with status code 500 Internal Server Error",
+            ),
+            (
+                r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>https://example.test/private?token=secret</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>"#,
+                "The renderer responded with status code 500 Internal Server Error (UPnP error 701)",
+            ),
+        ] {
+            let (address, _received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                1,
+                move |_, _| Err(body.to_string()),
+            );
+            let device = test_device(address);
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        let error = controller
-            .verify_connection()
-            .expect_err("unusable control service");
+            let error = controller
+                .verify_connection()
+                .expect_err("unusable control service");
 
-        assert!(error.contains("GetTransportInfo"), "error={error}");
-        renderer.join().expect("renderer thread");
+            assert_eq!(error, format!("UPnP GetTransportInfo failed: {expected}"));
+            drop(renderer);
+        }
     }
 
     #[test]
@@ -1393,7 +1776,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert!(actions[0].0.contains("GetTransportInfo"));
         assert!(!actions[0].0.contains("#Play"));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
@@ -1420,126 +1803,269 @@ mod tests {
         let actions = received.try_iter().collect::<Vec<_>>();
         assert_eq!(actions.len(), 3);
         assert!(!actions.iter().any(|(action, _)| action.contains("#Play")));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn start_resets_transport_and_waits_until_play_is_available() {
-        let mut stopped = false;
-        let mut action_polls = 0;
-        let (address, received, renderer) =
-            test_renderer(TEST_DEVICE_DESCRIPTION, 9, move |action, _| {
-                if action.contains("#Stop") {
-                    stopped = true;
-                }
-                if action.contains("SetAVTransportURI") && !stopped {
-                    return Err("transport locked".to_string());
-                }
-                Ok(if action.contains("GetTransportInfo") {
-                    if stopped {
-                        "<CurrentTransportState>STOPPED</CurrentTransportState>"
-                    } else {
-                        "<CurrentTransportState>LG_TRANSITIONING</CurrentTransportState>"
+        for initial_state in ["NO_MEDIA_PRESENT", "LG_TRANSITIONING"] {
+            let mut stopped = false;
+            let mut loaded = false;
+            let mut action_polls = 0;
+            let no_media = initial_state == "NO_MEDIA_PRESENT";
+            let (address, received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                if no_media { 9 } else { 10 },
+                move |action, _| {
+                    if action.contains("#Stop") {
+                        if no_media && !loaded {
+                            return Err("Transition not available".to_string());
+                        }
+                        stopped = true;
                     }
-                    .to_string()
-                } else if action.contains("GetCurrentTransportActions") {
-                    action_polls += 1;
-                    if action_polls <= 2 {
-                        "<Actions>Stop</Actions>".to_string()
-                    } else {
-                        "<Actions>Play,Stop,Seek</Actions>".to_string()
+                    if action.contains("SetAVTransportURI") {
+                        if !no_media && !stopped {
+                            return Err("transport locked".to_string());
+                        }
+                        loaded = true;
                     }
-                } else {
-                    String::new()
-                })
-            });
-        let device = test_device(address);
-        let (_directory, stream) = test_stream();
-        let relay =
-            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
-        let mut controller = UpnpController::new(device).expect("controller");
+                    if action.contains("#Play") && action_polls < 3 {
+                        return Err("Play is not available yet".to_string());
+                    }
+                    Ok(if action.contains("GetTransportInfo") {
+                        format!(
+                            "<CurrentTransportState>{}</CurrentTransportState>",
+                            if stopped || loaded {
+                                "STOPPED"
+                            } else {
+                                initial_state
+                            }
+                        )
+                    } else if action.contains("GetCurrentTransportActions") {
+                        action_polls += 1;
+                        if no_media && !loaded {
+                            "<Actions></Actions>".to_string()
+                        } else if action_polls <= 2 {
+                            "<Actions>Stop</Actions>".to_string()
+                        } else {
+                            "<Actions>Play,Stop,Seek</Actions>".to_string()
+                        }
+                    } else {
+                        String::new()
+                    })
+                },
+            );
+            let device = test_device(address);
+            let (_directory, stream) = test_stream();
+            let relay =
+                RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        controller
-            .start(RunId::new(1), stream, None, 0, &relay)
-            .expect("start after renderer reset");
-
-        let actions = received.try_iter().collect::<Vec<_>>();
-        assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetCurrentTransportActions"));
-        assert!(actions[6].0.contains("GetTransportInfo"));
-        assert!(actions[7].0.contains("#Play"));
-        renderer.join().expect("renderer thread");
+            let events = controller
+                .start(RunId::new(1), stream, None, 0, &relay)
+                .expect("start playback");
+            assert!(events.iter().any(|event| matches!(event,
+                BackendEvent::State { run, state: BackendState::Playing } if *run == RunId::new(1))));
+            let actions = received.try_iter().collect::<Vec<_>>();
+            let loaded = actions
+                .iter()
+                .position(|(action, _)| action.contains("SetAVTransportURI"))
+                .expect("media URI loaded");
+            let played = actions
+                .iter()
+                .position(|(action, _)| action.contains("#Play"))
+                .expect("play command");
+            assert!(loaded < played);
+            let stopped = actions
+                .iter()
+                .position(|(action, _)| action.contains("#Stop"));
+            if no_media {
+                assert!(
+                    stopped.is_none(),
+                    "empty renderer must accept its first media URI without Stop"
+                );
+            } else {
+                assert!(stopped.expect("reset active renderer") < loaded);
+            }
+            drop(renderer);
+        }
     }
 
     #[test]
-    fn play_failure_stops_the_uri_owned_by_the_controller() {
-        let (address, received, renderer) =
-            test_renderer(TEST_DEVICE_DESCRIPTION, 9, |action, _| {
-                if action.contains("#Play") {
-                    return Err("play failed".to_string());
-                }
-                Ok(if action.contains("GetTransportInfo") {
-                    "<CurrentTransportState>STOPPED</CurrentTransportState>"
-                } else if action.contains("GetCurrentTransportActions") {
-                    "<Actions>Play,Stop,Seek</Actions>"
-                } else {
-                    ""
-                }
-                .to_string())
-            });
-        let device = test_device(address);
-        let (_directory, stream) = test_stream();
-        let relay =
-            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
-        let mut controller = UpnpController::new(device).expect("controller");
+    fn transport_failures_record_exchange_and_preserve_cleanup() {
+        use tracing_subscriber::layer::SubscriberExt;
 
-        let error = controller
-            .start(RunId::new(1), stream, None, 0, &relay)
-            .expect_err("failed Play");
+        // Other test threads can register these callsites without the scoped subscriber.
+        let _unscoped = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        for failed_action in ["Play", "Stop"] {
+            let log = tempfile::NamedTempFile::new().expect("diagnostic log");
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(log.reopen().expect("diagnostic writer"))
+                .finish()
+                .with(
+                    tracing_subscriber::filter::Targets::new()
+                        .with_target("playback", tracing::Level::DEBUG),
+                );
+            let (address, received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                if failed_action == "Play" { 11 } else { 4 },
+                move |action, _| {
+                    if action.contains(&format!("#{failed_action}\"")) {
+                        let description = if failed_action == "Play" {
+                            "Transition not available"
+                        } else {
+                            "https://example.test/private?token=secret"
+                        };
+                        return Err(format!(
+                            r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>{description}</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>"#
+                        ));
+                    }
+                    Ok(if action.contains("GetTransportInfo") {
+                        "<CurrentTransportState>STOPPED</CurrentTransportState>"
+                    } else if action.contains("GetCurrentTransportActions") {
+                        "<Actions>Play,Stop,Seek</Actions>"
+                    } else {
+                        ""
+                    }
+                    .to_string())
+                },
+            );
+            let device = test_device(address);
+            let (_directory, stream) = test_stream();
+            let relay =
+                RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        assert!(error.contains("UPnP Play failed"));
-        assert!(controller.current.is_none());
-        let actions = received.try_iter().collect::<Vec<_>>();
-        assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetTransportInfo"));
-        assert!(actions[6].0.contains("#Play"));
-        assert!(actions[7].0.contains("GetCurrentTransportActions"));
-        assert!(actions[8].0.contains("#Stop"));
-        renderer.join().expect("renderer thread");
+            let error = tracing::subscriber::with_default(subscriber, || {
+                controller.handle(
+                    BackendCommand::Start {
+                        run: RunId::new(1),
+                        current: stream,
+                        next: None,
+                        start_position_millis: 0,
+                        playback_rate: 1.0,
+                    },
+                    &relay,
+                )
+            })
+            .expect_err("rejected transport command");
+
+            assert!(
+                error.contains(&format!("UPnP {failed_action} failed")),
+                "{error}"
+            );
+            assert!(error.contains("UPnP error 701"), "{error}");
+            assert!(controller.current.is_none());
+            let actions = received.try_iter().collect::<Vec<_>>();
+            assert!(actions[1].0.contains("GetTransportInfo"));
+            if failed_action == "Play" {
+                assert!(actions[0].0.contains("GetCurrentTransportActions"));
+                assert!(actions[2].0.contains("#Stop"));
+                assert!(actions[3].0.contains("SetAVTransportURI"));
+                assert!(actions[4].0.contains("GetTransportInfo"));
+                assert!(actions[5].0.contains("GetCurrentTransportActions"));
+                assert!(actions[6].0.contains("GetTransportInfo"));
+                assert!(actions[7].0.contains("#Play"));
+                assert!(actions[8].0.contains("GetCurrentTransportActions"));
+                assert!(actions[10].0.contains("#Stop"));
+            } else {
+                assert_eq!(actions.len(), 4);
+                assert!(actions[0].0.contains("GetCurrentTransportActions"));
+                assert!(actions[2].0.contains("#Stop"));
+                assert!(actions[3].0.contains("GetTransportInfo"));
+            }
+            let output = std::fs::read_to_string(log.path()).expect("recorded diagnostics");
+            let completed = output
+                .lines()
+                .filter(|line| line.contains("completed UPnP action"))
+                .collect::<Vec<_>>();
+            assert_eq!(completed.len(), actions.len(), "{output}");
+            for (index, line) in completed.iter().enumerate() {
+                assert!(line.contains(&format!("request={} ", index + 1)), "{line}");
+                assert!(
+                    line.contains(&format!("session={} ", controller.diagnostic_session)),
+                    "{line}"
+                );
+            }
+            for expected in [
+                "upnp_command",
+                "command=\"Start\"",
+                "upnp_start",
+                "transport_state=\"STOPPED\"",
+                "Play,Stop,Seek",
+                "http_status=500",
+                "soap_fault=true",
+                "soap_fault_type=\"Client\"",
+                "soap_fault_reason=\"UPnPError\"",
+                "soap_fault_code=701",
+                "success=false",
+            ] {
+                assert!(output.contains(expected), "missing {expected}: {output}");
+            }
+            if failed_action == "Stop" {
+                assert!(output.contains("upnp_status_after_failed_stop"), "{output}");
+                assert!(
+                    output.contains("soap_fault_description=\"[redacted]\""),
+                    "{output}"
+                );
+            } else {
+                assert!(
+                    output.contains("soap_fault_description=\"Transition not available\""),
+                    "{output}"
+                );
+            }
+            for private in [
+                "example.test",
+                "secret",
+                "Track & Title",
+                "file://",
+                &address.to_string(),
+            ] {
+                assert!(
+                    !output.contains(private),
+                    "private value in diagnostics: {output}"
+                );
+            }
+            drop(renderer);
+        }
     }
 
     #[test]
     fn stale_renderer_positions_do_not_cross_a_seek_boundary() {
         let mut forward = PendingSeek {
-            origin_millis: 25_000,
             target_millis: 99_000,
+            requested_at: Instant::now(),
             remaining_samples: SEEK_POSITION_SAMPLES,
         };
         assert_eq!(forward.observe(25_000), SeekObservation::Waiting);
         assert_eq!(forward.observe(99_000), SeekObservation::Reached);
 
+        // Playback that moved on past a backward target confirms it; the old position does not.
         let mut backward = PendingSeek {
-            origin_millis: 180_000,
             target_millis: 60_000,
+            requested_at: Instant::now() - Duration::from_secs(2),
             remaining_samples: SEEK_POSITION_SAMPLES,
         };
         assert_eq!(backward.observe(180_000), SeekObservation::Waiting);
-        assert_eq!(backward.observe(59_000), SeekObservation::Reached);
+        assert_eq!(backward.observe(61_000), SeekObservation::Reached);
+
+        // A report from a superseded target does not confirm the newer one.
+        let mut superseded = PendingSeek {
+            target_millis: 100_000,
+            requested_at: Instant::now(),
+            remaining_samples: SEEK_POSITION_SAMPLES,
+        };
+        assert_eq!(superseded.observe(60_000), SeekObservation::Waiting);
     }
 
     #[test]
     fn a_renderer_that_never_moves_releases_position_updates() {
         let mut pending = PendingSeek {
-            origin_millis: 25_000,
             target_millis: 99_000,
+            requested_at: Instant::now(),
             remaining_samples: 2,
         };
         assert_eq!(pending.observe(25_000), SeekObservation::Waiting);
@@ -1548,63 +2074,31 @@ mod tests {
 
     #[test]
     fn cue_start_uses_a_bounded_representation_and_prepares_next() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut seeked = false;
-            let mut playing = false;
-            for index in 0..12 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    request
-                        .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let mut current_uri = String::new();
+        let mut seeked = false;
+        let mut playing = false;
+        let (address, received, renderer) = test_renderer(
+            TEST_DEVICE_DESCRIPTION,
+            12,
+            move |action, body| {
                 if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
+                    current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
                 } else if action.contains("SetNextAVTransportURI") {
-                    current_uri = xml_element(&body, "NextURI").unwrap_or_default();
+                    current_uri = xml_element(body, "NextURI").unwrap_or_default();
                 } else if action.contains("#Play") {
                     playing = true;
                 } else if action.contains("#Seek") {
                     seeked = true;
                 }
-                sent.send((action, body)).expect("record SOAP request");
-                let values = if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetTransportInfo"))
-                {
+                let values = if action.contains("GetTransportInfo") {
                     if playing {
                         "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
                     } else {
                         "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
                     }
-                } else if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetCurrentTransportActions"))
-                {
+                } else if action.contains("GetCurrentTransportActions") {
                     "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
-                } else if request
-                    .headers()
-                    .iter()
-                    .any(|header| header.value.as_str().contains("GetPositionInfo"))
-                {
+                } else if action.contains("GetPositionInfo") {
                     if seeked {
                         format!(
                             "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>00:00:12</RelTime>"
@@ -1617,13 +2111,9 @@ mod tests {
                 } else {
                     String::new()
                 };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
-            }
-        });
+                Ok(values)
+            },
+        );
 
         let device = test_device(address);
         let directory = tempfile::tempdir().expect("track directory");
@@ -1638,14 +2128,14 @@ mod tests {
             .write_all(b"next")
             .expect("write next track");
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new(
+            audio_processing::ResolvedStream::new(
                 Url::from_file_path(path).expect("track URL").to_string(),
             )
             .with_window(10_000, 20_000),
         );
         let next = PreparedNext::new(
             RunId::new(2),
-            PreparedStream::from(playback::ResolvedStream::new(
+            PreparedStream::from(audio_processing::ResolvedStream::new(
                 Url::from_file_path(next_path)
                     .expect("next track URL")
                     .to_string(),
@@ -1662,20 +2152,20 @@ mod tests {
         let transition = controller.poll(&relay).expect("poll transition");
 
         let actions = received.try_iter().collect::<Vec<_>>();
-        assert_eq!(actions.len(), 11);
+        assert_eq!(actions.len(), 12);
         assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[2].1.contains("CurrentURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetTransportInfo"));
-        assert!(actions[6].0.contains("#Play"));
-        assert!(actions[7].0.contains("SetNextAVTransportURI"));
-        assert!(actions[7].1.contains("<NextURI>http://"));
-        assert!(actions[8].0.contains("GetTransportInfo"));
-        assert!(actions[9].0.contains("GetPositionInfo"));
-        assert!(actions[10].0.contains("GetCurrentTransportActions"));
+        assert!(actions[2].0.contains("#Stop"));
+        assert!(actions[3].0.contains("SetAVTransportURI"));
+        assert!(actions[3].1.contains("CurrentURI"));
+        assert!(actions[4].0.contains("GetTransportInfo"));
+        assert!(actions[5].0.contains("GetCurrentTransportActions"));
+        assert!(actions[6].0.contains("GetTransportInfo"));
+        assert!(actions[7].0.contains("#Play"));
+        assert!(actions[8].0.contains("SetNextAVTransportURI"));
+        assert!(actions[8].1.contains("<NextURI>http://"));
+        assert!(actions[9].0.contains("GetTransportInfo"));
+        assert!(actions[10].0.contains("GetPositionInfo"));
+        assert!(actions[11].0.contains("GetCurrentTransportActions"));
         assert!(!actions.iter().any(|(action, _)| action.contains("#Seek")));
         assert!(
             transition.iter().any(|event| {
@@ -1687,79 +2177,48 @@ mod tests {
             }),
             "transition={transition:?} actions={actions:?}"
         );
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn output_switch_stays_silent_until_one_startup_seek_is_confirmed() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let (sent, received) = mpsc::channel();
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut seek_attempts = 0;
-            let mut playing = false;
-            for index in 0..24 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    let description = format!(
-                        r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId><SCPDURL>/rendering.xml</SCPDURL><controlURL>/rendering</controlURL><eventSubURL>/rendering-events</eventSubURL></service></serviceList></device></root>"#
-                    );
-                    request
-                        .respond(Response::from_string(description))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
-                if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
-                } else if action.contains("#Play") {
-                    playing = true;
-                } else if action.contains("#Seek") {
-                    seek_attempts += 1;
-                }
-                sent.send((action.clone(), body))
-                    .expect("record SOAP request");
-                let values = if action.contains("GetTransportInfo") {
-                    if playing {
-                        "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
-                    } else {
-                        "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
-                    }
-                } else if action.contains("GetVolume") {
-                    "<CurrentVolume>40</CurrentVolume>".to_string()
-                } else if action.contains("GetMute") {
-                    "<CurrentMute>0</CurrentMute>".to_string()
-                } else if action.contains("GetPositionInfo") {
-                    format!(
-                        "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>{}</RelTime>",
-                        if seek_attempts >= 2 {
-                            "00:00:42"
-                        } else {
-                            "00:00:00"
-                        }
-                    )
-                } else if action.contains("GetCurrentTransportActions") {
-                    "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
-                } else {
-                    String::new()
-                };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
+        let mut current_uri = String::new();
+        let mut seek_attempts = 0;
+        let mut playing = false;
+        let description = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId><SCPDURL>/rendering.xml</SCPDURL><controlURL>/rendering</controlURL><eventSubURL>/rendering-events</eventSubURL></service></serviceList></device></root>"#;
+        let (address, received, renderer) = test_renderer(description, 24, move |action, body| {
+            if action.contains("SetAVTransportURI") {
+                current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
+            } else if action.contains("#Play") {
+                playing = true;
+            } else if action.contains("#Seek") {
+                seek_attempts += 1;
             }
+            let values = if action.contains("GetTransportInfo") {
+                if playing {
+                    "<CurrentTransportState>PLAYING</CurrentTransportState>".to_string()
+                } else {
+                    "<CurrentTransportState>STOPPED</CurrentTransportState>".to_string()
+                }
+            } else if action.contains("GetVolume") {
+                "<CurrentVolume>40</CurrentVolume>".to_string()
+            } else if action.contains("GetMute") {
+                "<CurrentMute>0</CurrentMute>".to_string()
+            } else if action.contains("GetPositionInfo") {
+                format!(
+                    "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>{}</RelTime>",
+                    if seek_attempts >= 2 {
+                        "00:00:42"
+                    } else {
+                        "00:00:00"
+                    }
+                )
+            } else if action.contains("GetCurrentTransportActions") {
+                "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
+            } else {
+                String::new()
+            };
+            Ok(values)
         });
 
         let device = test_device(address);
@@ -1769,7 +2228,7 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ));
         let mut relay =
@@ -1806,21 +2265,21 @@ mod tests {
         );
 
         let actions = received.try_iter().collect::<Vec<_>>();
-        assert_eq!(actions.len(), 23);
+        assert_eq!(actions.len(), 24);
         assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetVolume"));
-        assert!(actions[4].0.contains("GetMute"));
-        assert!(actions[5].0.contains("SetVolume"));
-        assert!(actions[5].1.contains("<DesiredVolume>0</DesiredVolume>"));
-        assert!(actions[6].0.contains("SetMute"));
-        assert!(actions[6].1.contains("<DesiredMute>1</DesiredMute>"));
-        assert!(actions[7].0.contains("GetTransportInfo"));
-        assert!(actions[8].0.contains("GetCurrentTransportActions"));
-        assert!(actions[9].0.contains("GetTransportInfo"));
-        assert!(actions[10].0.contains("#Play"));
-        assert!(actions[11].0.contains("GetCurrentTransportActions"));
+        assert!(actions[2].0.contains("#Stop"));
+        assert!(actions[3].0.contains("SetAVTransportURI"));
+        assert!(actions[4].0.contains("GetVolume"));
+        assert!(actions[5].0.contains("GetMute"));
+        assert!(actions[6].0.contains("SetVolume"));
+        assert!(actions[6].1.contains("<DesiredVolume>0</DesiredVolume>"));
+        assert!(actions[7].0.contains("SetMute"));
+        assert!(actions[7].1.contains("<DesiredMute>1</DesiredMute>"));
+        assert!(actions[8].0.contains("GetTransportInfo"));
+        assert!(actions[9].0.contains("GetCurrentTransportActions"));
+        assert!(actions[10].0.contains("GetTransportInfo"));
+        assert!(actions[11].0.contains("#Play"));
+        assert!(actions[12].0.contains("GetCurrentTransportActions"));
         let seeks = actions
             .iter()
             .filter(|(action, _)| action.contains("#Seek"))
@@ -1831,52 +2290,31 @@ mod tests {
                 .iter()
                 .all(|(_, body)| body.contains("<Target>00:00:42</Target>"))
         );
-        assert!(actions[21].0.contains("SetVolume"));
-        assert!(actions[21].1.contains("<DesiredVolume>40</DesiredVolume>"));
-        assert!(actions[22].0.contains("SetMute"));
-        assert!(actions[22].1.contains("<DesiredMute>0</DesiredMute>"));
-        renderer.join().expect("renderer thread");
+        assert!(actions[22].0.contains("SetVolume"));
+        assert!(actions[22].1.contains("<DesiredVolume>40</DesiredVolume>"));
+        assert!(actions[23].0.contains("SetMute"));
+        assert!(actions[23].1.contains("<DesiredMute>0</DesiredMute>"));
+        drop(renderer);
         relay.shutdown();
     }
 
     #[test]
     fn transient_status_failure_does_not_fail_upnp_playback() {
-        let server = Server::http("127.0.0.1:0").expect("fake renderer");
-        let address = server.server_addr().to_ip().expect("renderer address");
-        let renderer = thread::spawn(move || {
-            let mut current_uri = String::new();
-            let mut playing = false;
-            let mut failed_status = false;
-            for index in 0..12 {
-                let mut request = server.recv().expect("renderer request");
-                if index == 0 {
-                    request
-                        .respond(Response::from_string(TEST_DEVICE_DESCRIPTION))
-                        .expect("device description response");
-                    continue;
-                }
-                let action = request
-                    .headers()
-                    .iter()
-                    .find(|header| header.field.equiv("SOAPAction"))
-                    .map(|header| header.value.as_str().to_string())
-                    .expect("SOAP action");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("SOAP body");
+        let mut current_uri = String::new();
+        let mut playing = false;
+        let mut failed_status = false;
+        let (address, _received, renderer) = test_renderer(
+            TEST_DEVICE_DESCRIPTION,
+            12,
+            move |action, body| {
                 if action.contains("SetAVTransportURI") {
-                    current_uri = xml_element(&body, "CurrentURI").unwrap_or_default();
+                    current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
                 } else if action.contains("#Play") {
                     playing = true;
                 }
                 if action.contains("GetTransportInfo") && playing && !failed_status {
                     failed_status = true;
-                    request
-                        .respond(Response::from_string("renderer busy").with_status_code(500))
-                        .expect("temporary failure response");
-                    continue;
+                    return Err("renderer busy".to_string());
                 }
                 let values = if action.contains("GetTransportInfo") {
                     if playing {
@@ -1893,13 +2331,9 @@ mod tests {
                 } else {
                     String::new()
                 };
-                request
-                    .respond(Response::from_string(format!(
-                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">{values}</u:Response></s:Body></s:Envelope>"#,
-                    )))
-                    .expect("SOAP response");
-            }
-        });
+                Ok(values)
+            },
+        );
 
         let device = test_device(address);
         let (_directory, stream) = test_stream();
@@ -1919,30 +2353,39 @@ mod tests {
         )));
         assert!(recovered.iter().any(|event| matches!(
             event,
-            BackendEvent::State {
+            BackendEvent::TransportObserved {
                 run,
                 state: BackendState::Playing,
             } if *run == RunId::new(1)
         )));
-        renderer.join().expect("renderer thread");
+        drop(renderer);
     }
 
     #[test]
     fn didl_metadata_carries_standard_music_facts_artwork_and_resource() {
-        let stream = PreparedStream::from(playback::ResolvedStream::new("file:///track.flac"))
-            .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
+        let private = "https://user:secret@example.test/track?token=secret&signature=opaque";
+        let mut row = test_row();
+        row.track.media_uri = private.into();
+        let resolved = audio_processing::ResolvedStream::new(private);
+        assert_eq!(resolved.uri(), private);
+        assert!(!format!("{resolved:?}").contains("secret"));
+        assert!(!format!("{resolved:?}").contains("opaque"));
+        let stream =
+            PreparedStream::from(resolved).with_row(row.into(), Some("audio/flac".to_string()));
         let media = PublishedResource {
             uri: "http://192.0.2.10:4000/media".to_string(),
             content_type: "audio/flac".to_string(),
             content_length: Some(12_345),
             logical_offset_millis: 0,
             resource_duration_millis: Some(60_000),
-            seekable: true,
+            native_seek: true,
             artwork_uri: Some("http://192.0.2.10:4000/media/artwork".to_string()),
             relay_token: None,
         };
 
         let metadata = didl_metadata(&stream, &media);
+        assert!(!metadata.contains(private));
+        assert!(!metadata.contains("secret"));
 
         assert!(metadata.contains("<dc:title>Track &amp; Title</dc:title>"));
         assert!(metadata.contains("<upnp:artist>Artist</upnp:artist>"));
@@ -1955,35 +2398,51 @@ mod tests {
         assert!(metadata.contains("DLNA.ORG_OP=01;DLNA.ORG_CI=0"));
     }
 
-    fn test_occurrence() -> playback::QueueOccurrence {
-        playback::QueueOccurrence {
-            occurrence: playback::OccurrenceId::new("test-occurrence"),
-            canonical_position: 0,
-            source_index: None,
-            playlist_entry_id: None,
-            provenance: playback::Provenance::Manual,
-            item: playback::QueueItem {
-                media_uri: library::source_entity_uri(
-                    &library::SourceId::new("source"),
-                    "track",
-                    "track-1",
-                ),
-                title: "Track & Title".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_display_artist: Some("Album Artist".to_string()),
-                artwork_binding: None,
-                duration_millis: 300_000,
-                disc_number: Some(1),
-                track_number: Some(2),
-                year: Some(2026),
-                release_date: Some("2026-08-17".to_string()),
-                source_format: Some("flac".to_string()),
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                musicbrainz_album_id: None,
-                musicbrainz_release_group_id: None,
-                primary_artist_musicbrainz_id: None,
+    fn test_row() -> playback::QueueRow {
+        playback::QueueRow {
+            occurrence_id: None,
+            position: 0,
+            provenance: playback::QueueProvenance::Manual,
+            track: {
+                let reference = playback::TrackReference {
+                    media_uri: library::source_entity_uri(
+                        &library::SourceId::new("source"),
+                        "track",
+                        "track-1",
+                    ),
+                    artwork_binding: None,
+                    metadata: library::TrackMetadata {
+                        audio_properties: Default::default(),
+                        title: "Track & Title".to_string(),
+                        artist: "Artist".to_string(),
+                        album: "Album".to_string(),
+                        album_display_artist: Some("Album Artist".to_string()),
+                        duration_millis: 300_000,
+                        disc_number: 1,
+                        track_number: 2,
+                        year: Some(2026),
+                        release_date: Some("2026-08-17".to_string()),
+                        source_format: Some("flac".to_string()),
+                        musicbrainz_recording_id: None,
+                        musicbrainz_release_track_id: None,
+                        musicbrainz_album_id: None,
+                        musicbrainz_release_group_id: None,
+                        primary_artist_musicbrainz_id: None,
+                        ..Default::default()
+                    },
+                };
+                library::TrackView {
+                    track_key: library::TrackKey::from_raw(1),
+                    source_key: None,
+                    source_id: None,
+                    object_id: None,
+                    media_uri: reference.media_uri,
+                    metadata: reference.metadata,
+                    artwork_binding: reference.artwork_binding,
+                    state: Default::default(),
+                    access: Default::default(),
+                    links: Default::default(),
+                }
             },
         }
     }

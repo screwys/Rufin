@@ -65,14 +65,37 @@ impl LocalChangeFeed {
         on_change: &mut dyn FnMut(LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
-        let (messages, receiver) = mpsc::sync_channel(1);
+        let (messages, receiver) = mpsc::sync_channel(LIVE_CHANGE_LIMIT);
         let overflow = Arc::new(AtomicBool::new(false));
         let callback_overflow = Arc::clone(&overflow);
+        let roots = self.roots.iter().cloned().collect::<HashSet<_>>();
         let listener = std::thread::current();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = match event {
-                Ok(event) if !matches!(event.kind, EventKind::Access(_)) => {
-                    FeedMessage::Change(event_evidence(event))
+                // A deleted or moved root takes its watch along; the feed reconnects to watch
+                // what returns at its path.
+                Ok(event)
+                    if matches!(
+                        event.kind,
+                        EventKind::Remove(_)
+                            | EventKind::Modify(ModifyKind::Name(RenameMode::From))
+                    ) && event.paths.iter().any(|path| roots.contains(path)) =>
+                {
+                    FeedMessage::Failed("A Local music folder was removed.".to_string())
+                }
+                Ok(mut event) if !matches!(event.kind, EventKind::Access(_)) => {
+                    if !event.paths.is_empty() {
+                        event.paths.retain(|path| {
+                            path.ancestors().any(|ancestor| roots.contains(ancestor))
+                        });
+                        if event.paths.is_empty() {
+                            return;
+                        }
+                    }
+                    let Some(change) = event_evidence(event) else {
+                        return;
+                    };
+                    FeedMessage::Change(change)
                 }
                 Ok(_) => return,
                 Err(error) => FeedMessage::Failed(error.to_string()),
@@ -85,12 +108,12 @@ impl LocalChangeFeed {
 
         let mut watched = 0;
         let mut failed_roots = Vec::new();
-        for root in ordered_roots(self.roots.clone()) {
-            match watcher.watch(&root, RecursiveMode::Recursive) {
+        for (root, mode) in watch_targets(&self.roots) {
+            match watcher.watch(&root, mode) {
                 Ok(()) => watched += 1,
                 Err(error) => {
                     warn!(%error, root = %root.display(), "failed to watch Local music folder");
-                    failed_roots.push(root);
+                    failed_roots.push((root, mode));
                 }
             }
         }
@@ -143,15 +166,15 @@ impl LocalChangeFeed {
             if !failed_roots.is_empty() && Instant::now() >= retry_failed_roots_at {
                 let mut still_failed = Vec::new();
                 let mut recovered = false;
-                for root in failed_roots.drain(..) {
+                for (root, mode) in failed_roots.drain(..) {
                     if should_stop() {
                         return Ok(());
                     }
-                    match watcher.watch(&root, RecursiveMode::Recursive) {
+                    match watcher.watch(&root, mode) {
                         Ok(()) => recovered = true,
                         Err(error) => {
                             warn!(%error, root = %root.display(), "failed to retry Local music folder");
-                            still_failed.push(root);
+                            still_failed.push((root, mode));
                         }
                     }
                 }
@@ -232,40 +255,65 @@ fn wait_for_message(
     }
 }
 
-fn ordered_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    roots
-        .into_iter()
-        .filter(|root| seen.insert(root.clone()))
-        .collect()
+fn watch_targets(roots: &[PathBuf]) -> std::collections::BTreeMap<PathBuf, RecursiveMode> {
+    let mut targets = std::collections::BTreeMap::new();
+    for root in roots {
+        let (path, mode) = if root.is_file() {
+            (root.parent().unwrap_or(root), RecursiveMode::NonRecursive)
+        } else {
+            (root.as_path(), RecursiveMode::Recursive)
+        };
+        targets
+            .entry(path.to_path_buf())
+            .and_modify(|existing| {
+                if mode == RecursiveMode::Recursive {
+                    *existing = mode;
+                }
+            })
+            .or_insert(mode);
+    }
+    targets
 }
 
 fn feed_error(error: notify::Error) -> SourceError {
     SourceError::Other(error.to_string())
 }
 
-fn event_evidence(event: Event) -> LocalLiveChange {
+fn event_evidence(mut event: Event) -> Option<LocalLiveChange> {
+    if !event.need_rescan()
+        && event
+            .paths
+            .iter()
+            .any(|path| super::super::metadata::is_working_copy(path))
+    {
+        event
+            .paths
+            .retain(|path| !super::super::metadata::is_working_copy(path));
+        if event.paths.is_empty() {
+            return None;
+        }
+        // Replacing a tag-edit copy changes the original file, not its media URI.
+        event.kind = EventKind::Modify(ModifyKind::Any);
+    }
     let complete_required = event.need_rescan()
         || event.paths.is_empty()
         || event.paths.len() > LIVE_CHANGE_LIMIT
-        || matches!(event.kind, EventKind::Other)
-        || matches!(
-            event.kind,
-            EventKind::Modify(ModifyKind::Name(mode))
-                if mode != RenameMode::Both || event.paths.len() != 2
-        );
+        || matches!(event.kind, EventKind::Other);
     if complete_required {
-        return LocalLiveChange::Rescan;
+        return Some(LocalLiveChange::Rescan);
     }
     let rename = matches!(
         event.kind,
         EventKind::Modify(ModifyKind::Name(RenameMode::Both))
-    )
-    .then(|| (event.paths[0].clone(), event.paths[1].clone()));
-    LocalLiveChange::Paths {
+    ) && event.paths.len() == 2;
+    let renames = rename
+        .then(|| (event.paths[0].clone(), event.paths[1].clone()))
+        .into_iter()
+        .collect();
+    Some(LocalLiveChange::Paths {
         paths: event.paths,
-        rename,
-    }
+        renames,
+    })
 }
 
 #[cfg(test)]
@@ -279,24 +327,32 @@ mod tests {
         let evidence = event_evidence(
             Event::new(EventKind::Create(CreateKind::File))
                 .add_path(PathBuf::from("/music/one.flac")),
-        );
+        )
+        .unwrap();
         assert_eq!(
             evidence,
             LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/one.flac")],
-                rename: None,
+                renames: Vec::new(),
             }
         );
     }
 
     #[test]
-    fn partial_rename_and_rescan_require_complete_inventory() {
+    fn partial_rename_keeps_its_path_and_rescan_requires_complete_inventory() {
         let rename = event_evidence(
             Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
                 .add_path(PathBuf::from("/music/old.flac")),
+        )
+        .unwrap();
+        let rescan = event_evidence(Event::new(EventKind::Any).set_flag(Flag::Rescan)).unwrap();
+        assert_eq!(
+            rename,
+            LocalLiveChange::Paths {
+                paths: vec![PathBuf::from("/music/old.flac")],
+                renames: Vec::new(),
+            }
         );
-        let rescan = event_evidence(Event::new(EventKind::Any).set_flag(Flag::Rescan));
-        assert_eq!(rename, LocalLiveChange::Rescan);
         assert_eq!(rescan, LocalLiveChange::Rescan);
     }
 
@@ -308,12 +364,13 @@ mod tests {
             Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
                 .add_path(old.clone())
                 .add_path(new.clone()),
-        );
+        )
+        .unwrap();
         assert_eq!(
             rename,
             LocalLiveChange::Paths {
                 paths: vec![old.clone(), new.clone()],
-                rename: Some((old, new)),
+                renames: vec![(old, new)],
             }
         );
     }
@@ -324,11 +381,11 @@ mod tests {
             paths: (0..LIVE_CHANGE_LIMIT)
                 .map(|index| PathBuf::from(format!("/music/{index}.flac")))
                 .collect(),
-            rename: None,
+            renames: Vec::new(),
         };
         let merged = current.merge(LocalLiveChange::Paths {
             paths: vec![PathBuf::from("/music/overflow.flac")],
-            rename: None,
+            renames: Vec::new(),
         });
         assert_eq!(merged, LocalLiveChange::Rescan);
     }
@@ -339,7 +396,7 @@ mod tests {
         for index in 0..=LIVE_CHANGE_LIMIT {
             event = event.add_path(PathBuf::from(format!("/music/{index}.flac")));
         }
-        assert_eq!(event_evidence(event), LocalLiveChange::Rescan);
+        assert_eq!(event_evidence(event).unwrap(), LocalLiveChange::Rescan);
     }
 
     #[test]
@@ -351,7 +408,7 @@ mod tests {
             &overflow,
             FeedMessage::Change(LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/one.flac")],
-                rename: None,
+                renames: Vec::new(),
             })
         ));
         assert!(admit_feed_message(
@@ -359,7 +416,7 @@ mod tests {
             &overflow,
             FeedMessage::Change(LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/two.flac")],
-                rename: None,
+                renames: Vec::new(),
             })
         ));
         assert!(overflow.load(Ordering::Acquire));

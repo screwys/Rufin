@@ -1,23 +1,15 @@
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 mod backend;
-mod commands;
 mod listening;
-mod runtime;
-mod sequence;
-mod session;
 mod settings;
 mod updates;
 mod view;
 
 pub use backend::*;
-pub use commands::*;
-pub use library::{
-    OccurrenceId, QueueItem, QueueOccurrence, QueueProvenance as Provenance,
-    QueueRepeatMode as RepeatMode,
-};
+pub use library::{QueueProvenance, QueueRepeatMode, QueueRow, TrackReference};
 pub use listening::*;
-pub use runtime::*;
-pub use sequence::*;
-pub use session::*;
 pub use settings::*;
 pub use updates::*;
 pub use view::*;

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+<object class="GtkAspectFrame" id="artwork_frame">
+  <property name="ratio">1</property>
+  <property name="obey-child">false</property>
+  <property name="valign">start</property>
+  <property name="child">
+    <object class="GtkOverlay" id="artwork_overlay">
+      <property name="width-request">280</property>
+      <property name="height-request">280</property>
+      <property name="halign">start</property>
+      <property name="valign">start</property>
+      <child type="overlay">
+        <object class="GtkStack" id="artwork_display">
+          <property name="hhomogeneous">false</property>
+          <property name="vhomogeneous">false</property>
+          <child><object class="GtkBox" id="artwork_current"><property name="orientation">vertical</property></object></child>
+          <child>
+            <object class="GtkPicture" id="artwork_preview">
+              <property name="can-shrink">true</property>
+              <property name="content-fit">contain</property>
+              <property name="alternative-text" translatable="yes">Artwork</property>
+              <style><class name="card"/></style>
+            </object>
+          </child>
+        </object>
+      </child>
+      <child type="overlay">
+        <object class="GtkBox" id="artwork_actions">
+          <property name="halign">end</property>
+          <property name="valign">end</property>
+          <property name="margin-end">8</property>
+          <property name="margin-bottom">8</property>
+          <property name="spacing">6</property>
+          <child><object class="GtkButton" id="add_image"><property name="icon-name">rufin-document-open-symbolic</property><property name="tooltip-text" translatable="yes">Add image</property><style><class name="circular"/><class name="osd"/></style></object></child>
+          <child><object class="GtkButton" id="regenerate_image"><property name="icon-name">rufin-view-refresh-symbolic</property><property name="tooltip-text" translatable="yes">Regenerate</property><style><class name="circular"/><class name="osd"/></style></object></child>
+          <child><object class="GtkButton" id="delete_image"><property name="icon-name">rufin-user-trash-symbolic</property><property name="tooltip-text" translatable="yes">Delete</property><style><class name="circular"/><class name="osd"/></style></object></child>
+        </object>
+      </child>
+    </object>
+  </property>
+</object>
+<object class="GtkLabel" id="artwork_status"><property name="visible">false</property><property name="xalign">0</property><property name="wrap">true</property><property name="max-width-chars">35</property><style><class name="dim-label"/></style></object>
+  <object class="GtkFileFilter" id="image_filter">
+    <property name="name" translatable="yes">Image files</property>
+    <mime-types><mime-type>image/*</mime-type></mime-types>
+    <patterns><pattern>*.jxl</pattern><pattern>*.JXL</pattern></patterns>
+  </object>
+  <object class="GtkFileDialog" id="image_chooser"><property name="title" translatable="yes">Upload artwork</property><property name="default-filter">image_filter</property></object>
+</interface>

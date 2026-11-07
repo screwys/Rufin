@@ -1,0 +1,410 @@
+use rufin_core::runtime::source::source_kind_title;
+use std::{cell::RefCell, rc::Rc};
+
+use adw::prelude::*;
+use gtk::{gio, glib};
+use rufin_core::runtime::source::SourceSummary;
+
+use localization::{tr, tr_with};
+use sources::SourceId;
+
+use super::login::source_settings_group;
+use crate::shell::shell::Shell;
+use crate::widgets::layout::large_popup_content_width;
+use crate::widgets::local_access::{
+    LocalAccessDraft, LocalAccessEditor, LocalAccessOperation, connect_mapping_expander_visibility,
+    local_access_status_text, preview_local_path_text,
+};
+
+const MANAGE_SERVER_CLAMP_WIDTH: i32 = 560;
+
+#[derive(Clone)]
+struct ManageServerExitSlot {
+    navigation: glib::WeakRef<adw::NavigationView>,
+    on_close: Rc<dyn Fn()>,
+}
+
+pub fn manage_server_navigation_page(
+    shell: &Rc<Shell>,
+    server: SourceSummary,
+    navigation: &adw::NavigationView,
+    preferences_dialog: &adw::Dialog,
+    on_close: Rc<dyn Fn()>,
+) -> adw::NavigationPage {
+    let title = server_display_name(&server);
+    let content = manage_server_content(
+        shell,
+        server,
+        ManageServerExitSlot {
+            navigation: navigation.downgrade(),
+            on_close,
+        },
+        preferences_dialog,
+    );
+    adw::NavigationPage::new(&content, &title)
+}
+
+fn manage_server_content(
+    shell: &Rc<Shell>,
+    server: SourceSummary,
+    exit: ManageServerExitSlot,
+    preferences_dialog: &adw::Dialog,
+) -> gtk::Widget {
+    let (access, selected) = {
+        let configured = shell.source.configured.borrow();
+        let summary = configured
+            .local_access
+            .iter()
+            .find(|summary| summary.source_id == server.id)
+            .cloned();
+        let access = summary.as_ref().and_then(|summary| summary.access.clone());
+        let selected = configured.selected_source_id.as_ref() == Some(&server.id);
+        (access, selected)
+    };
+    let access_status = Rc::new(RefCell::new(
+        rufin_core::runtime::source::LocalAccessStatus::default(),
+    ));
+    let sample_source_path = None;
+    let resource = "preferences/source/manage_server.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        scroller: gtk::ScrolledWindow,
+        clamp: adw::Clamp,
+        content: gtk::Box,
+        mapping_group: adw::PreferencesGroup,
+        mapping_expander: adw::ExpanderRow,
+        folder_row: adw::EntryRow,
+        folder_edit: gtk::ToggleButton,
+        folder_button: gtk::Button,
+        server_prefix: adw::EntryRow,
+        local_prefix: adw::EntryRow,
+        sample_row: adw::ActionRow,
+        preview_row: adw::ActionRow,
+        status: gtk::Label,
+        actions: gtk::Box,
+        remove: gtk::Button,
+        save: gtk::Button,
+    });
+    clamp.set_maximum_size(large_popup_content_width(MANAGE_SERVER_CLAMP_WIDTH));
+    match shell.products.source.editable(server.id.clone()) {
+        Ok(Some(saved)) => {
+            if let Some(settings_group) = source_settings_group(shell, &saved) {
+                let settings = match settings_group {
+                    Ok(settings) => settings,
+                    Err(error) => source_settings_error(&error),
+                };
+                content.append(&settings);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => content.append(&source_settings_error(&error.to_string())),
+    }
+
+    if let Some(row) = super::playlist_auto_save_row(shell, &server) {
+        content.append(&row);
+    }
+    if let Some(half_stars) = super::half_stars_row(shell, &server) {
+        let library = adw::PreferencesGroup::builder()
+            .title(tr("Library"))
+            .build();
+        library.add(&half_stars);
+        content.append(&library);
+    }
+
+    let saved_folder = access.as_ref().map(|access| access.root_path.clone());
+    let saved_local_prefix = access
+        .as_ref()
+        .and_then(|access| access.local_prefix.as_deref())
+        .unwrap_or_default()
+        .to_string();
+    let saved_server_prefix = access
+        .as_ref()
+        .and_then(|access| access.server_prefix.as_deref())
+        .unwrap_or_default()
+        .to_string();
+    let display_local_prefix = saved_local_prefix.clone();
+    let display_server_prefix = saved_server_prefix.clone();
+    let initial_draft = LocalAccessDraft {
+        folder: saved_folder.clone(),
+        server_prefix: saved_server_prefix.trim().to_string(),
+        local_prefix: saved_local_prefix.trim().to_string(),
+    };
+
+    server_prefix.set_text(&display_server_prefix);
+
+    local_prefix.set_text(&display_local_prefix);
+
+    let sample_subtitle = sample_source_path
+        .clone()
+        .unwrap_or_else(|| tr("No cached server path yet"));
+    sample_row.set_subtitle(&sample_subtitle);
+
+    preview_row.set_subtitle(&preview_local_path_text(
+        sample_source_path.as_deref(),
+        server_prefix.text().as_str(),
+        local_prefix.text().as_str(),
+        saved_folder.as_deref(),
+    ));
+    let subtitle = if access.is_some() {
+        tr("Local file access configured")
+    } else {
+        tr("Use local files for playback, lyrics, and supported metadata editing")
+    };
+    mapping_expander.set_subtitle(&subtitle);
+    content.append(&mapping_group);
+
+    content.append(&status);
+
+    remove.set_visible(access.is_some());
+    content.append(&actions);
+    connect_mapping_expander_visibility(&mapping_expander, &status, &actions);
+
+    content.append(&server_actions_group(
+        shell,
+        &server,
+        selected,
+        &exit,
+        preferences_dialog,
+    ));
+    let exit_for_save = exit.clone();
+    let editor = LocalAccessEditor::new(
+        &shell.products.source,
+        server.id.clone(),
+        saved_folder,
+        &server_prefix,
+        Some(&local_prefix),
+        sample_source_path.clone(),
+        Rc::new(move || close_manage_server(&exit_for_save)),
+    );
+    let update_state: Rc<dyn Fn()> = Rc::new({
+        let editor = Rc::clone(&editor);
+        let sample_row = sample_row.downgrade();
+        let preview_row = preview_row.downgrade();
+        let status = status.downgrade();
+        let save = save.downgrade();
+        let remove = remove.downgrade();
+        let folder_row = folder_row.downgrade();
+        let server_prefix = server_prefix.downgrade();
+        let local_prefix = local_prefix.downgrade();
+        let initial_draft = initial_draft.clone();
+        let access_status = access_status.clone();
+        move || {
+            let (
+                Some(preview_row),
+                Some(sample_row),
+                Some(status),
+                Some(save),
+                Some(remove),
+                Some(folder_row),
+                Some(server_prefix),
+                Some(local_prefix),
+            ) = (
+                preview_row.upgrade(),
+                sample_row.upgrade(),
+                status.upgrade(),
+                save.upgrade(),
+                remove.upgrade(),
+                folder_row.upgrade(),
+                server_prefix.upgrade(),
+                local_prefix.upgrade(),
+            )
+            else {
+                return;
+            };
+            let draft = editor.draft();
+            let sample_source_path = editor.sample_source_path();
+            let has_location = draft.folder.is_some();
+            let changed = draft != initial_draft;
+            let preview = preview_local_path_text(
+                sample_source_path.as_deref(),
+                draft.server_prefix.as_str(),
+                draft.local_prefix.as_str(),
+                draft.folder.as_deref(),
+            );
+            sample_row.set_subtitle(
+                &sample_source_path.unwrap_or_else(|| tr("No cached server path yet")),
+            );
+            let operation = editor.operation();
+            let pending = matches!(operation, LocalAccessOperation::Pending);
+            folder_row.set_sensitive(!pending);
+            server_prefix.set_sensitive(!pending);
+            local_prefix.set_sensitive(!pending);
+            remove.set_sensitive(!pending);
+            save.set_sensitive(has_location && !pending);
+            preview_row.set_subtitle(&preview);
+            status.set_text(&match operation {
+                LocalAccessOperation::Failed(error) => error,
+                LocalAccessOperation::Editing | LocalAccessOperation::Pending => {
+                    local_access_status_text(&draft, changed, &access_status.borrow())
+                }
+            });
+        }
+    });
+    editor.connect_folder_row(
+        &shell.chrome.window,
+        &folder_button,
+        &folder_row,
+        &folder_edit,
+        Rc::clone(&update_state),
+    );
+    editor.connect_changes(Rc::clone(&update_state));
+
+    let source = shell.products.source.clone();
+    let source_id = server.id.clone();
+    let exit_for_remove = exit.clone();
+    remove.connect_clicked(move |_| {
+        source.clear_local_access(source_id.clone());
+        close_manage_server(&exit_for_remove);
+    });
+
+    save.connect_clicked({
+        let editor = Rc::clone(&editor);
+        let update_state = Rc::clone(&update_state);
+        move |_| editor.save(Rc::clone(&update_state))
+    });
+
+    update_state();
+    let source = shell.products.source.clone();
+    glib::spawn_future_local(async move {
+        match source.local_access_status(server.id).await {
+            Ok(status) => {
+                editor.set_sample_source_path(status.sample_source_path.clone());
+                access_status.replace(status);
+                update_state();
+            }
+            Err(error) => tracing::warn!(%error, "could not read local mapping status"),
+        }
+    });
+    scroller.upcast()
+}
+
+fn source_settings_error(error: &str) -> gtk::Widget {
+    let label = gtk::Label::new(Some(error));
+    label.set_wrap(true);
+    label.upcast()
+}
+
+fn close_manage_server(exit: &ManageServerExitSlot) {
+    if let Some(navigation) = exit.navigation.upgrade() {
+        navigation.pop();
+    }
+    (exit.on_close)();
+}
+
+fn server_actions_group(
+    shell: &Rc<Shell>,
+    server: &SourceSummary,
+    selected: bool,
+    exit: &ManageServerExitSlot,
+    preferences_dialog: &adw::Dialog,
+) -> adw::PreferencesGroup {
+    let resource = "preferences/source/server_actions.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        group: adw::PreferencesGroup,
+        select: gtk::Button,
+        resync: gtk::Button,
+        forget: gtk::Button,
+    });
+
+    if !selected {
+        let source = shell.products.source.clone();
+        let source_id = server.id.clone();
+        let exit = exit.clone();
+        let preferences_dialog = preferences_dialog.downgrade();
+        select.connect_clicked(move |_| {
+            let source = source.clone();
+            let source_id = source_id.clone();
+            gtk::glib::spawn_future_local(async move {
+                let _ = source.select_source(source_id).await;
+            });
+            close_manage_server(&exit);
+            if let Some(dialog) = preferences_dialog.upgrade() {
+                dialog.close();
+            }
+        });
+    } else {
+        select.set_visible(false);
+    }
+
+    let source = shell.products.source.clone();
+    let source_id = server.id.clone();
+    let preferences_dialog_for_resync = preferences_dialog.downgrade();
+    resync.connect_clicked(move |_| {
+        let source = source.clone();
+        let source_id = source_id.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _ = source.refresh_source(source_id, false).await;
+        });
+        if let Some(dialog) = preferences_dialog_for_resync.upgrade() {
+            dialog.close();
+        }
+    });
+    let forget_shell = Rc::clone(shell);
+    let source_id = server.id.clone();
+    let server_name = server_display_name(server);
+    let exit = exit.clone();
+    let preferences_dialog = preferences_dialog.downgrade();
+    forget.connect_clicked(move |_| {
+        confirm_forget_source(
+            &forget_shell,
+            source_id.clone(),
+            &server_name,
+            Rc::new({
+                let exit = exit.clone();
+                let preferences_dialog = preferences_dialog.clone();
+                move || {
+                    close_manage_server(&exit);
+                    if let Some(dialog) = preferences_dialog.upgrade() {
+                        dialog.close();
+                    }
+                }
+            }),
+        );
+    });
+    group
+}
+
+pub fn confirm_forget_source(
+    shell: &Rc<Shell>,
+    source_id: SourceId,
+    server_name: &str,
+    after_forget: Rc<dyn Fn()>,
+) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(tr("Forget Source"))
+        .body(tr_with(
+            "Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?",
+            &[("name", server_name)],
+        ))
+        .build();
+    let cancel = tr("Cancel");
+    let forget = tr("Forget Source");
+    dialog.add_responses(&[("cancel", cancel.as_str()), ("forget", forget.as_str())]);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    dialog.set_response_appearance("forget", adw::ResponseAppearance::Destructive);
+    let source = shell.products.source.clone();
+    dialog.choose(
+        Some(&shell.chrome.window),
+        None::<&gio::Cancellable>,
+        move |response| {
+            if response.as_str() == "forget" {
+                gtk::glib::spawn_future_local(async move {
+                    let _ = source.forget_source(source_id).await;
+                });
+                after_forget();
+            }
+        },
+    );
+}
+
+fn server_display_name(server: &SourceSummary) -> String {
+    if server.name.trim().is_empty() {
+        source_kind_title(&server.kind)
+            .map(tr)
+            .unwrap_or_else(|| server.kind.clone())
+    } else {
+        server.name.clone()
+    }
+}

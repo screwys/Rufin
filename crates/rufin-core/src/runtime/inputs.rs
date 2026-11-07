@@ -1,83 +1,43 @@
-use crate::SettingsHandle;
-use library::{Database, FolderKey, FolderRow, PlaylistKey, SourceKey};
+use library::{FolderChoice, FolderKey, SourceKey};
 use std::sync::Arc;
 
-use super::source::{ConfiguredSources, SelectedSourceHandle, SourceOperation, SourceProgress};
 use super::{DiagnosticsHandle, ProductHandles, ProductReceivers};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct SelectedLibrary {
     pub source_id: sources::SourceId,
     pub source_key: SourceKey,
     pub music_folder_key: Option<FolderKey>,
     pub music_folder_object_id: Option<String>,
-    pub music_folders: Arc<[FolderRow]>,
-    pub database: Arc<Database>,
-    pub runtime: tokio::runtime::Handle,
-    pub operations: SelectedSourceHandle,
+    pub music_folders: Arc<[FolderChoice]>,
+}
+
+impl SelectedLibrary {
+    /// Whether reads in `a` read what they read in `b`: the same source and, when `folder`,
+    /// the same music folder. The folders offered don't count.
+    pub fn same(a: Option<&Self>, b: Option<&Self>, folder: bool) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => {
+                a.source_key == b.source_key
+                    && (!folder
+                        || (a.music_folder_key == b.music_folder_key
+                            && a.music_folder_object_id == b.music_folder_object_id))
+            }
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
 }
 
 pub enum SourceEvent {
-    Configured(ConfiguredSources),
-    Selected {
-        configured: ConfiguredSources,
-        selected: SelectedLibrary,
-    },
-    CatalogReplaced {
-        configured: ConfiguredSources,
-        selected: SelectedLibrary,
-    },
-    Operation(SourceOperation),
-    ArtworkPreparation {
-        source_key: SourceKey,
-        revision: u64,
-        progress: Option<SourceProgress>,
-    },
-    CatalogPublished(CatalogPublication),
-    Notice(SourceNotice),
+    /// A server refused a favorite, so the source's own favorite shows again.
+    FavoriteRejected,
     PlaylistSourceMismatch(sources::SourceId),
-    ReleaseSelected,
 }
 
 pub struct VisualizerPublication {
     pub run: playback::RunId,
+    /// Linear amplitudes on the canonical ERB axis; map through the current visualizer preset.
     pub levels: Vec<f64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CatalogPublication {
-    pub source_key: Option<SourceKey>,
-    pub favorite: Option<FavoriteSettlement>,
-    pub change: CatalogChange,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CatalogChange {
-    /// Completed source acquisition; refresh selected folder/count summaries too.
-    Acquired,
-    Broad,
-    Home,
-    Playlists(Option<PlaylistKey>),
-    Album(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FavoriteSettlement {
-    pub target: library::FavoriteTarget,
-    pub requested: bool,
-    pub effective: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct SourceNotice {
-    pub source_key: SourceKey,
-    pub kind: SourceNoticeKind,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceNoticeKind {
-    ServerUnreachable,
-    FavoriteRejected,
 }
 
 pub struct RuntimeInputs {
@@ -85,9 +45,6 @@ pub struct RuntimeInputs {
     pub secret_storage_fallbacks: async_channel::Receiver<crate::settings::KeyringSecretStore>,
     pub diagnostics: DiagnosticsHandle,
     pub products: ProductHandles,
-    pub settings: SettingsHandle,
     pub receivers: ProductReceivers,
-    pub configured_sources: ConfiguredSources,
-    pub source_operation: SourceOperation,
     pub release_history: super::ReleaseHistory,
 }

@@ -9,6 +9,8 @@ import { init as connection } from "./connection.js";
 import { initPins } from "./pins.js";
 import { init as connect } from "./connect.js";
 
+import { init as equalizer } from "./equalizer.js";
+
 ui();
 library();
 player();
@@ -19,3 +21,5 @@ random();
 initPins();
 connection();
 connect();
+
+equalizer();

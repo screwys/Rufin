@@ -1,5 +1,7 @@
+%global debug_package %{nil}
+%global rustflags_debuginfo 0
 Name:           rufin
-Version:        0.15.4
+Version:        0.16.6
 Release:        1%{?dist}
 Summary:        Native GTK4/libadwaita music player written in Rust
 
@@ -27,7 +29,6 @@ BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.9
 BuildRequires:  rust >= 1.96.0
 
-# Generated Linux package dependencies start.
 Requires:       gstreamer1
 Requires:       gstreamer1-plugin-libav
 Requires:       gstreamer1-plugins-bad-free
@@ -36,7 +37,6 @@ Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugins-ugly-free
 Requires:       hicolor-icon-theme
-# Generated Linux package dependencies end.
 
 %description
 Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby

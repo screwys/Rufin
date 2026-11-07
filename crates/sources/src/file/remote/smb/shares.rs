@@ -137,7 +137,7 @@ fn exchange(pipe: &Pipe, kind: u8, expected: u8, call: u32, body: &[u8]) -> Sour
     let end = u16::from_le_bytes(bytes[8..10].try_into().unwrap()) as usize;
     bytes
         .get(16..end)
-        .map(<[u8]>::to_vec)
+        .map(|value| value.to_vec())
         .ok_or_else(|| invalid("Truncated RPC response"))
 }
 

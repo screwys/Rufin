@@ -1,0 +1,68 @@
+use std::sync::{OnceLock, mpsc};
+use std::time::{Duration, Instant};
+
+const COALESCE: Duration = Duration::from_secs(1);
+const RECLAIM_INTERVAL: Duration = Duration::from_secs(10);
+
+pub fn configure_allocator() {
+    let arenas = std::thread::available_parallelism()
+        .map(|count| count.get().saturating_mul(2))
+        .unwrap_or(2)
+        .min(libc::c_int::MAX as usize) as libc::c_int;
+    // Fixed thresholds prevent large temporary buffers from raising them process-wide.
+    for (option, value) in [
+        (libc::M_ARENA_MAX, arenas),
+        (libc::M_MMAP_THRESHOLD, 2 * 1024 * 1024),
+        (libc::M_TRIM_THRESHOLD, 4 * 1024 * 1024),
+        (libc::M_TOP_PAD, 128 * 1024),
+    ] {
+        // SAFETY: Both executables call this before starting worker threads.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::mallopt(option, value);
+        }
+    }
+}
+
+/// Requests reclamation after a batch has released its temporary allocations.
+pub fn request_reclaim() {
+    if let Some(sender) = requests() {
+        // One pending request covers all releases until the next trim.
+        let _ = sender.try_send(());
+    }
+}
+
+fn requests() -> Option<&'static mpsc::SyncSender<()>> {
+    static REQUESTS: OnceLock<Option<mpsc::SyncSender<()>>> = OnceLock::new();
+    REQUESTS.get_or_init(|| {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        match std::thread::Builder::new()
+            .name("memory-reclaim".into())
+            .spawn(move || reclaim(receiver))
+        {
+            Ok(_) => Some(sender),
+            Err(error) => {
+                tracing::warn!(target: "rufin::memory", %error, "could not start memory reclamation");
+                None
+            }
+        }
+    }).as_ref()
+}
+
+fn reclaim(requests: mpsc::Receiver<()>) {
+    let mut last_trim: Option<Instant> = None;
+    while requests.recv().is_ok() {
+        let now = Instant::now();
+        let deadline = last_trim
+            .map(|last| (last + RECLAIM_INTERVAL).max(now + COALESCE))
+            .unwrap_or(now + COALESCE);
+        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        let _ = requests.try_recv();
+        // SAFETY: glibc serializes malloc_trim with allocations in each arena.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::malloc_trim(0);
+        }
+        last_trim = Some(Instant::now());
+    }
+}

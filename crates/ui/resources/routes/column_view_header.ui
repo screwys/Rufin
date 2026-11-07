@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="header">
+    <property name="hexpand">true</property>
+    <property name="overflow">hidden</property>
+    <property name="accessible-role">row</property>
+    <style><class name="collection-table-header"/></style>
+  </object>
+</interface>

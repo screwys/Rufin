@@ -40,8 +40,7 @@ impl Writer {
     }
 
     pub(super) fn enqueue(&self, record: Vec<u8>) {
-        // A stalled terminal or redirected pipe must not stall the caller. Only
-        // the stderr copy is lossy; the separate local log still records events.
+        // A stalled terminal or redirected pipe must not stall the caller.
         let _ = self.sender.try_send(Some(record));
     }
 }

@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinDetailShowcaseView" parent="GtkBox">
+    <property name="spacing">18</property>
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="width-request">1</property>
+    <child>
+      <object class="GtkBox" id="cover_column">
+        <property name="orientation">vertical</property>
+        <property name="spacing">8</property>
+        <property name="halign">start</property>
+        <child>
+          <object class="GtkBox" id="cover_host">
+            <property name="orientation">vertical</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="external_links">
+            <property name="orientation">vertical</property>
+            <property name="spacing">6</property>
+            <property name="halign">center</property>
+            <property name="visible">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="metadata">
+        <property name="orientation">vertical</property>
+        <property name="spacing">10</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="valign">start</property>
+        <property name="width-request">1</property>
+        <child>
+          <object class="GtkBox" id="text_stack">
+            <property name="orientation">vertical</property>
+            <property name="spacing">8</property>
+            <property name="hexpand">true</property>
+            <property name="halign">fill</property>
+            <property name="width-request">1</property>
+            <child>
+              <object class="GtkBox" id="kind_row">
+                <property name="spacing">2</property>
+                <property name="halign">fill</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="album-detail-kind-row"/>
+                </style>
+                <child>
+                  <object class="GtkLabel" id="kind">
+                    <property name="halign">start</property>
+                    <property name="valign">center</property>
+                    <property name="xalign">0</property>
+                    <property name="margin-end">6</property>
+                    <style>
+                      <class name="eyebrow"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="kind_controls">
+                    <property name="spacing">2</property>
+                    <property name="valign">center</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="RufinAllocationOwner" id="genres">
+                    <property name="hexpand">true</property>
+                    <property name="visible">false</property>
+                    <child>
+                      <object class="GtkBox" id="genre_row">
+                        <property name="spacing">2</property>
+                        <property name="valign">center</property>
+                        <child>
+                          <object class="GtkMenuButton" id="genre_overflow">
+                            <property name="icon-name">rufin-go-next-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Genres</property>
+                            <style><class name="flat"/><class name="circular"/></style>
+                            <property name="popover">
+                              <object class="GtkPopover">
+                                <property name="child">
+                                  <object class="GtkScrolledWindow">
+                                    <property name="hscrollbar-policy">never</property>
+                                    <property name="vscrollbar-policy">automatic</property>
+                                    <property name="max-content-height">360</property>
+                                    <property name="propagate-natural-height">true</property>
+                                    <property name="child">
+                                      <object class="GtkBox" id="genre_overflow_list">
+                                        <property name="orientation">vertical</property>
+                                        <property name="spacing">4</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="RufinTextFade" id="title_fade">
+                <property name="hexpand">true</property>
+                <child>
+                  <object class="GtkScrolledWindow" id="title_slide">
+                    <property name="hscrollbar-policy">external</property>
+                    <property name="vscrollbar-policy">never</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="hexpand">true</property>
+                    <property name="width-request">1</property>
+                    <property name="child">
+                      <object class="GtkViewport" id="title_viewport">
+                        <property name="child">
+                          <object class="GtkLabel" id="title">
+                            <property name="single-line-mode">true</property>
+                            <property name="xalign">0</property>
+                            <property name="justify">left</property>
+                            <property name="wrap">false</property>
+                            <property name="hexpand">true</property>
+                            <property name="halign">fill</property>
+                            <property name="width-request">1</property>
+                            <property name="width-chars">1</property>
+                            <style>
+                              <class name="detail-title"/>
+                            </style>
+                          </object>
+                        </property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="details">
+                <property name="orientation">vertical</property>
+                <property name="spacing">8</property>
+                <property name="hexpand">true</property>
+                <property name="halign">fill</property>
+                <property name="visible">false</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="summary">
+                <property name="spacing">10</property>
+                <property name="halign">start</property>
+                <property name="visible">false</property>
+                <style>
+                  <class name="detail-summary-row"/>
+                </style>
+                <child>
+                  <object class="GtkBox" id="summary_item_0">
+                    <property name="spacing">4</property>
+                    <property name="visible">false</property>
+                    <child><object class="GtkImage" id="summary_icon_0"><property name="pixel-size">14</property><style><class name="muted"/></style></object></child>
+                    <child><object class="GtkLabel" id="summary_label_0"><property name="xalign">0</property><property name="ellipsize">end</property><property name="width-chars">1</property><style><class name="muted"/></style></object></child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="summary_item_1">
+                    <property name="spacing">4</property>
+                    <property name="visible">false</property>
+                    <child><object class="GtkImage" id="summary_icon_1"><property name="pixel-size">14</property><style><class name="muted"/></style></object></child>
+                    <child><object class="GtkLabel" id="summary_label_1"><property name="xalign">0</property><property name="ellipsize">end</property><property name="width-chars">1</property><style><class name="muted"/></style></object></child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="summary_item_2">
+                    <property name="spacing">4</property>
+                    <property name="visible">false</property>
+                    <child><object class="GtkImage" id="summary_icon_2"><property name="pixel-size">14</property><style><class name="muted"/></style></object></child>
+                    <child>
+                      <object class="GtkLinkButton" id="source_link">
+                        <property name="visible">false</property>
+                        <property name="valign">center</property>
+                        <style><class name="flat"/><class name="circular"/><class name="detail-external-link-button"/></style>
+                        <property name="child"><object class="GtkImage" id="source_link_icon"><property name="pixel-size">14</property></object></property>
+                        <accessibility><property name="description" translatable="yes">Open on server</property></accessibility>
+                      </object>
+                    </child>
+                    <child><object class="GtkLabel" id="summary_label_2"><property name="xalign">0</property><property name="ellipsize">end</property><property name="width-chars">1</property><style><class name="muted"/></style></object></child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="actions">
+            <property name="spacing">8</property>
+            <property name="halign">center</property>
+            <style>
+              <class name="detail-showcase-actions"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

@@ -18,6 +18,11 @@ msgstr ""
 "X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -83,6 +88,19 @@ msgstr ""
 "Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
 "le credenziali. Annullare l'operazione non salverà le credeneziali."
 
+#, fuzzy, python-brace-format
+#| msgid ""
+#| "No secret service found. Rufin will use a file to store its credentials. "
+#| "Cancelling will not save credentials at all."
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
+msgstr ""
+"Nessun servizio per i segreti trovato. Rufin utilizzerà un file per salvare "
+"le credenziali. Annullare l'operazione non salverà le credeneziali."
+
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
@@ -91,8 +109,17 @@ msgstr ""
 "manuali rimarranno"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
+msgstr ""
+
+msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
 msgstr ""
 
 msgid ""
@@ -161,8 +188,8 @@ msgid ""
 msgstr ""
 
 msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
 msgstr ""
 
 msgid ""
@@ -268,6 +295,9 @@ msgstr "Colore d'accento"
 msgid "Access token"
 msgstr "Token di accesso"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -304,6 +334,16 @@ msgstr "Aggiungi corrente"
 msgid "Add folder"
 msgstr "Aggiungi cartella"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "Aggiungi un titolo"
+
+#, fuzzy
+#| msgid "Add a music folder"
+msgid "Add music"
+msgstr "Aggiungi una cartella con la musica"
+
 msgid "Add to Favorites"
 msgstr "Aggiungi ai Preferiti"
 
@@ -311,6 +351,11 @@ msgid "Add to Pins"
 msgstr "Aggiungi agli elementi fissati"
 
 msgid "Add to Playlist"
+msgstr "Aggiungi alla Playlist"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "Aggiungi alla Playlist"
 
 #, fuzzy
@@ -332,6 +377,11 @@ msgstr "Aggiungendo una sorgente"
 msgid "Album Artists"
 msgstr "Artisti dell'Album"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "Artisti dell'album"
+
 msgid "Album artist"
 msgstr "Artista dell'album"
 
@@ -340,6 +390,11 @@ msgstr "Artisti dell'album"
 
 msgid "Album radio"
 msgstr "Radio dell'album"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "Album"
 
 msgid "Album title"
 msgstr "Titolo dell'album"
@@ -362,6 +417,9 @@ msgstr "Tutta la Musica"
 msgid "All Playlists"
 msgstr "Tutte le Playlist"
 
+msgid "All time"
+msgstr ""
+
 msgid "All tracks"
 msgstr "Tutte le Tracce"
 
@@ -373,6 +431,11 @@ msgstr "Consenti connessioni remote"
 
 msgid "Alternate addresses"
 msgstr "Indirizzi alternativi"
+
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "Colore d'accento"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr "Anonimo (WebDAV / SMB)"
@@ -404,6 +467,9 @@ msgstr "Nome dell'applicazione"
 msgid "Applied"
 msgstr ""
 
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
+
 msgid "Apply Template"
 msgstr "Applica Template"
 
@@ -416,8 +482,8 @@ msgstr ""
 msgid "Approve sign-in in your browser"
 msgstr "Approva l'accesso nel tuo browser"
 
-msgid "Artist / Album"
-msgstr "Artista / Album"
+msgid "April {year}"
+msgstr ""
 
 msgid "Artist albums"
 msgstr "Album dell'artista"
@@ -427,6 +493,11 @@ msgstr "Nome dell'artista"
 
 msgid "Artist radio"
 msgstr "Radio dell'artista"
+
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "Artisti"
 
 msgid "Artist tracks"
 msgstr "Tracce dell'artista"
@@ -439,6 +510,19 @@ msgstr "Artista"
 
 msgid "Artists"
 msgstr "Artisti"
+
+msgid "Artwork editing is no longer available"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artwork"
+msgid "Artwork selected"
+msgstr "Copertina"
+
+#, fuzzy
+#| msgid "Artwork"
+msgid "Artwork storage"
+msgstr "Copertina"
 
 msgid "Artwork"
 msgstr "Copertina"
@@ -454,6 +538,9 @@ msgstr "L'elaborazione audio non è disponibile durante il casting"
 
 msgid "Audio"
 msgstr "Audio"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr "Autenticazione"
@@ -518,6 +605,12 @@ msgstr "Token Bearer (WebDAV)"
 msgid "Bearer token"
 msgstr "Token Bearer"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "Blu"
 
@@ -577,6 +670,11 @@ msgstr "Cambiando sorgente"
 msgid "Changing this will redownload all local files."
 msgstr ""
 
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "Modifica"
+
 msgid "Check for updates every"
 msgstr "Controllo aggiornamenti ogni"
 
@@ -631,6 +729,11 @@ msgstr "Classico"
 msgid "Clear Mapping"
 msgstr ""
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear album"
+msgstr "Rimuovi coda"
+
 msgid "Clear artist"
 msgstr "Rimuovi artista"
 
@@ -681,6 +784,11 @@ msgstr "Collezioni"
 msgid "Color for the active word during playback"
 msgstr "Colore per la parola attiva durante il playback"
 
+#, fuzzy
+#| msgid "Columns"
+msgid "Column borders"
+msgstr "Colonne"
+
 msgid "Columns"
 msgstr "Colonne"
 
@@ -699,10 +807,24 @@ msgstr "Compatto"
 msgid "Compare these emoji on both devices"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Compilation"
+msgstr "Collezione"
+
 msgid "Complete sign-in in your browser"
 msgstr "Completa il login nel tuo browser"
 
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
+msgstr ""
+
 msgid "Configure another"
+msgstr ""
+
+msgid "Configured items: {count}"
 msgstr ""
 
 msgid "Confirm"
@@ -840,6 +962,11 @@ msgid "Copy"
 msgstr "Copia"
 
 #, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "Copia"
+
+#, fuzzy
 #| msgid "Could not load this page"
 msgid "Could not load listening overview"
 msgstr "Non è stato possibile caricare questa pagina"
@@ -857,6 +984,11 @@ msgstr "Non è stato possibile aprire la cartella: {error}"
 
 msgid "Could not open folder: {error}"
 msgstr "Non è stato possibile aprire la cartella: {error}"
+
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not play this track"
+msgstr "Non è stato possibile caricare questa pagina"
 
 msgid "Could not receive live updates"
 msgstr "Non è stato possibile ricevere aggiornamenti in tempo reale"
@@ -882,9 +1014,17 @@ msgstr "Non è stato possibile cercare il testo della canzone"
 msgid "Couldn’t download Japanese dictionary"
 msgstr "Non è stato possibile scaricare il dizionario giapponese"
 
+msgid "Country"
+msgstr ""
+
 #, fuzzy
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
+msgstr "Cancella Playlist"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Create playlist"
 msgstr "Cancella Playlist"
 
 msgid "Create"
@@ -899,6 +1039,9 @@ msgstr "Modalità di dissolvenza incrociata"
 msgid "Crossfade"
 msgstr "Dissolvenza incrociata"
 
+msgid "Current artwork"
+msgstr ""
+
 msgid "Custom HTTP headers"
 msgstr "Header HTTP personalizzati"
 
@@ -907,6 +1050,11 @@ msgstr "Personalizzato"
 
 msgid "Customize display"
 msgstr "Personalizza visualizzazione"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Customize"
+msgstr "Personalizzato"
 
 msgid "Cut"
 msgstr "Taglia"
@@ -923,6 +1071,9 @@ msgstr "Scuro"
 msgid "Date added"
 msgstr "Data aggiunta"
 
+msgid "Date"
+msgstr ""
+
 msgid "Days after month ends"
 msgstr ""
 
@@ -937,6 +1088,9 @@ msgstr ""
 
 msgid "Debug logging"
 msgstr "Scrivendo il log di debug"
+
+msgid "December {year}"
+msgstr ""
 
 msgid "Decrease"
 msgstr "Decrementa"
@@ -953,6 +1107,7 @@ msgstr "Predefinito"
 msgid "Delete Playlist"
 msgstr "Cancella Playlist"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Sei sicuro di cancellare \"{name}\"?"
 
@@ -1036,6 +1191,9 @@ msgstr ""
 msgid "Discord"
 msgstr "Discord"
 
+msgid "Display"
+msgstr ""
+
 msgid "Do not encrypt"
 msgstr "Non cifrare"
 
@@ -1044,6 +1202,9 @@ msgstr ""
 
 msgid "Don't duplicate"
 msgstr "Non duplicare"
+
+msgid "Donate"
+msgstr ""
 
 msgid "Download Folder"
 msgstr "Cartella di Download"
@@ -1176,8 +1337,16 @@ msgstr ""
 msgid "Equalizer"
 msgstr ""
 
+msgid "Ever played"
+msgstr ""
+
 msgid "Everything, including new tracks"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "Aggiungi cartella"
 
 msgid "Existing profile file"
 msgstr ""
@@ -1254,6 +1423,9 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1263,6 +1435,9 @@ msgstr "Connessione"
 #| msgid "Allow remote connections"
 msgid "File connections"
 msgstr "Consenti connessioni remote"
+
+msgid "File path"
+msgstr ""
 
 msgid "Filename"
 msgstr ""
@@ -1291,7 +1466,7 @@ msgstr ""
 msgid "Flat"
 msgstr ""
 
-msgid "Folder"
+msgid "Folder path"
 msgstr ""
 
 msgid "Folders"
@@ -1324,6 +1499,12 @@ msgstr ""
 msgid "Found Servers"
 msgstr ""
 
+msgid "Frame rate limit"
+msgstr ""
+
+msgid "Frames per second"
+msgstr ""
+
 msgid "Friday"
 msgstr ""
 
@@ -1335,6 +1516,11 @@ msgstr ""
 
 msgid "Full"
 msgstr ""
+
+#, fuzzy
+#| msgid "Close fullscreen player"
+msgid "Fullscreen player"
+msgstr "Chiudi player a schermo intero"
 
 msgid "Fullscreen"
 msgstr ""
@@ -1396,7 +1582,13 @@ msgstr ""
 msgid "Grid labels"
 msgstr ""
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
+msgstr ""
+
+msgid "Grouping"
 msgstr ""
 
 msgid "Guest / public access"
@@ -1409,6 +1601,9 @@ msgid "Hidden"
 msgstr ""
 
 msgid "Hide sidebar"
+msgstr ""
+
+msgid "Highlight hovered row"
 msgstr ""
 
 msgid "History"
@@ -1446,6 +1641,11 @@ msgstr ""
 msgid "If you do not have API keys, create them"
 msgstr ""
 
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Image files"
+msgstr "Cambia Profilo"
+
 msgid "Image"
 msgstr ""
 
@@ -1458,13 +1658,13 @@ msgstr ""
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
 msgid "Increase"
-msgstr ""
-
-msgid "Increases memory usage"
 msgstr ""
 
 msgid "Install available updates when Rufin starts"
@@ -1482,6 +1682,9 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr ""
 
@@ -1494,6 +1697,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -1520,6 +1729,9 @@ msgstr ""
 msgid "LRCLIB"
 msgstr ""
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr ""
 
@@ -1527,6 +1739,18 @@ msgid "Language"
 msgstr ""
 
 msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Large"
+msgstr ""
+
+msgid "Last 30 days"
+msgstr ""
+
+msgid "Last 365 days"
+msgstr ""
+
+msgid "Last 7 days"
 msgstr ""
 
 msgid "Last played"
@@ -1629,6 +1853,11 @@ msgstr[0] ""
 msgstr[1] ""
 
 #, fuzzy
+#| msgid "Add a music folder"
+msgid "Local files and folders"
+msgstr "Aggiungi una cartella con la musica"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Local folder"
 msgstr "Aggiungi cartella"
@@ -1705,7 +1934,13 @@ msgstr ""
 msgid "Mapped Local Path"
 msgstr ""
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr ""
+
+msgid "May {year}"
 msgstr ""
 
 #, fuzzy
@@ -1814,6 +2049,9 @@ msgstr ""
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
+msgid "MusicBrainz album artist ID"
+msgstr ""
+
 msgid "MusicBrainz artist ID"
 msgstr ""
 
@@ -1830,6 +2068,9 @@ msgid "MusicBrainz release track ID"
 msgstr ""
 
 msgid "MusicBrainz"
+msgstr ""
+
+msgid "Musical key"
 msgstr ""
 
 msgid "Mute"
@@ -1919,6 +2160,9 @@ msgstr ""
 msgid "No albums from this artist yet"
 msgstr ""
 
+msgid "No artwork found"
+msgstr ""
+
 msgid "No cached server path yet"
 msgstr ""
 
@@ -1949,7 +2193,7 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
+msgid "No local files or folders configured"
 msgstr ""
 
 msgid "No lyrics available."
@@ -1971,6 +2215,9 @@ msgid "No network address available"
 msgstr ""
 
 msgid "No network devices found"
+msgstr ""
+
+msgid "No playable entries were found"
 msgstr ""
 
 msgid "No related tracks found"
@@ -2012,6 +2259,9 @@ msgstr ""
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not valid"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr ""
 
@@ -2030,6 +2280,9 @@ msgstr ""
 msgid "Notifications"
 msgstr ""
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr ""
 
@@ -2040,6 +2293,9 @@ msgid "Number of backups"
 msgstr ""
 
 msgid "Number of songs"
+msgstr ""
+
+msgid "October {year}"
 msgstr ""
 
 msgid "Off only for a server you control"
@@ -2143,6 +2399,9 @@ msgstr "Azioni"
 msgid "Orange"
 msgstr ""
 
+msgid "Original release date"
+msgstr ""
+
 msgid "Original"
 msgstr ""
 
@@ -2189,6 +2448,12 @@ msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
 
 msgid "Perceptual"
+msgstr ""
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -2269,9 +2534,6 @@ msgstr ""
 msgid "Playback"
 msgstr ""
 
-msgid "Played"
-msgstr ""
-
 msgid "Playing on this device"
 msgstr ""
 
@@ -2329,9 +2591,6 @@ msgid "Prefer distinct track covers"
 msgstr ""
 
 msgid "Prefer server lyrics"
-msgstr ""
-
-msgid "Prefer server playlist covers"
 msgstr ""
 
 msgid "Prefer translations"
@@ -2480,11 +2739,19 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
+msgid "Record label"
+msgstr ""
+
 msgid "Red"
 msgstr ""
 
 msgid "Redo"
 msgstr ""
+
+#, fuzzy
+#| msgid "Collection"
+msgid "Reduce motion"
+msgstr "Collezione"
 
 msgid "Refresh automatically"
 msgstr ""
@@ -2505,6 +2772,9 @@ msgid "Regenerate access token"
 msgstr ""
 
 msgid "Regenerate access token?"
+msgstr ""
+
+msgid "Regenerate"
 msgstr ""
 
 msgid "Related"
@@ -2557,9 +2827,6 @@ msgstr ""
 msgid "Remove Downloads"
 msgstr ""
 
-msgid "Remove Local Folder"
-msgstr ""
-
 msgid "Remove Rule and Delete Downloads"
 msgstr ""
 
@@ -2598,6 +2865,11 @@ msgstr ""
 
 msgid "Remove search"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Remove unavailable tracks"
+msgstr "Album non disponibile"
 
 msgid "Remove"
 msgstr ""
@@ -2649,9 +2921,6 @@ msgstr ""
 msgid "Reset"
 msgstr ""
 
-msgid "Resource not found"
-msgstr ""
-
 msgid "Restart now"
 msgstr ""
 
@@ -2691,6 +2960,9 @@ msgstr ""
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr ""
 
@@ -2714,6 +2986,9 @@ msgstr ""
 msgid "SMB Domain"
 msgstr ""
 
+msgid "Sample rate"
+msgstr ""
+
 msgid "Saturday"
 msgstr ""
 
@@ -2731,6 +3006,11 @@ msgstr ""
 
 msgid "Save changes automatically"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Save in folder"
+msgstr "Aggiungi cartella"
 
 msgid "Save lyrics automatically"
 msgstr ""
@@ -2783,6 +3063,9 @@ msgid "Search Again"
 msgstr ""
 
 msgid "Search Lyrics"
+msgstr ""
+
+msgid "Search artwork"
 msgstr ""
 
 msgid "Search current folder"
@@ -2886,13 +3169,16 @@ msgstr ""
 msgid "Selected folders"
 msgstr ""
 
+msgid "Selected items: {count}"
+msgstr ""
+
 msgid "Selection"
 msgstr ""
 
 msgid "Self-host an Iroh Relay"
 msgstr ""
 
-msgid "Separate .lrc file"
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"
@@ -2973,6 +3259,9 @@ msgid "Show external service icons on album and artist pages"
 msgstr ""
 
 msgid "Show external site links"
+msgstr ""
+
+msgid "Show header"
 msgstr ""
 
 msgid "Show lyrics in the right panel"
@@ -3058,6 +3347,11 @@ msgstr ""
 msgid "Sign in"
 msgstr ""
 
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Similar artists"
+msgstr "Rimuovi artista"
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -3067,6 +3361,9 @@ msgstr ""
 msgid "Singles"
 msgstr ""
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr ""
 
@@ -3074,6 +3371,9 @@ msgid "Skip same-album crossfade"
 msgstr ""
 
 msgid "Slate"
+msgstr ""
+
+msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
@@ -3127,10 +3427,10 @@ msgstr ""
 msgid "Spectrum line"
 msgstr ""
 
-msgid "Sponsor"
+msgid "Start minimized"
 msgstr ""
 
-msgid "Start minimized"
+msgid "Start playing automatically"
 msgstr ""
 
 msgid "Starting..."
@@ -3150,6 +3450,16 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "Audio"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "Audio"
 
 msgid "Style"
 msgstr ""
@@ -3181,6 +3491,9 @@ msgstr ""
 msgid "System"
 msgstr ""
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr ""
 
@@ -3204,6 +3517,12 @@ msgstr ""
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
+msgid "TheAudioDB album ID"
+msgstr ""
+
+msgid "TheAudioDB artist ID"
+msgstr ""
+
 msgid "Theme"
 msgstr ""
 
@@ -3216,9 +3535,6 @@ msgstr ""
 msgid "This device"
 msgstr ""
 
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
-
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
@@ -3229,6 +3545,9 @@ msgid "This playlist only accepts {source} tracks"
 msgstr ""
 
 msgid "This source cannot edit this field"
+msgstr ""
+
+msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
 msgid "Thursday"
@@ -3267,6 +3586,14 @@ msgstr "Qualunque genere"
 #, fuzzy
 #| msgid "All tracks"
 msgid "Top tracks"
+msgstr "Tutte le Tracce"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "All tracks"
+msgid "Total tracks"
 msgstr "Tutte le Tracce"
 
 msgid "Track number"
@@ -3354,6 +3681,9 @@ msgid "Updated Rufin to {version}"
 msgstr ""
 
 msgid "Updating Rufin to {version}..."
+msgstr ""
+
+msgid "Upload artwork"
 msgstr ""
 
 msgid "Use API key"
@@ -3509,6 +3839,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Wide"
 msgstr ""
 
 msgid "Window"
@@ -3716,6 +4049,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Artist / Album"
+#~ msgstr "Artista / Album"
 
 #~ msgid "Color scheme"
 #~ msgstr "Schema di colori"

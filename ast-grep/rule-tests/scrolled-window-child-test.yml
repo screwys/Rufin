@@ -1,4 +1,4 @@
-id: scrolled-box-is-behind-viewport
+id: scrolled-content-is-behind-viewport
 valid:
   - |
       fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
@@ -16,6 +16,7 @@ invalid:
               .and_then(|child| child.downcast::<gtk::Box>().ok())
       }
   - |
-      fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
-          scroller.child().and_downcast::<gtk::Box>()
+      fn metadata_label() {
+          let clip = album_meta_label("", "muted", 1);
+          let label = clip.child().and_downcast::<gtk::Label>().expect("album metadata label");
       }

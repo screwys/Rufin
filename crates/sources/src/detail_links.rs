@@ -38,11 +38,16 @@ impl SourceConfiguration {
                 let mut url = web_base(&config.base_url)?
                     .join("web/index.html")
                     .map_err(url_error)?;
+                let (route, key) = if kind == "playlist" {
+                    ("playlist", format!("/playlists/{id}"))
+                } else {
+                    ("details", format!("/library/metadata/{id}"))
+                };
                 let query = url::form_urlencoded::Serializer::new(String::new())
-                    .append_pair("key", &format!("/library/metadata/{id}"))
+                    .append_pair("key", &key)
                     .finish();
                 url.set_fragment(Some(&format!(
-                    "!/server/{}/details?{query}",
+                    "!/server/{}/{route}?{query}",
                     encode(&config.server_id)
                 )));
                 url
@@ -57,8 +62,58 @@ impl SourceConfiguration {
         Ok(url.into())
     }
 
-    pub fn detail_folder_uri(&self, first: &str, last: &str) -> SourceResult<String> {
+    pub fn detail_folder_uri(&self, first: &str, last: &str) -> SourceResult<Option<String>> {
         if self.kind == "local" {
+            if first.starts_with("rufin-document:") || last.starts_with("rufin-document:") {
+                if !first.starts_with("rufin-document:") || !last.starts_with("rufin-document:") {
+                    return Ok(None);
+                }
+                let first = Url::parse(first).map_err(url_error)?;
+                let last = Url::parse(last).map_err(url_error)?;
+                if first.host_str() != last.host_str() {
+                    return Ok(None);
+                }
+                let config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
+                let Some(root) = config
+                    .document_roots
+                    .iter()
+                    .find(|root| Some(root.id.as_str()) == first.host_str())
+                else {
+                    return Ok(None);
+                };
+                let first = first
+                    .path()
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
+                let last = last
+                    .path()
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
+                let common = first
+                    .split('/')
+                    .zip(last.split('/'))
+                    .take_while(|(a, b)| a == b)
+                    .map(|(part, _)| part)
+                    .last()
+                    .unwrap_or_default();
+                let common = percent_encoding::percent_decode_str(common)
+                    .decode_utf8()
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                let uri = match common.rsplit_once('\u{1f}') {
+                    Some((_, uri)) => percent_encoding::percent_decode_str(uri)
+                        .decode_utf8()
+                        .map_err(|error| SourceError::Other(error.to_string()))?
+                        .into_owned(),
+                    None => root.uri.clone(),
+                };
+                // MediaStore's flat audio collection is not a browsable document folder.
+                let folder = Url::parse(&uri).map_err(url_error)?;
+                return Ok(folder
+                    .path_segments()
+                    .is_some_and(|mut parts| parts.next() == Some("tree"))
+                    .then_some(uri));
+            }
+
             let first = Path::new(first).parent().ok_or(SourceError::NotFound)?;
             let last = Path::new(last).parent().ok_or(SourceError::NotFound)?;
             let common = first
@@ -66,16 +121,16 @@ impl SourceConfiguration {
                 .find(|path| last.starts_with(path))
                 .ok_or(SourceError::NotFound)?;
             return Url::from_directory_path(common)
-                .map(String::from)
+                .map(|uri| Some(String::from(uri)))
                 .map_err(|_| SourceError::NotFound);
         }
-        crate::file::remote::detail_folder_uri(self, first, last)
+        crate::file::remote::detail_folder_uri(self, first, last).map(Some)
     }
 }
 
 fn entity_id<'a>(source: &str, kind: &str, id: &'a str) -> SourceResult<&'a str> {
     id.strip_prefix(&format!("{source}:{kind}:"))
-        .filter(|id| !id.is_empty() && matches!(kind, "artist" | "album"))
+        .filter(|id| !id.is_empty() && matches!(kind, "track" | "artist" | "album" | "playlist"))
         .ok_or(SourceError::NotFound)
 }
 
@@ -91,6 +146,9 @@ fn web_base(base: &str) -> SourceResult<Url> {
 }
 
 fn subsonic_url(base: &Url, server: &str, kind: &str, id: &str) -> SourceResult<Option<Url>> {
+    if kind == "track" {
+        return Ok(None);
+    }
     let mut url = web_base(base.as_str())?;
     let path = url.path().trim_end_matches('/').to_owned();
     // These API mount points identify the web app even on older saved connections.
@@ -144,7 +202,7 @@ mod tests {
                 kind,
                 json!({"version":1,"base_url":base,"server_id":"server & two","user_id":"listener","username":"listener","trust_invalid_cert":false}),
             );
-            for entity in ["artist", "album"] {
+            for entity in ["track", "artist", "album"] {
                 assert_eq!(
                     source
                         .detail_web_url(entity, &format!("{kind}:{entity}:42&other=1"))
@@ -160,7 +218,7 @@ mod tests {
                 "plex",
                 json!({"version":1,"server_id":"machine","profile_id":"profile","base_url":base,"address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}),
             );
-            for entity in ["artist", "album"] {
+            for entity in ["track", "artist", "album"] {
                 assert_eq!(
                     source
                         .detail_web_url(entity, &format!("plex:{entity}:42"))
@@ -277,6 +335,7 @@ mod tests {
             .join("Artist & Friends/Album/Disc 2/z.flac");
         let uri = source
             .detail_folder_uri(first.to_str().unwrap(), last.to_str().unwrap())
+            .unwrap()
             .unwrap();
         assert_eq!(
             Url::parse(&uri).unwrap().to_file_path().unwrap(),
@@ -285,10 +344,66 @@ mod tests {
         let sibling = directory.path().join("Artist & Friends/Album Two/z.flac");
         let uri = source
             .detail_folder_uri(first.to_str().unwrap(), sibling.to_str().unwrap())
+            .unwrap()
             .unwrap();
         assert_eq!(
             Url::parse(&uri).unwrap().to_file_path().unwrap(),
             directory.path().join("Artist & Friends")
+        );
+        let source = SourceConfiguration::local(crate::SourceId::new("local"), "Local", Vec::new())
+            .unwrap()
+            .with_document_roots(vec![
+                crate::DocumentRoot {
+                    id: "documents".into(),
+                    uri: "content://provider/tree/root".into(),
+                    name: "Files".into(),
+                },
+                crate::DocumentRoot {
+                    id: "music".into(),
+                    uri: "content://media/external/audio/media".into(),
+                    name: "Music".into(),
+                },
+            ])
+            .unwrap();
+        let folder = "content://provider/tree/root/document/album%2Fopaque-id";
+        let parent = encode(&format!("Album & Friends\u{1f}{}", encode(folder)));
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    &format!("rufin-document://documents/{parent}/one.flac"),
+                    &format!("rufin-document://documents/{parent}/two.flac"),
+                )
+                .unwrap()
+                .as_deref(),
+            Some(folder)
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    &format!("rufin-document://documents/{parent}/one.flac"),
+                    "rufin-document://documents/other/two.flac",
+                )
+                .unwrap()
+                .as_deref(),
+            Some("content://provider/tree/root")
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    "rufin-document://music/one.flac",
+                    "rufin-document://music/two.flac"
+                )
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            source
+                .detail_folder_uri(
+                    "rufin-document://music/one.flac",
+                    "rufin-document://documents/two.flac"
+                )
+                .unwrap(),
+            None
         );
     }
 
@@ -314,6 +429,7 @@ mod tests {
             );
             // Deserialize the complete settings used by real configured sources.
             let settings = crate::FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: current.into(),
                 alternate_urls: vec![],
                 folders: vec![],
@@ -337,6 +453,7 @@ mod tests {
                         &format!("{namespace}Artist%20One/Album/Disc%201/a.flac"),
                         &format!("{namespace}Artist%20One/Album/Disc%202/z.flac"),
                     )
+                    .unwrap()
                     .unwrap(),
                 expected
             );
@@ -346,6 +463,7 @@ mod tests {
                         &format!("{namespace}A/a.flac"),
                         &format!("{namespace}Z/z.flac")
                     )
+                    .unwrap()
                     .unwrap(),
                 current,
             );

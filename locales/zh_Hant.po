@@ -19,6 +19,11 @@ msgstr ""
 "X-Generator: Weblate 2026.9.dev0\n"
 
 msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+
+msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
 
@@ -75,14 +80,31 @@ msgid ""
 "Cancelling will not save credentials at all."
 msgstr ""
 
+#, python-brace-format
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
+msgstr ""
+
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
 
 msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+
+msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
+msgstr ""
+
+msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
 msgstr ""
 
 msgid ""
@@ -131,8 +153,8 @@ msgid ""
 msgstr ""
 
 msgid ""
-"These folders are combined into the Local source and shown through folder "
-"browsing"
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
 msgstr ""
 
 msgid ""
@@ -232,6 +254,9 @@ msgstr "強調色"
 msgid "Access token"
 msgstr "取得登入授權"
 
+msgid "Accessibility"
+msgstr ""
+
 msgid "Action required"
 msgstr ""
 
@@ -274,6 +299,16 @@ msgstr ""
 msgid "Add folder"
 msgstr "新增資料夾"
 
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add image"
+msgstr "新增標題"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add music"
+msgstr "本地音樂資料夾"
+
 msgid "Add to Favorites"
 msgstr "加入最愛"
 
@@ -281,6 +316,11 @@ msgid "Add to Pins"
 msgstr "加入釘選"
 
 msgid "Add to Playlist"
+msgstr "加入播放清單"
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Add to library"
 msgstr "加入播放清單"
 
 msgid "Add tracks when fewer than this many remain"
@@ -303,6 +343,11 @@ msgstr "新增來源"
 msgid "Album Artists"
 msgstr "專輯藝人"
 
+#, fuzzy
+#| msgid "Album artists"
+msgid "Album artist sort"
+msgstr "專輯藝人"
+
 msgid "Album artist"
 msgstr "專輯藝人"
 
@@ -311,6 +356,11 @@ msgstr "專輯藝人"
 
 msgid "Album radio"
 msgstr "專輯電台"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album sort"
+msgstr "專輯"
 
 msgid "Album title"
 msgstr "專輯標題"
@@ -335,6 +385,9 @@ msgstr "所有音樂"
 msgid "All Playlists"
 msgstr "所有播放清單"
 
+msgid "All time"
+msgstr ""
+
 msgid "All tracks"
 msgstr "所有曲目"
 
@@ -346,6 +399,11 @@ msgstr ""
 
 msgid "Alternate addresses"
 msgstr ""
+
+#, fuzzy
+#| msgid "Accent color"
+msgid "Alternate row colors"
+msgstr "強調色"
 
 msgid "Anonymous (WebDAV / SMB)"
 msgstr ""
@@ -379,6 +437,9 @@ msgstr "應用程式名稱"
 msgid "Applied"
 msgstr ""
 
+msgid "Applies to sidebar and fullscreen separately"
+msgstr ""
+
 msgid "Apply Template"
 msgstr ""
 
@@ -393,8 +454,8 @@ msgstr "正在儲存..."
 msgid "Approve sign-in in your browser"
 msgstr ""
 
-msgid "Artist / Album"
-msgstr "藝人 / 專輯"
+msgid "April {year}"
+msgstr ""
 
 msgid "Artist albums"
 msgstr "藝人專輯"
@@ -404,6 +465,11 @@ msgstr "藝人名稱"
 
 msgid "Artist radio"
 msgstr "藝人電台"
+
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist sort"
+msgstr "藝人"
 
 msgid "Artist tracks"
 msgstr "藝人曲目"
@@ -419,6 +485,21 @@ msgstr "藝人"
 msgid "Artists"
 msgstr "藝人"
 
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Artwork editing is no longer available"
+msgstr "元資料已經不再能編輯"
+
+#, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork selected"
+msgstr "無資料夾被選擇"
+
+#, fuzzy
+#| msgid "Secret storage"
+msgid "Artwork storage"
+msgstr "私密儲存空間"
+
 msgid "Artwork"
 msgstr ""
 
@@ -433,6 +514,9 @@ msgstr "投放時無法進行音訊處理"
 
 msgid "Audio"
 msgstr "音訊"
+
+msgid "August {year}"
+msgstr ""
 
 msgid "Authentication"
 msgstr ""
@@ -513,6 +597,12 @@ msgstr "取得登入授權"
 msgid "Bearer token"
 msgstr "取得登入授權"
 
+msgid "Bit depth"
+msgstr ""
+
+msgid "Bitrate"
+msgstr ""
+
 msgid "Blue"
 msgstr "藍色"
 
@@ -579,6 +669,11 @@ msgstr "變更敏感存儲空間"
 msgid "Changing this will redownload all local files."
 msgstr ""
 
+#, fuzzy
+#| msgid "Change"
+msgid "Channels"
+msgstr "變更"
+
 msgid "Check for updates every"
 msgstr ""
 
@@ -638,6 +733,11 @@ msgid "Clear Mapping"
 msgstr ""
 
 #, fuzzy
+#| msgid "Play album"
+msgid "Clear album"
+msgstr "播放專輯"
+
+#, fuzzy
 #| msgid "Play artist"
 msgid "Clear artist"
 msgstr "播放藝人"
@@ -693,6 +793,9 @@ msgstr "收藏"
 msgid "Color for the active word during playback"
 msgstr ""
 
+msgid "Column borders"
+msgstr ""
+
 msgid "Columns"
 msgstr ""
 
@@ -713,10 +816,24 @@ msgstr "緊湊"
 msgid "Compare these emoji on both devices"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Compilation"
+msgstr "收藏"
+
 msgid "Complete sign-in in your browser"
 msgstr ""
 
+msgid "Composer sort"
+msgstr ""
+
+msgid "Composer"
+msgstr ""
+
 msgid "Configure another"
+msgstr ""
+
+msgid "Configured items: {count}"
 msgstr ""
 
 msgid "Confirm"
@@ -870,6 +987,11 @@ msgid "Copy"
 msgstr "複製"
 
 #, fuzzy
+#| msgid "Copy"
+msgid "Copyright"
+msgstr "複製"
+
+#, fuzzy
 #| msgid "Couldn't load this folder"
 msgid "Could not load listening overview"
 msgstr "無法載入此資料夾"
@@ -893,6 +1015,11 @@ msgstr "無法更新最愛"
 #| msgid "Could not update favorites"
 msgid "Could not open folder: {error}"
 msgstr "無法更新最愛"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not play this track"
+msgstr "無法載入此資料夾"
 
 #, fuzzy
 #| msgid "Could not update favorites"
@@ -922,10 +1049,18 @@ msgstr "無法搜尋到歌詞"
 msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
+msgid "Country"
+msgstr ""
+
 #, fuzzy
 #| msgid "Delete Playlist"
 msgid "Create a playlist from queue"
 msgstr "刪除播放清單"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Create playlist"
+msgstr "智慧播放清單"
 
 msgid "Create"
 msgstr "建立"
@@ -939,6 +1074,9 @@ msgstr "交叉淡入淡出模式"
 msgid "Crossfade"
 msgstr "交叉淡入淡出"
 
+msgid "Current artwork"
+msgstr ""
+
 msgid "Custom HTTP headers"
 msgstr ""
 
@@ -946,6 +1084,9 @@ msgid "Custom"
 msgstr ""
 
 msgid "Customize display"
+msgstr ""
+
+msgid "Customize"
 msgstr ""
 
 msgid "Cut"
@@ -963,6 +1104,9 @@ msgstr "深色"
 msgid "Date added"
 msgstr "新增日期"
 
+msgid "Date"
+msgstr ""
+
 msgid "Days after month ends"
 msgstr ""
 
@@ -977,6 +1121,9 @@ msgstr ""
 
 msgid "Debug logging"
 msgstr "除錯記錄"
+
+msgid "December {year}"
+msgstr ""
 
 msgid "Decrease"
 msgstr "減少"
@@ -995,6 +1142,7 @@ msgstr "回復預設值"
 msgid "Delete Playlist"
 msgstr "刪除播放清單"
 
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr ""
 
@@ -1086,6 +1234,9 @@ msgstr ""
 msgid "Discord"
 msgstr "Discord"
 
+msgid "Display"
+msgstr ""
+
 #, fuzzy
 #| msgid "is not empty"
 msgid "Do not encrypt"
@@ -1095,6 +1246,9 @@ msgid "Do you want to use the existing configuration?"
 msgstr ""
 
 msgid "Don't duplicate"
+msgstr ""
+
+msgid "Donate"
 msgstr ""
 
 msgid "Download Folder"
@@ -1246,8 +1400,18 @@ msgstr "整個媒體庫"
 msgid "Equalizer"
 msgstr "等化器"
 
+#, fuzzy
+#| msgid "Never Played"
+msgid "Ever played"
+msgstr "從未播放"
+
 msgid "Everything, including new tracks"
 msgstr "所有內容，包含新曲目"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Excluded folders"
+msgstr "新增資料夾"
 
 msgid "Existing profile file"
 msgstr ""
@@ -1336,6 +1500,9 @@ msgstr "最愛"
 msgid "Featured genres"
 msgstr ""
 
+msgid "February {year}"
+msgstr ""
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1345,6 +1512,11 @@ msgstr "連接"
 #| msgid "Connection"
 msgid "File connections"
 msgstr "連接"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "File path"
+msgstr "資料夾"
 
 #, fuzzy
 #| msgid "Rename"
@@ -1377,7 +1549,9 @@ msgstr "固定位置"
 msgid "Flat"
 msgstr ""
 
-msgid "Folder"
+#, fuzzy
+#| msgid "Folder"
+msgid "Folder path"
 msgstr "資料夾"
 
 msgid "Folders"
@@ -1412,6 +1586,14 @@ msgstr "前進"
 msgid "Found Servers"
 msgstr ""
 
+msgid "Frame rate limit"
+msgstr ""
+
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Frames per second"
+msgstr "重新整理區塊"
+
 msgid "Friday"
 msgstr ""
 
@@ -1423,6 +1605,11 @@ msgstr ""
 
 msgid "Full"
 msgstr "完整"
+
+#, fuzzy
+#| msgid "Open fullscreen player"
+msgid "Fullscreen player"
+msgstr "開啟全螢幕播放器"
 
 #, fuzzy
 #| msgid "Toggle Fullscreen"
@@ -1488,8 +1675,14 @@ msgstr "綠色"
 msgid "Grid labels"
 msgstr ""
 
+msgid "Grid spacing"
+msgstr ""
+
 msgid "Grid"
 msgstr "網格"
+
+msgid "Grouping"
+msgstr ""
 
 msgid "Guest / public access"
 msgstr ""
@@ -1502,6 +1695,9 @@ msgstr "隱藏"
 
 msgid "Hide sidebar"
 msgstr "隱藏側邊欄"
+
+msgid "Highlight hovered row"
+msgstr ""
 
 msgid "History"
 msgstr "歷史"
@@ -1536,6 +1732,11 @@ msgstr "如果頁面沒有載入，表示 Libre.fm 阻擋了您的 IP 區段或 
 msgid "If you do not have API keys, create them"
 msgstr "如果你尚未擁有 API 金鑰，請建立它"
 
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Image files"
+msgstr "變更敏感存儲空間"
+
 msgid "Image"
 msgstr "圖像"
 
@@ -1550,14 +1751,14 @@ msgstr "智慧播放清單"
 msgid "Import"
 msgstr ""
 
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
 
 msgid "Increase"
 msgstr "增加"
-
-msgid "Increases memory usage"
-msgstr "增加記憶體使用量"
 
 msgid "Install available updates when Rufin starts"
 msgstr "在 Rufin 啟動時安裝可用的更新"
@@ -1574,6 +1775,9 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "January {year}"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1586,6 +1790,12 @@ msgid "Join using"
 msgstr ""
 
 msgid "Join"
+msgstr ""
+
+msgid "July {year}"
+msgstr ""
+
+msgid "June {year}"
 msgstr ""
 
 #, fuzzy
@@ -1614,6 +1824,9 @@ msgstr "快捷鍵"
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
+msgid "Labels"
+msgstr ""
+
 msgid "Language and readings"
 msgstr ""
 
@@ -1622,6 +1835,22 @@ msgstr "語言"
 
 msgid "Laptop/Headphones"
 msgstr ""
+
+msgid "Large"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 30 days"
+msgstr "最後播放"
+
+msgid "Last 365 days"
+msgstr ""
+
+#, fuzzy
+#| msgid "Last played"
+msgid "Last 7 days"
+msgstr "最後播放"
 
 msgid "Last played"
 msgstr "最後播放"
@@ -1726,6 +1955,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 
 #, fuzzy
+#| msgid "Local music folder"
+msgid "Local files and folders"
+msgstr "本地音樂資料夾"
+
+#, fuzzy
 #| msgid "Local Folders"
 msgid "Local folder"
 msgstr "本地資料夾"
@@ -1806,7 +2040,15 @@ msgstr "管理"
 msgid "Mapped Local Path"
 msgstr ""
 
+msgid "March {year}"
+msgstr ""
+
 msgid "Maximum year"
+msgstr "最大年份"
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "May {year}"
 msgstr "最大年份"
 
 #, fuzzy
@@ -1927,6 +2169,11 @@ msgstr "此裝置"
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "MusicBrainz album artist ID"
+msgstr "MusicBrainz 藝人 ID"
+
 msgid "MusicBrainz artist ID"
 msgstr "MusicBrainz 藝人 ID"
 
@@ -1944,6 +2191,11 @@ msgstr ""
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Musical key"
+msgstr "音樂資料夾"
 
 msgid "Mute"
 msgstr "靜音"
@@ -2038,6 +2290,11 @@ msgstr "未找到伺服器"
 msgid "No albums from this artist yet"
 msgstr "暫無此藝人的專輯"
 
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No artwork found"
+msgstr "找不到網路裝置"
+
 msgid "No cached server path yet"
 msgstr "暫無快取伺服器路徑"
 
@@ -2076,8 +2333,10 @@ msgstr ""
 msgid "No local file mapping"
 msgstr ""
 
-msgid "No local folders configured"
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "No local files or folders configured"
+msgstr "未設置來源"
 
 #, fuzzy
 #| msgid "No lyrics"
@@ -2105,6 +2364,11 @@ msgstr "找不到網路裝置"
 
 msgid "No network devices found"
 msgstr "找不到網路裝置"
+
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No playable entries were found"
+msgstr "未找到伺服器"
 
 #, fuzzy
 #| msgid "No matching tracks"
@@ -2150,6 +2414,9 @@ msgstr "未連接"
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not valid"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr "這裡目前還沒有任何東西"
 
@@ -2168,6 +2435,9 @@ msgstr "未佇列任何內容"
 msgid "Notifications"
 msgstr "通知"
 
+msgid "November {year}"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr "正在播放通知"
 
@@ -2181,6 +2451,9 @@ msgstr "歌曲數量"
 
 msgid "Number of songs"
 msgstr "歌曲數量"
+
+msgid "October {year}"
+msgstr ""
 
 msgid "Off only for a server you control"
 msgstr ""
@@ -2299,6 +2572,11 @@ msgstr "收藏"
 msgid "Orange"
 msgstr "橘色"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Original release date"
+msgstr "發行日期"
+
 msgid "Original"
 msgstr ""
 
@@ -2353,6 +2631,12 @@ msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
 
 msgid "Perceptual"
+msgstr ""
+
+msgid "Performer"
+msgstr ""
+
+msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -2443,9 +2727,6 @@ msgstr "播放速度"
 msgid "Playback"
 msgstr "播放"
 
-msgid "Played"
-msgstr "已播放"
-
 msgid "Playing on this device"
 msgstr "在此裝置上播放"
 
@@ -2510,9 +2791,6 @@ msgstr ""
 
 msgid "Prefer server lyrics"
 msgstr "偏好伺服器歌詞"
-
-msgid "Prefer server playlist covers"
-msgstr "偏好伺服器的播放清單封面"
 
 msgid "Prefer translations"
 msgstr "偏好翻譯"
@@ -2688,11 +2966,19 @@ msgstr ""
 msgid "Reconnect"
 msgstr "重新連接"
 
+msgid "Record label"
+msgstr ""
+
 msgid "Red"
 msgstr "紅色"
 
 msgid "Redo"
 msgstr "重做"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Reduce motion"
+msgstr "選擇"
 
 msgid "Refresh automatically"
 msgstr ""
@@ -2717,6 +3003,9 @@ msgid "Regenerate access token"
 msgstr ""
 
 msgid "Regenerate access token?"
+msgstr ""
+
+msgid "Regenerate"
 msgstr ""
 
 msgid "Related"
@@ -2775,9 +3064,6 @@ msgstr "移除下載內容"
 msgid "Remove Downloads"
 msgstr "移除下載內容"
 
-msgid "Remove Local Folder"
-msgstr "移除本地資料夾"
-
 msgid "Remove Rule and Delete Downloads"
 msgstr "移除規則並刪除下載內容"
 
@@ -2822,6 +3108,11 @@ msgstr "移除規則"
 #| msgid "Remove folder"
 msgid "Remove search"
 msgstr "移除資料夾"
+
+#, fuzzy
+#| msgid "Album title"
+msgid "Remove unavailable tracks"
+msgstr "專輯標題"
 
 msgid "Remove"
 msgstr "移除"
@@ -2877,9 +3168,6 @@ msgstr "重置回預設值"
 msgid "Reset"
 msgstr "重置"
 
-msgid "Resource not found"
-msgstr ""
-
 msgid "Restart now"
 msgstr ""
 
@@ -2921,6 +3209,9 @@ msgstr "羅馬拼音"
 msgid "Rounded bars"
 msgstr ""
 
+msgid "Row borders"
+msgstr ""
+
 msgid "Rows"
 msgstr "列表"
 
@@ -2944,6 +3235,9 @@ msgstr ""
 msgid "SMB Domain"
 msgstr ""
 
+msgid "Sample rate"
+msgstr ""
+
 msgid "Saturday"
 msgstr ""
 
@@ -2961,6 +3255,11 @@ msgstr ""
 
 msgid "Save changes automatically"
 msgstr ""
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Save in folder"
+msgstr "移除資料夾"
 
 msgid "Save lyrics automatically"
 msgstr ""
@@ -3018,6 +3317,11 @@ msgid "Search Again"
 msgstr "重新搜尋"
 
 msgid "Search Lyrics"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search artwork"
 msgstr "搜尋歌詞"
 
 #, fuzzy
@@ -3143,13 +3447,16 @@ msgstr "全選"
 msgid "Selected folders"
 msgstr "選擇音樂資料夾"
 
+msgid "Selected items: {count}"
+msgstr ""
+
 msgid "Selection"
 msgstr "選擇"
 
 msgid "Self-host an Iroh Relay"
 msgstr ""
 
-msgid "Separate .lrc file"
+msgid "September {year}"
 msgstr ""
 
 msgid "Server Actions"
@@ -3240,6 +3547,11 @@ msgstr "在專輯與藝人頁面上顯示外部服務的圖示"
 msgid "Show external site links"
 msgstr "顯示外部連結"
 
+#, fuzzy
+#| msgid "Show sidebar"
+msgid "Show header"
+msgstr "顯示側邊欄"
+
 msgid "Show lyrics in the right panel"
 msgstr "顯示歌詞在右側邊欄"
 
@@ -3329,6 +3641,11 @@ msgstr ""
 msgid "Sign in"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Similar artists"
+msgstr "播放藝人"
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -3338,6 +3655,9 @@ msgstr ""
 msgid "Singles"
 msgstr "單曲"
 
+msgid "Size"
+msgstr ""
+
 msgid "Skip count"
 msgstr "跳過次數"
 
@@ -3345,6 +3665,9 @@ msgid "Skip same-album crossfade"
 msgstr ""
 
 msgid "Slate"
+msgstr ""
+
+msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
@@ -3406,10 +3729,10 @@ msgstr ""
 msgid "Spectrum line"
 msgstr ""
 
-msgid "Sponsor"
+msgid "Start minimized"
 msgstr ""
 
-msgid "Start minimized"
+msgid "Start playing automatically"
 msgstr ""
 
 #, fuzzy
@@ -3433,6 +3756,16 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "串流品質"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studio"
+msgstr "音訊"
+
+#, fuzzy
+#| msgid "Audio"
+msgid "Studios"
+msgstr "音訊"
 
 msgid "Style"
 msgstr ""
@@ -3466,6 +3799,9 @@ msgstr "系統預設值"
 msgid "System"
 msgstr "系統"
 
+msgid "Tags"
+msgstr ""
+
 msgid "Target loudness"
 msgstr ""
 
@@ -3489,6 +3825,14 @@ msgstr ""
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
+msgid "TheAudioDB album ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "MusicBrainz artist ID"
+msgid "TheAudioDB artist ID"
+msgstr "MusicBrainz 藝人 ID"
+
 msgid "Theme"
 msgstr "主題"
 
@@ -3501,9 +3845,6 @@ msgstr ""
 msgid "This device"
 msgstr "此裝置"
 
-msgid "This is not a valid Rufin visualizer preset."
-msgstr ""
-
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
@@ -3514,6 +3855,9 @@ msgid "This playlist only accepts {source} tracks"
 msgstr ""
 
 msgid "This source cannot edit this field"
+msgstr ""
+
+msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
 msgid "Thursday"
@@ -3552,6 +3896,14 @@ msgstr "任何曲風"
 #, fuzzy
 #| msgid "Mood tracks"
 msgid "Top tracks"
+msgstr "氛圍曲目"
+
+msgid "Total discs"
+msgstr ""
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Total tracks"
 msgstr "氛圍曲目"
 
 msgid "Track number"
@@ -3643,6 +3995,9 @@ msgid "Updated Rufin to {version}"
 msgstr ""
 
 msgid "Updating Rufin to {version}..."
+msgstr ""
+
+msgid "Upload artwork"
 msgstr ""
 
 msgid "Use API key"
@@ -3814,6 +4169,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Wide"
 msgstr ""
 
 msgid "Window"
@@ -4020,6 +4378,21 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "Increases memory usage"
+#~ msgstr "增加記憶體使用量"
+
+#~ msgid "Remove Local Folder"
+#~ msgstr "移除本地資料夾"
+
+#~ msgid "Played"
+#~ msgstr "已播放"
+
+#~ msgid "Prefer server playlist covers"
+#~ msgstr "偏好伺服器的播放清單封面"
+
+#~ msgid "Artist / Album"
+#~ msgstr "藝人 / 專輯"
+
 #~ msgid "Color scheme"
 #~ msgstr "色彩配置"
 
@@ -4033,9 +4406,6 @@ msgstr ""
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "選擇已存在的本地資料夾"
-
-#~ msgid "No folder selected"
-#~ msgstr "無資料夾被選擇"
 
 #, fuzzy
 #~| msgid "Smart Playlist"

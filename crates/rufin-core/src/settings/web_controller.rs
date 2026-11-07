@@ -1,0 +1,112 @@
+use std::net::{IpAddr, Ipv4Addr};
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(IpAddr, String, {
+    remote,
+    lower: |address| address.to_string(),
+    try_lift: |address| Ok(address.parse()?),
+});
+
+use secrets::SecretKey;
+use serde::{Deserialize, Serialize};
+
+use super::SettingsOwner;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct ControllerSettings {
+    pub enabled: bool,
+    pub address: IpAddr,
+    pub port: u16,
+}
+
+impl Default for ControllerSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            address: Ipv4Addr::LOCALHOST.into(),
+            port: 1717,
+        }
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_controller_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<ControllerSettings, super::SettingsError> {
+        self.update_controller(|settings| settings.enabled = enabled)
+            .map_err(Into::into)
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_controller_remote(
+        &self,
+        remote: bool,
+    ) -> Result<ControllerSettings, super::SettingsError> {
+        self.update_controller(|settings| {
+            settings.address = match (settings.address.is_ipv6(), remote) {
+                (false, false) => Ipv4Addr::LOCALHOST.into(),
+                (false, true) => Ipv4Addr::UNSPECIFIED.into(),
+                (true, false) => std::net::Ipv6Addr::LOCALHOST.into(),
+                (true, true) => std::net::Ipv6Addr::UNSPECIFIED.into(),
+            };
+        })
+        .map_err(Into::into)
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    pub fn set_controller_port(
+        &self,
+        port: u16,
+    ) -> Result<ControllerSettings, super::SettingsError> {
+        self.update_controller(|settings| settings.port = port)
+            .map_err(Into::into)
+    }
+}
+
+impl SettingsOwner {
+    fn update_controller(
+        &self,
+        edit: impl FnOnce(&mut ControllerSettings),
+    ) -> Result<ControllerSettings, String> {
+        self.file.edit(|stored| {
+            edit(&mut stored.ui.web_controller);
+            Ok(stored.ui.web_controller.clone())
+        })
+    }
+
+    pub fn web_controller_token(&self, regenerate: bool) -> Result<String, String> {
+        let store = self.secrets.current().map_err(|error| error.to_string())?;
+        let key = secret_key();
+        if !regenerate
+            && let Some(token) = store.load_secret(&key).map_err(|error| error.to_string())?
+            && !token.is_empty()
+        {
+            return Ok(token);
+        }
+        use std::fmt::Write;
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+        let mut token = String::with_capacity(64);
+        for byte in bytes {
+            write!(&mut token, "{byte:02x}").expect("write token");
+        }
+        store
+            .save_secret(&key, &token)
+            .map_err(|error| error.to_string())?;
+        if regenerate {
+            self.file.web_controller_token_replaced()?;
+        }
+        Ok(token)
+    }
+}
+
+pub(super) fn secret_key() -> SecretKey {
+    SecretKey::namespaced("web-controller", "token", "Rufin Web Controller token")
+}

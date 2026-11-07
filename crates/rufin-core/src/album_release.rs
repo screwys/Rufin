@@ -1,36 +1,27 @@
-//! Bounded Album release enrichment over exact Database candidates.
+//! Bounded Album release enrichment over exact Catalog candidates.
 
 use std::sync::Arc;
 
-use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
-use async_channel::Sender;
-use library::{AlbumReleaseResult, ReadCancellation, SourceKey};
+use library::{AlbumReleaseResult, Catalog, ReadCancellation, SourceKey};
 use tracing::{info, warn};
 
 use crate::settings::SettingsFile;
-use crate::source::WeakActiveSource;
 
 const LOOKUP_LIMIT: usize = 8;
 
 pub(crate) async fn run_selected_album_release_lookup(
+    catalog: Arc<Catalog>,
     settings: SettingsFile,
-    events: Sender<SourceEvent>,
     source_key: SourceKey,
-    selected: WeakActiveSource,
 ) {
     let mut requested = 0;
     let mut found = 0;
     let mut missing = 0;
     let mut errors = 0;
-    let Some(current) = selected.upgrade().and_then(|session| session.resolve()) else {
-        return;
-    };
-    if current.source_key != source_key || !settings.load().ui.allows_external_metadata_lookup() {
+    if !settings.load().ui.allows_external_metadata_lookup() {
         return;
     }
-    let database = Arc::clone(&current.database);
-    drop(current);
-    let candidates = match database
+    let candidates = match catalog
         .album_release_candidates(source_key, LOOKUP_LIMIT, &ReadCancellation::new())
         .await
     {
@@ -41,12 +32,7 @@ pub(crate) async fn run_selected_album_release_lookup(
         }
     };
     for candidate in candidates {
-        if selected
-            .upgrade()
-            .and_then(|session| session.resolve())
-            .is_none()
-            || !settings.load().ui.allows_external_metadata_lookup()
-        {
+        if !settings.load().ui.allows_external_metadata_lookup() {
             break;
         }
         requested += 1;
@@ -83,25 +69,12 @@ pub(crate) async fn run_selected_album_release_lookup(
                 break;
             }
         };
-        if selected
-            .upgrade()
-            .and_then(|session| session.resolve())
-            .is_none()
-        {
-            break;
-        }
-        match database
+        match catalog
             .accept_album_release_result(source_key, candidate.album_key, identity.as_str(), result)
             .await
         {
-            Ok(Some(_)) => {
-                let _ = events.try_send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key: Some(source_key),
-                    favorite: None,
-                    change: CatalogChange::Album(candidate.media_uri.clone()),
-                }));
-            }
-            Ok(None) => {}
+            // The accepted album's Change reaches clients through the change feed.
+            Ok(Some(_) | None) => {}
             Err(error) => {
                 errors += 1;
                 warn!(%error, "could not accept Album release result");

@@ -1,0 +1,204 @@
+use library::{AlbumView, ArtistView, SourceKind};
+use localization::msgid;
+
+use crate::settings::ExternalSiteLinkSettings;
+
+pub struct DetailLink {
+    pub title: &'static str,
+    pub icon_name: &'static str,
+    pub url: Option<String>,
+}
+
+pub fn navigation_source_link(
+    source: Option<&sources::SourceConfiguration>,
+    media_uri: &str,
+    album_uri: Option<&str>,
+) -> Option<DetailLink> {
+    let folder = source.map_or_else(
+        || media_uri.starts_with("file:"),
+        |source| source.is(SourceKind::file_library),
+    );
+    if folder {
+        return Some(DetailLink {
+            title: msgid("Folder"),
+            icon_name: "rufin-document-open-symbolic",
+            url: None,
+        });
+    }
+    let source = source?;
+    // Navidrome's player links tracks to their album page.
+    let uri = if source.source_kind() == Some(SourceKind::Navidrome)
+        && library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
+    {
+        album_uri?
+    } else {
+        media_uri
+    };
+    let mut link = source_link(source, uri)?;
+    link.title = crate::runtime::source::source_kind_title(&source.kind)?;
+    Some(link)
+}
+
+pub fn source_link(source: &sources::SourceConfiguration, media_uri: &str) -> Option<DetailLink> {
+    let (_, kind, object_id) = library::source_entity_parts(media_uri)?;
+    let source_kind = source.source_kind()?;
+    let folder = source_kind.file_library();
+    let title = match source_kind {
+        SourceKind::Local | SourceKind::Webdav | SourceKind::Smb => msgid("Open Folder"),
+        SourceKind::Jellyfin => msgid("Open on Jellyfin"),
+        SourceKind::Emby => msgid("Open on Emby"),
+        SourceKind::Plex => msgid("Open on Plex"),
+        SourceKind::Navidrome => msgid("Open on Navidrome"),
+        SourceKind::Subsonic => msgid("Open on server"),
+        SourceKind::Peer => return None,
+    };
+    Some(DetailLink {
+        title,
+        icon_name: if folder {
+            "rufin-document-open-symbolic"
+        } else {
+            crate::runtime::source::source_kind_icon_name(&source.kind)?
+        },
+        url: if folder {
+            None
+        } else {
+            Some(source.detail_web_url(&kind, &object_id).ok()?)
+        },
+    })
+}
+
+pub fn album_external_links(
+    settings: &ExternalSiteLinkSettings,
+    source: Option<&sources::SourceConfiguration>,
+    album: &AlbumView,
+) -> Vec<DetailLink> {
+    if !settings.enabled {
+        return Vec::new();
+    }
+    let mut links = Vec::new();
+    if settings.lastfm
+        && let Some(url) = lastfm_album_url(&album.metadata.artist, &album.metadata.title)
+    {
+        links.push(DetailLink {
+            title: msgid("Open on Last.fm"),
+            icon_name: "io.github.screwys.Rufin.external.lastfm",
+            url: Some(url),
+        });
+    }
+    if settings.musicbrainz
+        && let Some(url) = musicbrainz_album_url(album)
+    {
+        links.push(DetailLink {
+            title: msgid("Open on MusicBrainz"),
+            icon_name: "io.github.screwys.Rufin.external.musicbrainz",
+            url: Some(url),
+        });
+    }
+    if settings.server
+        && let Some(source) = source
+        && let Some(link) = source_link(source, &album.row.media_uri)
+    {
+        links.push(link);
+    }
+    links
+}
+
+pub fn artist_external_links(
+    settings: &ExternalSiteLinkSettings,
+    source: Option<&sources::SourceConfiguration>,
+    artist: &ArtistView,
+) -> Vec<DetailLink> {
+    if !settings.enabled {
+        return Vec::new();
+    }
+    let mut links = Vec::new();
+    if settings.lastfm
+        && let Some(url) = lastfm_artist_url(&artist.row.name)
+    {
+        links.push(DetailLink {
+            title: msgid("Open on Last.fm"),
+            icon_name: "io.github.screwys.Rufin.external.lastfm",
+            url: Some(url),
+        });
+    }
+    if settings.musicbrainz
+        && let Some(url) = musicbrainz_artist_url(artist)
+    {
+        links.push(DetailLink {
+            title: msgid("Open on MusicBrainz"),
+            icon_name: "io.github.screwys.Rufin.external.musicbrainz",
+            url: Some(url),
+        });
+    }
+    if settings.server
+        && let Some(source) = source
+        && let Some(link) = source_link(source, &artist.row.media_uri)
+    {
+        links.push(link);
+    }
+    links
+}
+
+fn lastfm_album_url(artist: &str, album: &str) -> Option<String> {
+    let artist = clean_url_label(artist)?;
+    let album = clean_url_label(album)?;
+    Some(format!(
+        "https://www.last.fm/music/{}/{}",
+        percent_encode_path_segment(artist),
+        percent_encode_path_segment(album)
+    ))
+}
+
+fn lastfm_artist_url(artist: &str) -> Option<String> {
+    let artist = clean_url_label(artist)?;
+    Some(format!(
+        "https://www.last.fm/music/{}",
+        percent_encode_path_segment(artist)
+    ))
+}
+
+fn musicbrainz_album_url(album: &AlbumView) -> Option<String> {
+    if let Some(group_id) = album
+        .metadata
+        .musicbrainz_release_group_id
+        .as_deref()
+        .and_then(clean_url_label)
+    {
+        return Some(format!("https://musicbrainz.org/release-group/{group_id}"));
+    }
+    let release_id = album
+        .metadata
+        .musicbrainz_release_id
+        .as_deref()
+        .and_then(clean_url_label)?;
+    Some(format!("https://musicbrainz.org/release/{release_id}"))
+}
+
+fn musicbrainz_artist_url(artist: &ArtistView) -> Option<String> {
+    let artist_id = artist
+        .musicbrainz_artist_id
+        .as_deref()
+        .and_then(clean_url_label)?;
+    Some(format!("https://musicbrainz.org/artist/{artist_id}"))
+}
+
+fn clean_url_label(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+fn percent_encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            _ => {
+                encoded.push('%');
+                encoded.push_str(&format!("{byte:02X}"));
+            }
+        }
+    }
+    encoded
+}

@@ -8,7 +8,8 @@ use crate::LocalImageRef;
 use crate::{ImageBytes, SourceError, SourceResult};
 
 use crate::file::artwork::{
-    best_picture_index, content_type, image_rank, read_image_input, supported_image,
+    FolderImage, best_picture_index, content_type, folder_cover, folder_portrait, read_image_input,
+    supported_image,
 };
 use crate::file::discovery;
 use crate::file::lofty::read_lofty;
@@ -29,24 +30,38 @@ impl ArtworkReference {
     }
 }
 
+/// The supported images in `directory`.
+pub(crate) fn directory_images(directory: &Path) -> Vec<FolderImage> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| supported_image(path) && path.is_file())
+        .map(|path| FolderImage {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            path: path.to_string_lossy().into_owned(),
+            revision: None,
+        })
+        .collect()
+}
+
 pub(crate) fn directory_image(directory: &Path) -> Option<PathBuf> {
-    let mut best = None;
-    let mut count = 0;
-    for entry in fs::read_dir(directory).ok()?.flatten() {
-        let path = entry.path();
-        if !supported_image(&path) || !path.is_file() {
-            continue;
-        }
-        count += 1;
-        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        let rank = image_rank(&name);
-        let candidate = (rank, path);
-        if best.as_ref().is_none_or(|current| &candidate < current) {
-            best = Some(candidate);
-        }
-    }
-    best.filter(|(rank, _)| *rank != usize::MAX || count == 1)
-        .map(|(_, path)| path)
+    folder_cover(&directory_images(directory)).map(|image| PathBuf::from(&image.path))
+}
+
+pub(crate) fn directory_artist_image_for(
+    directory: &Path,
+    artist: &str,
+    allow_generic: bool,
+) -> Option<PathBuf> {
+    folder_portrait(&directory_images(directory), artist, allow_generic)
+        .map(|image| PathBuf::from(&image.path))
 }
 
 pub(crate) fn file_reference(source_id: &str, path: &Path, revision: String) -> LocalImageRef {
@@ -127,4 +142,14 @@ fn read_bounded(mut file: fs::File) -> SourceResult<Vec<u8>> {
 
 fn file_error(error: std::io::Error) -> SourceError {
     SourceError::Other(error.to_string())
+}
+
+pub(crate) fn revision(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!("{}-{}", metadata.len(), modified.as_nanos()))
 }

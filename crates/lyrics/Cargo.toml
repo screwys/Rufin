@@ -10,7 +10,13 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+uniffi = { workspace = true, optional = true }
+futures-util.workspace = true
+localization.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -20,6 +26,9 @@ lindera.workspace = true
 wana_kana.workspace = true
 tempfile.workspace = true
 zip.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros"] }
 
 [lints]
 workspace = true

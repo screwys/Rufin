@@ -8,7 +8,6 @@ pkgdesc='Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emb
 arch=('x86_64')
 url='https://github.com/screwys/Rufin'
 license=('GPL-3.0-or-later')
-# Generated Linux package dependencies start.
 depends=(
   'libgcc_s.so'
   'glib2'
@@ -24,7 +23,6 @@ depends=(
   'hicolor-icon-theme'
   'libadwaita'
 )
-# Generated Linux package dependencies end.
 provides=("rufin=${pkgver}")
 conflicts=('rufin' 'rufin-git')
 replaces=('rufin')

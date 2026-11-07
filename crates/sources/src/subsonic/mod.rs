@@ -1,18 +1,18 @@
 use crate::config::{decode_provider_payload, require_payload_version};
-use crate::policy::{raw_item_id, stable_hash, u16_from_option};
+use crate::policy::{raw_item_id, u16_from_option};
 use crate::{
-    ConnectedSource, CredentialHostInput, CredentialSettingsInput, ImageBytes, SourceConfiguration,
-    SourceEditResult, SourceError, SourceResult,
+    ConnectedSource, CredentialInput, ImageBytes, SourceConfiguration, SourceEditResult,
+    SourceError, SourceResult,
 };
+use audio_processing::ResolvedStream;
 use lyrics::{
     LyricsAgent, LyricsAgentRole, LyricsBundle, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine, LyricsOrigin, LyricsRole,
 };
-use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::instrument;
 
 mod client;
@@ -26,157 +26,18 @@ use item::*;
 
 use crate::{NativeImageRef as ImageRef, SourceId};
 
-type AlbumId = String;
-type ArtistId = String;
-type GenreId = String;
-type MusicFolderId = String;
 type PlaylistId = String;
-type TrackId = String;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ArtistCredit {
-    id: String,
-    name: String,
-    sort_name: Option<String>,
-    musicbrainz_artist_id: Option<String>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct GenreCredit {
-    id: String,
-    name: String,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct MoodCredit {
-    id: String,
-    name: String,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct AlbumRelations {
-    album_artists: Vec<ArtistCredit>,
-    artists: Vec<ArtistCredit>,
-    genres: Vec<GenreCredit>,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct TrackRelations {
-    artists: Vec<ArtistCredit>,
-    album_artists: Vec<ArtistCredit>,
-    genres: Vec<GenreCredit>,
-    moods: Vec<MoodCredit>,
-    music_folders: Option<Vec<MusicFolderId>>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Album {
-    id: AlbumId,
-    title: String,
-    sort_name: Option<String>,
-    artist: String,
-    year: u16,
-    release_date: Option<String>,
-    date_added: Option<String>,
-    last_played: Option<String>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    favorite: Option<bool>,
-    color_seed: u32,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-    release_types: Vec<String>,
-    is_compilation: Option<bool>,
-    musicbrainz_album_id: Option<String>,
-    musicbrainz_release_group_id: Option<String>,
-    relations: AlbumRelations,
-}
 #[derive(Clone, Debug, PartialEq)]
-struct Track {
-    id: TrackId,
-    album_id: Option<AlbumId>,
-    title: String,
-    sort_name: Option<String>,
-    artist: String,
-    album: String,
-    year: u16,
-    release_date: Option<String>,
-    date_added: Option<String>,
-    last_played: Option<i64>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    duration_seconds: u32,
-    favorite: Option<bool>,
-    disc_number: u16,
-    track_number: u16,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-    musicbrainz_recording_id: Option<String>,
-    musicbrainz_release_track_id: Option<String>,
-    source_path: Option<String>,
-    cue: Option<()>,
-    source_format: Option<String>,
-    comment: Option<String>,
-    skip_count: Option<u32>,
-    bpm: Option<u16>,
-    replay_gain_track_db: Option<f64>,
-    replay_gain_track_peak: Option<f64>,
-    replay_gain_album_db: Option<f64>,
-    replay_gain_album_peak: Option<f64>,
-    relations: TrackRelations,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Artist {
-    id: ArtistId,
-    name: String,
-    sort_name: Option<String>,
-    favorite: Option<bool>,
-    last_played: Option<String>,
-    play_count: Option<u32>,
-    user_rating: Option<u8>,
-    musicbrainz_artist_id: Option<String>,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Genre {
-    id: GenreId,
-    name: String,
-    image_ref: Option<ImageRef>,
-    local_artwork: Option<()>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct MusicFolder {
-    id: MusicFolderId,
-    name: String,
-    image_ref: Option<ImageRef>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct Playlist {
-    id: PlaylistId,
-    name: String,
-    duration_seconds: u32,
-    track_count: usize,
-    image_ref: Option<ImageRef>,
+    header: library::PlaylistObservation,
     revision: Option<String>,
     valid_until: Option<i64>,
-    writable: bool,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PlaylistEntry {
-    occurrence_id: String,
-    track_id: TrackId,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct PlaylistSnapshot {
     playlist: Playlist,
-    entries: Vec<PlaylistEntry>,
-}
-
-fn normalize_release_types(values: Vec<String>) -> Vec<String> {
-    let mut result = Vec::new();
-    for value in values {
-        let value = value.trim().to_lowercase();
-        if !value.is_empty() && !result.contains(&value) {
-            result.push(value);
-        }
-    }
-    result
+    entries: Vec<library::PlaylistEntryObservation>,
 }
 
 const SOURCE_CONFIG_VERSION: u32 = 1;
@@ -199,6 +60,7 @@ struct SubsonicSourcePayload {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SubsonicAuthentication {
     #[default]
     Password,
@@ -217,7 +79,7 @@ pub struct SubsonicSourceConfig {
 
 impl SubsonicSourceConfig {
     pub fn from_configuration(stored: &crate::SourceConfiguration) -> SourceResult<Self> {
-        if !matches!(stored.kind.as_str(), "navidrome" | "subsonic") {
+        if !stored.is(library::SourceKind::subsonic) {
             return Err(SourceError::InvalidConfig(format!(
                 "expected a Subsonic source, found {}",
                 stored.kind
@@ -272,7 +134,7 @@ pub(crate) async fn connect(
     source_id: SourceId,
     flavor: SubsonicFlavor,
     authentication: SubsonicAuthentication,
-    credentials: CredentialHostInput,
+    credentials: CredentialInput,
 ) -> SourceResult<ConnectedSource> {
     SubsonicSource::authenticate(source_id, flavor, authentication, credentials)
         .await
@@ -298,50 +160,47 @@ pub(crate) async fn edit(
     current: SourceConfiguration,
     current_credential: Option<String>,
     authentication: SubsonicAuthentication,
-    credentials: CredentialSettingsInput,
+    mut credentials: CredentialInput,
 ) -> SourceResult<SourceEditResult> {
     let flavor = SubsonicFlavor::from_source_id(&current.kind)?;
     crate::source::require_source_edit(&current, flavor.source_id())?;
     let saved = SubsonicSourceConfig::from_configuration(&current)?;
-    let name = crate::source::edited_source_name(&credentials.name, &current.name);
-    let address_changed = crate::source::comparable_address(&credentials.base_url)
+    let name = crate::source::edited_source_name(
+        credentials.source_name.as_deref().unwrap_or_default(),
+        &current.name,
+    );
+    let address_changed = crate::source::comparable_address(&credentials.server_url)
         != crate::source::comparable_address(&saved.base_url);
     let username_changed = credentials.username.trim() != saved.username;
-    let has_password = !credentials.password.is_empty();
+    let has_password = !credentials.secret.is_empty();
     let authentication_changed = authentication != saved.authentication;
 
-    if (address_changed || username_changed || authentication_changed) && !has_password {
+    if (username_changed || authentication_changed) && !has_password {
         return Err(SourceError::Other(
             "Enter the server password or API key to save authentication changes.".to_string(),
         ));
     }
 
     if has_password {
-        let authenticated = SubsonicSource::authenticate(
-            current.source_id,
-            flavor,
-            authentication,
-            CredentialHostInput {
-                server_name: Some(name),
-                server_url: credentials.base_url,
-                username: credentials.username,
-                password: credentials.password,
-                trust_invalid_cert: credentials.trust_invalid_cert,
-            },
-        )
-        .await?;
+        credentials.source_name = Some(name);
+        let authenticated =
+            SubsonicSource::authenticate(current.source_id, flavor, authentication, credentials)
+                .await?;
         return Ok(SourceEditResult::Connected(Box::new(
             authenticated.connected(),
         )));
     }
 
-    let reopen = credentials.trust_invalid_cert != saved.trust_invalid_cert;
+    let reopen = address_changed || credentials.trust_invalid_cert != saved.trust_invalid_cert;
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
         flavor.source_id(),
         name,
         SubsonicSourceConfig {
-            base_url: saved.base_url,
+            base_url: normalize_base_url(&credentials.server_url)?
+                .as_str()
+                .trim_end_matches('/')
+                .to_owned(),
             username: saved.username,
             trust_invalid_cert: credentials.trust_invalid_cert,
             navidrome_library_version: saved.navidrome_library_version,
@@ -361,9 +220,12 @@ pub(crate) async fn edit(
     )))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SubsonicFlavor {
     Navidrome,
+    #[serde(rename = "open_subsonic")]
     Subsonic,
 }
 impl SubsonicFlavor {
@@ -394,6 +256,7 @@ impl SubsonicFlavor {
 #[derive(Debug)]
 pub struct SubsonicSource {
     client: Client,
+    navidrome_client: Client,
     base_url: Url,
     username: String,
     credential: Arc<SubsonicCredential>,
@@ -401,7 +264,7 @@ pub struct SubsonicSource {
     navidrome_library: bool,
     navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
-    metadata_editing: AtomicBool,
+    extensions: tokio::sync::OnceCell<serde_json::Value>,
 }
 impl SubsonicSource {
     fn open(
@@ -411,6 +274,7 @@ impl SubsonicSource {
     ) -> SourceResult<Self> {
         let base_url = normalize_base_url(&config.base_url)?;
         let client = build_client(config.trust_invalid_cert)?;
+        let navidrome_client = navidrome::build_client(config.trust_invalid_cert)?;
         let credential = SubsonicCredential::parse(&credential)?;
         let navidrome_library = config.navidrome_library_version > 0;
         if config.navidrome_library_version > NAVIDROME_LIBRARY_VERSION {
@@ -433,6 +297,7 @@ impl SubsonicSource {
         }
         Ok(Self {
             client,
+            navidrome_client,
             base_url,
             username: config.username,
             credential: Arc::new(credential),
@@ -440,7 +305,7 @@ impl SubsonicSource {
             navidrome_library,
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
-            metadata_editing: AtomicBool::new(false),
+            extensions: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -449,13 +314,13 @@ impl SubsonicSource {
         source_id: SourceId,
         flavor: SubsonicFlavor,
         authentication: SubsonicAuthentication,
-        credentials: CredentialHostInput,
+        credentials: CredentialInput,
     ) -> SourceResult<AuthenticatedSubsonic> {
-        let CredentialHostInput {
-            server_name: submitted_name,
+        let CredentialInput {
+            source_name: submitted_name,
             server_url,
             username,
-            password,
+            secret: password,
             trust_invalid_cert,
         } = credentials;
         let base_url = normalize_base_url(&server_url)?;
@@ -479,7 +344,7 @@ impl SubsonicSource {
                 SubsonicCredential::from_api_key(&password)?
             }
         };
-        let (canonical_username, metadata_editing, provider_name) = match authentication {
+        let (canonical_username, provider_name) = match authentication {
             SubsonicAuthentication::Password | SubsonicAuthentication::LegacyPassword => {
                 let mut ping_url = endpoint(&base_url, "ping")?;
                 ping_url
@@ -502,15 +367,12 @@ impl SubsonicSource {
                     .filter(|value| !value.is_empty())
                     .unwrap_or(username.trim())
                     .to_string();
-                let editing = observed.as_ref().is_some_and(|value| {
-                    json::boolean(&value.body["user"]["adminRole"]).unwrap_or(false)
-                });
                 let name = observed
                     .and_then(|value| value.server_type)
                     .or(response.server_type)
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| flavor.display_name().to_string());
-                (canonical, editing, name)
+                (canonical, name)
             }
             SubsonicAuthentication::ApiKey => {
                 let mut token_url = endpoint(&base_url, "tokenInfo")?;
@@ -524,7 +386,7 @@ impl SubsonicSource {
                     .server_type
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| flavor.display_name().to_string());
-                (canonical, false, name)
+                (canonical, name)
             }
         };
         if canonical_username.trim().is_empty() {
@@ -552,6 +414,7 @@ impl SubsonicSource {
             .into_payload(),
         );
         let source = Self {
+            navidrome_client: navidrome::build_client(trust_invalid_cert)?,
             client,
             base_url,
             username: canonical_username,
@@ -560,24 +423,12 @@ impl SubsonicSource {
             navidrome_library: flavor == SubsonicFlavor::Navidrome,
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
-            metadata_editing: AtomicBool::new(metadata_editing),
+            extensions: tokio::sync::OnceCell::new(),
         };
         Ok(AuthenticatedSubsonic {
             configuration,
             source,
             credential: serialized_credential,
         })
-    }
-
-    pub(crate) fn metadata_editing_available(&self) -> bool {
-        self.metadata_editing.load(Ordering::Acquire)
-    }
-
-    pub(crate) async fn refresh_metadata_editing(&self) {
-        let available = self
-            .get_json("getUser", &[("username", self.username.clone())])
-            .await
-            .is_ok_and(|body| json::boolean(&body["user"]["adminRole"]).unwrap_or(false));
-        self.metadata_editing.store(available, Ordering::Release);
     }
 }

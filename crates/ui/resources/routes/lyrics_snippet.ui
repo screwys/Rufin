@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <template class="RufinLyricsSnippetView" parent="GtkBox">
+    <property name="visible">false</property><property name="hexpand">true</property>
+    <style><class name="lyrics-snippet"/></style>
+    <child><object class="GtkLabel" id="label">
+      <property name="xalign">0</property><property name="hexpand">true</property>
+      <property name="wrap">true</property><property name="wrap-mode">word-char</property>
+      <property name="ellipsize">end</property><property name="lines">2</property>
+      <property name="width-chars">1</property><property name="max-width-chars">36</property>
+    </object></child>
+  </template>
+</interface>

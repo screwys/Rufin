@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="GtkScrolledWindow" id="scroll">
+    <property name="hscrollbar-policy">never</property>
+    <property name="min-content-height">160</property>
+    <property name="max-content-height">360</property>
+    <property name="propagate-natural-height">true</property>
+    <property name="child"><object class="GtkListView" id="queue">
+      <property name="name">download-queue</property>
+      <property name="single-click-activate">false</property>
+      <style><class name="boxed-list"/></style>
+    </object></property>
+  </object>
+  <object class="AdwActionRow" id="empty">
+    <property name="name">download-queue</property>
+    <property name="title" translatable="yes">Nothing queued</property>
+    <property name="focusable">true</property>
+  </object>
+</interface>

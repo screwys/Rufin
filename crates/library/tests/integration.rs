@@ -1,14 +1,4 @@
-use library::LibraryResult;
-
-#[expect(
-    dead_code,
-    reason = "Raw integration fixtures reuse production connection setup."
-)]
-#[path = "../src/schema.rs"]
-mod production_schema;
-
 mod activity;
-mod connect;
 mod entities;
 mod laws;
 mod playlists;

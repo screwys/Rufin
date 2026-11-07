@@ -62,23 +62,40 @@ fn queue_load_confirmation_waits_through_stop_and_the_wrong_duplicate() {
     }
 }
 
-#[test]
-fn plex_queue_admission_retains_occurrences_and_rejects_mixed_sources() {
+#[tokio::test]
+async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(directory.path().join("queue.sqlite3"))
+        .await
+        .unwrap();
     let source = sources::SourceId::new("plex-test");
-    let entry = |index, source: &sources::SourceId| library::QueueEntry {
-        occurrence: OccurrenceId::new(format!("local:{index}")),
-        media_uri: library::source_entity_uri(source, "track", "plex:track:42").into(),
-        playlist_entry_id: None,
-        provenance: playback::Provenance::Manual,
-    };
-    let entries = vec![entry(0, &source), entry(1, &source), entry(2, &source)];
-    assert_eq!(queue_keys(&entries, &source).unwrap(), ["42", "42", "42"]);
-    let mut mixed = entries.clone();
-    mixed.push(entry(3, &sources::SourceId::new("another-profile")));
-    assert!(queue_keys(&mixed, &source).is_err());
-    assert_eq!(entries.len(), 3);
-    assert_eq!(plex_occurrence(&occurrence(7, 18)), Some(18));
-    assert_eq!(plex_occurrence(&OccurrenceId::new("local:18")), None);
+    let uri = library::source_entity_uri(&source, "track", "plex:track:42");
+    let entries = catalog
+        .queue_entries(
+            library::QueueLoad::media_uris(
+                vec![
+                    uri.clone(),
+                    uri.clone(),
+                    uri,
+                    library::source_entity_uri(
+                        &sources::SourceId::new("another-profile"),
+                        "track",
+                        "plex:track:42",
+                    ),
+                ],
+                playback::QueueProvenance::Manual,
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .entries;
+    assert_eq!(
+        queue_keys(&catalog, &entries[..3], &source).await.unwrap(),
+        ["42", "42", "42"]
+    );
+    assert!(queue_keys(&catalog, &entries, &source).await.is_err());
+    assert_eq!(entries.len(), 4);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -103,12 +120,12 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let root = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Handle::current();
     let settings = SettingsFile::open(root.path().join("settings.json")).unwrap();
-    let credential_ref = crate::settings::CredentialRef::new("plex-fixture");
+    let credential = crate::settings::Credential::new("plex-fixture");
     settings
         .update(|stored| {
             stored.sources.configured = vec![crate::settings::ConfiguredSource {
                 configuration: first.clone(),
-                credential_ref: Some(credential_ref.clone()),
+                credential: Some(credential.clone()),
                 music_folder_id: None,
                 local_access: None,
                 enable_half_stars: true,
@@ -116,82 +133,70 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             Ok(())
         })
         .unwrap();
-    let database = Arc::new(
-        Database::open(root.path().join("store.sqlite"))
+    let catalog = Arc::new(
+        Catalog::open(root.path().join("store.sqlite"))
             .await
             .unwrap(),
     );
     let memory = Arc::new(secrets::MemorySecretStore::new());
     memory
-        .save_secret(
-            &crate::settings::provider_secret_key(&credential_ref),
-            &login,
-        )
+        .save_secret(&crate::settings::provider_secret_key(&credential), &login)
         .unwrap();
     let secrets = Arc::new(secrets::SwitchableSecretStore::new(memory));
-    let artwork = artwork::Artwork::new(root.path().join("artwork"), runtime.clone()).unwrap();
-    let downloads = downloads::Downloads::new(
-        root.path().join("downloads"),
-        database.as_ref().clone(),
-        runtime.clone(),
-        async_channel::unbounded().0,
-        Vec::new(),
-    );
-    let bootstrap = SourceOwner::open_dormant(
-        artwork.clone(),
-        database.clone(),
+    let downloads = root.path().join("downloads");
+    let source = SourceOwner::open_dormant(
+        root.path().join("artwork"),
+        catalog.clone(),
         downloads,
         settings.clone(),
         secrets,
         runtime.clone(),
         crate::source::SourceOutputs {
             events: async_channel::unbounded().0,
-            discovery: async_channel::unbounded().0,
+            downloads: async_channel::unbounded().0,
         },
-    );
-    let source = bootstrap.owner;
+    )
+    .expect("the source owner opens");
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,
-        root.path().join("playback"),
-        false,
+        &root.path().join("playback"),
+        &settings,
     );
-    let stored = settings.load();
+    settings
+        .update(|stored| {
+            stored.ui.lyrics.preferences.external_lyrics_enabled = false;
+            Ok(())
+        })
+        .unwrap();
     let lyrics = LyricsService::new(
-        database.as_ref().clone(),
+        catalog.as_ref().clone(),
         source.clone(),
         runtime.clone(),
-        stored.ui.lyrics.clone(),
-        true,
+        &settings,
         async_channel::unbounded().0,
         root.path().join("dictionary"),
     );
-    let scrobbler = Arc::new(tokio::task::block_in_place(|| {
-        Scrobbler::new(
-            database.as_ref().clone(),
-            runtime.clone(),
-            stored.scrobbling_runtime_settings(),
-            true,
-        )
-        .unwrap()
-    }));
+    let scrobbler = Arc::new(Scrobbler::new(
+        catalog.as_ref().clone(),
+        runtime.clone(),
+        settings.clone(),
+    ));
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
     let owner = PlaybackOwner::new(
-        database,
+        catalog,
         settings,
         runtime,
         visualizer,
         visualizer_drain,
-        artwork,
         waveform,
         lyrics,
-        Arc::new(|_, _| {}),
         Vec::new,
         scrobbler,
-        || Ok(Box::new(Idle)),
+        source,
+        |_| Ok(Box::new(Idle)),
     );
-    owner.install_source_owner(&source);
-    owner.start().await.unwrap();
+    owner.start();
     owner
         .settings
         .update(|stored| {
@@ -204,7 +209,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             Ok(())
         })
         .unwrap();
-    let source_owner = owner.source_owner().unwrap();
+    let source_owner = &owner.source;
     let source = source_owner.client(&first.source_id).unwrap();
     let context = source.plex_companion_context().await.unwrap();
     let client = tokio::task::spawn_blocking(|| {
@@ -225,15 +230,16 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let plex = PlexPlayback {
         client,
         connection: Mutex::new((source, context)),
-        source_owner: Arc::downgrade(&source_owner),
+        source_owner: Arc::clone(source_owner),
+        owner: Arc::downgrade(&owner),
         settings: owner.settings.clone(),
         output: PlaybackOutput::Remote(RemoteOutput {
             id: "receiver".into(),
             name: "receiver".into(),
             protocol: RemoteOutputProtocol::PlexCompanion,
         }),
-        playback: owner.active().unwrap().playback,
-        database: owner.database.clone(),
+        playback: owner.active().unwrap(),
+        catalog: owner.catalog.clone(),
         queue: tokio::sync::Mutex::new(Some(cached)),
         timeline: Mutex::new(stopped_timeline()),
         commands: tokio::sync::Mutex::new(()),
@@ -253,23 +259,15 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         assert!(plex.resolve_timeline_source(&timeline).await.is_err());
         assert_eq!(plex.connection().1.source_id.as_str(), "preferred");
     }
-    assert_ne!(
-        receiver_occurrence(&first.source_id, 7, 1),
-        receiver_occurrence(&sources::SourceId::new("preferred"), 7, 1)
-    );
-    assert_eq!(
-        plex_occurrence(&receiver_occurrence(&first.source_id, 7, 1)),
-        Some(1)
-    );
     // The receiver endpoint refuses connections. Returning to Rufin must still work.
     plex.observe(stopped_timeline(), false).await.unwrap();
     let plex = Arc::new(plex);
     *owner.plex.lock().unwrap() = Some(plex.clone());
-    owner.output.lock().unwrap().selected = plex.output.clone();
+    *owner.output.lock().unwrap() = plex.output.clone();
     tokio::task::spawn_blocking(move || {
         owner.leave_plex(Arc::new(AtomicBool::new(false))).unwrap();
         assert!(owner.plex.lock().unwrap().is_none());
-        assert_eq!(owner.output.lock().unwrap().selected, PlaybackOutput::Local);
+        assert_eq!(*owner.output.lock().unwrap(), PlaybackOutput::Local);
         assert!(plex.cancelled.load(Ordering::Acquire));
         drop(plex);
         owner.shutdown();

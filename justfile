@@ -1,4 +1,5 @@
 set shell := ["bash", "-euc"]
+set positional-arguments
 
 default:
     @just --list
@@ -9,6 +10,10 @@ build target="" architecture="":
             Darwin|CYGWIN*|MINGW*|MSYS*) just _build-native-package ;; \
             *) scripts/container run default none just _build ;; \
         esac; \
+    elif [[ "{{ target }}" == "apk" && -z "{{ architecture }}" ]]; then \
+        cargo run -p xtask -- android build stable; \
+    elif [[ "{{ target }}" == "apk-dev" && -z "{{ architecture }}" ]]; then \
+        cargo run -p xtask -- android build development; \
     elif [[ "{{ target }}" == "headless" && -z "{{ architecture }}" ]]; then \
         scripts/container run default none just _build rufin-controller; \
     elif [[ "{{ target }}" == "arch" && -z "{{ architecture }}" ]]; then \
@@ -20,7 +25,15 @@ build target="" architecture="":
         scripts/container run packaging sandbox env FLATPAK_BWRAP=/usr/bin/bwrap \
             just _build-flatpak; \
     else \
-        echo "usage: just build [headless|arch|flatpak|rpm [arm]]" >&2; \
+        echo "usage: just build [headless|apk|apk-dev|arch|flatpak|rpm [arm]]" >&2; \
+        exit 2; \
+    fi
+
+install target:
+    @if [[ "{{ target }}" == "android" ]]; then \
+        cargo run -p xtask -- android install; \
+    else \
+        echo "usage: just install android" >&2; \
         exit 2; \
     fi
 
@@ -247,25 +260,14 @@ _build-rpm requested_arch="":
 clean:
     @scripts/container clean
 
-# Run all checks, or only Linux dependency checks with `just check deps`.
-check target="":
-    @if [[ -z "{{ target }}" ]]; then \
-        scripts/container run default none just _check-all; \
-    elif [[ "{{ target }}" == "deps" ]]; then \
-        scripts/container run default none just _check-deps; \
-    else \
-        echo "usage: just check [deps]" >&2; \
-        exit 2; \
-    fi
-
-_check-deps:
-    @cargo run --locked -p xtask -- generate linux-packaging --check
+check:
+    @scripts/container run default none just _check-all
 
 _check-all:
+    @cargo deny --locked check -D unmatched-skip
     @just _check-cmake
     @cargo run --locked -p xtask -- generate flatpak-sources --check
     @cargo run --locked -p xtask -- generate i18n-template --check
-    @cargo run --locked -p xtask -- generate linux-packaging --check
     @cargo fmt --all -- --check
     @if command -v ast-grep >/dev/null 2>&1; then \
         just _ast-grep; \
@@ -273,8 +275,7 @@ _check-all:
         echo "ast-grep is unavailable; skipping RefCell checks."; \
     fi
     @just _lint
-    @just _test
-    @cargo deny --locked check -D unmatched-skip
+    @just _test --locked
 
 _check-cmake:
     @preset=development; \
@@ -330,15 +331,24 @@ debug *args:
     @if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then \
         echo "Run 'just debug' on the host." >&2; \
         exit 1; \
-    fi
-    @set -- {{ args }}; \
+    fi; \
+    set -- {{ args }}; \
+    if [[ "${1:-}" == "--" ]]; then \
+        shift; \
+    fi; \
     if [[ "${1:-}" == "flatpak" ]]; then \
         shift; \
+        if [[ "${1:-}" == "--" ]]; then \
+            shift; \
+        fi; \
         flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \
     else \
         executable_name=rufin; \
         if [[ "${1:-}" == "headless" ]]; then \
             shift; \
+            if [[ "${1:-}" == "--" ]]; then \
+                shift; \
+            fi; \
             executable_name=rufin-controller; \
         fi; \
         cmake --preset development; \
@@ -392,10 +402,15 @@ fmt:
 
 # Regenerate the shared desktop and web translation template, or pass --check.
 i18n *args:
-    @scripts/container run default none cargo run --locked -p xtask -- generate i18n-template {{ args }}
+    @scripts/container run default none cargo run -p xtask -- generate i18n-template {{ args }}
 
 test *args:
-    @scripts/container run default none just _test {{ args }}
+    @if [[ "$*" == "android" ]]; then \
+        android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug; \
+        cargo run --locked -p xtask -- android clippy; \
+    else \
+        scripts/container run default none just _test "$@"; \
+    fi
 
 _test *args:
     @if [[ "$(uname -s)" == Darwin ]]; then \
@@ -409,14 +424,14 @@ _test *args:
             echo "NEXTEST_JOBS must be a positive integer." >&2; \
             exit 1; \
         fi; \
-        cargo nextest run --locked --test-threads "$nextest_jobs" {{ args }}; \
+        cargo nextest run --config-file nextest.toml --features app-identity/development --test-threads "$nextest_jobs" "$@"; \
     else \
-        cargo_args=(--locked); \
-        if [[ -z "{{ args }}" ]]; then \
+        cargo_args=(--features app-identity/development); \
+        if [[ -z "$*" || "$*" == "--locked" ]]; then \
             cargo_args+=(--lib --bins --tests --benches --examples); \
         fi; \
         echo "cargo-nextest is unavailable; falling back to cargo test." >&2; \
-        cargo test "${cargo_args[@]}" {{ args }}; \
+        cargo test "${cargo_args[@]}" "$@"; \
     fi
 
 container action="status":
@@ -430,14 +445,7 @@ _lint:
     @if [[ "$(uname -s)" == Darwin ]]; then \
         export GETTEXT_DIR="$(brew --prefix gettext)"; \
     fi; \
-    cargo clippy --workspace --all-targets --locked
-
-# Regenerate Linux package dependency metadata.
-deps:
-    @scripts/container run default none just _deps
-
-_deps:
-    @cargo run --locked -p xtask -- generate linux-packaging
+    cargo clippy --workspace --all-targets --locked --features app-identity/development
 
 _build-native-package identity="development":
     @build_identity="{{ identity }}"; \

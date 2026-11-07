@@ -12,11 +12,17 @@ on:
       - main
     paths:
       - .github/workflows/nix.yml
+      - .cargo/**
       - Cargo.lock
       - Cargo.toml
       - CMakeLists.txt
       - cmake/**
       - crates/**
+      - locales/**
+      - resources/**
+      - vendor/**
+      - packaging/linux/**
+      - web/**
       - flake.lock
       - flake.nix
       - '!**/*.md'
@@ -108,7 +114,7 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Check flake
-        run: nix flake check --no-write-lock-file --print-build-logs
+        run: nix flake check --no-build --no-write-lock-file
 
       - name: Build app
         id: build

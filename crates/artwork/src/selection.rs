@@ -1,100 +1,37 @@
-//! Decodes one already-selected opaque Library artwork binding.
+//! Decodes stored artwork bindings into images in selection order.
 
-use sources::{ExternalAlbumImageRef, LocalImageRef, NativeArtworkBinding};
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Candidate {
-    Native(NativeArtworkBinding),
-    Local(LocalImageRef),
-    Album(metadata_lookup::AlbumCover),
-}
-
-impl Candidate {
-    pub(crate) fn asset_identity(&self) -> String {
-        match self {
-            Self::Native(image) => {
-                format!("native\0{}\0{}", image.source_id, image.image.item_id)
-            }
-            Self::Local(LocalImageRef::File {
-                source_id, path, ..
-            }) => {
-                format!("local-file\0{source_id}\0{path}")
-            }
-            Self::Local(LocalImageRef::Embedded {
-                source_id,
-                path,
-                picture_index,
-                ..
-            }) => format!("local-embedded\0{source_id}\0{path}\0{picture_index}"),
-            Self::Album(album) => album.stable_identity(),
-        }
-    }
-
-    pub(crate) fn stable_identity(&self) -> String {
-        let mut identity = match self {
-            Self::Native(image) => format!(
-                "native\0{}\0{}\0{}",
-                image.source_id,
-                image.image.item_id,
-                image.image.tag.as_deref().unwrap_or_default()
-            ),
-            Self::Local(LocalImageRef::File { path, revision, .. }) => {
-                format!("local-file\0{path}\0{revision}")
-            }
-            Self::Local(LocalImageRef::Embedded {
-                path,
-                picture_index,
-                revision,
-                ..
-            }) => format!("local-embedded\0{path}\0{picture_index}\0{revision}"),
-            Self::Album(album) => album.stable_identity(),
-        };
-        if let Self::Local(binding) = self
-            && binding.source_id().as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
-        {
-            identity.push('\0');
-            identity.push_str(binding.source_id().as_str());
-        }
-        identity
-    }
-
-    pub(crate) const fn is_external(&self) -> bool {
-        matches!(self, Self::Album(_))
-    }
-}
+pub(crate) use library::ArtworkCandidate as Candidate;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArtworkBinding {
-    candidate: Option<Candidate>,
+    pub(crate) candidates: Vec<Candidate>,
+    asset_identity: String,
     stable_identity: String,
 }
 
 impl ArtworkBinding {
     pub fn opaque(binding: &[u8]) -> Self {
-        let candidate = serde_json::from_slice::<NativeArtworkBinding>(binding)
-            .ok()
-            .map(Candidate::Native)
+        let candidates: Vec<Candidate> = serde_json::from_slice(binding).unwrap_or_default();
+        // An album's cover lookup names its own asset; an artist's binding keeps its name's.
+        let asset_identity = candidates
+            .first()
+            .filter(|candidate| matches!(candidate.image, library::ArtworkImage::Album(_)))
             .or_else(|| {
-                serde_json::from_slice::<LocalImageRef>(binding)
-                    .ok()
-                    .map(Candidate::Local)
+                candidates.iter().find(|candidate| {
+                    matches!(candidate.image, library::ArtworkImage::Artist { .. })
+                })
             })
-            .or_else(|| {
-                let external = serde_json::from_slice::<ExternalAlbumImageRef>(binding).ok()?;
-                metadata_lookup::AlbumCover::new(
-                    &external.artist,
-                    &external.album,
-                    external.musicbrainz_release_group_id.as_deref(),
-                    external.musicbrainz_release_id.as_deref(),
-                )
-                .map(Candidate::Album)
-            });
-        let stable_identity = candidate
-            .as_ref()
-            .map(Candidate::stable_identity)
+            .or_else(|| candidates.first())
+            .map(Candidate::asset_identity)
             .unwrap_or_default();
+        let stable_identity = candidates
+            .iter()
+            .map(Candidate::stable_identity)
+            .collect::<Vec<_>>()
+            .join("\0");
         Self {
-            candidate,
+            candidates,
+            asset_identity,
             stable_identity,
         }
     }
@@ -103,12 +40,16 @@ impl ArtworkBinding {
         Self::default()
     }
 
-    pub(crate) fn candidate(&self) -> Option<&Candidate> {
-        self.candidate.as_ref()
+    pub(crate) fn has_external(&self) -> bool {
+        self.candidates.iter().any(Candidate::is_external)
     }
 
-    pub(crate) fn has_external(&self) -> bool {
-        self.candidate.as_ref().is_some_and(Candidate::is_external)
+    pub(crate) fn source_id(&self) -> Option<&sources::SourceId> {
+        self.candidates.iter().find_map(Candidate::source_id)
+    }
+
+    pub(crate) fn asset_identity(&self) -> &str {
+        &self.asset_identity
     }
 
     pub fn stable_identity(&self) -> &str {
@@ -128,8 +69,47 @@ mod tests {
         )
         .expect("encode binding");
         let binding = ArtworkBinding::opaque(&encoded);
-        assert!(binding.candidate().is_some());
+        assert!(!binding.candidates.is_empty());
         assert!(binding.stable_identity().contains("album"));
+        let album = library::AlbumCover::new(
+            " Artist ",
+            " Album ",
+            Some(" release-group "),
+            Some("bad/id"),
+        )
+        .unwrap();
+        let candidate = Candidate::new(library::ArtworkImage::Album(album), None);
+        assert_eq!(
+            candidate.stable_identity(),
+            "album\0Artist\0Album\0release-group\0"
+        );
+        assert_eq!(
+            serde_json::to_value(&candidate.image).unwrap(),
+            serde_json::json!({
+                "kind":"album", "artist":"Artist", "album":"Album", "release_group_id":"release-group", "release_id":null
+            })
+        );
+        let restored: Candidate =
+            serde_json::from_slice(&serde_json::to_vec(&candidate).unwrap()).unwrap();
+        assert_eq!(restored, candidate);
+        assert!(library::AlbumCover::new("Unknown Artist", "Unknown Album", None, None).is_none());
+        for encoded in [
+            encoded,
+            br#"{"File":{"path":"/cover.png","revision":"one"}}"#.to_vec(),
+            br#"{"Embedded":{"path":"/song.flac","picture_index":0,"revision":"one"}}"#.to_vec(),
+            br#"{"artist":"Artist","album":"Album","musicbrainz_release_group_id":null,"musicbrainz_release_id":null}"#.to_vec(),
+            br#"{"kind":"artist","artist_name":"Artist","musicbrainz_artist_id":null,"source":null,"fallback":null}"#.to_vec(),
+            br#"{"kind":"playlist","smart":false,"source_id":null,"object_id":"playlist","revision":"one"}"#.to_vec(),
+        ] {
+            let normalized = library::normalize_artwork_binding(&encoded).unwrap();
+            let before = ArtworkBinding::opaque(&normalized);
+            let mut candidates = before.candidates.clone();
+            for candidate in &mut candidates { candidate.blur_hash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into()); }
+            let after = ArtworkBinding::opaque(&serde_json::to_vec(&candidates).unwrap());
+            assert_eq!(after.stable_identity(), before.stable_identity());
+            assert_eq!(after.asset_identity(), before.asset_identity());
+            assert!(after.candidates.iter().all(|candidate| candidate.blur_hash().is_some()));
+        }
     }
 
     #[test]
@@ -145,13 +125,12 @@ mod tests {
                 "local-embedded\0/music/track.flac\x002\0two",
             ),
         ] {
-            let binding = ArtworkBinding::opaque(encoded);
+            let binding =
+                ArtworkBinding::opaque(&library::normalize_artwork_binding(encoded).unwrap());
             assert_eq!(binding.stable_identity(), identity);
-            let Some(Candidate::Local(reference)) = binding.candidate() else {
-                panic!("released Local binding");
-            };
+            let reference = binding.candidates.first().unwrap();
             assert_eq!(
-                reference.source_id().as_str(),
+                reference.source_id().unwrap().as_str(),
                 sources::LOCAL_LIBRARY_SOURCE_ID
             );
         }

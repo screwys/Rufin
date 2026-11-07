@@ -10,8 +10,9 @@ use tokio_tungstenite::{
 impl PlexSource {
     async fn listen_once(
         &self,
+        ready: &mut (impl FnMut() -> bool + Send),
         changed: &mut (impl FnMut(RemoteItemChange) -> bool + Send),
-    ) -> SourceResult<()> {
+    ) -> SourceResult<bool> {
         let mut random = [0; 16];
         getrandom::fill(&mut random).map_err(|error| SourceError::Other(error.to_string()))?;
         let response = self
@@ -38,16 +39,16 @@ impl PlexSource {
             .await
             .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
         let mut socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
-        if !changed(RemoteItemChange::BoundaryLost) {
-            return Ok(());
+        if !ready() {
+            return Ok(false);
         }
         while let Some(message) = socket.next().await {
             match message.map_err(|error| SourceError::Network(error.to_string()))? {
                 Message::Text(text) => {
-                    if let Some(change) = notification(&text) {
-                        if !changed(change) {
-                            break;
-                        }
+                    if let Some(change) = notification(&text)
+                        && !changed(change)
+                    {
+                        return Ok(false);
                     }
                 }
                 Message::Ping(payload) => socket
@@ -58,18 +59,20 @@ impl PlexSource {
                 _ => {}
             }
         }
-        Ok(())
+        Ok(true)
     }
+    /// Listens until `ready` or `changed` returns false. `ready` runs on each connect; the
+    /// changes missed while disconnected are caught up from there.
     pub(crate) async fn listen_library_changes(
         &self,
+        mut ready: impl FnMut() -> bool + Send,
         mut changed: impl FnMut(RemoteItemChange) -> bool + Send,
     ) {
         loop {
-            if let Err(error) = self.listen_once(&mut changed).await {
-                tracing::warn!(%error, "Plex notification feed disconnected");
-            }
-            if !changed(RemoteItemChange::BoundaryLost) {
-                return;
+            match self.listen_once(&mut ready, &mut changed).await {
+                Ok(false) => return,
+                Ok(true) => {}
+                Err(error) => tracing::warn!(%error, "Plex notification feed disconnected"),
             }
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
@@ -110,15 +113,8 @@ fn notification(text: &str) -> Option<RemoteItemChange> {
             }
         }
     }
-    upserts.sort();
-    upserts.dedup();
-    removals.sort();
-    removals.dedup();
-    if upserts.len().saturating_add(removals.len()) > crate::source::LIVE_CHANGE_LIMIT {
-        return Some(RemoteItemChange::BoundaryLost);
-    }
     (!upserts.is_empty() || !removals.is_empty())
-        .then_some(RemoteItemChange::Items { upserts, removals })
+        .then(|| RemoteItemChange::items(upserts, removals))
 }
 
 #[cfg(test)]
@@ -142,10 +138,7 @@ mod tests {
         ]);
         assert_eq!(
             notification(&input.to_string()),
-            Some(RemoteItemChange::Items {
-                upserts: vec!["1763".into()],
-                removals: vec![]
-            })
+            Some(RemoteItemChange::items(vec!["1763".into()], vec![]))
         );
     }
 
@@ -153,19 +146,22 @@ mod tests {
     fn library_hints_include_all_processing_states_and_ignore_playback() {
         let entries:Vec<_>=(0..=5).map(|state|serde_json::json!({"identifier":"com.plexapp.plugins.library","state":state,"itemID":state.to_string()})).collect();
         let input = serde_json::json!({"NotificationContainer":{"TimelineEntry":entries,"PlaySessionStateNotification":[{"ratingKey":"not-catalog","state":"stopped"}]}});
-        let Some(RemoteItemChange::Items { upserts, removals }) = notification(&input.to_string())
-        else {
+        let Some(RemoteItemChange::Items(items)) = notification(&input.to_string()) else {
             panic!("item hints");
         };
-        assert_eq!(upserts, ["0", "1", "2", "3", "4", "5"]);
-        assert!(removals.is_empty());
+        assert_eq!(
+            items.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["0", "1", "2", "3", "4", "5"]
+        );
+        assert!(
+            items
+                .values()
+                .all(|value| matches!(value, crate::RemoteItemUpdate::Metadata))
+        );
         let input = serde_json::json!({"NotificationContainer":{"_children":[{"identifier":"com.plexapp.plugins.library","state":9,"itemID":"gone"}]}});
         assert_eq!(
             notification(&input.to_string()),
-            Some(RemoteItemChange::Items {
-                upserts: vec![],
-                removals: vec!["gone".into()]
-            })
+            Some(RemoteItemChange::items(vec![], vec!["gone".into()]))
         );
     }
 }

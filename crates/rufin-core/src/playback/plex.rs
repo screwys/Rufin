@@ -1,24 +1,29 @@
 //! Native Companion crossings. PMS owns its queue; observations enter the existing session.
+use library::ReadCancellation;
 #[cfg(test)]
 mod tests;
 use super::*;
-use playback::{
-    ExternalPlayback, PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus,
+use crate::playback::{
+    actor::Playback,
+    state::{AutoDjRequest, Command, ExternalPlayback},
 };
+use playback::{PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus};
 use playback_cast::plex::{PlayMedia, PlexClient, PlexPlayer, Timeline};
 use sources::{
     PlexCompanionContext, PlexQueueMutation, PlexQueuePlacement, PlexQueueWindow, Source,
 };
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) struct PlexPlayback {
     client: PlexClient,
     connection: Mutex<(Arc<Source>, PlexCompanionContext)>,
-    source_owner: std::sync::Weak<SourceOwner>,
+    source_owner: Arc<SourceOwner>,
+    /// The playback owner that left for this player, which takes it back.
+    owner: std::sync::Weak<super::PlaybackOwner>,
     settings: SettingsFile,
     output: PlaybackOutput,
     playback: Playback,
-    database: Arc<Database>,
+    catalog: Arc<Catalog>,
     queue: tokio::sync::Mutex<Option<PlexQueueWindow>>,
     timeline: Mutex<Timeline>,
     commands: tokio::sync::Mutex<()>,
@@ -28,75 +33,6 @@ pub(super) struct PlexPlayback {
 }
 
 impl PlexPlayback {
-    pub(super) async fn queue_content_id(&self) -> String {
-        let (_, context) = self.connection();
-        let queue = self.queue.lock().await;
-        match queue.as_ref() {
-            Some(queue) => format!("plex:{}:{}:{}", context.source_id, queue.id, queue.version),
-            None => library::queue_content_id(&[], &[]),
-        }
-    }
-
-    pub(super) async fn continuation_snapshot(
-        &self,
-    ) -> Result<Option<playback::Continuation>, String> {
-        let _guard = self.commands.lock().await;
-        let timeline = self.current().await?;
-        self.observe(timeline.clone(), false).await?;
-        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
-            return Ok(None);
-        };
-        let items = self.all_items(&timeline, &self.cancelled).await?;
-        let (_, context) = self.connection();
-        let queue_id = timeline
-            .play_queue_id
-            .ok_or("The Plex player has no queue")?;
-        snapshot.queue.entries = items
-            .iter()
-            .map(|item| library::QueueEntry {
-                occurrence: receiver_occurrence(&context.source_id, queue_id, item.occurrence_id),
-                media_uri: item.media_uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: playback::Provenance::Manual,
-            })
-            .collect();
-        snapshot.queue.order = (0..items.len() as u32).collect();
-        snapshot.queue.current_index = snapshot
-            .queue
-            .entries
-            .iter()
-            .position(|entry| entry.occurrence == snapshot.header.current);
-        snapshot.header.total = items.len();
-        Ok(Some(snapshot))
-    }
-
-    pub(super) async fn stop_continuation(
-        &self,
-        expected: &playback::ContinuationHeader,
-    ) -> Result<Option<playback::ContinuationHeader>, String> {
-        let _guard = self.commands.lock().await;
-        let mut timeline = self.current().await?;
-        self.observe(timeline.clone(), false).await?;
-        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
-            return Ok(None);
-        };
-        if snapshot.header.current != expected.current
-            || snapshot
-                .header
-                .listen
-                .as_ref()
-                .map(|listen| &listen.play_id)
-                != expected.listen.as_ref().map(|listen| &listen.play_id)
-        {
-            return Ok(None);
-        }
-        self.control(|client| client.stop()).await?;
-        timeline.state = "stopped".into();
-        self.observe(timeline, false).await?;
-        snapshot.header.total = expected.total;
-        Ok(Some(snapshot.header))
-    }
-
     pub(super) async fn stop_for_continuation(&self) -> Result<(), String> {
         let _guard = self.commands.lock().await;
         self.control(|client| client.stop()).await?;
@@ -125,17 +61,19 @@ impl PlexPlayback {
         {
             return Ok(());
         }
-        let owner = self
-            .source_owner
-            .upgrade()
-            .ok_or("Sources are unavailable")?;
+        let owner = &self.source_owner;
         let stored = self.settings.load();
-        let preferred = stored.sources.selected_source_id;
+        let preferred = stored.sources.selected_source_id.clone();
         let mut configured = stored
             .sources
             .configured
-            .into_iter()
-            .filter(|source| source.configuration.kind == "plex")
+            .iter()
+            .filter(|source| {
+                source
+                    .configuration
+                    .is(|kind| kind == library::SourceKind::Plex)
+            })
+            .cloned()
             .collect::<Vec<_>>();
         configured
             .sort_by_key(|source| Some(&source.configuration.source_id) != preferred.as_ref());
@@ -159,42 +97,26 @@ impl PlexPlayback {
     }
     async fn insert(
         &self,
-        input: library::QueueInput,
-        target: Option<playback::QueueReorderTarget>,
-        placement: playback::QueuePlacement,
-        anchor: usize,
-        shuffled: Option<u64>,
+        request: PlayRequest,
+        target: Option<crate::playback::QueueReorderTarget>,
     ) -> Result<(), String> {
         self.current().await?;
-        let page = self
-            .database
-            .read_queue(library::QueueReadRequest::Capture {
-                input: Box::new(input),
-                anchor_index: anchor,
-                random_start: None,
-                shuffled,
-            })
-            .await
-            .map_err(string_error)?;
-        if let Some(prefix) = page.entries.first().and_then(|entry| {
-            entry
-                .occurrence
-                .as_str()
-                .rsplit_once(':')
-                .map(|(prefix, _)| format!("{prefix}:"))
-        }) {
-            self.database
-                .discard_queue_capture(&prefix)
-                .await
-                .map_err(string_error)?;
-        }
-        let keys = queue_keys(&page.entries, &self.connection().1.source_id)?;
+        let placement = request.placement;
+        let shuffled = self
+            .playback
+            .projection()
+            .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
+        let page = request
+            .prepare(&self.catalog, shuffled, random_u64())
+            .await?;
+        let anchor = page.current_index;
+        let keys = queue_keys(&self.catalog, &page.entries, &self.connection().1.source_id).await?;
         if keys.is_empty() {
-            return Ok(());
+            return Err(localization::tr("Nothing to play here"));
         }
         let replacing = matches!(
             placement,
-            playback::QueuePlacement::Now | playback::QueuePlacement::Replace { .. }
+            crate::playback::QueuePlacement::Now | crate::playback::QueuePlacement::Replace { .. }
         ) && target.is_none();
         if replacing {
             let queue = create_queue(&self.connection().0, &keys, &self.cancelled).await?;
@@ -293,13 +215,13 @@ impl PlexPlayback {
                 .ok_or("The Plex player has no queue")?;
             let mut first = None;
             let placement = match target {
-                Some(playback::QueueReorderTarget::After(id)) => PlexQueuePlacement::After(
-                    plex_occurrence(&id)
-                        .ok_or("The queue target is no longer on the Plex player")?,
-                ),
-                Some(playback::QueueReorderTarget::Before(id)) => {
-                    let id = plex_occurrence(&id)
-                        .ok_or("The queue target is no longer on the Plex player")?;
+                Some(crate::playback::QueueReorderTarget::After(position)) => {
+                    PlexQueuePlacement::After(
+                        self.items_at(&timeline, &[position]).await?[0].occurrence_id,
+                    )
+                }
+                Some(crate::playback::QueueReorderTarget::Before(position)) => {
+                    let id = self.items_at(&timeline, &[position]).await?[0].occurrence_id;
                     let before = self
                         .connection()
                         .0
@@ -313,8 +235,14 @@ impl PlexPlayback {
                         PlexQueuePlacement::After(id)
                     }
                 }
-                Some(playback::QueueReorderTarget::End) => PlexQueuePlacement::End,
-                None if placement == playback::QueuePlacement::Next => PlexQueuePlacement::Next,
+                Some(
+                    crate::playback::QueueReorderTarget::BeforeOccurrence(_)
+                    | crate::playback::QueueReorderTarget::AfterOccurrence(_),
+                ) => return Ok(()),
+                Some(crate::playback::QueueReorderTarget::End) => PlexQueuePlacement::End,
+                None if placement == crate::playback::QueuePlacement::Next => {
+                    PlexQueuePlacement::Next
+                }
                 None => PlexQueuePlacement::End,
             };
             let chunks = keys.chunks(sources::PLEX_QUEUE_WINDOW).collect::<Vec<_>>();
@@ -430,6 +358,7 @@ impl PlexPlayback {
                             .is_some(),
                         repeat: repeat(&timeline),
                         shuffle: timeline.shuffle.unwrap_or(false),
+                        rate: 1.0,
                     },
                 )
                 .map_err(string_error);
@@ -460,9 +389,12 @@ impl PlexPlayback {
                 .handoff_snapshot()
                 .map_err(string_error)?
                 .0
-                .current()
-                .cloned();
-            if current.as_ref().and_then(plex_occurrence) != timeline.play_queue_item_id {
+                .current_index;
+            if current
+                .and_then(|position| window.items.get(position))
+                .map(|item| item.occurrence_id)
+                != timeline.play_queue_item_id
+            {
                 Some(self.restore(window, &timeline).await?)
             } else {
                 None
@@ -495,6 +427,7 @@ impl PlexPlayback {
                         .is_some(),
                     repeat: repeat(&timeline),
                     shuffle: timeline.shuffle.unwrap_or(false),
+                    rate: 1.0,
                 },
             )
             .map_err(string_error)
@@ -505,52 +438,32 @@ impl PlexPlayback {
         window: &PlexQueueWindow,
         timeline: &Timeline,
     ) -> Result<library::QueueRestore, String> {
-        let (source, context) = self.connection();
-        let entries: Vec<_> = window
-            .items
-            .iter()
-            .map(|item| library::QueueEntry {
-                occurrence: receiver_occurrence(&context.source_id, window.id, item.occurrence_id),
-                media_uri: item.media_uri.clone().into(),
-                playlist_entry_id: None,
-                provenance: playback::Provenance::Manual,
-            })
-            .collect();
-        let mut page = self
-            .database
-            .read_queue(library::QueueReadRequest::Hydrate {
-                entries: entries.clone(),
-            })
+        let entries = self
+            .catalog
+            .queue_entries(
+                library::QueueLoad::media_uris(
+                    window.items.iter().map(|item| item.media_uri.clone()),
+                    playback::QueueProvenance::Manual,
+                ),
+                None,
+            )
+            .await
+            .map_err(string_error)?
+            .entries;
+        let rows = self
+            .catalog
+            .queue_rows_for_entries(
+                &entries.iter().cloned().enumerate().collect::<Vec<_>>(),
+                &ReadCancellation::new(),
+            )
             .await
             .map_err(string_error)?;
-        if page.occurrences.len() != entries.len() {
-            let keys = window
-                .items
-                .iter()
-                .filter(|item| {
-                    !page
-                        .occurrences
-                        .iter()
-                        .any(|row| row.media_uri == item.media_uri)
-                })
-                .map(|item| item.rating_key.clone())
-                .collect::<Vec<_>>();
-            source
-                .plex_import_items(&self.database, &keys)
-                .await
-                .map_err(string_error)?;
-            page = self
-                .database
-                .read_queue(library::QueueReadRequest::Hydrate {
-                    entries: entries.clone(),
-                })
-                .await
-                .map_err(string_error)?;
-        }
         Ok(library::QueueRestore {
             order: (0..entries.len() as u32).collect(),
             entries: entries.into(),
-            occurrences: page.occurrences,
+            rows,
+            ids: Arc::from([]),
+            ranks: Arc::from([]),
             current_index: window
                 .items
                 .iter()
@@ -558,19 +471,18 @@ impl PlexPlayback {
             progress_millis: timeline.time.unwrap_or_default().min(i64::MAX as u64) as i64,
             repeat_mode: repeat(timeline),
             shuffled: timeline.shuffle.unwrap_or(false),
-            next_id: 0,
         })
     }
 
-    async fn command(&self, command: SessionCommand) -> Result<(), String> {
+    async fn command(&self, command: Command) -> Result<(), String> {
         let _guard = self.commands.lock().await;
         if self.cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
         match command {
-            SessionCommand::Play => self.control(|client| client.play()).await?,
-            SessionCommand::Pause => self.control(|client| client.pause()).await?,
-            SessionCommand::PlayPause => {
+            Command::Play => self.control(|client| client.play()).await?,
+            Command::Pause => self.control(|client| client.pause()).await?,
+            Command::PlayPause => {
                 let playing = matches!(
                     self.current().await?.state.as_str(),
                     "playing" | "buffering"
@@ -584,18 +496,18 @@ impl PlexPlayback {
                 })
                 .await?;
             }
-            SessionCommand::Stop => self.control(|client| client.stop()).await?,
-            SessionCommand::Next => self.control(|client| client.next()).await?,
-            SessionCommand::Previous => self.control(|client| client.previous()).await?,
-            SessionCommand::Seek(offset) => self.control(move |client| client.seek(offset)).await?,
-            SessionCommand::SetVolume(value) | SessionCommand::PersistVolume(value) => {
+            Command::Stop => self.control(|client| client.stop()).await?,
+            Command::Next => self.control(|client| client.next()).await?,
+            Command::Previous => self.control(|client| client.previous()).await?,
+            Command::Seek(offset) => self.control(move |client| client.seek(offset)).await?,
+            Command::SetVolume(value) | Command::PersistVolume(value) => {
                 *self.prior_volume.lock().unwrap_or_else(|p| p.into_inner()) = None;
                 self.control(move |client| {
                     client.volume((value.clamp(0.0, 1.0) * 100.0).round() as u8)
                 })
                 .await?;
             }
-            SessionCommand::SetMuted(muted) => {
+            Command::SetMuted(muted) => {
                 let volume = self.current().await?.volume.unwrap_or(100);
                 let target = {
                     let mut saved = self.prior_volume.lock().unwrap_or_else(|p| p.into_inner());
@@ -608,97 +520,84 @@ impl PlexPlayback {
                 };
                 self.control(move |client| client.volume(target)).await?;
             }
-            SessionCommand::SetRepeat(mode) => {
-                self.control(move |client| client.repeat(mode)).await?
-            }
-            SessionCommand::SetShuffle { enabled, .. } => {
+            Command::SetRepeat(mode) => self.control(move |client| client.repeat(mode)).await?,
+            Command::SetShuffle { enabled, .. } => {
                 self.control(move |client| client.shuffle(enabled)).await?
             }
-            SessionCommand::Activate(id) => {
+            Command::Activate(position) => {
                 let timeline = self.current().await?;
-                let id = plex_occurrence(&id)
-                    .ok_or("The queue occurrence is no longer on the Plex player")?;
-                let window = self
-                    .connection()
-                    .0
-                    .plex_queue_window(
-                        timeline
-                            .play_queue_id
-                            .ok_or("The Plex player has no queue")?,
-                        Some(id),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                let key = window
-                    .items
-                    .iter()
-                    .find(|item| item.occurrence_id == id)
-                    .ok_or("The Plex player no longer has that occurrence")?
-                    .key
-                    .clone();
+                let items = self.items_at(&timeline, &[position]).await?;
+                let item = &items[0];
+                let key = item.key.clone();
+                let id = item.occurrence_id;
                 self.control(move |client| client.skip_to(&key, id)).await?;
             }
-            SessionCommand::Remove(id) => self.remove(&[id]).await?,
-            SessionCommand::RemoveMany(ids) | SessionCommand::Forget(ids) => {
-                self.remove(&ids).await?
+            Command::Remove(position) => self.remove(&[position]).await?,
+            Command::RemoveMany(crate::playback::QueueSelection::Positions(positions)) => {
+                self.remove(&positions).await?
             }
-            SessionCommand::Reorder {
-                occurrences,
+            Command::Reorder {
+                selection: crate::playback::QueueSelection::Positions(positions),
                 target,
-            } => self.reorder(&occurrences, &target).await?,
-            SessionCommand::MoveAfterCurrent(id) => {
+            } => self.reorder(&positions, &target).await?,
+            Command::MoveAfterCurrentSelection(crate::playback::QueueSelection::Positions(
+                positions,
+            )) => {
                 let timeline = self.current().await?;
-                let current = occurrence(
-                    timeline
-                        .play_queue_id
-                        .ok_or("The Plex player has no queue")?,
-                    timeline
-                        .play_queue_item_id
-                        .ok_or("The Plex player has no current occurrence")?,
-                );
-                self.reorder(&[id], &playback::QueueReorderTarget::After(current))
-                    .await?;
+                let queue = timeline
+                    .play_queue_id
+                    .ok_or("The Plex player has no queue")?;
+                let current = timeline
+                    .play_queue_item_id
+                    .ok_or("The Plex player has no current queue item")?;
+                let mut moving = self.items_at(&timeline, &positions).await?;
+                moving.retain(|item| item.occurrence_id != current);
+                self.move_items(queue, moving, Some(current)).await?
             }
-            SessionCommand::Insert { input, target } => {
-                self.insert(input, Some(target), playback::QueuePlacement::Last, 0, None)
+            Command::Insert { input, target } => {
+                self.insert(
+                    PlayRequest::from_input(input, crate::playback::QueuePlacement::Last),
+                    Some(target),
+                )
+                .await?
+            }
+            Command::Clear { include_current } => {
+                let timeline = self.current().await?;
+                let queue = timeline
+                    .play_queue_id
+                    .ok_or("The Plex player has no queue")?;
+                let items = self
+                    .all_items(&timeline, &self.cancelled)
                     .await?
-            }
-            SessionCommand::Clear { include_current } => {
-                let timeline = self.current().await?;
-                let entries = self.all_items(&timeline, &self.cancelled).await?;
-                let ids = entries
                     .into_iter()
                     .filter(|item| {
                         include_current || Some(item.occurrence_id) != timeline.play_queue_item_id
                     })
-                    .map(|item| occurrence(timeline.play_queue_id.unwrap(), item.occurrence_id))
-                    .collect::<Vec<_>>();
-                self.remove(&ids).await?;
+                    .collect();
+                self.remove_items(queue, items).await?;
             }
-            SessionCommand::ApplyBatch { batch, placement } => {
-                self.insert(
-                    batch.input().clone(),
-                    None,
-                    placement,
-                    0,
-                    batch.shuffled_seed(),
-                )
-                .await?
-            }
+            Command::ApplyQueue(request) => self.insert(request, None).await?,
             _ => return Ok(()),
         }
         Ok(())
     }
 
-    async fn remove(&self, ids: &[OccurrenceId]) -> Result<(), String> {
-        let queue = self
-            .current()
-            .await?
+    async fn remove(&self, positions: &[usize]) -> Result<(), String> {
+        let timeline = self.current().await?;
+        let queue = timeline
             .play_queue_id
             .ok_or("The Plex player has no queue")?;
-        for id in ids {
-            let occurrence_id =
-                plex_occurrence(id).ok_or("The occurrence is no longer on the Plex player")?;
+        let items = self.items_at(&timeline, positions).await?;
+        self.remove_items(queue, items).await
+    }
+
+    async fn remove_items(
+        &self,
+        queue: u64,
+        items: Vec<sources::PlexQueueItem>,
+    ) -> Result<(), String> {
+        for item in items {
+            let occurrence_id = item.occurrence_id;
             self.connection()
                 .0
                 .plex_queue_mutation(PlexQueueMutation::Remove {
@@ -710,6 +609,46 @@ impl PlexPlayback {
         }
         self.control(move |client| client.refresh_queue(queue))
             .await
+    }
+
+    async fn items_at(
+        &self,
+        timeline: &Timeline,
+        positions: &[usize],
+    ) -> Result<Vec<sources::PlexQueueItem>, String> {
+        let cached = self
+            .queue
+            .lock()
+            .await
+            .as_ref()
+            .filter(|queue| {
+                Some(queue.id) == timeline.play_queue_id
+                    && Some(queue.version) == timeline.play_queue_version
+            })
+            .and_then(|queue| {
+                positions
+                    .iter()
+                    .map(|position| {
+                        position
+                            .checked_sub(queue.offset)
+                            .and_then(|position| queue.items.get(position))
+                            .cloned()
+                    })
+                    .collect::<Option<Vec<_>>>()
+            });
+        if let Some(items) = cached {
+            return Ok(items);
+        }
+        let items = self.all_items(timeline, &self.cancelled).await?;
+        positions
+            .iter()
+            .map(|position| {
+                items
+                    .get(*position)
+                    .cloned()
+                    .ok_or_else(|| "The queue item is no longer on the Plex player".into())
+            })
+            .collect()
     }
 
     async fn all_items(
@@ -758,68 +697,95 @@ impl PlexPlayback {
 
     async fn reorder(
         &self,
-        ids: &[OccurrenceId],
-        target: &playback::QueueReorderTarget,
+        positions: &[usize],
+        target: &crate::playback::QueueReorderTarget,
     ) -> Result<(), String> {
+        if matches!(target, crate::playback::QueueReorderTarget::Before(position) | crate::playback::QueueReorderTarget::After(position) if positions.contains(position))
+        {
+            return Ok(());
+        }
         let timeline = self.current().await?;
         let queue = timeline
             .play_queue_id
             .ok_or("The Plex player has no queue")?;
-        let mut after = match target {
-            playback::QueueReorderTarget::After(id) => plex_occurrence(id),
-            playback::QueueReorderTarget::Before(id) => {
-                let items = self.all_items(&timeline, &self.cancelled).await?;
-                let index = items
-                    .iter()
-                    .position(|item| Some(item.occurrence_id) == plex_occurrence(id))
-                    .ok_or("The Plex player no longer has the target occurrence")?;
-                items[..index]
-                    .iter()
-                    .rev()
-                    .find(|item| {
-                        !ids.iter()
-                            .any(|id| plex_occurrence(id) == Some(item.occurrence_id))
-                    })
-                    .map(|item| item.occurrence_id)
+        let moving = self.items_at(&timeline, positions).await?;
+        let after = match target {
+            crate::playback::QueueReorderTarget::BeforeOccurrence(_)
+            | crate::playback::QueueReorderTarget::AfterOccurrence(_) => return Ok(()),
+            crate::playback::QueueReorderTarget::After(position) => {
+                Some(self.items_at(&timeline, &[*position]).await?[0].occurrence_id)
             }
-            playback::QueueReorderTarget::End => self
+            crate::playback::QueueReorderTarget::Before(position) => {
+                let items = self.all_items(&timeline, &self.cancelled).await?;
+                items
+                    .get(*position)
+                    .ok_or("The Plex player no longer has the target queue item")?;
+                items[..*position]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(position, _)| !positions.contains(position))
+                    .map(|(_, item)| item.occurrence_id)
+            }
+            crate::playback::QueueReorderTarget::End => self
                 .all_items(&timeline, &self.cancelled)
                 .await?
                 .iter()
+                .enumerate()
                 .rev()
-                .find(|item| {
-                    !ids.iter()
-                        .any(|id| plex_occurrence(id) == Some(item.occurrence_id))
-                })
-                .map(|item| item.occurrence_id),
+                .find(|(position, _)| !positions.contains(position))
+                .map(|(_, item)| item.occurrence_id),
         };
-        for id in ids {
-            let occurrence_id =
-                plex_occurrence(id).ok_or("The occurrence is no longer on the Plex player")?;
+        self.move_items(queue, moving, after).await
+    }
+
+    /// Moves `moving` in order after the queue item `after`, or to the start.
+    async fn move_items(
+        &self,
+        queue: u64,
+        moving: Vec<sources::PlexQueueItem>,
+        mut after: Option<u64>,
+    ) -> Result<(), String> {
+        for item in moving {
             self.connection()
                 .0
                 .plex_queue_mutation(PlexQueueMutation::Move {
                     queue_id: queue,
-                    occurrence_id,
+                    occurrence_id: item.occurrence_id,
                     after,
                 })
                 .await
                 .map_err(string_error)?;
-            after = Some(occurrence_id);
+            after = Some(item.occurrence_id);
         }
         self.control(move |client| client.refresh_queue(queue))
             .await
     }
 }
 
-fn queue_keys(
+async fn queue_keys(
+    catalog: &Catalog,
     entries: &[library::QueueEntry],
     source: &sources::SourceId,
 ) -> Result<Vec<String>, String> {
-    entries
-        .iter()
-        .map(|entry| {
-            let (id, kind, key) = library::source_entity_parts(&entry.media_uri).ok_or(
+    let uris = catalog
+        .selected_track_uris(
+            &library::MemberSelection::Keys {
+                source: None,
+                keys: entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>()
+                    .into(),
+            },
+            None,
+            &ReadCancellation::new(),
+        )
+        .await
+        .map_err(string_error)?;
+    uris.iter()
+        .map(|uri| {
+            let (id, kind, key) = library::source_entity_parts(uri).ok_or(
                 "Plex Companion queues require Plex music from one configured server and profile",
             )?;
             if &id != source || kind != "track" {
@@ -942,20 +908,6 @@ fn queue_timeline(queue: &PlexQueueWindow) -> Timeline {
     }
 }
 
-fn receiver_occurrence(source: &sources::SourceId, queue: u64, item: u64) -> OccurrenceId {
-    OccurrenceId::new(format!("plex:{}:{queue}:{item}", source.as_str()))
-}
-fn occurrence(queue: u64, item: u64) -> OccurrenceId {
-    OccurrenceId::new(format!("plex:{queue}:{item}"))
-}
-fn plex_occurrence(id: &OccurrenceId) -> Option<u64> {
-    id.as_str()
-        .strip_prefix("plex:")?
-        .rsplit_once(':')?
-        .1
-        .parse()
-        .ok()
-}
 fn status(timeline: &Timeline) -> TransportStatus {
     match timeline.state.as_str() {
         "playing" => TransportStatus::Playing,
@@ -964,71 +916,22 @@ fn status(timeline: &Timeline) -> TransportStatus {
         _ => TransportStatus::Stopped,
     }
 }
-fn repeat(timeline: &Timeline) -> RepeatMode {
+fn repeat(timeline: &Timeline) -> QueueRepeatMode {
     match timeline.repeat {
-        Some(1) => RepeatMode::All,
-        Some(2) => RepeatMode::One,
-        _ => RepeatMode::Off,
+        Some(1) => QueueRepeatMode::All,
+        Some(2) => QueueRepeatMode::One,
+        _ => QueueRepeatMode::Off,
     }
 }
 
 impl PlaybackOwner {
-    /// A pulled native queue retains all lightweight memberships. Resolve only
-    /// the missing Plex metadata requested by the existing local queue window.
-    pub(super) async fn import_missing_plex_queue_rows(
-        &self,
-        entries: Vec<library::QueueEntry>,
-        page: library::QueueReadPage,
-    ) -> Result<library::QueueReadPage, String> {
-        let mut missing = std::collections::BTreeMap::<String, Vec<String>>::new();
-        for entry in &entries {
-            if page
-                .occurrences
-                .iter()
-                .any(|row| row.media_uri == entry.media_uri.as_ref())
-            {
-                continue;
-            }
-            if let Some((source, kind, key)) = library::source_entity_parts(&entry.media_uri)
-                && kind == "track"
-                && let Some(key) = key.strip_prefix("plex:track:")
-            {
-                missing
-                    .entry(source.to_string())
-                    .or_default()
-                    .push(key.to_owned());
-            }
-        }
-        if missing.is_empty() {
-            return Ok(page);
-        }
-        for (id, mut keys) in missing {
-            keys.sort_unstable();
-            keys.dedup();
-            let owner = self
-                .source_owner()
-                .ok_or("The Plex source is unavailable")?;
-            let source =
-                tokio::task::spawn_blocking(move || owner.client(&sources::SourceId::new(id)))
-                    .await
-                    .map_err(string_error)?
-                    .map_err(string_error)?;
-            source
-                .plex_import_items(&self.database, &keys)
-                .await
-                .map_err(string_error)?;
-        }
-        self.database
-            .read_queue(library::QueueReadRequest::Hydrate { entries })
-            .await
-            .map_err(string_error)
-    }
-
-    pub(super) fn request_plex_auto_dj(&self, request: &playback::AutoDjRequest) -> bool {
+    pub(super) fn request_plex_auto_dj(&self, request: &AutoDjRequest) -> bool {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
         let request = request.clone();
+        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
             let result = async {
                 let (_, context) = {
@@ -1041,40 +944,44 @@ impl PlaybackOwner {
                 {
                     return Ok(());
                 }
-                let candidates = crate::radio::radio_candidates(
-                    &plex.database,
-                    plex.source_owner.clone(),
-                    library::RadioSeed::Track(request.seed_media_uri),
-                    request.requested_count,
-                    &library::ReadCancellation::new(),
-                )
-                .await?;
+                let candidates = candidates.await?;
                 let _guard = plex.commands.lock().await;
                 let timeline = plex.current().await?;
+                plex.observe(timeline, false).await?;
                 if plex.connection().1.source_id != context.source_id {
                     return Ok(());
                 }
                 if plex.cancelled.load(Ordering::Acquire)
-                    || timeline.play_queue_item_id != plex_occurrence(&request.seed_occurrence)
+                    || plex
+                        .playback
+                        .current_media()
+                        .map_err(string_error)?
+                        .as_ref()
+                        .is_none_or(|media| {
+                            media.id.run != request.seed_run
+                                || media.row.track.media_uri != request.seed_media_uri
+                        })
                 {
                     return Ok(());
                 }
                 plex.insert(
-                    library::QueueInput::MediaUris {
-                        order: candidates.into(),
-                        provenance: playback::Provenance::AutoDj,
-                    },
-                    None,
-                    playback::QueuePlacement::Last,
-                    0,
+                    PlayRequest::from_input(
+                        library::QueueLoad::track_keys(
+                            candidates,
+                            playback::QueueProvenance::AutoDj,
+                        ),
+                        crate::playback::QueuePlacement::Last,
+                    ),
                     None,
                 )
                 .await
             }
             .await;
-            let _ = plex
-                .playback
-                .auto_dj_unavailable(request.seed_occurrence, result.err());
+            let _ = plex.playback.auto_dj_unavailable(
+                request.seed_run,
+                request.seed_media_uri,
+                result.err(),
+            );
         });
         true
     }
@@ -1083,87 +990,31 @@ impl PlaybackOwner {
             return false;
         };
         let request = request.clone();
+        let candidates = self.candidates(request.seed.clone(), 20, Default::default());
         self.runtime.spawn(async move {
             let result = async {
-                let candidates = crate::radio::radio_candidates(
-                    &plex.database,
-                    plex.source_owner.clone(),
-                    request.seed,
-                    20,
-                    &library::ReadCancellation::new(),
-                )
-                .await?;
+                let candidates = candidates.await?;
                 let _guard = plex.commands.lock().await;
                 plex.insert(
-                    library::QueueInput::MediaUris {
-                        order: candidates.into(),
-                        provenance: playback::Provenance::Radio,
-                    },
-                    None,
-                    request.placement,
-                    0,
+                    PlayRequest::from_input(
+                        library::QueueLoad::track_keys(
+                            candidates,
+                            playback::QueueProvenance::Radio,
+                        ),
+                        request.placement,
+                    ),
                     None,
                 )
                 .await
             }
             .await;
             if let Err(error) = result {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         true
     }
 
-    pub(super) fn random_plex(&self, request: &RandomPlayRequest) -> bool {
-        let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
-            return false;
-        };
-        let Some(selected) = self
-            .source_owner()
-            .and_then(|owner| owner.current_session())
-            .and_then(|session| session.resolve())
-        else {
-            return true;
-        };
-        let request = request.clone();
-        self.runtime.spawn(async move {
-            let result = async {
-                let candidates = selected
-                    .database
-                    .random_candidates(
-                        selected.source_key,
-                        selected.music_folder_key,
-                        &request.criteria,
-                        &[],
-                        request.requested,
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                let _guard = plex.commands.lock().await;
-                plex.insert(
-                    library::QueueInput::MediaUris {
-                        order: candidates.into(),
-                        provenance: playback::Provenance::Random,
-                    },
-                    None,
-                    request.placement,
-                    0,
-                    None,
-                )
-                .await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
-            }
-        });
-        true
-    }
     pub(super) fn select_plex(
         &self,
         output: PlaybackOutput,
@@ -1181,7 +1032,7 @@ impl PlaybackOwner {
             .cloned()
             .ok_or("The Plex player is no longer available; search for outputs again")?;
         let active = self.active().ok_or("Playback is unavailable")?;
-        let (local, _, _) = active.playback.handoff_snapshot().map_err(string_error)?;
+        let (local, _, _) = active.handoff_snapshot().map_err(string_error)?;
         let sources = self.plex_sources()?;
         let transferring = !local.entries.is_empty()
             && self
@@ -1191,7 +1042,18 @@ impl PlaybackOwner {
                 .is_none();
         let selected = if transferring {
             let entry = local.entries.first().unwrap();
-            let (source, _, _) = library::source_entity_parts(&entry.media_uri).ok_or(
+            let uris = self
+                .runtime
+                .block_on(self.catalog.selected_track_uris(
+                    &library::MemberSelection::Keys {
+                        source: None,
+                        keys: vec![entry.track_key].into(),
+                    },
+                    None,
+                    &ReadCancellation::new(),
+                ))
+                .map_err(string_error)?;
+            let (source, _, _) = uris.first().and_then(|uri| library::source_entity_parts(uri)).ok_or(
                 "Plex Companion queues require Plex music from one configured server and profile",
             )?;
             sources
@@ -1211,7 +1073,7 @@ impl PlaybackOwner {
             let server = timeline
                 .as_ref()
                 .and_then(|timeline| timeline.machine_identifier.as_deref());
-            let preferred = self.settings.load().sources.selected_source_id;
+            let preferred = self.settings.load().sources.selected_source_id.clone();
             let candidates = sources
                 .iter()
                 .enumerate()
@@ -1230,7 +1092,11 @@ impl PlaybackOwner {
             .ok_or("Add a Plex source before selecting a Plex player")?;
         // Validate every occurrence before sending a command to the receiver.
         let keys = if transferring {
-            Some(queue_keys(&local.entries, &context.source_id)?)
+            Some(self.runtime.block_on(queue_keys(
+                &self.catalog,
+                &local.entries,
+                &context.source_id,
+            ))?)
         } else {
             None
         };
@@ -1242,14 +1108,12 @@ impl PlaybackOwner {
         let plex = Arc::new(PlexPlayback {
             client,
             connection: Mutex::new((source, context)),
-            source_owner: self
-                .source_owner()
-                .map(|owner| Arc::downgrade(&owner))
-                .unwrap_or_default(),
+            source_owner: Arc::clone(&self.source),
+            owner: self.this.clone(),
             settings: self.settings.clone(),
             output: output.clone(),
-            playback: active.playback.clone(),
-            database: self.database.clone(),
+            playback: active.clone(),
+            catalog: self.catalog.clone(),
             queue: tokio::sync::Mutex::new(None),
             timeline: Mutex::new(stopped_timeline()),
             commands: tokio::sync::Mutex::new(()),
@@ -1285,10 +1149,10 @@ impl PlaybackOwner {
                     .map_err(string_error)?;
                 check_cancelled(&cancelled)?;
                 let (fresh, report, _) =
-                    active.playback.handoff_snapshot().map_err(string_error)?;
+                    active.handoff_snapshot().map_err(string_error)?;
                 if fresh.entries != local.entries
                     || fresh.order != local.order
-                    || fresh.current() != local.current()
+                    || fresh.current_index != local.current_index
                 {
                     return Err(
                         "Local playback changed its queue during transfer; select the Plex player again"
@@ -1345,10 +1209,7 @@ impl PlaybackOwner {
         {
             previous.cancel();
         }
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = output;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = output;
         let observed = plex.clone();
         let task = self.runtime.spawn(async move {
             let mut failed_since = None;
@@ -1375,9 +1236,7 @@ impl PlaybackOwner {
                             break;
                         }
                         if let Err(error) = observed.observe(timeline, false).await {
-                            let _ = observed
-                                .playback
-                                .command(SessionCommand::OperationFailed(error));
+                            let _ = observed.playback.command(Command::OperationFailed(error));
                         }
                     }
                     Ok(None) => {
@@ -1390,11 +1249,7 @@ impl PlaybackOwner {
                             tokio::time::Instant::now()
                         });
                         if since.elapsed() >= std::time::Duration::from_secs(5) {
-                            if let Some(owner) = observed
-                                .source_owner
-                                .upgrade()
-                                .and_then(|source| source.shared.playback().ok())
-                            {
+                            if let Some(owner) = observed.owner.upgrade() {
                                 let observed = observed.clone();
                                 tokio::task::spawn_blocking(move || {
                                     if !observed.cancelled.load(Ordering::Acquire)
@@ -1403,7 +1258,7 @@ impl PlaybackOwner {
                                     {
                                         let _ = observed
                                             .playback
-                                            .command(SessionCommand::OperationFailed(error));
+                                            .command(Command::OperationFailed(error));
                                     }
                                 });
                             }
@@ -1426,7 +1281,8 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
             .ok_or("The Plex player is not selected")?;
-        let backend = (self.start_backend)()?;
+        let backend =
+            (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         self.runtime.block_on(async {
             let _guard = plex.commands.lock().await;
             check_cancelled(&plex.cancelled)?;
@@ -1436,7 +1292,6 @@ impl PlaybackOwner {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .clone();
-            let (_, context) = plex.connection();
             if timeline.play_queue_id.is_none() {
                 let playback = plex.playback.clone();
                 tokio::task::spawn_blocking(move || {
@@ -1478,48 +1333,37 @@ impl PlaybackOwner {
                 items: window.items[start..end].to_vec(),
             };
             let mut queue = plex.restore(&nearby, &timeline).await?;
-            queue.entries = window
-                .items
-                .iter()
-                .map(|item| library::QueueEntry {
-                    occurrence: receiver_occurrence(
-                        &context.source_id,
-                        window.id,
-                        item.occurrence_id,
+            queue.entries = self
+                .catalog
+                .queue_entries(
+                    library::QueueLoad::media_uris(
+                        window.items.iter().map(|item| item.media_uri.clone()),
+                        playback::QueueProvenance::Manual,
                     ),
-                    media_uri: item.media_uri.clone().into(),
-                    playlist_entry_id: None,
-                    provenance: playback::Provenance::Manual,
-                })
-                .collect();
+                    None,
+                )
+                .await
+                .map_err(string_error)?
+                .entries
+                .into();
+            queue.ids = Arc::from([]);
             queue.order = (0..queue.entries.len() as u32).collect();
             queue.current_index = Some(selected);
-            let occurrence = queue
-                .occurrences
+            for row in &mut queue.rows {
+                Arc::make_mut(row).position += start;
+            }
+            let row = queue
+                .rows
                 .iter()
-                .find(|row| Some(&row.occurrence) == queue.current())
+                .find(|row| row.position == selected)
                 .cloned()
                 .ok_or("The current Plex track is not available locally")?;
-            let mut request =
-                StreamRequest::for_item(&occurrence.item, self.settings.playback_stream_quality());
+            let mut request = StreamRequest::new(
+                (&row.track).media_uri.clone(),
+                self.settings.playback_stream_quality(),
+            );
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
-            let source = plex.connection().0.clone();
-            let stream =
-                prepare_stream(&self.database, request, move |_| async { Ok(source) }).await?;
-            let (track, album) = self
-                .database
-                .playback_loudness(&occurrence.media_uri, &ReadCancellation::new())
-                .await
-                .map_err(string_error)?;
-            let prepared = prepare_media_stream(
-                stream,
-                playback::TrackLoudness {
-                    track: track.map(Box::new),
-                    album: album.map(Box::new),
-                },
-                occurrence,
-            );
             check_cancelled(&cancelled)?;
             queue.progress_millis = plex
                 .playback
@@ -1527,26 +1371,24 @@ impl PlaybackOwner {
                 .map_err(string_error)?
                 .0
                 .progress_millis;
-            let playback = plex.playback.clone();
-            tokio::task::spawn_blocking(move || {
-                playback.adopt_local(
+            self.adopt_here(
+                plex.playback.clone(),
+                super::continuation::Adoption {
                     queue,
-                    prepared,
-                    matches!(timeline.state.as_str(), "playing" | "buffering"),
-                    backend,
-                )
-            })
-            .await
-            .map_err(string_error)?
-            .map_err(string_error)?;
+                    row,
+                    request,
+                    client: Some(plex.connection().0.clone()),
+                    playing: matches!(timeline.state.as_str(), "playing" | "buffering"),
+                    listen: None,
+                },
+                backend,
+            )
+            .await?;
             plex.cancel();
             Ok::<_, String>(())
         })?;
         self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = PlaybackOutput::Local;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = PlaybackOutput::Local;
         self.runtime.spawn(async move {
             if let Err(error) = plex.control(|client| client.stop()).await {
                 tracing::debug!(%error, "Could not stop the previous Plex player");
@@ -1555,13 +1397,17 @@ impl PlaybackOwner {
         Ok(())
     }
     fn plex_sources(&self) -> Result<Vec<(Arc<Source>, PlexCompanionContext)>, String> {
-        let owner = self.source_owner().ok_or("Sources are unavailable")?;
+        let owner = &self.source;
         self.settings
             .load()
             .sources
             .configured
             .iter()
-            .filter(|source| source.configuration.kind == "plex")
+            .filter(|source| {
+                source
+                    .configuration
+                    .is(|kind| kind == library::SourceKind::Plex)
+            })
             .map(|configured| {
                 let source = owner.client(&configured.configuration.source_id)?;
                 let context = self
@@ -1615,25 +1461,21 @@ impl PlaybackOwner {
             .collect())
     }
 
-    pub(super) fn send_plex(&self, command: SessionCommand) -> Option<SessionCommand> {
+    pub(super) fn send_plex(&self, command: Command) -> Option<Command> {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return Some(command);
         };
         if matches!(
             command,
-            SessionCommand::UpdateSettings(_)
-                | SessionCommand::SetAutoDj { .. }
-                | SessionCommand::SetVisualizerEnabled(_)
-                | SessionCommand::ArtworkRefreshed(_)
-                | SessionCommand::CatalogChanged
+            Command::UpdateSettings(_)
+                | Command::SetAutoDj { .. }
+                | Command::SetVisualizerEnabled(_)
         ) {
             return Some(command);
         }
         self.runtime.spawn(async move {
             if let Err(error) = plex.command(command).await {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         None
@@ -1643,23 +1485,11 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let anchor = request.anchor_index;
-        let (batch, placement) = request.clone().compact_batch(super::random_u64());
+        let request = request.clone();
         self.runtime.spawn(async move {
             let _guard = plex.commands.lock().await;
-            if let Err(error) = plex
-                .insert(
-                    batch.input().clone(),
-                    None,
-                    placement,
-                    anchor,
-                    batch.shuffled_seed(),
-                )
-                .await
-            {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(error));
+            if let Err(error) = plex.insert(request, None).await {
+                let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });
         true

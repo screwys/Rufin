@@ -1,8 +1,7 @@
 //! Jellyfin's concrete library-change feed.
 //!
-//! The socket carries only hints. HTTP resolution in `refresh` produces the
-//! finite canonical update; disconnected or folder-wide intervals widen to a
-//! complete source read owned by Rufin.
+//! Personal data is published directly. Metadata hints need HTTP resolution;
+//! disconnected or folder-wide intervals require a complete source read.
 
 use base64::{Engine as _, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
@@ -18,9 +17,9 @@ use tokio_tungstenite::{
 use tracing::{debug, warn};
 
 use super::*;
-use crate::RemoteItemChange;
 use crate::remote_json::{id, items};
 use crate::source::LIVE_CHANGE_LIMIT;
+use crate::{RemoteItemChange, RemoteItemUpdate};
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const JELLYFIN_WEBSOCKET_KEY_BYTES: usize = 16;
@@ -87,19 +86,11 @@ impl JellyfinEmbySource {
     pub(crate) async fn listen_library_changes(
         &self,
         on_ready: &mut (dyn FnMut() -> bool + Send),
-        on_gap: &mut (dyn FnMut() -> bool + Send),
         on_change: &mut (dyn FnMut(RemoteItemChange) -> bool + Send),
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
-        let mut boundary_established = false;
-        let mut gap_reported = false;
         loop {
-            let ready = &mut || {
-                boundary_established = true;
-                gap_reported = false;
-                on_ready()
-            };
-            let keep_listening = match self.listen_library_changes_once(ready, on_change).await {
+            let keep_listening = match self.listen_library_changes_once(on_ready, on_change).await {
                 Ok(keep_listening) => keep_listening,
                 Err(error) => {
                     warn!(%error, "Library change feed disconnected");
@@ -108,12 +99,6 @@ impl JellyfinEmbySource {
             };
             if !keep_listening {
                 return Ok(());
-            }
-            if boundary_established && !gap_reported {
-                gap_reported = true;
-                if !on_gap() {
-                    return Ok(());
-                }
             }
             sleep(delay).await;
             delay = delay.saturating_mul(2).min(FEED_RETRY_MAX);
@@ -180,23 +165,43 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
             if id(&data["UserId"]).as_deref() != Some(user_id) {
                 return Ok(JellyfinSocketMessage::Other);
             }
-            let mut upserts = items(&data["UserDataList"])
-                .iter()
-                .filter_map(|item| id(&item["ItemId"]))
-                .collect::<Vec<_>>();
-            upserts.sort();
-            upserts.dedup();
-            if upserts.is_empty() {
+            let mut changes = std::collections::BTreeMap::new();
+            for item in items(&data["UserDataList"]) {
+                let Some(id) = id(&item["ItemId"]) else {
+                    continue;
+                };
+                let facts = library::NativeUserState {
+                    favorite: crate::remote_json::boolean(&item["IsFavorite"]),
+                    rating: item
+                        .get("Rating")
+                        .map(|_| item::user_rating(item).map(|rating| i64::from(rating) * 10)),
+                    play_count: item::play_count(item).map(i64::from),
+                    last_played: crate::policy::unix_seconds(crate::remote_json::field(
+                        item,
+                        "LastPlayedDate",
+                    )),
+                };
+                if let Some(favorite) = facts.favorite {
+                    tracing::info!(favorite, "Received server favorite state");
+                }
+                changes
+                    .entry(id)
+                    .or_insert_with(library::NativeUserState::default)
+                    .merge(facts);
+            }
+            if changes.is_empty() {
                 Ok(JellyfinSocketMessage::Other)
-            } else if upserts.len() > LIVE_CHANGE_LIMIT {
+            } else if changes.len() > LIVE_CHANGE_LIMIT {
                 Ok(JellyfinSocketMessage::Change(
                     RemoteItemChange::BoundaryLost,
                 ))
             } else {
-                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                    upserts,
-                    removals: Vec::new(),
-                }))
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items(
+                    changes
+                        .into_iter()
+                        .map(|(id, facts)| (id, RemoteItemUpdate::UserData(facts)))
+                        .collect(),
+                )))
             }
         }
         Some("LibraryChanged") => {
@@ -205,33 +210,20 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
             let folder_change = ["FoldersAddedTo", "FoldersRemovedFrom", "CollectionFolders"]
                 .iter()
                 .any(|key| ids(key).next().is_some());
-            let mut upserts = ids("ItemsAdded")
+            let upserts = ids("ItemsAdded")
                 .chain(ids("ItemsUpdated"))
                 .collect::<Vec<_>>();
-            upserts.sort();
-            upserts.dedup();
-            let mut removals = ids("ItemsRemoved").collect::<Vec<_>>();
-            removals.sort();
-            removals.dedup();
-            if upserts.len().saturating_add(removals.len()) > LIVE_CHANGE_LIMIT {
-                Ok(JellyfinSocketMessage::Change(
-                    RemoteItemChange::BoundaryLost,
-                ))
-            } else if upserts.is_empty() && removals.is_empty() && folder_change {
+            let removals = ids("ItemsRemoved").collect::<Vec<_>>();
+            if upserts.is_empty() && removals.is_empty() && folder_change {
                 Ok(JellyfinSocketMessage::Change(
                     RemoteItemChange::BoundaryLost,
                 ))
             } else if upserts.is_empty() && removals.is_empty() {
                 Ok(JellyfinSocketMessage::Other)
-            } else if upserts.iter().any(|id| removals.binary_search(id).is_ok()) {
-                Ok(JellyfinSocketMessage::Change(
-                    RemoteItemChange::BoundaryLost,
-                ))
             } else {
-                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                    upserts,
-                    removals,
-                }))
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::items(
+                    upserts, removals,
+                )))
             }
         }
         Some("ForceKeepAlive") => Ok(JellyfinSocketMessage::ForceKeepAlive),
@@ -263,14 +255,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn user_data_changes_refresh_only_the_connected_users_items() {
+    fn user_data_changes_preserve_only_the_connected_users_facts() {
         let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"album","IsFavorite":true},{"ItemId":42,"PlayCount":3},{"ItemId":"album"},{"ItemId":null}]}}"#;
         assert_eq!(
             library_socket_message(event, "user").unwrap(),
-            JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                upserts: vec!["42".into(), "album".into()],
-                removals: Vec::new(),
-            })
+            JellyfinSocketMessage::Change(RemoteItemChange::Items(
+                std::collections::BTreeMap::from([
+                    (
+                        "42".into(),
+                        RemoteItemUpdate::UserData(library::NativeUserState {
+                            play_count: Some(3),
+                            ..Default::default()
+                        })
+                    ),
+                    (
+                        "album".into(),
+                        RemoteItemUpdate::UserData(library::NativeUserState {
+                            favorite: Some(true),
+                            ..Default::default()
+                        })
+                    ),
+                ])
+            ))
         );
         assert_eq!(
             library_socket_message(event, "another-user").unwrap(),
@@ -288,7 +294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn user_data_event_refreshes_one_album_without_replacing_the_catalog() {
+    async fn user_data_event_preserves_album_metadata_without_fetching_it() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -304,7 +310,7 @@ mod tests {
                     "Id":"3272", "Name":"AG! Calling", "Type":"MusicAlbum",
                     "UserData":{"IsFavorite":true}
                 })))
-                .expect(2)
+                .expect(0)
                 .mount(&server)
                 .await;
             let source = JellyfinEmbySource::open(
@@ -332,54 +338,153 @@ mod tests {
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[{"Id":"track","Name":"Track","AlbumId":"3272","Type":"Audio"}]})))
                 .mount(&server).await;
             let root = tempfile::tempdir().unwrap();
-            let database = library::Database::open(root.path().join("library.sqlite"))
+            let catalog = library::Catalog::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
-            let mut scan =
-                library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
-                    .await
-                    .unwrap();
-            for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
-                stage_album(
-                    &mut scan,
-                    album_from_item(kind, serde_json::json!({"Id":id,"Name":name})).unwrap(),
+            let mut updates = catalog.changes();
+            catalog
+                .reconcile_source(
+                    &library::SourceId::new("source"),
+                    kind.source_kind(),
+                    kind.name(),
                 )
                 .await
                 .unwrap();
+            let catalog_source_id = ("source").to_string();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+            observation.start_observation().await.unwrap();
+            for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
+                (async {
+                    let mut batch = library::CatalogBatch::default();
+                    let result = batch.albums.extend_from_slice(&[(album_from_item(
+                        kind,
+                        catalog_source_id.as_str(),
+                        &serde_json::json!({"Id":id,"Name":name}),
+                    )
+                    .unwrap()
+                    .unwrap())
+                    .clone()]);
+                    observation.apply_catalog(&batch, true).await?;
+                    Ok::<_, library::LibraryError>(result)
+                })
+                .await
+                .unwrap();
             }
-            scan.finish().await.unwrap();
-            let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true}]}}"#;
+            (async {
+                let mut batch = library::CatalogBatch::default();
+                let result = batch.tracks.extend_from_slice(&[(track_from_item(
+                    kind,
+                    catalog_source_id.as_str(),
+                    &serde_json::json!({
+                        "Id":"track","Name":"Track","AlbumId":"3272","Type":"Audio",
+                        "UserData":{"PlayCount":7,"Rating":8}
+                    }),
+                )
+                .unwrap()
+                .unwrap())
+                .clone()]);
+                observation.apply_catalog(&batch, true).await?;
+                Ok::<_, library::LibraryError>(result)
+            })
+            .await
+            .unwrap();
+            crate::published(&mut updates)
+                .expect("initial catalog update")
+                .1;
+            let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true},{"ItemId":"track","PlayCount":8}]}}"#;
             for repeated in [false, true] {
-                let JellyfinSocketMessage::Change(RemoteItemChange::Items { upserts, removals }) =
+                let JellyfinSocketMessage::Change(RemoteItemChange::Items(items)) =
                     library_socket_message(event, "user").unwrap()
                 else {
                     panic!("user data must retain the item boundary");
                 };
-                let outcome = source
-                    .apply_items(&database, upserts, removals)
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    matches!(outcome, library::ScanOutcome::Identical(_)),
-                    repeated
-                );
+                source.apply_changes(&catalog, items).await.unwrap();
+                let mut shown = sources::Shown::default();
+                while let Ok(change) = updates.try_recv() {
+                    for (_, part) in sources::Shown::of(&change) {
+                        shown |= part;
+                    }
+                }
+                // A favorite is state and a play count activity, not a catalog change.
+                assert!(!shown.intersects(sources::Shown::CATALOG));
+                assert_eq!(shown.is_empty(), repeated);
             }
             let cancellation = library::ReadCancellation::new();
+            let track = catalog
+                .tracks_by_uris(
+                    &([(&library::source_entity_uri(
+                        &crate::SourceId::new("source"),
+                        "track",
+                        &kind.object_id("track", "track"),
+                    ))
+                        .to_owned()]),
+                    &cancellation,
+                )
+                .await
+                .map(|rows| rows.into_iter().next())
+                .unwrap()
+                .unwrap();
+            assert_eq!((track.state.rating, track.state.play_count), (Some(8), 8));
+            let source_key = track.source_key.unwrap();
             for (raw, favorite) in [("3272", true), ("other", false)] {
                 let uri = library::source_entity_uri(
                     &crate::SourceId::new("source"),
                     "album",
                     &kind.object_id("album", raw),
                 );
-                let album = database
-                    .album_row_by_media_uri(&uri, &cancellation)
+                let album = catalog
+                    .album(&(&uri), false, &cancellation)
                     .await
                     .unwrap()
                     .unwrap();
-                assert_eq!(album.favorite, favorite);
-                assert_eq!(album.track_count, i64::from(favorite));
+                assert_eq!(album.row.state.favorite, favorite);
+                assert_eq!(album.row.summary.track_count, i64::from(favorite));
             }
+            assert!(server.received_requests().await.unwrap().is_empty());
             server.verify().await;
+            server.reset().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(503))
+                .mount(&server)
+                .await;
+            assert!(
+                source
+                    .apply_changes(
+                        &catalog,
+                        [
+                            ("missing".into(), RemoteItemUpdate::Metadata),
+                            (
+                                "track".into(),
+                                RemoteItemUpdate::UserData(library::NativeUserState {
+                                    play_count: Some(9),
+                                    ..Default::default()
+                                })
+                            ),
+                        ]
+                        .into()
+                    )
+                    .await
+                    .is_err()
+            );
+            let mut shown = sources::Shown::default();
+            while let Ok(change) = updates.try_recv() {
+                for (_, part) in sources::Shown::of(&change) {
+                    shown |= part;
+                }
+            }
+            // A server play count is activity, kept after the partial failure.
+            assert_eq!(shown, sources::Shown::STATS);
+            assert_eq!(
+                catalog
+                    .tracks_by_uris(std::slice::from_ref(&track.media_uri), &cancellation)
+                    .await
+                    .map(|rows| { rows.into_iter().next() })
+                    .unwrap()
+                    .unwrap()
+                    .state
+                    .play_count,
+                9
+            );
             for (album_id, removed) in [("3272", false), ("other", true)] {
                 server.reset().await;
                 let item_path = match kind {
@@ -419,7 +524,7 @@ mod tests {
                 // Album membership no longer lists the old track. Resolve the track
                 // itself before deciding whether it moved or was deleted.
                 source
-                    .apply_items(&database, vec![album_id.into()], vec![])
+                    .apply_items(&catalog, vec![album_id.into()], vec![])
                     .await
                     .unwrap();
                 let uri = library::source_entity_uri(
@@ -427,17 +532,22 @@ mod tests {
                     "track",
                     &kind.object_id("track", "track"),
                 );
-                let track = database
-                    .track_row_by_uri(&uri, &cancellation)
-                    .await
-                    .unwrap();
+                let track = catalog.track(&(&uri), &cancellation).await.unwrap();
                 if removed {
-                    assert!(track.is_none());
+                    assert!(track.is_some());
+                    assert!(
+                        crate::listed_tracks(
+                            &catalog,
+                            library::MemberRead::new(library::Collection::Source(source_key))
+                        )
+                        .await
+                        .is_empty()
+                    );
                 } else {
                     let track = track.unwrap();
-                    assert_eq!(track.title, "Moved");
+                    assert_eq!(track.metadata.title, "Moved");
                     assert_eq!(
-                        track.album_media_uri,
+                        track.links.album_media_uri,
                         Some(library::source_entity_uri(
                             &crate::SourceId::new("source"),
                             "album",
@@ -448,7 +558,7 @@ mod tests {
                 server.verify().await;
             }
             source
-                .apply_items(&database, vec![], vec!["3272".into()])
+                .apply_items(&catalog, vec![], vec!["3272".into()])
                 .await
                 .unwrap();
             let uri = library::source_entity_uri(
@@ -457,23 +567,65 @@ mod tests {
                 &kind.object_id("album", "3272"),
             );
             assert!(
-                database
-                    .album_row_by_media_uri(&uri, &cancellation)
+                catalog
+                    .album(&(&uri), false, &cancellation)
                     .await
+                    .map(|rows| { rows.into_iter().next() })
                     .unwrap()
-                    .is_none()
+                    .is_some()
             );
-            let mut full =
-                library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
-                    .await
-                    .unwrap();
-            stage_album(&mut full, album_from_item(kind, serde_json::json!({
-                "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
-            })).unwrap()).await.unwrap();
-            assert!(matches!(
-                full.finish().await.unwrap(),
-                library::ScanOutcome::Identical(_)
-            ));
+            assert!(
+                crate::listed_albums(
+                    &catalog,
+                    library::ListRead {
+                        playlist_scope: Default::default(),
+                        kind: library::ListKind::Albums,
+                        source: Some(source_key),
+                        sort: library::LibraryField::Title,
+                        folder: None,
+                        filter: ("").to_string(),
+                        descending: false,
+                        favorites_only: false,
+                        activity: false
+                    }
+                )
+                .await
+                .iter()
+                .all(|album| album.media_uri != uri)
+            );
+            crate::published(&mut updates);
+            catalog
+                .reconcile_source(
+                    &library::SourceId::new("source"),
+                    kind.source_kind(),
+                    kind.name(),
+                )
+                .await
+                .unwrap();
+            let catalog_source_id = ("source").to_string();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+            observation.start_observation().await.unwrap();
+            (async {
+                let mut batch = library::CatalogBatch::default();
+                let result = batch.albums.extend_from_slice(&[(album_from_item(
+                kind,
+                &catalog_source_id,
+                &serde_json::json!({
+                    "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
+                }),
+            )
+            .unwrap()
+            .unwrap()).clone()]);
+                observation.apply_catalog(&batch, true).await?;
+                Ok::<_, library::LibraryError>(result)
+            })
+            .await
+            .unwrap();
+            assert!(!observation.changed());
+            assert!(
+                crate::published(&mut updates).is_none(),
+                "unchanged native data stays quiet"
+            );
         }
     }
 
@@ -486,10 +638,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                upserts: vec!["42".into(), "added".into()],
-                removals: vec!["removed".into()],
-            })
+            JellyfinSocketMessage::Change(RemoteItemChange::items(
+                vec!["42".into(), "added".into()],
+                vec!["removed".into()]
+            ))
         );
         for text in [
             r#"{"MessageType":42,"Data":{"ItemsAdded":false}}"#,
@@ -519,10 +671,10 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                upserts: vec!["item-one".to_string(), "item-two".to_string()],
-                removals: vec!["item-three".to_string()],
-            })
+            JellyfinSocketMessage::Change(RemoteItemChange::items(
+                vec!["item-one".to_string(), "item-two".to_string()],
+                vec!["item-three".to_string()]
+            ))
         );
     }
 
@@ -550,10 +702,10 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(RemoteItemChange::Items {
-                upserts: vec!["item-one".to_string(), "item-two".to_string()],
-                removals: vec!["item-three".to_string()],
-            })
+            JellyfinSocketMessage::Change(RemoteItemChange::items(
+                vec!["item-one".to_string(), "item-two".to_string()],
+                vec!["item-three".to_string()]
+            ))
         );
     }
 

@@ -27,6 +27,17 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Desktop
+        - Android
+        - Unrelated
+    validations:
+      required: true
+
   - type: textarea
     id: feature
     attributes:

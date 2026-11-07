@@ -4,13 +4,13 @@ import {
   applyAppearance,
   initialAppearance,
   applyColors,
-  coverUrls,
+  covers,
   $,
   notice,
   run,
 } from "./ui.js";
 
-import { disposeHome, loadView, restoreView, viewRequest } from "./library.js";
+import { disposeHome, loadView, navigate, opened, showChanged, showPage, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -18,7 +18,7 @@ import { coverRequest, showLyrics, showPlayback } from "./player.js";
 
 import { showSourceProgress, updateSources } from "./sources.js";
 import { refreshPins, resetPins } from "./pins.js";
-import { offerContinuation, watch as watchConnect } from "./connect.js";
+import { refreshContinuation, watch as watchConnect } from "./connect.js";
 
 let session = null;
 let initialPage = true;
@@ -41,8 +41,9 @@ async function login() {
   token = "";
 }
 
+// The events stream names itself so the page reads it sends become the page it follows.
 function browserHeaders() {
-  return { "X-Rufin-CSRF": csrf };
+  return { "X-Rufin-CSRF": csrf, ...(state.stream ? { "X-Rufin-Events": String(state.stream) } : {}) };
 }
 
 async function api(path, method = "GET", data, signal = session?.signal) {
@@ -66,7 +67,7 @@ async function api(path, method = "GET", data, signal = session?.signal) {
     throw Object.assign(new Error(
       result.error ||
         tr("Request failed ({status})", { status: response.status }),
-    ), { conflict: result.conflict === true });
+    ), { conflict: result.conflict === true, confirmation: result.confirmation });
   return result;
 }
 
@@ -116,10 +117,10 @@ function disconnect() {
   session = null;
   resetPins();
   token = "";
-  for (const url of coverUrls.values()) URL.revokeObjectURL(url);
-  coverUrls.clear();
+  for (const entry of covers.values()) entry.dispose();
   state.playback = null;
-  state.currentId = null;
+  state.currentMediaUri = null;
+  state.currentRun = null;
   showQueue(null);
   for (const id of ["content", "queue", "lyrics"]) $(id).replaceChildren();
   $("app").inert = true;
@@ -143,28 +144,34 @@ async function connect() {
   $("login-dialog").close();
   $("app").inert = false;
   updateSources(configured);
-  if (initialPage) {
-    restoreView();
-    if (rendered) {
-      state.source = $("content").dataset.source;
-      state.selectedLibrary = $("content").dataset.folder || null;
-    }
-    initialPage = false;
-  }
-  await loadView(rendered);
-  void offerContinuation();
+  const shown = rendered && $("content").querySelector("[data-page]");
+  const initial = initialPage;
+  initialPage = false;
+  if (shown) {
+    state.source = $("content").dataset.source;
+    state.selectedLibrary = $("content").dataset.folder || null;
+    showPage(shown.dataset);
+  } else if (initial) navigate("Home");
   stream(
-    "/events",
+    // The stream follows the page shown when it connects, then the pages it reads; it starts
+    // before the page loads, so it hears what commits meanwhile.
+    () => `/events${opened && opened !== "sources" ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
     (value) => {
+      if (value.stream) state.stream = value.stream;
       if (Object.hasOwn(value, "playback")) showPlayback(value.playback);
       if (value.queue) showQueue(value.queue);
       if (value.source) showSourceProgress(value.source);
       if (value.lyrics) showLyrics(value.lyrics);
       if (value.appearance) applyColors(value.appearance);
       if (value.pins_changed) run(refreshPins);
+      if (value.catalog_acquired) run(async () => updateSources(await api("/sources")));
+      showChanged(value);
     },
     session.signal,
   );
+  if (shown) await loadView(true, {}, Number(new URLSearchParams(location.search).get("offset")));
+  else if (!initial) await loadView();
+  void refreshContinuation();
 }
 
 async function stream(path, receive, signal) {
@@ -172,7 +179,8 @@ async function stream(path, receive, signal) {
   while (!signal.aborted) {
     let retryAfter = 1500;
     try {
-      const response = await fetch(`/api${path}`, {
+      state.stream = null;
+      const response = await fetch(`/api${path()}`, {
         signal,
         headers: browserHeaders(),
       });
@@ -298,12 +306,13 @@ function init() {
 }
 
 const state = {
-  visibleItems: [],
   source: "",
   playback: null,
-  currentId: null,
+  currentMediaUri: null,
+  currentRun: null,
   selectedLibrary: null,
   randomSource: null,
+  stream: null,
 };
 
 export { init, api, fragment, session, state };

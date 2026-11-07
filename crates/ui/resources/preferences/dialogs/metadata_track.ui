@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <template class="RufinMetadataTrackRow" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">2</property>
+    <property name="margin-top">8</property>
+    <property name="margin-bottom">8</property>
+    <property name="margin-start">12</property>
+    <property name="margin-end">12</property>
+    <style><class name="preferences-category-label"/></style>
+    <child><object class="GtkLabel" id="title">
+      <property name="xalign">0</property>
+      <property name="single-line-mode">true</property>
+      <property name="ellipsize">end</property>
+    </object></child>
+    <child><object class="GtkLabel" id="status">
+      <property name="xalign">0</property>
+      <property name="single-line-mode">true</property>
+      <property name="ellipsize">end</property>
+      <style><class name="caption"/><class name="dim-label"/></style>
+    </object></child>
+  </template>
+</interface>

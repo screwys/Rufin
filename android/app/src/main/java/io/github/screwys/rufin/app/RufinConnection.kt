@@ -1,0 +1,351 @@
+package io.github.screwys.rufin.app
+
+import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.Changed
+import io.github.screwys.rufin.shared.library.sourceIdForUri
+
+import io.github.screwys.rufin.browse.BrowseConnection
+import io.github.screwys.rufin.more.MoreConnection
+import io.github.screwys.rufin.connect.ConnectConnection
+import io.github.screwys.rufin.downloads.DownloadsConnection
+import io.github.screwys.rufin.sources.SourceSetupConnection
+import io.github.screwys.rufin.RufinService
+import io.github.screwys.rufin.StorageRestartActivity
+import io.github.screwys.rufin.shared.rufin_core.StorageReset
+
+import android.app.Application
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
+import android.net.Uri
+import androidx.compose.runtime.*
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
+import io.github.screwys.rufin.core.AndroidLibrary
+import io.github.screwys.rufin.core.AndroidLibraryEvents
+import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
+import io.github.screwys.rufin.shared.rufin_core.SourceOperation
+import io.github.screwys.rufin.shared.rufin_core.SourceOwner
+import io.github.screwys.rufin.shared.rufin_core.sourceOperationText
+import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.ui.userMessage
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+
+/** Keeps library paging, service binding and user actions across Activity recreation. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+class RufinConnection(application: Application) : AndroidViewModel(application) {
+    internal data class FeedbackMessage(val message: String, val artworkIdentity: ByteArray?)
+    internal var feedback by mutableStateOf<FeedbackMessage?>(null)
+        private set
+    internal var controlNotifications = true
+    private var feedbackTimeout: Job? = null
+    internal fun showFeedback(message: String, artworkIdentity: ByteArray? = null, control: Boolean = false) {
+        if (control && !controlNotifications) return
+        feedbackTimeout?.cancel()
+        feedback = FeedbackMessage(message, artworkIdentity)
+        feedbackTimeout = viewModelScope.launch { delay(2000); feedback = null }
+    }
+    internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
+    internal var libraryEvents: AndroidLibraryEvents? = null
+        private set
+    private val feed = MutableSharedFlow<Changed>(extraBufferCapacity = 64)
+    /** Committed library changes; each page asks its query whether one touches it. */
+    internal val changes = feed.asSharedFlow()
+    internal var overviewExportName by mutableStateOf<String?>(null)
+        private set
+    private var overviewExportBytes: ByteArray? = null
+    internal fun prepareOverviewExport(bytes: ByteArray, name: String) {
+        overviewExportBytes = bytes
+        overviewExportName = name
+    }
+    internal fun overviewExportLaunched() { overviewExportName = null }
+    internal fun saveOverview(uri: Uri?) {
+        val bytes = overviewExportBytes
+        overviewExportBytes = null
+        if (uri == null || bytes == null) return
+        runAction {
+            withContext(Dispatchers.IO) {
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                    ?: error(translate("This isn't available"))
+            }
+        }
+    }
+    internal val browse: BrowseConnection
+    internal val more: MoreConnection
+    internal val connect: ConnectConnection
+    internal val downloads: DownloadsConnection
+    private var sourceSetup: SourceSetupConnection? = null
+    private var sourceSetupId: String? = null
+    internal fun sourceSetupSession(id: String?): SourceSetupConnection {
+        if (sourceSetup == null || sourceSetupId != id) {
+            sourceSetup?.close()
+            sourceSetup = SourceSetupConnection(this, id)
+            sourceSetupId = id
+        }
+        return sourceSetup!!
+    }
+    internal fun closeSourceSetup() { sourceSetup?.close(); sourceSetup = null; sourceSetupId = null }
+    var service by mutableStateOf<RufinService?>(null)
+        private set
+    var ready by mutableStateOf(false)
+        private set
+    var startupError by mutableStateOf<String?>(null)
+        private set
+    var pendingActions by mutableIntStateOf(0)
+        private set
+    var catalogChanges by mutableLongStateOf(0L)
+        private set
+    var sourceOperation by mutableStateOf<SourceOperation>(SourceOperation.Idle)
+        private set
+    internal var sourceOwner by mutableStateOf<SourceOwner?>(null)
+        private set
+    val sourceBusy get() = sourceOperation !is SourceOperation.Idle && sourceOperation !is SourceOperation.Failed
+    val sourceStatus get() = if (sourceBusy) sourceOperationText(sourceOperation) else null
+    val sourceProgress get() = when (val operation = sourceOperation) {
+        is SourceOperation.Adding -> operation.progress
+        is SourceOperation.Switching -> operation.progress
+        is SourceOperation.Refreshing -> operation.progress
+        is SourceOperation.Downloading -> operation.progress
+        else -> null
+    }
+    fun sourceName(id: String) = sources?.sources?.firstOrNull { it.id == id }?.name.orEmpty()
+    var sources by mutableStateOf<ConfiguredSources?>(null)
+        private set
+    var debugLogging by mutableStateOf(false)
+        private set
+    /** The committed preferences, followed once for every connection that shows them. */
+    var preferences by mutableStateOf<io.github.screwys.rufin.shared.rufin_core.CommittedPreferences?>(null)
+        private set
+    private var observation: Job? = null
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            val connected = (binder as RufinService.Connection).service
+            service = connected
+            observe(connected)
+        }
+        override fun onServiceDisconnected(name: ComponentName) {
+            observation?.cancel()
+            service = null
+            ready = false
+            sourceOperation = SourceOperation.Idle
+            sources = null
+            debugLogging = false
+        }
+    }
+
+    init {
+        connect = ConnectConnection(this)
+        downloads = DownloadsConnection(this, viewModelScope)
+        browse = BrowseConnection(this, viewModelScope)
+        more = MoreConnection(this, viewModelScope)
+        viewModelScope.launch { connect.observe() }
+        application.bindService(Intent(application, RufinService::class.java)
+            .setAction(RufinService.ACTION_BIND_RUNTIME), connection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun observe(connected: RufinService) {
+        observation?.cancel()
+        observation = viewModelScope.launch {
+            connected.runtime.collectLatest { result ->
+                ready = false
+                sourceOperation = SourceOperation.Idle
+                sources = null
+                debugLogging = false
+                startupError = result?.exceptionOrNull()?.userMessage()
+                val core = result?.getOrNull() ?: return@collectLatest
+                val events = core.libraryEvents()
+                libraryEvents = events
+                val owner = core.source()
+                sourceOwner = owner
+                val sourceChanges = owner.subscribe()
+                val operations = owner.subscribeOperation()
+                val catalog = owner.changes()
+                val settings = core.settings()
+                val preferenceChanges = settings.subscribePreferences()
+                debugLogging = core.debugLogging()
+                try {
+                    sources = withContext(Dispatchers.Default) { sourceChanges.next() }
+                    sourceOperation = withContext(Dispatchers.Default) { operations.next() }
+                    ready = true
+                    coroutineScope {
+                        launch { connected.playbackNotices.collect { showFeedback(it) } }
+                        launch {
+                            while (isActive) {
+                                showFeedback(withContext(Dispatchers.Default) { events.next() })
+                            }
+                        }
+                        launch {
+                            while (isActive) {
+                                sources = withContext(Dispatchers.Default) { sourceChanges.next() }
+                            }
+                        }
+                        launch {
+                            while (isActive) preferences = withContext(Dispatchers.Default) { preferenceChanges.next() }
+                        }
+                        launch {
+                            while (isActive) {
+                                val changed = withContext(Dispatchers.Default) { catalog.next() } ?: break
+                                catalogChanges++
+                                feed.emit(changed)
+                            }
+                        }
+                        while (isActive) {
+                            val operation = withContext(Dispatchers.Default) { operations.next() }
+                            if (operation is SourceOperation.Failed && operation != sourceOperation) showFeedback(operation.message)
+                            sourceOperation = operation
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    showFeedback(error)
+                } finally {
+                    ready = false
+                    sourceOperation = SourceOperation.Idle
+                    sources = null
+                    preferences = null
+                    preferenceChanges.destroy()
+                    settings.destroy()
+                    operations.destroy()
+                    catalog.destroy()
+                    sourceChanges.destroy()
+                    sourceOwner = null
+                    owner.destroy()
+                    libraryEvents = null
+                    events.destroy()
+                }
+            }
+        }
+    }
+
+    internal suspend fun resetStorage(kind: StorageReset) {
+        val connected = connectedService()
+        val storage = connected.runtime.value!!.getOrThrow().storage()
+        restartAfterStorageReset {
+            try { connected.resetStorage(storage, kind) }
+            finally { storage.destroy() }
+        }
+    }
+
+    private suspend fun restartAfterStorageReset(reset: suspend () -> Unit) {
+        // A confirmed reset must finish even when dropping the runtime unmounts this screen.
+        withContext(NonCancellable) {
+            val jobs = viewModelScope.coroutineContext[Job]!!.children.toList()
+            jobs.forEach { it.cancel() }
+            jobs.joinAll()
+            var failure: String? = null
+            try {
+                reset()
+            } catch (error: LinkageError) {
+                failure = error.userMessage()
+            } catch (error: Exception) {
+                failure = error.userMessage()
+            } finally {
+                StorageRestartActivity.restart(getApplication(), failure)
+            }
+        }
+    }
+
+    fun runAction(action: suspend () -> Unit) {
+        viewModelScope.launch {
+            pendingActions++
+            try { action() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { showFeedback(error) }
+            finally { pendingActions-- }
+        }
+    }
+
+    suspend fun connectedService(): RufinService {
+        val connected = snapshotFlow { service }.filterNotNull().first()
+        connected.runtime.filterNotNull().first().getOrThrow()
+        return connected
+    }
+
+    fun openDocuments(uris: List<Uri>, flags: Int) = runAction {
+        uris.forEach { retainGrant(it, flags) }
+        connectedService().openUris(uris.map(Uri::toString))
+    }
+
+    fun addFolder(uri: Uri, flags: Int) = runAction {
+        retainGrant(uri, flags)
+        connectedService().runtime.value!!.getOrThrow().addDocumentRoot(uri.toString())
+    }
+
+    fun addMediaLibrary() = runAction { connectedService().addMediaLibrary() }
+
+    suspend fun addMediaLibraryForSetup(): Boolean = connectedService().addMediaLibrary()
+
+    suspend fun addFolderForSetup(uri: Uri) {
+        getApplication<Application>().contentResolver.takePersistableUriPermission(uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val service = connectedService()
+        service.runtime.value!!.getOrThrow().addDocumentRoot(uri.toString())
+    }
+
+    private fun retainGrant(uri: Uri, flags: Int) {
+        if (flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(uri,
+                flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+        }
+    }
+
+    fun requestLocalNetwork() = runAction { connectedService().requestLocalNetwork() }
+    internal fun openOverview(mediaUri: String, title: String, kind: String, period: String) = runAction {
+        val library = browse.library ?: return@runAction
+        val route = when (kind) {
+            "album" -> Route.AlbumDetail(mediaUri)
+            "artist" -> Route.ArtistDetail(mediaUri)
+            else -> null
+        }
+        if (route != null) {
+            sourceIdForUri(mediaUri)?.takeIf { it != sources?.selectedSourceId }?.let { sourceOwner?.selectSource(it) }
+            browse.openRoute(route, title)
+        } else connectedService().playRequest {
+            library.playUri(mediaUri, translate("Listening overview"))
+        }
+    }
+
+    fun changeDebugLogging(enabled: Boolean) = runAction {
+        val core = connectedService().runtime.value!!.getOrThrow()
+        try { core.setDebugLogging(enabled) }
+        finally { debugLogging = core.debugLogging() }
+    }
+
+    fun saveDiagnosticLog(uri: Uri) = runAction {
+        val core = connectedService().runtime.value!!.getOrThrow()
+        withContext(Dispatchers.IO) {
+            val contents = core.diagnosticLog()
+            val output = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                ?: error(translate("Could not save diagnostic log"))
+            output.bufferedWriter().use { it.write(contents) }
+        }
+    }
+
+    fun refresh() = runAction {
+        sources?.selectedSourceId?.let { sourceOwner?.refreshSource(it, false) }
+    }
+
+    fun selectSource(id: String) = runAction {
+        sourceOwner?.selectSource(id)
+    }
+
+    fun retryStartup() {
+        startupError = null
+        service?.retryStartup()
+    }
+
+
+    override fun onCleared() {
+        closeSourceSetup()
+        observation?.cancel()
+        getApplication<Application>().unbindService(connection)
+    }
+}

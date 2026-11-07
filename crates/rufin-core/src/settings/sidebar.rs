@@ -8,6 +8,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SidebarRouteItem {
     Home,
     Search,
@@ -51,39 +52,13 @@ impl SidebarRouteItem {
     }
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SidebarRouteItemSettings {
     pub item: SidebarRouteItem,
     pub visible: bool,
 }
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum SidebarPin {
-    Album {
-        source_id: SourceId,
-        album_id: String,
-    },
-    Artist {
-        source_id: SourceId,
-        artist_id: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        album_artist: bool,
-    },
-    Genre {
-        source_id: SourceId,
-        genre_id: String,
-    },
-    Playlist {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_id: Option<SourceId>,
-        playlist_id: String,
-    },
-    SmartPlaylist {
-        playlist_id: String,
-    },
-}
+pub use library::SidebarPin;
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SidebarSettings {
     #[serde(default = "default_sidebar_route_items")]
@@ -109,6 +84,89 @@ impl Default for SidebarSettings {
     }
 }
 impl SidebarSettings {
+    pub fn pins_use_activity(&self) -> bool {
+        self.pins_visible
+            && self.pins.iter().any(|pin| {
+                matches!(
+                    pin,
+                    SidebarPin::SmartPlaylist { .. }
+                        | SidebarPin::PlaylistFolder { smart: true, .. }
+                )
+            })
+    }
+
+    pub fn set_route_visible(&mut self, item: SidebarRouteItem, visible: bool) -> bool {
+        let Some(stored) = self
+            .route_items
+            .iter_mut()
+            .find(|stored| stored.item == item)
+        else {
+            return false;
+        };
+        if stored.visible == visible {
+            return false;
+        }
+        stored.visible = visible;
+        self.sanitize();
+        true
+    }
+
+    pub fn move_route(&mut self, item: SidebarRouteItem, delta: isize) -> bool {
+        let Some(index) = self.route_items.iter().position(|entry| entry.item == item) else {
+            return false;
+        };
+        let new_index = if delta < 0 {
+            index.saturating_sub(1)
+        } else {
+            (index + 1).min(self.route_items.len().saturating_sub(1))
+        };
+        if index == new_index {
+            return false;
+        }
+        self.route_items.swap(index, new_index);
+        self.sanitize();
+        true
+    }
+
+    pub fn reorder_route(
+        &mut self,
+        source: SidebarRouteItem,
+        target: SidebarRouteItem,
+        after: bool,
+    ) -> bool {
+        if source == target {
+            return false;
+        }
+        let before = self.route_items.clone();
+        let Some(source_index) = self
+            .route_items
+            .iter()
+            .position(|entry| entry.item == source)
+        else {
+            return false;
+        };
+        let entry = self.route_items.remove(source_index);
+        let Some(mut target_index) = self
+            .route_items
+            .iter()
+            .position(|entry| entry.item == target)
+        else {
+            self.route_items
+                .insert(source_index.min(self.route_items.len()), entry);
+            return false;
+        };
+        if after {
+            target_index += 1;
+        }
+        self.route_items
+            .insert(target_index.min(self.route_items.len()), entry);
+        let changed = self.route_items != before;
+        if changed {
+            self.sanitize();
+        }
+        changed
+    }
+
     pub fn sanitize(&mut self) {
         let mut sanitized = Vec::with_capacity(SidebarRouteItem::all().len());
         for entry in &self.route_items {
@@ -140,6 +198,17 @@ impl SidebarSettings {
             home.visible = true;
         }
         self.route_items = sanitized;
+        // A Rufin playlist belongs to no source, whatever source a release saved its pin with.
+        for pin in &mut self.pins {
+            if let SidebarPin::Playlist {
+                source_id,
+                playlist_id,
+            } = pin
+                && playlist_id.starts_with("rufin:playlist:")
+            {
+                *source_id = None;
+            }
+        }
         let mut seen = HashSet::new();
         self.pins.retain(|pin| seen.insert(pin.clone()));
         let mut seen = HashSet::new();
@@ -369,4 +438,108 @@ mod tests {
         assert_eq!(settings.pin_drop_after(&second, &second), None);
         assert_eq!(settings.pin_drop_after(&pin("missing"), &second), None);
     }
+}
+
+/// A Home block as the block editor lists it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct HomeBlockRow {
+    pub block: library::HomeBlockKind,
+    /// Its title, untranslated.
+    pub title: String,
+    pub visible: bool,
+    /// Whether it can be shown or hidden: the last visible block stays.
+    pub can_toggle: bool,
+}
+
+/// The visible blocks in their order, then the hidden ones in their default order.
+pub(crate) fn home_block_rows(visible: &[library::HomeBlockKind]) -> Vec<HomeBlockRow> {
+    let order = home_block_order(visible);
+    order
+        .into_iter()
+        .map(|block| {
+            let shown = visible.contains(&block);
+            HomeBlockRow {
+                block,
+                title: super::presentation::home_block_title(block).into(),
+                visible: shown,
+                can_toggle: !shown || visible.len() > 1,
+            }
+        })
+        .collect()
+}
+
+fn home_block_order(visible: &[library::HomeBlockKind]) -> Vec<library::HomeBlockKind> {
+    let mut order = visible.to_vec();
+    order.extend(
+        library::HomeBlockKind::all()
+            .into_iter()
+            .filter(|block| !visible.contains(block)),
+    );
+    order
+}
+
+/// Shows a block where the rows list it, or hides it; hiding the last visible block is
+/// refused.
+pub(crate) fn set_home_block_visible(
+    blocks: &mut Vec<library::HomeBlockKind>,
+    block: library::HomeBlockKind,
+    visible: bool,
+) -> bool {
+    if visible == blocks.contains(&block) || (!visible && blocks.len() <= 1) {
+        return false;
+    }
+    if !visible {
+        blocks.retain(|shown| *shown != block);
+        return true;
+    }
+    let order = home_block_order(blocks);
+    let rank = |block: &library::HomeBlockKind| order.iter().position(|ordered| ordered == block);
+    let at = blocks
+        .iter()
+        .position(|shown| rank(shown) > rank(&block))
+        .unwrap_or(blocks.len());
+    blocks.insert(at, block);
+    true
+}
+
+/// Moves a visible block one place up (`delta` below zero) or down.
+pub(crate) fn move_home_block(
+    blocks: &mut [library::HomeBlockKind],
+    block: library::HomeBlockKind,
+    delta: isize,
+) -> bool {
+    let Some(index) = blocks.iter().position(|shown| *shown == block) else {
+        return false;
+    };
+    let next = if delta < 0 {
+        index.saturating_sub(1)
+    } else {
+        (index + 1).min(blocks.len().saturating_sub(1))
+    };
+    blocks.swap(index, next);
+    index != next
+}
+
+/// Moves a visible block before or after another.
+pub(crate) fn reorder_home_block(
+    blocks: &mut Vec<library::HomeBlockKind>,
+    source: library::HomeBlockKind,
+    target: library::HomeBlockKind,
+    after: bool,
+) -> bool {
+    if source == target || !blocks.contains(&target) {
+        return false;
+    }
+    let Some(index) = blocks.iter().position(|shown| *shown == source) else {
+        return false;
+    };
+    let before = blocks.clone();
+    let block = blocks.remove(index);
+    let target = blocks
+        .iter()
+        .position(|shown| *shown == target)
+        .map_or(blocks.len(), |at| at + usize::from(after));
+    blocks.insert(target, block);
+    *blocks != before
 }

@@ -16,21 +16,25 @@ const el = (tag, className = "", text = "") => {
   return node;
 };
 
+// An icon from /icons by its file name, as GTK names it.
 const icon = (name) => {
   const node = el("span", "icon");
-  node.dataset.icon = name;
+  setIcon(node, name);
   node.ariaHidden = "true";
   return node;
 };
 
 function setIcon(node, name) {
-  if (node.dataset.icon !== name) node.dataset.icon = name;
+  if (node.dataset.icon === name) return;
+  node.dataset.icon = name;
+  node.style.setProperty("--icon", `url("/icons/${name}.svg")`);
 }
 
 function showFavorite(node, favorite) {
-  if (node.getAttribute("aria-pressed") === String(favorite)) return;
-  node.setAttribute("aria-pressed", String(favorite));
-  setIcon(node.firstElementChild, favorite ? "favorite-filled" : "favorite");
+  if (node.getAttribute("aria-pressed") !== String(favorite)) {
+    node.setAttribute("aria-pressed", String(favorite));
+  }
+  setIcon(node.firstElementChild, favorite ? "rufin-heart-filled-symbolic" : "rufin-heart-outline-symbolic");
 }
 
 const button = (label, action, name, className = "icon-button") => {
@@ -149,48 +153,95 @@ function initAppearance() {
   );
 }
 
-const coverUrls = new Map();
+const covers = new Map();
 
-async function cover(node, uri, signal) {
-  const response = await fetch(
-    `/api/artwork?${new URLSearchParams(typeof uri === "string" ? { uri } : uri)}`,
-    {
-      signal,
-    },
-  );
-  if (!response.ok) return;
-  const blob = await response.blob();
-  if (signal.aborted || !node.isConnected) return;
-  const url = URL.createObjectURL(blob);
-  const previous = coverUrls.get(node);
-  if (previous) URL.revokeObjectURL(previous);
-  coverUrls.set(node, url);
-  const image = el("img");
-  image.alt = "";
-  image.src = url;
-  node.replaceChildren(image);
+async function cover(node, uri, signal, preview = null) {
+  const query = typeof uri === "string" ? { uri } : uri;
+  const identity = JSON.stringify(query);
+  let fullReady = node.dataset.coverIdentity === identity && node.dataset.coverFull === "true";
+  covers.get(node)?.dispose();
+  if (!fullReady && preview && node.querySelector("img")?.getAttribute("src") !== preview) {
+    const image = el("img");
+    image.alt = "";
+    image.src = preview;
+    node.replaceChildren(image);
+  } else if (!fullReady && !preview && node.dataset.coverIdentity && node.dataset.coverIdentity !== identity) {
+    node.replaceChildren(icon("rufin-symbolic"));
+  }
+  node.dataset.coverIdentity = identity;
+  node.dataset.coverFull = String(fullReady);
+  let request, pixels = 0;
+  const entry = { url: null, dispose };
+  const resize = new ResizeObserver(() => {
+    const size = physicalSize();
+    if (!query.original && size > pixels) run(() => load(size));
+  });
+  function physicalSize() {
+    const bounds = node.getBoundingClientRect();
+    return Math.max(1, Math.ceil(Math.max(bounds.width, bounds.height) * devicePixelRatio));
+  }
+  function dispose() {
+    request?.abort();
+    resize.disconnect();
+    signal.removeEventListener("abort", dispose);
+    if (entry.url) URL.revokeObjectURL(entry.url);
+    if (covers.get(node) === entry) covers.delete(node);
+  }
+  async function load(size) {
+    pixels = size;
+    request?.abort();
+    request = new AbortController();
+    const requestSignal = AbortSignal.any([signal, request.signal]);
+    try {
+      const response = await fetch(`/api/artwork?${new URLSearchParams({ ...query, size })}`, { signal: requestSignal });
+      if (!response.ok) return fullReady || !!preview;
+      const image = el("img");
+      const url = URL.createObjectURL(await response.blob());
+      image.alt = "";
+      image.src = url;
+      try { await image.decode(); }
+      catch { URL.revokeObjectURL(url); return fullReady || !!preview; }
+      if (requestSignal.aborted || !node.isConnected) {
+        URL.revokeObjectURL(url);
+        return false;
+      }
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      entry.url = url;
+      fullReady = true;
+      node.dataset.coverFull = "true";
+      node.replaceChildren(image);
+      return true;
+    } catch (error) {
+      if (requestSignal.aborted) throw error;
+      return fullReady || !!preview;
+    }
+  }
+  covers.set(node, entry);
+  signal.addEventListener("abort", dispose, { once: true });
+  resize.observe(node);
+  return load(physicalSize());
 }
 
 function releaseCovers() {
-  for (const [node, url] of coverUrls)
-    if (!node.isConnected) {
-      URL.revokeObjectURL(url);
-      coverUrls.delete(node);
-    }
+  for (const [node, entry] of covers)
+    if (!node.isConnected) entry.dispose();
 }
 
-async function coverGroup(node, query, count, signal) {
+async function coverGroup(node, query, count, signal, previews = []) {
   node.classList.toggle("cover-mosaic", count > 1);
-  if (count <= 1) return cover(node, query, signal);
-  node.replaceChildren();
-  await Promise.all(
-    Array.from({ length: 4 }, (_, index) => {
+  if (count <= 1) return cover(node, query, signal, previews[0]);
+  let tiles = [...node.children].filter((tile) => tile.classList.contains("cover-quadrant"));
+  if (tiles.length !== 4) {
+    node.replaceChildren();
+    tiles = Array.from({ length: 4 }, () => {
       const tile = el("span", "cover-quadrant");
-      tile.append(icon("cover-fallback"));
+      tile.append(icon("rufin-symbolic"));
       node.append(tile);
-      return cover(tile, { ...query, part: index % count }, signal);
-    }),
-  );
+      return tile;
+    });
+  }
+  await Promise.all(tiles.map((tile, index) =>
+    cover(tile, { ...query, part: index % count }, signal, previews[index % count])));
 }
 
 function initLayout() {
@@ -227,15 +278,16 @@ function initLayout() {
     event.preventDefault();
     const hidden = $("app").classList.toggle("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", String(!hidden));
-    $("toggle-right").firstElementChild.dataset.icon = hidden
-      ? "expand-right"
-      : "collapse-right";
+    setIcon(
+      $("toggle-right").firstElementChild,
+      hidden ? "rufin-sidebar-expand-right-symbolic" : "rufin-sidebar-collapse-right-symbolic",
+    );
   });
   $("close-right").addEventListener("click", (event) => {
     event.preventDefault();
     $("app").classList.add("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", "false");
-    $("toggle-right").firstElementChild.dataset.icon = "expand-right";
+    setIcon($("toggle-right").firstElementChild, "rufin-sidebar-expand-right-symbolic");
   });
   $("open-navigation").addEventListener("click", (event) => {
     event.preventDefault();
@@ -263,7 +315,7 @@ function initLayout() {
   if (matchMedia("(max-width:860px)").matches) {
     $("app").classList.add("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", "false");
-    $("toggle-right").firstElementChild.dataset.icon = "expand-right";
+    setIcon($("toggle-right").firstElementChild, "rufin-sidebar-expand-right-symbolic");
   }
 }
 
@@ -350,7 +402,7 @@ export {
   applyColors,
   cover,
   coverGroup,
-  coverUrls,
+  covers,
   releaseCovers,
   bindHoverControls,
   init,

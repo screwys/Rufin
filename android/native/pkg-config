@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The SDK archives are linked into one shared library by GStreamer's builder.
+args=()
+libs=false
+for argument in "$@"; do
+    if [[ "$argument" == --libs ]]; then libs=true; else args+=("$argument"); fi
+done
+pkg-config --define-prefix "${args[@]}"
+if "$libs"; then printf ' -L%q -lgstreamer_android\n' "$RUFIN_GSTREAMER_LINK_DIR"; fi

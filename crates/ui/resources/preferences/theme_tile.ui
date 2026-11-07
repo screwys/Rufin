@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="tile">
+    <property name="orientation">vertical</property>
+    <property name="spacing">6</property>
+    <property name="width-request">124</property>
+    <child><object class="GtkToggleButton" id="select">
+      <property name="vexpand">false</property>
+      <property name="valign">start</property>
+      <style><class name="theme-select"/><class name="flat"/></style>
+      <property name="child"><object class="GtkDrawingArea" id="preview">
+        <property name="content-width">124</property>
+        <property name="content-height">96</property>
+        <property name="can-target">false</property>
+      </object></property>
+    </object></child>
+    <child><object class="GtkBox">
+      <property name="spacing">4</property>
+      <property name="height-request">34</property>
+      <child><object class="GtkLabel" id="name">
+      <property name="hexpand">true</property>
+      <property name="wrap">true</property>
+      <property name="wrap-mode">word-char</property>
+      <property name="max-width-chars">16</property>
+      <property name="lines">2</property>
+      <property name="ellipsize">end</property>
+      <property name="xalign">0</property>
+      <style><class name="caption"/></style>
+    </object></child>
+    <child><object class="GtkButton" id="edit">
+      <property name="visible">false</property>
+      <property name="valign">center</property>
+      <property name="icon-name">rufin-document-edit-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Edit theme</property>
+      <accessibility><property name="label" translatable="yes">Edit theme</property></accessibility>
+      <style><class name="flat"/><class name="theme-edit"/></style>
+    </object></child>
+    <child><object class="GtkDropDown" id="accent">
+      <property name="valign">center</property>
+      <property name="tooltip-text" translatable="yes">Accent color</property>
+      <accessibility><property name="label" translatable="yes">Accent color</property></accessibility>
+      <style><class name="theme-accent"/></style>
+    </object></child>
+    </object></child>
+  </object>
+</interface>

@@ -25,7 +25,7 @@ impl MetadataWriter {
         Self::for_file_type(FileType::from_ext(source_format)?)
     }
 
-    fn for_file_type(file_type: FileType) -> Option<Self> {
+    pub(crate) fn for_file_type(file_type: FileType) -> Option<Self> {
         file_type
             .tag_support(file_type.primary_tag_type())
             .is_writable()
@@ -60,7 +60,16 @@ impl MetadataWriter {
 
 fn metadata_key_is_writable(tag_type: lofty::tag::TagType, key: ItemKey) -> bool {
     key.map_key(tag_type).is_some()
-        || tag_type == lofty::tag::TagType::Id3v2 && key == ItemKey::MusicBrainzRecordingId
+        || tag_type == lofty::tag::TagType::Id3v2
+            && matches!(
+                key,
+                ItemKey::MusicBrainzRecordingId
+                    | ItemKey::Producer
+                    | ItemKey::Arranger
+                    | ItemKey::Engineer
+                    | ItemKey::MixDj
+                    | ItemKey::MixEngineer
+            )
 }
 
 pub(crate) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
@@ -150,7 +159,11 @@ pub(crate) fn read_lofty_for_edit(
             .preserve_format_specific_items(true),
     );
     let probe = Probe::new(BufReader::new(fs::File::open(path)?))
-        .options(ParseOptions::new().read_cover_art(true))
+        .options(
+            ParseOptions::new()
+                .read_cover_art(true)
+                .read_properties(false),
+        )
         .guess_file_type()?;
     let Some(actual_file_type) = probe.file_type() else {
         return Ok(None);

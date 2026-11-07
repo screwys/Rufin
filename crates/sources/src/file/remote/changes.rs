@@ -1,17 +1,15 @@
 use std::time::Duration;
 
-use library::{Database, LocalFileKind, Scan};
 use smb_fscc::NotifyAction;
 
-use super::RemoteSource;
+use super::FileSource;
 use crate::file::remote::input::FileInput;
-use crate::{SourceError, SourceResult};
 
 pub(crate) enum FileChange {
-    Inventory,
+    FullRefresh,
     Paths {
         paths: Vec<String>,
-        rename: Option<(String, String)>,
+        renames: Vec<(String, String)>,
     },
 }
 
@@ -19,43 +17,43 @@ impl FileChange {
     pub(crate) fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (
-                Self::Paths { mut paths, rename },
+                Self::Paths {
+                    mut paths,
+                    mut renames,
+                },
                 Self::Paths {
                     paths: incoming,
-                    rename: next,
+                    renames: next,
                 },
             ) => {
-                if rename.is_some() && next.is_some() {
-                    return Self::Inventory;
-                }
+                renames.extend(next);
                 for path in incoming {
                     if !paths.contains(&path) {
                         paths.push(path);
                     }
                     if paths.len() > crate::source::LIVE_CHANGE_LIMIT {
-                        return Self::Inventory;
+                        return Self::FullRefresh;
                     }
                 }
-                Self::Paths {
-                    paths,
-                    rename: rename.or(next),
-                }
+                Self::Paths { paths, renames }
             }
-            _ => Self::Inventory,
+            _ => Self::FullRefresh,
         }
     }
 }
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) fn has_notifications(&self) -> bool {
         self.kind == "smb"
     }
 
     pub(crate) async fn watch(&self, mut changed: impl FnMut(FileChange) -> bool) {
+        let Ok((settings, _)) = self.network() else {
+            return;
+        };
         loop {
             let mut connected = None;
-            for address in std::iter::once(&self.settings.url).chain(&self.settings.alternate_urls)
-            {
+            for address in std::iter::once(&settings.url).chain(&settings.alternate_urls) {
                 match self.connect_input(address).await {
                     Ok(FileInput::Smb(client)) => {
                         connected = Some(client);
@@ -66,7 +64,7 @@ impl RemoteSource {
                 }
             }
             if let Some(client) = connected {
-                if !changed(FileChange::Inventory) {
+                if !changed(FileChange::FullRefresh) {
                     return;
                 }
                 let mut old_name = None;
@@ -82,12 +80,14 @@ impl RemoteSource {
                                 true
                             }
                             NotifyAction::RenamedNewName => {
-                                let rename = old_name.take().map(|old| (old, path.clone()));
+                                let renames = old_name
+                                    .take()
+                                    .map(|old| (old, path.clone()))
+                                    .into_iter()
+                                    .collect::<Vec<_>>();
                                 let mut paths = vec![path];
-                                if let Some((old, _)) = &rename {
-                                    paths.push(old.clone());
-                                }
-                                changed(FileChange::Paths { paths, rename })
+                                paths.extend(renames.iter().map(|(old, _)| old.clone()));
+                                changed(FileChange::Paths { paths, renames })
                             }
                             _ => {
                                 let mut paths = vec![path];
@@ -96,7 +96,7 @@ impl RemoteSource {
                                 }
                                 changed(FileChange::Paths {
                                     paths,
-                                    rename: None,
+                                    renames: Vec::new(),
                                 })
                             }
                         }
@@ -107,7 +107,7 @@ impl RemoteSource {
                         // Explicit protocol limitation: retain automatic checks on this server.
                         loop {
                             tokio::time::sleep(Duration::from_secs(300)).await;
-                            if !changed(FileChange::Inventory) {
+                            if !changed(FileChange::FullRefresh) {
                                 return;
                             }
                         }
@@ -118,105 +118,5 @@ impl RemoteSource {
             }
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
-    }
-
-    pub(crate) async fn publish_paths(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        paths: &[String],
-        rename: Option<&(String, String)>,
-    ) -> SourceResult<library::ScanOutcome> {
-        let mut affected = Vec::new();
-        for path in paths {
-            if self.includes(path) {
-                if !affected.contains(path) {
-                    affected.push(path.clone());
-                }
-            } else {
-                for folder in &self.settings.folders {
-                    if folder
-                        .strip_prefix(path)
-                        .is_some_and(|rest| rest.starts_with('/'))
-                        && !affected.contains(folder)
-                    {
-                        affected.push(folder.clone());
-                    }
-                }
-            }
-        }
-        let paths = affected;
-        let input = self.input().await?;
-        let seeds = paths
-            .iter()
-            .map(|path| self.location(path))
-            .collect::<SourceResult<Vec<_>>>()?;
-        let rename = rename
-            .map(|(old, new)| Ok::<_, SourceError>((self.location(old)?, self.location(new)?)))
-            .transpose()?;
-        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        for page in seeds.chunks(128) {
-            scan.write_local_component_paths(page).await?;
-        }
-        // The same inventory dependency expansion used by Local includes CUE backing files.
-        // Prefixes include old directory contents even when a moved directory no longer exists.
-        let prefixes = seeds
-            .iter()
-            .map(|path| format!("{}/", path.trim_end_matches('/')))
-            .collect::<Vec<_>>();
-        for page in prefixes.chunks(128) {
-            scan.expand_local_artwork_prefixes(source, page, &[])
-                .await?;
-        }
-        let mut image_directories = Vec::new();
-        for path in &paths {
-            if crate::file::artwork::supported_image(std::path::Path::new(path)) {
-                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
-                let prefix = format!("{}/", self.location(parent)?.trim_end_matches('/'));
-                if !image_directories.contains(&prefix) {
-                    image_directories.push(prefix);
-                }
-            }
-        }
-        for page in image_directories.chunks(128) {
-            scan.expand_local_artwork_prefixes(source, &[], page)
-                .await?;
-        }
-        scan.expand_local_component(source).await?;
-        scan.remove_local_component_tracks(source).await?;
-        let mut after = None;
-        loop {
-            let page = scan
-                .local_component_path_page(after.as_deref(), 128)
-                .await?;
-            if page.is_empty() {
-                break;
-            }
-            after = page.last().cloned();
-            for path in &page {
-                match self.stat(&input, &self.relative(path)?).await {
-                    Ok(file) => scan.write_local_files(&[(file, vec![])]).await?,
-                    Err(SourceError::NotFound) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            scan.remove_local_file_paths(&page).await?;
-        }
-        let mut after = None;
-        loop {
-            let page = scan
-                .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
-                .await?;
-            let Some(directory) = page.into_iter().next() else {
-                break;
-            };
-            self.list_directory(&input, &mut scan, &self.relative(&directory)?, &|| false)
-                .await?;
-            after = Some(directory);
-        }
-        self.stage_files(database, &mut scan, &|_| {}, &|| false, rename.as_ref())
-            .await?;
-        self.stage_artwork(database, &mut scan, &|| false).await?;
-        Ok(scan.finish().await?)
     }
 }

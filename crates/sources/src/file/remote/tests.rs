@@ -3,10 +3,12 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use library::{Database, ReadCancellation, Scan, ScanOutcome, SourceId};
+use library::{Catalog, ReadCancellation, SourceId};
+use sqlx::Connection as _;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
 
-use super::{FileAuthentication, FileCredentials, FileSourceSettings, RemoteSource};
+use super::{FileAuthentication, FileCredentials, FileSource, FileSourceSettings};
+use crate::file::walk;
 
 #[test]
 fn file_source_locations_preserve_server_authority_and_encoded_names() {
@@ -15,6 +17,7 @@ fn file_source_locations_preserve_server_authority_and_encoded_names() {
         ("webdav", "https://nas.example:8443/Music/"),
     ] {
         let settings = FileSourceSettings {
+            excluded_folders: Vec::new(),
             url: url.into(),
             alternate_urls: vec![],
             folders: vec![],
@@ -28,7 +31,7 @@ fn file_source_locations_preserve_server_authority_and_encoded_names() {
         let configuration = settings
             .configuration(SourceId::new("files:test"), kind, "Files".into())
             .unwrap();
-        let source = RemoteSource::open(&configuration, None).unwrap();
+        let source = FileSource::open(&configuration, None).unwrap();
         let name = "日本語/track 100% # ?.flac";
         let location = source.location(name).unwrap();
         assert_eq!(source.relative(&location).unwrap(), name);
@@ -55,6 +58,9 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
     Mock::given(any())
         .respond_with(move |request: &Request| match request.method.as_str() {
             "PROPFIND" => {
+                if request.url.path() != "/" {
+                    return ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{}</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>{}</d:getcontentlength></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>", request.url.path(), audio.len()));
+                }
                 let mut entries = String::new();
                 if request.headers.get("depth").unwrap() == "1" {
                     for name in ["a.wav", "b.wav", "c.wav", "c.lrc"].into_iter().chain((response_cue.load(Ordering::Relaxed) == 1).then_some("album.cue")) {
@@ -72,6 +78,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         .mount(&server)
         .await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -88,29 +95,58 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let config = settings
             .configuration(SourceId::new("webdav:partial"), "webdav", "DAV".into())
             .unwrap();
-        let source = crate::Source::open(config, None, None).unwrap();
+        let source = crate::Source::open(config, None, None, None).unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.sqlite3"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite3"))
+            .await
+            .unwrap();
+        let mut emit = catalog.changes();
+        catalog
+            .reconcile_source(source.source_id(), "webdav", "DAV")
             .await
             .unwrap();
         let progress = std::sync::Mutex::new(Vec::new());
-        let result = source
-            .manual_refresh(
-                &database,
-                "DAV",
-                &|value| progress.lock().unwrap().push(value),
-                Arc::new(false.into()),
-            )
-            .await
-            .unwrap();
-        let ScanOutcome::Changed(publication) = result else {
-            panic!("Accepted tracks must still be published: {result:?}");
-        };
-        let rows = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+        for _ in 0..2 {
+            progress.lock().unwrap().clear();
+            source
+                .acquire_catalog(
+                    &catalog,
+                    &|value| progress.lock().unwrap().push(value),
+                    Arc::new(false.into()),
+                    crate::Refresh::Changed,
+                )
+                .await
+                .unwrap();
+            let updates = progress.lock().unwrap();
+            let counts = updates
+                .iter()
+                .filter(|p| p.stage == crate::SourceProgressStage::Tracks)
+                .map(|p| p.completed)
+                .collect::<Vec<_>>();
+            assert_eq!(counts.first(), Some(&0));
+            assert_eq!(counts.last(), Some(&2));
+            assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
+        }
+        let (catalog_source, publication) = crate::published(&mut emit).expect("catalog update");
+        assert!(publication.intersects(sources::Shown::CATALOG));
+        let rows = catalog
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
+        let lyrics = catalog
+            .search_tracks_by_lyrics(
+                &library::SearchRequest::new("lyric line"),
+                None,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            lyrics.tracks.len(),
+            1,
+            "WebDAV scans index sidecars without opening lyrics"
+        );
         let requests = server.received_requests().await.unwrap();
         for name in ["/a.wav", "/b.wav", "/c.wav"] {
             assert!(
@@ -120,19 +156,94 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             );
         }
         let progress = progress.lock().unwrap();
-        assert_eq!(
-            progress
-                .iter()
-                .filter(|p| p.stage == crate::SourceReadStage::Tracks)
-                .map(|p| (p.completed, p.total))
-                .collect::<Vec<_>>(),
-            [(0, None), (1, None), (2, None)]
-        );
-        assert_eq!(
-            progress.last().unwrap().stage,
-            crate::SourceReadStage::Finalizing
-        );
+        let counts = progress
+            .iter()
+            .filter(|p| p.stage == crate::SourceProgressStage::Tracks)
+            .map(|p| p.completed)
+            .collect::<Vec<_>>();
+        assert_eq!(counts.first(), Some(&0));
+        assert_eq!(counts.last(), Some(&2));
+        assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(progress.iter().all(|update| {
+            update.stage == crate::SourceProgressStage::Tracks && update.total.is_none()
+        }));
     }
+}
+
+#[tokio::test]
+async fn dav_refresh_reads_collections_whose_hrefs_escape_names_differently() {
+    // Like hacdias/webdav, hrefs escape the `(`, `[` and `!` that requests carry as typed.
+    // The collection name is Latin-1 and its children are UTF-8.
+    const ESCAPED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'/')
+        .remove(b'.')
+        .remove(b'-');
+    let server = MockServer::start().await;
+    let audio = wave();
+    Mock::given(any()).respond_with(move |request: &Request| {
+        let path: Vec<u8> = percent_encoding::percent_decode_str(request.url.path()).collect();
+        let entry = |path: &[u8]| {
+            let href = percent_encoding::percent_encode(path, ESCAPED);
+            let properties = if path.ends_with(b"/") { "<d:resourcetype><d:collection/></d:resourcetype>".into() } else { format!("<d:resourcetype/><d:getcontentlength>{}</d:getcontentlength>", audio.len()) };
+            format!("<d:response><d:href>{href}</d:href><d:propstat><d:prop>{properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>")
+        };
+        match request.method.as_str() {
+            "PROPFIND" => {
+                let collection = [path.strip_suffix(b"/").unwrap_or(&path), b"/"].concat();
+                let mut entries = if path.ends_with(b".wav") { entry(&path) } else { entry(&collection) };
+                if request.headers.get("depth").unwrap() == "1" && collection.ends_with(b"/Album (2014) [FLAC]/") {
+                    entries += &entry(&[&collection[..], b"01 Intro!.wav"].concat());
+                }
+                ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\">{entries}</d:multistatus>"))
+            }
+            "GET" if path.ends_with(b"/01 Intro!.wav") => ResponseTemplate::new(200).set_body_bytes(audio.clone()),
+            _ => ResponseTemplate::new(404),
+        }
+    }).mount(&server).await;
+    let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
+        url: format!("{}/M%FAsica [Lossless]/", server.uri()),
+        alternate_urls: vec![],
+        folders: vec!["Album (2014) [FLAC]".into()],
+        username: String::new(),
+        domain: String::new(),
+        authentication: FileAuthentication::Anonymous,
+        trust_invalid_certificate: false,
+        certificate_pem: None,
+        require_smb_encryption: false,
+    };
+    let config = settings
+        .configuration(SourceId::new("webdav:escaped"), "webdav", "DAV".into())
+        .unwrap();
+    let source = crate::Source::open(config, None, None, None).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(directory.path().join("library.sqlite3"))
+        .await
+        .unwrap();
+    catalog
+        .reconcile_source(source.source_id(), "webdav", "DAV")
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(false.into()),
+            crate::Refresh::Changed,
+        )
+        .await
+        .unwrap();
+    let publication = {
+        catalog.loaded().await;
+        catalog.cached_source(source.source_id().as_str())
+    }
+    .unwrap()
+    .source;
+    let tracks = catalog
+        .mapping_track_page(publication, None, None, 10, &ReadCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(tracks.len(), 1);
 }
 
 #[tokio::test]
@@ -177,6 +288,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}{ROOT}", server.uri()).replace("%E8%81%B4", "%e8%81%b4"),
         alternate_urls: vec![],
         folders: vec!["library".into()],
@@ -194,31 +306,43 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
             "Nextcloud".into(),
         )
         .unwrap();
-    let source = crate::Source::open(config, None, None).unwrap();
+    let source = crate::Source::open(config, None, None, None).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("library.sqlite3"))
+    let catalog = Catalog::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
+    let mut emit = catalog.changes();
     let mut identities = Vec::new();
+    catalog
+        .reconcile_source(source.source_id(), "webdav", "Nextcloud")
+        .await
+        .unwrap();
     for round in 0..3 {
         let before = server.received_requests().await.unwrap().len();
         if round == 2 {
             generation.store(1, Ordering::Relaxed);
         }
-        let outcome = source
-            .refresh_if_needed(
-                &database,
-                "Nextcloud",
+        source
+            .acquire_catalog(
+                &catalog,
                 &|_| panic!("automatic inventory must not replace artwork progress"),
                 Arc::new(false.into()),
+                crate::Refresh::Check,
             )
             .await
-            .unwrap()
             .unwrap();
-        let publication = match outcome {
-            ScanOutcome::Changed(p) if round != 1 => p,
-            ScanOutcome::Identical(p) if round == 1 => p,
-            other => panic!("Unexpected refresh: {other:?}"),
+        let publication = if round == 1 {
+            assert!(crate::published(&mut emit).is_none());
+            {
+                catalog.loaded().await;
+                catalog.cached_source(source.source_id().as_str())
+            }
+            .unwrap()
+            .source
+        } else {
+            let (catalog_source, update) = crate::published(&mut emit).expect("catalog update");
+            assert!(update.intersects(sources::Shown::CATALOG));
+            catalog_source
         };
         let requests = server.received_requests().await.unwrap();
         assert!(
@@ -241,8 +365,8 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
                 "Unchanged branch was traversed or downloaded"
             );
         }
-        let tracks = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+        let tracks = catalog
+            .mapping_track_page(publication, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(tracks.len(), 2);
@@ -261,37 +385,21 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
 
 #[tokio::test]
 async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
-    for sync_supported in [false, true] {
-        dav_inventory_round_trip(sync_supported).await;
-    }
-}
-
-async fn dav_inventory_round_trip(sync_supported: bool) {
     let server = MockServer::start().await;
     let path = Arc::new(RwLock::new("first.wav".to_string()));
     let gets = Arc::new(AtomicUsize::new(0));
     let current_path = Arc::clone(&path);
     let reads = Arc::clone(&gets);
-    let expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let token_expired = Arc::clone(&expired);
     let audio = wave();
     Mock::given(any()).respond_with(move |request: &Request| {
         assert_eq!(request.headers.get("authorization").unwrap(), "Basic bGlzdGVuZXI6c2VjcmV0");
         let path = current_path.read().unwrap();
         match request.method.as_str() {
             "PROPFIND" => {
-                let token = if sync_supported { format!("<d:sync-token>urn:rufin:{path}</d:sync-token>") } else { String::new() };
                 let file = if request.headers.get("depth").unwrap() == "1" {
                     format!("<d:response><d:href>/music/{path}</d:href><d:propstat><d:prop><d:getcontentlength>{}</d:getcontentlength><d:getetag>&quot;unchanged&quot;</d:getetag><o:fileid>42</o:fileid><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>", audio.len())
                 } else { String::new() };
-                ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>/music/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype>{token}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>{file}</d:multistatus>"))
-            }
-            "REPORT" if sync_supported => {
-                if token_expired.load(Ordering::Relaxed) { return ResponseTemplate::new(409); }
-                let token = format!("urn:rufin:{path}");
-                let changes = if String::from_utf8_lossy(&request.body).contains(&token) { String::new() }
-                    else { "<d:response><d:href>/music/first.wav</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>".into() };
-                ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\">{changes}<d:sync-token>{token}</d:sync-token></d:multistatus>"))
+                ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>/music/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>{file}</d:multistatus>"))
             }
             "GET" if request.url.path() == format!("/music/{path}") => {
                 reads.fetch_add(1, Ordering::Relaxed);
@@ -307,6 +415,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -326,52 +435,81 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         headers: vec![],
     })
     .unwrap();
-    let source = RemoteSource::open(&configuration, Some(credential)).unwrap();
+    let source = FileSource::open(&configuration, Some(credential)).unwrap();
+    let source_owner = crate::Source::new(
+        configuration.source_id.clone(),
+        crate::Implementation::Files(source),
+    );
+    let crate::Implementation::Files(source) = &source_owner.implementation else {
+        unreachable!()
+    };
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("library.sqlite3"))
-        .await
-        .unwrap();
+    let database_path = directory.path().join("library.sqlite3");
+    let catalog = Catalog::open(&database_path).await.unwrap();
+    let mut emit = catalog.changes();
     let mut first_uri = String::new();
     let mut reads_after_first = 0;
     for round in 0..4 {
-        let before = server.received_requests().await.unwrap().len();
         if round == 3 {
-            expired.store(true, Ordering::Relaxed);
-        }
-        if round == 2 {
             *path.write().unwrap() = "renamed.wav".into();
-        }
-        let mut scan = Scan::begin(
-            &database,
-            configuration.source_id.as_str(),
-            "DAV",
-            "dav",
-            None,
-        )
-        .await
-        .unwrap();
-        source
-            .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
-            .await
-            .unwrap();
-        let outcome = scan.finish().await.unwrap();
-        if sync_supported && matches!(round, 1 | 3) {
-            let requests = server.received_requests().await.unwrap();
-            let current = &requests[before..];
-            assert!(current.iter().any(|r| r.method.as_str() == "REPORT"));
-            assert_eq!(
-                current
-                    .iter()
-                    .filter(|r| r.headers.get("depth").is_some_and(|depth| depth == "1"))
-                    .count(),
-                usize::from(round == 3),
-                "Unchanged sync reuses listings; expired tokens reacquire them"
+            catalog
+                .reconcile_source(
+                    &library::SourceId::new(configuration.source_id.as_str()),
+                    "dav",
+                    "DAV",
+                )
+                .await
+                .unwrap();
+            let catalog_source_id = (configuration.source_id.as_str()).to_string();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+            observation.start_observation().await.unwrap();
+            let cancelled = std::sync::atomic::AtomicBool::new(false);
+            let interrupted = source
+                .walk(
+                    &mut observation,
+                    walk::WalkScope::All { resync: false },
+                    &|progress| {
+                        if progress.stage == crate::SourceProgressStage::Tracks {
+                            cancelled.store(true, Ordering::Relaxed);
+                        }
+                    },
+                    &|| cancelled.load(Ordering::Relaxed),
+                )
+                .await;
+            assert!(
+                matches!(interrupted, Err(crate::SourceError::Cancelled)),
+                "interrupted after native listing, before metadata"
             );
         }
-        if round == 1 {
+        catalog
+            .reconcile_source(
+                &library::SourceId::new(configuration.source_id.as_str()),
+                "dav",
+                "DAV",
+            )
+            .await
+            .unwrap();
+        let catalog_source_id = (configuration.source_id.as_str()).to_string();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+        let catalog_source = observation.source;
+        source
+            .walk(
+                &mut observation,
+                walk::WalkScope::All { resync: false },
+                &|_| {},
+                &|| false,
+            )
+            .await
+            .unwrap();
+        let publication = crate::published(&mut emit);
+        if let Some((published_source, _)) = publication {
+            assert_eq!(published_source, catalog_source);
+        }
+        if matches!(round, 1 | 2) {
             assert!(
-                matches!(outcome, ScanOutcome::Identical(_)),
-                "unchanged inventory: {outcome:?}"
+                publication.is_none(),
+                "unchanged inventory: {publication:?}"
             );
             assert_eq!(
                 gets.load(Ordering::Relaxed),
@@ -379,18 +517,24 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                 "unchanged files must not be downloaded or parsed again"
             );
         }
-        let publication = match outcome {
-            ScanOutcome::Changed(p) | ScanOutcome::Identical(p) => p,
-            other => panic!("{other:?}"),
-        };
-        let tracks = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+        let tracks = catalog
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
-        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks.len(), 1, "round={round} {tracks:?}");
         if round == 0 {
             first_uri = tracks[0].media_uri.clone();
             reads_after_first = gets.load(Ordering::Relaxed);
+            let mut stored = sqlx::SqliteConnection::connect_with(
+                &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+            )
+            .await
+            .unwrap();
+            sqlx::query("UPDATE track_details SET metadata=jsonb_remove(metadata,'$.album_tags')")
+                .execute(&mut stored)
+                .await
+                .unwrap();
+            stored.close().await.unwrap();
         } else {
             assert_eq!(tracks[0].media_uri, first_uri);
         }
@@ -398,14 +542,37 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             library::source_entity_parts(&first_uri).unwrap().0,
             configuration.source_id
         );
-        if round == 2 {
-            let observation = database
-                .observed_media_file(&first_uri)
+        if matches!(round, 1 | 2) {
+            let observation = crate::stored_files(&catalog, configuration.source_id.as_str())
                 .await
-                .unwrap()
+                .into_iter()
+                .find(|file| file.kind == library::LocalFileKind::Media)
                 .unwrap();
-            assert!(observation.path.ends_with("/renamed.wav"));
-            let stream = source.stream(&database, &first_uri).await.unwrap();
+            assert_eq!(observation.parse_version, Some(super::scan::PARSER_VERSION));
+            assert_eq!(observation.state, library::LocalFileState::Accepted);
+        }
+        if round == 3 {
+            assert!(gets.load(Ordering::Relaxed) > reads_after_first);
+            let playable = crate::playable(&catalog, &first_uri).await;
+            assert!(
+                playable
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .path
+                    .ends_with("/renamed.wav")
+            );
+            assert!(
+                crate::stored_files(&catalog, configuration.source_id.as_str())
+                    .await
+                    .iter()
+                    .all(|file| !file.path.ends_with("/first.wav")),
+                "a listing interrupted before completion must not retain the absent old path"
+            );
+            let stream = source
+                .stream(playable.file.as_ref().unwrap(), &first_uri, playable.window)
+                .await
+                .unwrap();
             let response = reqwest::get(stream.uri()).await.unwrap();
             assert_eq!(response.bytes().await.unwrap().as_ref(), wave());
         }
@@ -449,16 +616,24 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         let audio = wave();
         match request.method.as_str() {
             "PROPFIND" => {
+                if request.url.path() != "/music/" {
+                    let name = request.url.path().rsplit('/').next().unwrap();
+                    let (native_id, current_revision, size) = if name == "audio.wav" { ("audio-id", revision, audio.len()) }
+                        else if round != 4 && name == cue_name { ("cue-id", "cue-1", cue.len()) }
+                        else if round != 4 && name == "second.cue" { ("second-cue-id", "cue-1", cue.len()) }
+                        else { return ResponseTemplate::new(404); };
+                    return ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>{}</d:href><d:propstat><d:prop><d:getcontentlength>{size}</d:getcontentlength><d:getetag>&quot;{current_revision}&quot;</d:getetag><o:fileid>{native_id}</o:fileid><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>",request.url.path()));
+                }
                 let mut files = String::new();
                 if request.headers.get("depth").unwrap() == "1" {
-                    for (name, id, revision, size) in [("audio.wav", "audio-id", revision, audio.len()), (cue_name, "cue-id", "cue-1", cue.len())] {
-                        if round == 4 && name == cue_name { continue; }
+                    for (name, id, revision, size) in [("audio.wav", "audio-id", revision, audio.len()), (cue_name, "cue-id", "cue-1", cue.len()), ("second.cue", "second-cue-id", "cue-1", cue.len())] {
+                        if round == 4 && name.ends_with(".cue") { continue; }
                         files.push_str(&format!("<d:response><d:href>/music/{name}</d:href><d:propstat><d:prop><d:getcontentlength>{size}</d:getcontentlength><d:getetag>&quot;{revision}&quot;</d:getetag><o:fileid>{id}</o:fileid><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"));
                     }
                 }
                 ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>/music/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>{files}</d:multistatus>"))
             }
-            "GET" if request.url.path() == format!("/music/{cue_name}") => {
+            "GET" if request.url.path() == format!("/music/{cue_name}") || request.url.path() == "/music/second.cue" => {
                 gets.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200).set_body_bytes(cue.to_vec())
             }
@@ -476,6 +651,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         }
     }).mount(&server).await;
     let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", server.uri()),
         alternate_urls: vec![],
         folders: vec![],
@@ -489,31 +665,51 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     let configuration = settings
         .configuration(SourceId::new("webdav:cue-test"), "webdav", "DAV".into())
         .unwrap();
-    let source = RemoteSource::open(&configuration, None).unwrap();
+    let source = FileSource::open(&configuration, None).unwrap();
+    let source_owner = crate::Source::new(
+        configuration.source_id.clone(),
+        crate::Implementation::Files(source),
+    );
+    let crate::Implementation::Files(source) = &source_owner.implementation else {
+        unreachable!()
+    };
     let folder = tempfile::tempdir().unwrap();
-    let database = Database::open(folder.path().join("library.sqlite3"))
+    let catalog = Catalog::open(folder.path().join("library.sqlite3"))
         .await
         .unwrap();
+    let mut emit = catalog.changes();
     let mut original_uris = Vec::new();
     let mut previous_reads = 0;
     for pass in 0..5 {
         round.store(pass, Ordering::Relaxed);
-        let mut scan = Scan::begin(
-            &database,
-            configuration.source_id.as_str(),
-            "DAV",
-            "dav",
-            None,
-        )
-        .await
-        .unwrap();
-        source
-            .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
+        let before = server.received_requests().await.unwrap().len();
+        catalog
+            .reconcile_source(
+                &library::SourceId::new(configuration.source_id.as_str()),
+                "dav",
+                "DAV",
+            )
             .await
             .unwrap();
-        let outcome = scan.finish().await.unwrap();
+        let catalog_source_id = (configuration.source_id.as_str()).to_string();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+        let catalog_source = observation.source;
+        source
+            .walk(
+                &mut observation,
+                walk::WalkScope::All { resync: false },
+                &|_| {},
+                &|| false,
+            )
+            .await
+            .unwrap();
+        let publication = crate::published(&mut emit);
+        if let Some((published_source, _)) = publication {
+            assert_eq!(published_source, catalog_source);
+        }
         if pass == 1 {
-            assert!(matches!(outcome, ScanOutcome::Identical(_)), "{outcome:?}");
+            assert!(publication.is_none(), "{publication:?}");
             assert_eq!(
                 reads.load(Ordering::Relaxed),
                 previous_reads,
@@ -521,23 +717,24 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             );
         }
         if pass == 3 {
-            assert!(
-                reads.load(Ordering::Relaxed) > previous_reads,
-                "changed backing audio must be re-read"
-            );
+            let requests = server.received_requests().await.unwrap();
+            for cue in ["/music/renamed.cue", "/music/second.cue"] {
+                assert!(
+                    requests[before..].iter().any(
+                        |request| request.method.as_str() == "GET" && request.url.path() == cue
+                    ),
+                    "both CUE sheets must reparse changed shared backing audio"
+                );
+            }
         }
         previous_reads = reads.load(Ordering::Relaxed);
-        let publication = match outcome {
-            ScanOutcome::Changed(p) | ScanOutcome::Identical(p) => p,
-            other => panic!("{other:?}"),
-        };
-        let rows = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+        let rows = catalog
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(
             rows.len(),
-            if pass == 4 { 1 } else { 2 },
+            if pass == 4 { 1 } else { 4 },
             "backing audio appears only after its CUE is removed"
         );
         let mut uris = rows
@@ -556,20 +753,27 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         if pass == 2 {
             let mut windows = Vec::new();
             for row in rows {
-                let file = database
-                    .observed_media_file(&row.media_uri)
+                let playable = crate::playable(&catalog, &row.media_uri).await;
+                assert!(playable.file.as_ref().unwrap().path.ends_with("/audio.wav"));
+                let stream = source
+                    .stream(
+                        playable.file.as_ref().unwrap(),
+                        &row.media_uri,
+                        playable.window,
+                    )
                     .await
-                    .unwrap()
                     .unwrap();
-                assert!(file.path.ends_with("/audio.wav"));
-                let stream = source.stream(&database, &row.media_uri).await.unwrap();
                 windows.push(stream.window().unwrap().clone());
             }
             windows.sort_by_key(|window| window.start_millis);
             assert_eq!(windows[0].start_millis, 0);
             assert_eq!(windows[0].end_millis, 493);
-            assert_eq!(windows[1].start_millis, 493);
-            assert_eq!(windows[1].end_millis, 1000);
+            assert_eq!(windows[1].start_millis, 0);
+            assert_eq!(windows[1].end_millis, 493);
+            assert_eq!(windows[2].start_millis, 493);
+            assert_eq!(windows[2].end_millis, 1000);
+            assert_eq!(windows[3].start_millis, 493);
+            assert_eq!(windows[3].end_millis, 1000);
         }
     }
 }
@@ -590,6 +794,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
         }).mount(server).await;
     }
     let mut settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
         url: format!("{}/music/", primary.uri()),
         alternate_urls: vec![format!("{}/music/", alternate.uri())],
         folders: vec![],
@@ -602,13 +807,13 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
     };
     let credentials = FileCredentials {
         secret: "saved-password".into(),
-        headers: vec![("X-Access".into(), "retained-secret".into())],
+        headers: vec![("X-Access".into(), "retained-secret".into()).into()],
     };
     let configuration = settings
         .configuration(SourceId::new("dav:addresses"), "webdav", "Music".into())
         .unwrap();
     let credential = Some(serde_json::to_string(&credentials).unwrap());
-    let source = RemoteSource::open(&configuration, credential.clone()).unwrap();
+    let source = FileSource::open(&configuration, credential.clone()).unwrap();
     let original = source.location("a song #.wav").unwrap();
     let first = source.input().await.unwrap();
     unavailable.store(1, Ordering::Relaxed);
@@ -635,7 +840,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
     let (configuration, _, saved) = edited.into_parts();
     assert_eq!(saved, credential);
     assert!(!configuration.provider_payload.contains("retained-secret"));
-    let reopened = RemoteSource::open(&configuration, saved).unwrap();
+    let reopened = FileSource::open(&configuration, saved).unwrap();
     assert_eq!(reopened.location("a song #.wav").unwrap(), original);
     assert_eq!(reopened.relative(&original).unwrap(), "a song #.wav");
 }

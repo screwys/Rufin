@@ -3,10 +3,20 @@
 pub(crate) mod artwork;
 pub(crate) mod cue;
 pub(crate) mod discovery;
+pub(crate) mod documents;
 pub(crate) mod local;
 pub(crate) mod lofty;
+pub(crate) mod lyrics;
 pub(crate) mod media;
 pub(crate) mod metadata;
 pub(crate) mod playlist;
 pub(crate) mod remote;
-pub(crate) mod scan;
+pub(crate) mod walk;
+
+fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> crate::SourceResult<()> {
+    if cancelled() {
+        Err(crate::SourceError::Cancelled)
+    } else {
+        Ok(())
+    }
+}

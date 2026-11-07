@@ -1,27 +1,56 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Read, SeekFrom, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
-use playback::{CastNetwork, PreparedStream};
+use audio_processing::{TranscodeOptions, effects::ProcessingConfig};
+use axum::Router;
+use axum::body::{Body, HttpBody};
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, Version};
+use axum::response::{IntoResponse, Response};
+use futures_util::TryStreamExt;
+use library::AudioEncoding;
+use playback::{BackendEvent, CastNetwork, PreparedStream};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::{OnceCell, oneshot, watch};
+use tokio_util::io::{ReaderStream, StreamReader};
 use url::Url;
 
 const PREFERRED_RELAY_PORT: u16 = 9_876;
 
-pub(crate) type ArtworkResolver = Arc<dyn Fn(&PreparedStream) -> Option<PathBuf> + Send + Sync>;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RelayRepresentation {
-    Automatic,
     Source,
-    Mp3,
+    Generated(AudioEncoding),
+}
+
+pub(crate) struct PublishRequest {
+    pub(crate) representation: RelayRepresentation,
+    pub(crate) processing: ProcessingConfig,
+    pub(crate) logical_offset_millis: u64,
+}
+
+impl Default for PublishRequest {
+    fn default() -> Self {
+        Self {
+            representation: RelayRepresentation::Source,
+            processing: ProcessingConfig::default(),
+            logical_offset_millis: 0,
+        }
+    }
+}
+
+struct GeneratedResource {
+    options: TranscodeOptions,
+    cancelled: Arc<AtomicBool>,
+    generated: OnceCell<Arc<GeneratedFile>>,
+    error_reported: AtomicBool,
+    reported_processing: Mutex<ProcessingFacts>,
 }
 
 #[derive(Clone)]
@@ -30,7 +59,7 @@ struct RelayResource {
     artwork_path: Option<PathBuf>,
     content_type: String,
     content_length: Option<u64>,
-    transcode: bool,
+    generated: Option<Arc<GeneratedResource>>,
 }
 
 #[derive(Clone)]
@@ -40,7 +69,7 @@ pub(crate) struct PublishedResource {
     pub(crate) content_length: Option<u64>,
     pub(crate) logical_offset_millis: u64,
     pub(crate) resource_duration_millis: Option<u64>,
-    pub(crate) seekable: bool,
+    pub(crate) native_seek: bool,
     pub(crate) artwork_uri: Option<String>,
     pub(crate) relay_token: Option<String>,
 }
@@ -53,12 +82,12 @@ impl PublishedResource {
 }
 
 pub(crate) struct RelayServer {
+    pub(crate) visualizer_fft_size: usize,
     base_url: String,
     target_is_local: bool,
     proxy_media: Arc<AtomicBool>,
     resources: Arc<Mutex<HashMap<String, RelayResource>>>,
-    artwork_resolver: Option<ArtworkResolver>,
-    running: Arc<AtomicBool>,
+    shutdown: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -74,87 +103,101 @@ impl RelayServer {
         } else {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED)
         };
-        let server = relay_server(bind_ip, PREFERRED_RELAY_PORT, bound_interface)
-            .or_else(|_| relay_server(bind_ip, 0, bound_interface))?;
-        let address = server
-            .server_addr()
-            .to_ip()
-            .ok_or_else(|| "the cast relay did not bind an IP socket".to_string())?;
+        let listener = relay_listener(bind_ip, PREFERRED_RELAY_PORT, bound_interface)
+            .or_else(|_| relay_listener(bind_ip, 0, bound_interface))?;
+        let address = listener.local_addr().map_err(|error| error.to_string())?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| error.to_string())?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let listener = {
+            let _guard = runtime.enter();
+            tokio::net::TcpListener::from_std(listener).map_err(|error| error.to_string())?
+        };
         let resources = Arc::new(Mutex::new(HashMap::new()));
-        let running = Arc::new(AtomicBool::new(true));
-        let thread_resources = Arc::clone(&resources);
-        let thread_running = Arc::clone(&running);
+        let app = Router::new()
+            .fallback(respond)
+            .with_state(Arc::clone(&resources));
+        let (shutdown, stopped) = oneshot::channel();
         let thread = thread::Builder::new()
             .name("rufin-cast-relay".to_string())
-            .spawn(move || serve(server, thread_resources, thread_running))
+            .spawn(move || {
+                runtime.block_on(async {
+                    tokio::select! {
+                        result = async { axum::serve(listener, app).await } => {
+                            if let Err(error) = result {
+                                tracing::debug!(%error, "cast relay stopped receiving requests");
+                            }
+                        }
+                        _ = stopped => {}
+                    }
+                });
+                runtime.shutdown_background();
+            })
             .map_err(|error| error.to_string())?;
         let host = match local_ip {
             IpAddr::V4(ip) => ip.to_string(),
             IpAddr::V6(ip) => format!("[{ip}]"),
         };
         Ok(Self {
+            visualizer_fft_size: 4_096,
             base_url: format!("http://{host}:{}", address.port()),
             target_is_local: target_is_local(target),
             proxy_media,
             resources,
-            artwork_resolver: None,
-            running,
+            shutdown: Some(shutdown),
             thread: Some(thread),
         })
     }
 
-    pub(crate) fn with_artwork_resolver(mut self, resolver: ArtworkResolver) -> Self {
-        self.artwork_resolver = Some(resolver);
-        self
-    }
-
-    pub(crate) fn publish(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
-        self.publish_at(stream, RelayRepresentation::Automatic, 0)
-    }
-
-    pub(crate) fn publish_as(
+    pub(crate) fn publish(
         &self,
         stream: &PreparedStream,
-        representation: RelayRepresentation,
+        request: PublishRequest,
     ) -> Result<PublishedResource, String> {
-        self.publish_at(stream, representation, 0)
-    }
-
-    pub(crate) fn publish_at(
-        &self,
-        stream: &PreparedStream,
-        representation: RelayRepresentation,
-        logical_offset_millis: u64,
-    ) -> Result<PublishedResource, String> {
-        let artwork_path = stream.artwork_path.as_deref().cloned().or_else(|| {
-            let resolver = self.artwork_resolver.as_ref()?;
-            resolver(stream)
-        });
+        let artwork_path = stream.artwork_path.as_deref().cloned();
         let original_content_type = source_content_type(stream);
-        let transcode = representation == RelayRepresentation::Mp3
-            || stream.window().is_some()
-            || (representation == RelayRepresentation::Automatic
-                && !directly_supported(&original_content_type));
+        let encoding = match request.representation {
+            RelayRepresentation::Generated(encoding) => Some(encoding),
+            RelayRepresentation::Source => (stream.window().is_some()
+                || request.processing != ProcessingConfig::default())
+            .then_some(AudioEncoding::mp3()),
+        };
         let logical_duration_millis = stream_duration_millis(stream);
-        let (stream, logical_offset_millis) = if transcode && logical_offset_millis > 0 {
-            let duration = logical_duration_millis.ok_or_else(|| {
-                "cast transcode cannot restore a position without a track duration".to_string()
-            })?;
-            if logical_offset_millis >= duration {
-                return Err("cast position is outside the track duration".to_string());
-            }
-            (
-                clipped_stream(stream, logical_offset_millis, duration),
-                logical_offset_millis,
-            )
+        let logical_offset_millis = if encoding.is_some() {
+            request.logical_offset_millis
         } else {
-            (stream.clone(), 0)
+            0
         };
-        let content_type = if transcode {
-            "audio/mpeg".to_string()
-        } else {
-            original_content_type
-        };
+        if logical_duration_millis
+            .is_some_and(|duration| logical_offset_millis >= duration && logical_offset_millis > 0)
+        {
+            return Err("cast position is outside the track duration".into());
+        }
+        let resource_duration_millis =
+            logical_duration_millis.map(|duration| duration.saturating_sub(logical_offset_millis));
+        let generated = encoding.map(|encoding| {
+            Arc::new(GeneratedResource {
+                options: TranscodeOptions {
+                    encoding,
+                    processing: Some(request.processing),
+                    start_offset_millis: logical_offset_millis,
+                    duration_millis: resource_duration_millis,
+                    visualizer_fft_size: Some(self.visualizer_fft_size),
+                },
+                cancelled: Arc::new(AtomicBool::new(false)),
+                generated: OnceCell::new(),
+                error_reported: AtomicBool::new(false),
+                reported_processing: Mutex::new(ProcessingFacts::default()),
+            })
+        });
+        let content_type = encoding.map_or(original_content_type, |encoding| {
+            encoding.codec.content_type().to_string()
+        });
+        let transcode = generated.is_some();
         let content_length = if transcode {
             None
         } else {
@@ -175,7 +218,7 @@ impl RelayServer {
                         artwork_path: artwork_path.clone(),
                         content_type: content_type.clone(),
                         content_length,
-                        transcode,
+                        generated,
                     },
                 );
         }
@@ -214,9 +257,119 @@ impl RelayServer {
             content_length,
             logical_offset_millis,
             resource_duration_millis,
-            seekable: !transcode,
+            native_seek: !transcode,
             relay_token: token,
         })
+    }
+
+    pub(crate) fn source_seekable(&self, resource: &PublishedResource) -> Option<bool> {
+        let resources = self
+            .resources
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        resources
+            .get(resource.relay_token.as_ref()?)?
+            .generated
+            .as_ref()?
+            .generated
+            .get()?
+            .progress
+            .borrow()
+            .source_seekable
+    }
+
+    pub(crate) fn visualizer(
+        &self,
+        resource: &PublishedResource,
+        run: playback::RunId,
+        position_millis: u64,
+    ) -> Option<BackendEvent> {
+        let resources = self
+            .resources
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let file = resources
+            .get(resource.relay_token.as_ref()?)?
+            .generated
+            .as_ref()?
+            .generated
+            .get()?
+            .clone();
+        drop(resources);
+        let levels = file
+            .visualizer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .at(position_millis.saturating_sub(resource.logical_offset_millis))
+            .ok()??;
+        Some(BackendEvent::Visualizer { run, levels })
+    }
+
+    pub(crate) fn processing_events(
+        &self,
+        resource: &PublishedResource,
+        output: &str,
+    ) -> Vec<BackendEvent> {
+        let resources = self
+            .resources
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(generated) = resource
+            .relay_token
+            .as_ref()
+            .and_then(|token| resources.get(token))
+            .and_then(|resource| resource.generated.as_ref())
+        else {
+            return Vec::new();
+        };
+        let Some(file) = generated.generated.get() else {
+            return Vec::new();
+        };
+        let progress = file.progress.borrow();
+        if progress.error.is_some() {
+            return Vec::new();
+        }
+        let Some((config, rate, preamp)) = &progress.processing.applied else {
+            return Vec::new();
+        };
+        let mut previous = generated
+            .reported_processing
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let mut events = Vec::new();
+        let applied_changed = previous.applied != progress.processing.applied;
+        if applied_changed {
+            events.push(BackendEvent::ProcessingApplied {
+                output: output.into(),
+                config: config.clone(),
+                sample_rate: Some(*rate),
+                preamp_db: *preamp,
+            });
+        }
+        if applied_changed || previous.peak_db != progress.processing.peak_db {
+            events.push(BackendEvent::ProcessingMeter {
+                output: output.into(),
+                peak_db: progress.processing.peak_db.clone(),
+                spectrum_db: Vec::new(),
+            });
+        }
+        if !events.is_empty() {
+            *previous = progress.processing.clone();
+        }
+        events
+    }
+
+    pub(crate) fn error(&self, resource: &PublishedResource) -> Option<String> {
+        let resources = self
+            .resources
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let generated = resources
+            .get(resource.relay_token.as_ref()?)?
+            .generated
+            .as_ref()?;
+        let error = generated.generated.get()?.progress.borrow().error.clone()?;
+        (!generated.error_reported.swap(true, Ordering::AcqRel)).then_some(error)
     }
 
     pub(crate) fn remove(&self, resource: &PublishedResource) {
@@ -226,35 +379,31 @@ impl RelayServer {
         self.resources
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(token);
+            .remove(token)
+            .inspect(|resource| resource.cancel());
     }
 
     pub(crate) fn clear(&self) {
         self.resources
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
+            .drain()
+            .for_each(|(_, resource)| resource.cancel());
     }
 
     pub(crate) fn shutdown(&mut self) {
-        self.running.store(false, Ordering::Release);
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
         self.resources
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
+            .drain()
+            .for_each(|(_, resource)| resource.cancel());
     }
-}
-
-fn relay_server(
-    bind_ip: IpAddr,
-    port: u16,
-    network_interface: Option<&str>,
-) -> Result<Server, String> {
-    let listener = relay_listener(bind_ip, port, network_interface)?;
-    Server::from_listener(listener, None).map_err(|error| error.to_string())
 }
 
 fn relay_listener(
@@ -296,27 +445,12 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .end_millis()
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
-            stream
-                .occurrence
-                .as_ref()
-                .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
+            stream.row.as_ref().and_then(|occurrence| {
+                u64::try_from(occurrence.track.metadata.duration_millis)
+                    .ok()
+                    .filter(|value| *value > 0)
+            })
         })
-}
-
-fn clipped_stream(
-    stream: &PreparedStream,
-    logical_offset_millis: u64,
-    duration_millis: u64,
-) -> PreparedStream {
-    let source_start_millis = stream.start_millis().saturating_add(logical_offset_millis);
-    let source_end_millis = stream.start_millis().saturating_add(duration_millis);
-    let mut clipped = stream.clone();
-    clipped.stream = Box::new(
-        (*stream.stream)
-            .clone()
-            .with_window(source_start_millis, source_end_millis),
-    );
-    clipped
 }
 
 fn direct_media_uri(stream: &PreparedStream, transcode: bool, target_is_local: bool) -> bool {
@@ -459,34 +593,14 @@ fn selected_interface_address<'a>(
         .or_else(|| addresses.first().copied())
 }
 
-fn serve(
-    server: Server,
-    resources: Arc<Mutex<HashMap<String, RelayResource>>>,
-    running: Arc<AtomicBool>,
-) {
-    while running.load(Ordering::Acquire) {
-        let request = match server.recv_timeout(Duration::from_millis(100)) {
-            Ok(Some(request)) => request,
-            Ok(None) => continue,
-            Err(error) => {
-                tracing::debug!(%error, "cast relay stopped receiving requests");
-                break;
-            }
-        };
-        let request_resources = Arc::clone(&resources);
-        let _ = thread::Builder::new()
-            .name("rufin-cast-request".to_string())
-            .spawn(move || respond(request, &request_resources));
-    }
-}
-
-fn respond(request: Request, resources: &Mutex<HashMap<String, RelayResource>>) {
-    let path = request
-        .url()
-        .split('?')
-        .next()
-        .unwrap_or_default()
-        .trim_start_matches('/');
+async fn respond(
+    State(resources): State<Arc<Mutex<HashMap<String, RelayResource>>>>,
+    method: Method,
+    uri: Uri,
+    version: Version,
+    headers: HeaderMap,
+) -> Response {
+    let path = uri.path().trim_start_matches('/');
     let mut segments = path.split('/');
     let token = segments.next().unwrap_or_default();
     let artwork = segments.next() == Some("artwork");
@@ -496,149 +610,486 @@ fn respond(request: Request, resources: &Mutex<HashMap<String, RelayResource>>) 
         .get(token)
         .cloned();
     tracing::debug!(
-        method = ?request.method(),
+        ?method,
         artwork,
-        range = request.headers().iter().any(|header| header.field.equiv("Range")),
+        range = headers.contains_key("range"),
         active = resource.is_some(),
         "received cast relay request"
     );
-    let response = match resource {
-        Some(resource) => resource_response(&request, resource, artwork),
-        None => Ok(empty_response(StatusCode(404))),
+    match resource {
+        Some(resource) => resource_response(&method, version, &headers, resource, artwork).await,
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
     .unwrap_or_else(|error| {
         tracing::debug!(%error, "cast relay request failed");
-        empty_response(StatusCode(502))
-    });
-    let _ = request.respond(response);
+        StatusCode::BAD_GATEWAY.into_response()
+    })
 }
 
-fn resource_response(
-    request: &Request,
+async fn resource_response(
+    method: &Method,
+    version: Version,
+    headers: &HeaderMap,
     resource: RelayResource,
     artwork: bool,
-) -> Result<ResponseBox, String> {
-    if !matches!(request.method(), Method::Get | Method::Head) {
-        return Ok(empty_response(StatusCode(405)));
+) -> Result<Response, String> {
+    if !matches!(*method, Method::GET | Method::HEAD) {
+        return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let range = request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Range"))
-        .map(|header| header.value.as_str().to_string());
-    if artwork {
-        artwork_response(request.method(), range.as_deref(), resource)
-    } else if resource.transcode {
-        transcoded_response(request.method(), range.as_deref(), resource)
+    let range = headers.get("range").and_then(|value| value.to_str().ok());
+    let response = if artwork {
+        let path = resource
+            .artwork_path
+            .ok_or_else(|| "cast artwork is unavailable".to_string())?;
+        let content_type = artwork_content_type(&path).await?;
+        file_response(method, range, path, content_type).await
+    } else if resource.generated.is_some() {
+        return generated_response(method, version, range, resource).await;
     } else if resource.stream.uri().starts_with("file:") {
-        local_response(request.method(), range.as_deref(), resource)
+        let path = Url::parse(resource.stream.uri())
+            .map_err(|error| error.to_string())?
+            .to_file_path()
+            .map_err(|()| "the local cast URL is not a file path".to_string())?;
+        file_response(method, range, path, &resource.content_type).await
     } else {
-        remote_response(request.method(), range.as_deref(), resource)
+        remote_response(method, range, resource).await
+    }?;
+    if version == Version::HTTP_10
+        && !response.headers().contains_key("content-length")
+        && response.body().size_hint().exact().is_none()
+    {
+        // HTTP/1.0 receivers previously received a length even for transcoded media.
+        let file = tokio::task::spawn_blocking(tempfile::tempfile)
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        let mut file = tokio::fs::File::from_std(file);
+        let (mut parts, body) = response.into_parts();
+        let mut reader = StreamReader::new(body.into_data_stream().map_err(std::io::Error::other));
+        let length = tokio::io::copy(&mut reader, &mut file)
+            .await
+            .map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(0))
+            .await
+            .map_err(|error| error.to_string())?;
+        parts
+            .headers
+            .insert("content-length", HeaderValue::from(length));
+        return Ok(Response::from_parts(
+            parts,
+            Body::from_stream(ReaderStream::new(file)),
+        ));
+    }
+    Ok(response)
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct ProcessingFacts {
+    applied: Option<(ProcessingConfig, u32, f64)>,
+    peak_db: Vec<f64>,
+}
+
+#[derive(Clone, Default)]
+struct GeneratedProgress {
+    written: u64,
+    complete: bool,
+    error: Option<String>,
+    source_seekable: Option<bool>,
+    processing: ProcessingFacts,
+}
+
+#[derive(Default)]
+struct GeneratedDemand {
+    readers: BTreeMap<u64, u64>,
+    next_reader: u64,
+    complete: bool,
+}
+
+struct GeneratedFile {
+    file: tempfile::NamedTempFile,
+    visualizer: Mutex<crate::visualizer::VisualizerHistory>,
+    progress: watch::Sender<GeneratedProgress>,
+    demand: Mutex<GeneratedDemand>,
+    wake: Condvar,
+    cancelled: Arc<AtomicBool>,
+}
+
+struct GeneratedReader {
+    file: tokio::fs::File,
+    generated: Arc<GeneratedFile>,
+    reader_id: u64,
+    position: u64,
+    end: Option<u64>,
+    progress: watch::Receiver<GeneratedProgress>,
+}
+
+impl RelayResource {
+    fn cancel(&self) {
+        if let Some(resource) = &self.generated {
+            resource.cancelled.store(true, Ordering::Release);
+            if let Some(generated) = resource.generated.get() {
+                generated.progress.send_modify(|progress| {
+                    progress.error = Some("Cast resource was removed".into())
+                });
+                generated.wake.notify_all();
+            }
+        }
     }
 }
 
-fn transcoded_response(
+impl GeneratedFile {
+    fn produce(self: Arc<Self>, stream: PreparedStream, options: TranscodeOptions) {
+        let result = (|| -> std::io::Result<()> {
+            let cancelled = Arc::clone(&self.cancelled);
+            let mut reader =
+                audio_processing::TranscodedAudioReader::new(&stream.stream, options, move || {
+                    cancelled.load(Ordering::Acquire)
+                })?;
+            let mut file = self.file.reopen()?;
+            let mut buffer = [0; 32 * 1024];
+            let mut written = 0_u64;
+            loop {
+                let mut demand = self
+                    .demand
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                while !self.cancelled.load(Ordering::Acquire)
+                    && !demand.complete
+                    && (demand.readers.is_empty()
+                        || written
+                            > demand
+                                .readers
+                                .values()
+                                .copied()
+                                .max()
+                                .unwrap_or(0)
+                                .saturating_add(1024 * 1024))
+                {
+                    demand = self
+                        .wake
+                        .wait(demand)
+                        .unwrap_or_else(|error| error.into_inner());
+                }
+                drop(demand);
+                if self.cancelled.load(Ordering::Acquire) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Cast resource was removed",
+                    ));
+                }
+                let length = reader.read(&mut buffer)?;
+                self.visualizer
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .append(reader.take_visualizer_frames())?;
+                file.write_all(&buffer[..length])?;
+                written += length as u64;
+                let source_seekable = self
+                    .progress
+                    .borrow()
+                    .source_seekable
+                    .or_else(|| reader.source_seekable());
+                self.progress.send_modify(|progress| {
+                    progress.written = written;
+                    progress.source_seekable = source_seekable;
+                    progress.processing = ProcessingFacts {
+                        applied: reader.applied_processing().cloned(),
+                        peak_db: reader.encoding_peak_db().to_vec(),
+                    };
+                });
+                if length == 0 {
+                    return Ok(());
+                }
+            }
+        })();
+        self.progress.send_modify(|progress| match result {
+            Ok(()) => progress.complete = true,
+            Err(error) => progress.error = Some(error.to_string()),
+        });
+    }
+
+    fn reader(
+        self: &Arc<Self>,
+        start: u64,
+        end: Option<u64>,
+        complete: bool,
+    ) -> Result<GeneratedReader, String> {
+        let file = self.file.reopen().map_err(|error| error.to_string())?;
+        let mut demand = self
+            .demand
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let reader_id = demand.next_reader;
+        demand.next_reader += 1;
+        demand.complete |= complete;
+        demand.readers.insert(reader_id, end.unwrap_or(start));
+        self.wake.notify_all();
+        Ok(GeneratedReader {
+            file: tokio::fs::File::from_std(file),
+            generated: Arc::clone(self),
+            reader_id,
+            position: start,
+            end,
+            progress: self.progress.subscribe(),
+        })
+    }
+}
+
+impl Drop for GeneratedReader {
+    fn drop(&mut self) {
+        self.generated
+            .demand
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .readers
+            .remove(&self.reader_id);
+        self.generated.wake.notify_all();
+    }
+}
+
+impl GeneratedReader {
+    async fn wait_for(&mut self, end: Option<u64>) -> Result<GeneratedProgress, String> {
+        loop {
+            let progress = self.progress.borrow_and_update().clone();
+            if let Some(error) = progress.error {
+                return Err(error);
+            }
+            if progress.complete || end.is_some_and(|end| progress.written >= end) {
+                return Ok(progress);
+            }
+            self.progress
+                .changed()
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    fn body(self) -> Body {
+        Body::from_stream(futures_util::stream::try_unfold(
+            self,
+            |mut reader| async move {
+                if reader.end.is_some_and(|end| reader.position >= end) {
+                    return Ok(None);
+                }
+                let progress = reader
+                    .wait_for(Some(reader.position.saturating_add(1)))
+                    .await
+                    .map_err(std::io::Error::other)?;
+                let end = reader.end.unwrap_or(progress.written).min(progress.written);
+                let length = end.saturating_sub(reader.position).min(32 * 1024) as usize;
+                if length == 0 {
+                    return Ok(None);
+                }
+                reader.file.seek(SeekFrom::Start(reader.position)).await?;
+                let mut bytes = vec![0; length];
+                reader.file.read_exact(&mut bytes).await?;
+                reader.position += length as u64;
+                {
+                    let mut demand = reader
+                        .generated
+                        .demand
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    demand
+                        .readers
+                        .insert(reader.reader_id, reader.end.unwrap_or(reader.position));
+                    reader.generated.wake.notify_all();
+                }
+                Ok::<_, std::io::Error>(Some((axum::body::Bytes::from(bytes), reader)))
+            },
+        ))
+    }
+}
+
+async fn generated_response(
     method: &Method,
+    version: Version,
     range: Option<&str>,
     resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    if range.is_some() {
-        return Ok(empty_response(StatusCode(416)));
+) -> Result<Response, String> {
+    let generated_resource = resource
+        .generated
+        .as_ref()
+        .expect("generated representation");
+    let mut headers = relay_headers(&resource.content_type, None)?;
+    if let Some(duration) = generated_resource.options.duration_millis {
+        headers.insert(
+            "content-duration",
+            HeaderValue::from_str(&format!("{:.3}", duration as f64 / 1000.0))
+                .map_err(|error| error.to_string())?,
+        );
     }
-    let headers = vec![
-        header("Content-Type", "audio/mpeg")?,
-        header("Access-Control-Allow-Origin", "*")?,
-        header("transferMode.dlna.org", "Streaming")?,
-        header(
-            "contentFeatures.dlna.org",
-            "DLNA.ORG_PN=MP3;DLNA.ORG_OP=00;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01500000000000000000000000000000",
-        )?,
-    ];
-    if matches!(method, Method::Head) {
-        return Ok(Response::new(
-            StatusCode(200),
+    let features = headers
+        .get("contentfeatures.dlna.org")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .replace("DLNA.ORG_CI=0", "DLNA.ORG_CI=1");
+    headers.insert(
+        "contentfeatures.dlna.org",
+        HeaderValue::from_str(&features).map_err(|error| error.to_string())?,
+    );
+    if *method == Method::HEAD
+        && generated_resource
+            .generated
+            .get()
+            .is_none_or(|file| !file.progress.borrow().complete)
+    {
+        return Ok((
             headers,
-            Cursor::new(Vec::new()),
-            None,
-            None,
+            Body::from_stream(futures_util::stream::empty::<
+                Result<axum::body::Bytes, std::io::Error>,
+            >()),
         )
-        .boxed());
+            .into_response());
     }
-    let reader = audio_processing::TranscodedAudioReader::mp3(&resource.stream.stream)?;
-    Ok(Response::new(StatusCode(200), headers, reader, None, None).boxed())
+    let generated = generated_resource
+        .generated
+        .get_or_try_init(|| async {
+            let (file, visualizer) = tokio::task::spawn_blocking(|| {
+                Ok::<_, std::io::Error>((
+                    tempfile::NamedTempFile::new()?,
+                    crate::visualizer::VisualizerHistory::new()?,
+                ))
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+            let (progress, _) = watch::channel(GeneratedProgress::default());
+            let generated = Arc::new(GeneratedFile {
+                file,
+                visualizer: Mutex::new(visualizer),
+                progress,
+                demand: Mutex::new(GeneratedDemand::default()),
+                wake: Condvar::new(),
+                cancelled: Arc::clone(&generated_resource.cancelled),
+            });
+            let producer = Arc::clone(&generated);
+            let stream = resource.stream.clone();
+            let options = generated_resource.options.clone();
+            tokio::task::spawn_blocking(move || producer.produce(stream, options));
+            Ok::<_, String>(generated)
+        })
+        .await?;
+    let complete = generated.progress.borrow().complete;
+    let finite = range
+        .and_then(|range| range.strip_prefix("bytes="))
+        .and_then(|range| range.split_once('-'))
+        .and_then(|(start, end)| Some((start.parse::<u64>().ok()?, end.parse::<u64>().ok()?)));
+    let initial = range.is_none() || range == Some("bytes=0-");
+    if !complete
+        && !initial
+        && finite.is_none()
+        && range.is_some_and(|range| !range.starts_with("bytes=") || range.contains(','))
+    {
+        return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+    }
+    let needs_complete = complete || version == Version::HTTP_10 || (!initial && finite.is_none());
+    let mut reader = generated.reader(
+        0,
+        finite.map(|(_, end)| end.saturating_add(1)),
+        needs_complete,
+    )?;
+    let progress = if needs_complete {
+        reader.wait_for(None).await?
+    } else if let Some((start, end)) = finite {
+        if end < start {
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+        reader.wait_for(Some(end.saturating_add(1))).await?
+    } else {
+        generated.progress.borrow().clone()
+    };
+    let selected = if progress.complete {
+        parse_range(range, progress.written)
+    } else {
+        Ok(finite)
+    };
+    let selected = match selected {
+        Ok(selected) => selected,
+        Err(_) => {
+            headers.insert(
+                "content-range",
+                HeaderValue::from_str(&format!("bytes */{}", progress.written))
+                    .map_err(|error| error.to_string())?,
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers).into_response());
+        }
+    };
+    let status = if let Some((start, end)) = selected {
+        reader.position = start;
+        reader.end = Some(end.saturating_add(1));
+        headers.insert("content-length", HeaderValue::from(end - start + 1));
+        let total = if progress.complete {
+            progress.written.to_string()
+        } else {
+            "*".into()
+        };
+        headers.insert(
+            "content-range",
+            HeaderValue::from_str(&format!("bytes {start}-{end}/{total}"))
+                .map_err(|error| error.to_string())?,
+        );
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        reader.end = progress.complete.then_some(progress.written);
+        if progress.complete {
+            headers.insert("content-length", HeaderValue::from(progress.written));
+        }
+        StatusCode::OK
+    };
+    let body = if *method == Method::HEAD {
+        Body::empty()
+    } else {
+        reader.body()
+    };
+    Ok((status, headers, body).into_response())
 }
 
-fn local_response(
-    method: &Method,
-    range: Option<&str>,
-    resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    let url = Url::parse(resource.stream.uri()).map_err(|error| error.to_string())?;
-    let path = url
-        .to_file_path()
-        .map_err(|()| "the local cast URL is not a file path".to_string())?;
-    file_response(method, range, path, &resource.content_type)
-}
-
-fn artwork_response(
-    method: &Method,
-    range: Option<&str>,
-    resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    let path = resource
-        .artwork_path
-        .ok_or_else(|| "cast artwork is unavailable".to_string())?;
-    let content_type = artwork_content_type(&path)?;
-    file_response(method, range, path, content_type)
-}
-
-fn file_response(
+async fn file_response(
     method: &Method,
     range: Option<&str>,
     path: PathBuf,
     content_type: &str,
-) -> Result<ResponseBox, String> {
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
-    let total = file.metadata().map_err(|error| error.to_string())?.len();
+) -> Result<Response, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| error.to_string())?;
+    let total = file
+        .metadata()
+        .await
+        .map_err(|error| error.to_string())?
+        .len();
     let selected = match parse_range(range, total) {
         Ok(selected) => selected,
-        Err(_) => return Ok(empty_response(StatusCode(416))),
+        Err(_) => return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response()),
     };
-    let (status, start, length) = selected.map_or((StatusCode(200), 0, total), |(start, end)| {
-        (StatusCode(206), start, end - start + 1)
+    let (status, start, length) = selected.map_or((StatusCode::OK, 0, total), |(start, end)| {
+        (StatusCode::PARTIAL_CONTENT, start, end - start + 1)
     });
     file.seek(SeekFrom::Start(start))
+        .await
         .map_err(|error| error.to_string())?;
-    let headers = relay_headers(
+    let mut headers = relay_headers(
         content_type,
         selected.map(|(start, end)| (start, end, total)),
     )?;
-    if matches!(method, Method::Head) {
-        let length =
-            usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-        return Ok(
-            Response::new(status, headers, Cursor::new(Vec::new()), Some(length), None)
-                .with_chunked_threshold(usize::MAX)
-                .boxed(),
-        );
-    }
-    let length = usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-    Ok(Response::new(
-        status,
-        headers,
-        file.take(length as u64),
-        Some(length),
-        None,
-    )
-    .with_chunked_threshold(usize::MAX)
-    .boxed())
+    headers.insert("content-length", HeaderValue::from(length));
+    let body = if *method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from_stream(ReaderStream::new(file.take(length)))
+    };
+    Ok((status, headers, body).into_response())
 }
 
-fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
+async fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| error.to_string())?;
     let mut signature = [0_u8; 12];
     let length = file
         .read(&mut signature)
+        .await
         .map_err(|error| error.to_string())?;
     if length >= 8 && signature[..8] == *b"\x89PNG\r\n\x1a\n" {
         Ok("image/png")
@@ -653,29 +1104,24 @@ fn artwork_content_type(path: &Path) -> Result<&'static str, String> {
     }
 }
 
-fn remote_response(
+async fn remote_response(
     method: &Method,
     range: Option<&str>,
     resource: RelayResource,
-) -> Result<ResponseBox, String> {
-    if matches!(method, Method::Head)
+) -> Result<Response, String> {
+    if *method == Method::HEAD
         && let Some(length) = resource.content_length
     {
-        let headers = relay_headers(&resource.content_type, None)?;
-        let length =
-            usize::try_from(length).map_err(|_| "cast resource is too large".to_string())?;
-        return Ok(Response::new(
-            StatusCode(200),
-            headers,
-            Cursor::new(Vec::new()),
-            Some(length),
-            None,
-        )
-        .with_chunked_threshold(usize::MAX)
-        .boxed());
+        let mut headers = relay_headers(&resource.content_type, None)?;
+        headers.insert("content-length", HeaderValue::from(length));
+        return Ok((headers, Body::empty()).into_response());
     }
-    let client = upstream_client(&resource.stream)?;
-    let mut upstream = if matches!(method, Method::Head) {
+    let client = reqwest::Client::builder()
+        .referer(false)
+        .danger_accept_invalid_certs(resource.stream.trust_invalid_certificate())
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut upstream = if *method == Method::HEAD {
         client.head(resource.stream.uri())
     } else {
         client.get(resource.stream.uri())
@@ -683,7 +1129,7 @@ fn remote_response(
     if let Some(range) = range {
         upstream = upstream.header(reqwest::header::RANGE, range);
     }
-    let response = upstream.send().map_err(crate::private_http_error)?;
+    let response = upstream.send().await.map_err(crate::private_http_error)?;
     tracing::debug!(
         method = ?method,
         range = range.is_some(),
@@ -691,40 +1137,23 @@ fn remote_response(
         content_length = response.content_length(),
         "received cast relay upstream response"
     );
-    let status = StatusCode(response.status().as_u16());
+    let status = response.status();
     let length = response
         .headers()
         .get(reqwest::header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            response
-                .content_length()
-                .and_then(|length| usize::try_from(length).ok())
-        })
-        .or_else(|| {
-            range
-                .is_none()
-                .then_some(resource.content_length)
-                .flatten()
-                .and_then(|length| usize::try_from(length).ok())
-        });
+        .and_then(|value| value.parse::<u64>().ok())
+        .or_else(|| response.content_length())
+        .or_else(|| range.is_none().then_some(resource.content_length).flatten());
     let mut headers = relay_headers(&resource.content_type, None)?;
-    if let Some(content_range) = response.headers().get(reqwest::header::CONTENT_RANGE)
-        && let Ok(content_range) = content_range.to_str()
-    {
-        headers.push(header("Content-Range", content_range)?);
+    if let Some(content_range) = response.headers().get(reqwest::header::CONTENT_RANGE) {
+        headers.insert("content-range", content_range.clone());
     }
-    if matches!(method, Method::Head) {
-        return Ok(
-            Response::new(status, headers, Cursor::new(Vec::new()), length, None)
-                .with_chunked_threshold(usize::MAX)
-                .boxed(),
-        );
+    if let Some(length) = length {
+        headers.insert("content-length", HeaderValue::from(length));
     }
-    Ok(Response::new(status, headers, response, length, None)
-        .with_chunked_threshold(usize::MAX)
-        .boxed())
+    let body = Body::from_stream(response.bytes_stream());
+    Ok((status, headers, body).into_response())
 }
 
 fn parse_range(value: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, String> {
@@ -771,7 +1200,7 @@ fn parse_range(value: Option<&str>, total: u64) -> Result<Option<(u64, u64)>, St
 fn relay_headers(
     content_type: &str,
     content_range: Option<(u64, u64, u64)>,
-) -> Result<Vec<Header>, String> {
+) -> Result<HeaderMap, String> {
     let profile = match content_type
         .split(';')
         .next()
@@ -783,7 +1212,7 @@ fn relay_headers(
         "audio/mpeg" | "audio/mp3" => "DLNA.ORG_PN=MP3;",
         _ => "",
     };
-    let mut headers = vec![
+    let mut headers: HeaderMap = [
         header("Content-Type", content_type)?,
         header("Accept-Ranges", "bytes")?,
         header("Access-Control-Allow-Origin", "*")?,
@@ -794,12 +1223,14 @@ fn relay_headers(
                 "{profile}DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01500000000000000000000000000000"
             ),
         )?,
-    ];
+    ].into_iter().collect();
     if let Some((start, end, total)) = content_range {
-        headers.push(header(
-            "Content-Range",
-            &format!("bytes {start}-{end}/{total}"),
-        )?);
+        headers.insert(
+            "content-range",
+            format!("bytes {start}-{end}/{total}")
+                .parse()
+                .map_err(|_| "invalid cast content range".to_string())?,
+        );
     }
     Ok(headers)
 }
@@ -847,18 +1278,20 @@ fn response_content_length(response: &reqwest::blocking::Response) -> Option<u64
 
 fn upstream_client(stream: &PreparedStream) -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
+        .referer(false)
         .danger_accept_invalid_certs(stream.trust_invalid_certificate())
         .build()
         .map_err(|error| error.to_string())
 }
 
-fn empty_response(status: StatusCode) -> ResponseBox {
-    Response::new(status, Vec::new(), Cursor::new(Vec::new()), Some(0), None).boxed()
-}
-
-fn header(name: &str, value: &str) -> Result<Header, String> {
-    Header::from_bytes(name.as_bytes(), value.as_bytes())
-        .map_err(|()| format!("invalid cast relay header {name}"))
+fn header(name: &str, value: &str) -> Result<(HeaderName, HeaderValue), String> {
+    Ok((
+        name.parse()
+            .map_err(|_| format!("invalid cast relay header {name}"))?,
+        value
+            .parse()
+            .map_err(|_| format!("invalid cast relay header {name}"))?,
+    ))
 }
 
 fn random_token() -> Result<String, String> {
@@ -923,7 +1356,7 @@ fn transport_scheme(uri: &str) -> &str {
         .unwrap_or("unknown")
 }
 
-fn directly_supported(content_type: &str) -> bool {
+pub(crate) fn directly_supported(content_type: &str) -> bool {
     matches!(
         content_type
             .split(';')
@@ -947,9 +1380,9 @@ fn directly_supported(content_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use std::io::Write;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::mpsc;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
@@ -967,9 +1400,8 @@ mod tests {
     fn flac_is_not_advertised_as_a_nonstandard_dlna_profile() {
         let headers = relay_headers("audio/flac", None).expect("FLAC relay headers");
         let features = headers
-            .iter()
-            .find(|header| header.field.equiv("contentFeatures.dlna.org"))
-            .map(|header| header.value.as_str())
+            .get("contentfeatures.dlna.org")
+            .and_then(|header| header.to_str().ok())
             .expect("DLNA content features");
 
         assert!(!features.contains("DLNA.ORG_PN"));
@@ -978,13 +1410,13 @@ mod tests {
 
     #[test]
     fn direct_media_requires_a_receiver_reachable_url() {
-        let loopback = PreparedStream::from(playback::ResolvedStream::new(
+        let loopback = PreparedStream::from(audio_processing::ResolvedStream::new(
             "http://127.0.0.1:8096/audio.flac",
         ));
         assert!(!direct_media_uri(&loopback, false, false));
         assert!(direct_media_uri(&loopback, false, true));
 
-        let remote = PreparedStream::from(playback::ResolvedStream::new(
+        let remote = PreparedStream::from(audio_processing::ResolvedStream::new(
             "https://music.example/audio.flac",
         ));
         assert!(direct_media_uri(&remote, false, false));
@@ -1000,7 +1432,7 @@ mod tests {
             .write_all(b"flac")
             .expect("write album");
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new(
+            audio_processing::ResolvedStream::new(
                 Url::from_file_path(&path).expect("album URL").to_string(),
             )
             .with_window(10_000, 100_000),
@@ -1012,23 +1444,30 @@ mod tests {
         )
         .expect("relay");
 
-        let mut negotiated_source = PreparedStream::from(playback::ResolvedStream::new(
+        let mut negotiated_source = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(&path).expect("source URL").to_string(),
         ));
         negotiated_source.stream.content_type = Some("audio/alac".to_string());
         let source = relay
-            .publish_as(&negotiated_source, RelayRepresentation::Source)
+            .publish(&negotiated_source, PublishRequest::default())
             .expect("publish negotiated source representation");
         assert_eq!(source.content_type, "audio/alac");
-        assert!(source.seekable);
+        assert!(source.native_seek);
         assert!(source.uri.ends_with("/media.m4a"));
 
         let published = relay
-            .publish_at(&stream, RelayRepresentation::Mp3, 42_000)
+            .publish(
+                &stream,
+                PublishRequest {
+                    representation: RelayRepresentation::Generated(AudioEncoding::mp3()),
+                    logical_offset_millis: 42_000,
+                    ..PublishRequest::default()
+                },
+            )
             .expect("publish clipped MP3 representation");
 
         assert_eq!(published.content_type, "audio/mpeg");
-        assert!(!published.seekable);
+        assert!(!published.native_seek);
         assert!(published.uri.ends_with("/media.mp3"));
         assert_eq!(published.logical_offset_millis, 42_000);
         assert_eq!(published.resource_duration_millis, Some(48_000));
@@ -1040,7 +1479,16 @@ mod tests {
             .get(published.relay_token.as_ref().expect("relay token"))
             .cloned()
             .expect("published resource");
-        assert_eq!(resource.stream.start_millis(), 52_000);
+        assert_eq!(resource.stream.start_millis(), 10_000);
+        assert_eq!(
+            resource
+                .generated
+                .as_ref()
+                .unwrap()
+                .options
+                .start_offset_millis,
+            42_000
+        );
         assert_eq!(resource.stream.end_millis(), Some(100_000));
         relay.shutdown();
     }
@@ -1109,9 +1557,10 @@ mod tests {
     }
 
     #[test]
-    fn cue_windows_are_published_as_bounded_nonseekable_media() {
+    fn cue_windows_are_published_as_bounded_generated_media() {
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new("file:///music/album.flac").with_window(523_613, 612_345),
+            audio_processing::ResolvedStream::new("file:///music/album.flac")
+                .with_window(523_613, 612_345),
         );
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
@@ -1120,12 +1569,14 @@ mod tests {
         )
         .expect("relay");
 
-        let published = relay.publish(&stream).expect("publish CUE window");
+        let published = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("publish CUE window");
 
         assert_eq!(published.content_type, "audio/mpeg");
         assert_eq!(published.logical_offset_millis, 0);
         assert_eq!(published.resource_duration_millis, Some(88_732));
-        assert!(!published.seekable);
+        assert!(!published.native_seek);
         relay.shutdown();
     }
 
@@ -1134,7 +1585,6 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("track.mp3");
         let artwork_path = directory.path().join("cover.img");
-        let artwork_resolutions = Arc::new(AtomicUsize::new(0));
         let audio = b"0123456789".repeat(4_000);
         File::create(&path)
             .expect("create track")
@@ -1145,21 +1595,17 @@ mod tests {
             .write_all(b"\x89PNG\r\n\x1a\ncover")
             .expect("write artwork");
         let uri = Url::from_file_path(&path).expect("file URL").to_string();
-        let stream = PreparedStream::from(playback::ResolvedStream::new(uri));
-        let resolver_count = Arc::clone(&artwork_resolutions);
+        let mut stream = PreparedStream::from(audio_processing::ResolvedStream::new(uri));
+        stream.artwork_path = Some(Arc::new(artwork_path));
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::new(AtomicBool::new(false)),
             None,
         )
-        .expect("start relay")
-        .with_artwork_resolver(Arc::new(move |_| {
-            resolver_count.fetch_add(1, Ordering::Relaxed);
-            Some(artwork_path.clone())
-        }));
-        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 0);
-        let published = relay.publish(&stream).expect("publish stream");
-        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 1);
+        .expect("start relay");
+        let published = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("publish stream");
         let artwork_uri = published.artwork_uri.expect("artwork URL");
         let first = published.uri;
         let client = reqwest::blocking::Client::new();
@@ -1217,7 +1663,10 @@ mod tests {
                 .starts_with(b"\x89PNG")
         );
 
-        let second = relay.publish(&stream).expect("replace stream URL").uri;
+        let second = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("replace stream URL")
+            .uri;
         assert_ne!(first, second);
         assert_eq!(
             client
@@ -1237,27 +1686,30 @@ mod tests {
 
     #[test]
     fn remote_http_media_uses_the_provider_url_directly() {
-        let upstream = Server::http("127.0.0.1:0").expect("upstream server");
-        let upstream_address = upstream.server_addr().to_ip().expect("upstream address");
-        let (sent, received) = mpsc::channel();
-        let upstream_thread = thread::spawn(move || {
-            for _ in 0..3 {
-                let request = upstream.recv().expect("upstream request");
-                sent.send(request.url().to_string())
-                    .expect("record upstream URL");
-                request
-                    .respond(Response::from_string("remote audio"))
-                    .expect("upstream response");
-            }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let upstream = runtime.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(wiremock::matchers::any())
+                .respond_with(ResponseTemplate::new(200).set_body_string("remote audio"))
+                .expect(3)
+                .mount(&server)
+                .await;
+            server
         });
-        let stream = PreparedStream::from(playback::ResolvedStream::new(format!(
+        let upstream_address = *upstream.address();
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(format!(
             "http://{upstream_address}/audio.mp3?api_key=secret"
         )));
         let mut relay =
             RelayServer::start(upstream_address, Arc::new(AtomicBool::new(false)), None)
                 .expect("relay");
 
-        let published = relay.publish(&stream).expect("publish remote stream");
+        let published = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("publish remote stream");
 
         assert_eq!(published.uri, stream.uri());
         assert!(published.uri.contains("api_key=secret"));
@@ -1276,14 +1728,14 @@ mod tests {
             .text()
             .expect("relay body");
         assert_eq!(body, "remote audio");
-        let upstream_urls = received.try_iter().collect::<Vec<_>>();
+        let upstream_urls = runtime.block_on(upstream.received_requests()).unwrap();
         assert_eq!(upstream_urls.len(), 3);
         assert!(
             upstream_urls
                 .iter()
-                .all(|url| url == "/audio.mp3?api_key=secret")
+                .all(|request| request.url.path() == "/audio.mp3"
+                    && request.url.query() == Some("api_key=secret"))
         );
-        upstream_thread.join().expect("upstream thread");
         relay.shutdown();
     }
 
@@ -1296,15 +1748,19 @@ mod tests {
             None,
         )
         .expect("relay");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             "https://music.example/audio.mp3?api_key=secret",
         ));
 
-        let direct = relay.publish(&stream).expect("direct resource");
+        let direct = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("direct resource");
         assert_eq!(direct.uri, stream.uri());
 
         proxy_media.store(true, Ordering::Release);
-        let proxied = relay.publish(&stream).expect("proxied resource");
+        let proxied = relay
+            .publish(&stream, PublishRequest::default())
+            .expect("proxied resource");
         assert_ne!(proxied.uri, stream.uri());
         assert!(proxied.uri.starts_with("http://"));
         assert!(!proxied.uri.contains("api_key=secret"));

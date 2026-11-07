@@ -2,8 +2,13 @@ use std::collections::BTreeSet;
 
 // Web calls use JSON string literals, shared by JavaScript and Askama.
 pub fn messages(source: &str) -> BTreeSet<String> {
-    ["tr(", "msgid("]
-        .into_iter()
+    messages_for_calls(source, &["tr(", "msgid("])
+}
+
+pub fn messages_for_calls(source: &str, markers: &[&str]) -> BTreeSet<String> {
+    markers
+        .iter()
+        .copied()
         .flat_map(|marker| {
             source
                 .match_indices(marker)

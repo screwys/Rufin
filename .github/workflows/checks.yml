@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .cargo/**
+      - nextest.toml
       - Cargo.lock
       - Cargo.toml
       - CMakeLists.txt
@@ -18,6 +19,14 @@ on:
       - scripts/rust-cache-command
       - sgconfig.yml
       - '!**/*.md'
+      - '!**/*.css'
+      - '!**/*.ui'
+      - '!**/resources/**'
+      - '!crates/ui/**'
+      - crates/ui/Cargo.toml
+      - xtask/**
+      - android/**
+      - .github/workflows/android.yml
   workflow_dispatch:
 
 permissions:
@@ -51,13 +60,14 @@ jobs:
       - name: Classify changed paths
         id: select
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
-          all_build_jobs=(aur_bin aur_git container flatpak macos nix rpm windows)
+          package_jobs=(aur_bin flatpak macos nix rpm windows)
           workspace_jobs=(workspace workspace_macos workspace_windows)
-          release_build_jobs=(aur_bin flatpak macos nix rpm windows)
           declare -A selected_jobs=()
 
           add_jobs() {
@@ -67,25 +77,19 @@ jobs:
             done
           }
 
-          only_updates_flathub_commit() {
-            local path="packaging/flatpak/io.github.screwys.Rufin.flathub.json"
-            local filter
-            local base_manifest
-            local head_manifest
-            filter='walk(
-              if type == "object"
-                and .type? == "git"
-                and .url? == "https://github.com/screwys/Rufin.git"
-                and has("tag")
-              then del(.commit)
-              else .
-              end
-            )'
-            git cat-file -e "${merge_base}:${path}" || return 1
-            git cat-file -e "${HEAD_SHA}:${path}" || return 1
-            base_manifest="$(git show "${merge_base}:${path}" | jq -cS "$filter")"
-            head_manifest="$(git show "${HEAD_SHA}:${path}" | jq -cS "$filter")"
-            [[ "$base_manifest" == "$head_manifest" ]]
+          select_android() {
+            case "$1" in
+              *.md|*.css|*.ui|locales/*|resources/*|*/resources/*)
+                ;;
+              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|xtask/src/android.rs|xtask/src/main.rs|xtask/src/process.rs|xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
+                add_jobs android
+                ;;
+              crates/ui/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|xtask/*)
+                ;;
+              crates/*/Cargo.toml|crates/*/build.rs|crates/*/src/*.rs)
+                add_jobs android
+                ;;
+            esac
           }
 
           build_container_image=false
@@ -93,13 +97,31 @@ jobs:
           use_current_nix=false
 
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            add_jobs "${all_build_jobs[@]}"
-            add_jobs "${workspace_jobs[@]}" cargo-deny
+            add_jobs "${package_jobs[@]}" aur_git container
+            add_jobs source_checks "${workspace_jobs[@]}" cargo-deny
+            add_jobs android
             build_container_image=true
             check_workflows=true
             use_current_nix=true
           elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            add_jobs "${workspace_jobs[@]}"
+            git cat-file -e "${BASE_SHA}^{commit}"
+            git cat-file -e "${HEAD_SHA}^{commit}"
+            while IFS= read -r -d '' path; do
+              select_android "$path"
+              case "$path" in
+                android/*|*.kt|*.kts|crates/rufin-android/*|.github/workflows/android.yml)
+                  ;;
+                xtask/*)
+                  add_jobs source_checks workspace
+                  ;;
+                *)
+                  add_jobs source_checks "${workspace_jobs[@]}"
+                  ;;
+              esac
+            done < <(git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA")
+          elif [[ "$HEAD_REPOSITORY" == "$GITHUB_REPOSITORY" && "$HEAD_BRANCH" == release/v* ]]; then
+            # The release helper builds and verifies every package in the draft.
+            echo "Release preparation defers checks to the draft release builds."
           else
             git cat-file -e "${BASE_SHA}^{commit}"
             git cat-file -e "${HEAD_SHA}^{commit}"
@@ -112,17 +134,15 @@ jobs:
             printf '  %q\n' "${changed_paths[@]}"
 
             for path in "${changed_paths[@]}"; do
-              if [[ "$path" == "packaging/flatpak/io.github.screwys.Rufin.flathub.json" ]] \
-                && only_updates_flathub_commit; then
-                echo "Skipping release builders for the Flathub commit pointer update."
-                continue
-              fi
+              select_android "$path"
+              case "$path" in
+                *.rs|*.ui|web/*.html|web/*.js|locales/*.pot|ast-grep/*|sgconfig.yml|Cargo.toml|*/Cargo.toml|Cargo.lock|.cargo/*|.github/workflows/checks.yml)
+                  add_jobs source_checks
+                  ;;
+              esac
 
               case "$path" in
-                resources/themes/*|crates/ui-shell/resources/*|crates/ui-shared/resources/*|crates/ui-library/resources/*|crates/ui-player/resources/*)
-                  add_jobs "${workspace_jobs[@]}"
-                  ;;
-                LICENSE|resources|resources/*|web|web/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
+                LICENSE|resources|resources/*|*/resources/*|web|web/*|locales/*|*.md|*.css|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
                   continue
                   ;;
               esac
@@ -134,113 +154,49 @@ jobs:
               esac
 
               case "$path" in
-                Cargo.lock|Cargo.toml|*/Cargo.toml)
-                  add_jobs "${workspace_jobs[@]}" cargo-deny nix
-                  if [[ "$path" == Cargo.toml ]]; then
-                    base_version="$(git show "${merge_base}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')"
-                    head_version="$(git show "${HEAD_SHA}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')"
-                    if [[ "$base_version" != "$head_version" ]]; then
-                      add_jobs "${release_build_jobs[@]}"
-                    fi
-                  fi
+                android/*|*.kt|*.kts|crates/rufin-android/*)
                   ;;
-              esac
-
-              case "$path" in
+                packaging/linux/*)
+                  add_jobs source_checks
+                  ;;
+                Cargo.lock|Cargo.toml|*/Cargo.toml)
+                  add_jobs "${workspace_jobs[@]}" cargo-deny
+                  ;;
+                crates/ui/*)
+                  ;;
+                CMakeLists.txt|CMakePresets.json|cmake/*)
+                  # Package builds otherwise run manually or for a draft release.
+                  add_jobs "${workspace_jobs[@]}" "${package_jobs[@]}" container
+                  ;;
+                .github/workflows/container-image.yml|scripts/container|justfile)
+                  add_jobs container
+                  ;;
+                nextest.toml)
+                  add_jobs container "${workspace_jobs[@]}"
+                  ;;
+                .github/workflows/checks.yml)
+                  add_jobs "${workspace_jobs[@]}"
+                  ;;
                 .cargo/*|crates/*)
                   add_jobs "${workspace_jobs[@]}"
                   ;;
-              esac
-
-              case "$path" in
-                .github/workflows/checks.yml)
-                  add_jobs "${workspace_jobs[@]}" cargo-deny
-                  ;;
-                .github/workflows/aur-build.yml)
-                  add_jobs aur_bin aur_git
-                  ;;
-                cmake/RufinMacOSAudio.cmake)
-                  add_jobs workspace_macos macos
-                  ;;
-                crates/xtask/src/packaged_playback.rs|crates/xtask/src/media.rs)
-                  add_jobs macos windows
-                  ;;
-                cmake/RufinMacOS*)
-                  add_jobs macos
-                  ;;
-                cmake/RufinWindows*|crates/xtask/src/windows_i18n.rs|crates/xtask/src/windows_installer.rs)
-                  add_jobs windows
-                  ;;
-                CMakeLists.txt|CMakePresets.json|cmake/*)
-                  add_jobs "${workspace_jobs[@]}" aur_bin aur_git flatpak macos nix rpm windows
-                  ;;
-                .github/workflows/rpm-source.yml|packaging/rpm/*)
-                  add_jobs rpm
-                  ;;
-                .github/workflows/nix.yml|packaging/nix/*)
-                  add_jobs nix
-                  ;;
-                .github/workflows/flatpak-build.yml|packaging/flatpak/*)
-                  add_jobs flatpak
-                  ;;
-                .github/workflows/macos-build.yml|packaging/macos/*)
-                  add_jobs macos
-                  ;;
-                .github/workflows/windows-build.yml|packaging/windows/*)
-                  add_jobs windows
-                  ;;
-                crates/windows-updater/*)
-                  add_jobs windows
-                  ;;
-                crates/xtask/src/rpm.rs)
-                  add_jobs rpm
-                  ;;
-                crates/xtask/src/verify.rs)
-                  add_jobs workspace
-                  ;;
-                .github/workflows/container-image.yml|scripts/container)
-                  add_jobs container
-                  ;;
-                justfile)
-                  add_jobs container flatpak macos windows
-                  ;;
-                .github/workflows/*.yml|.github/workflows/*.yaml)
-                  ;;
-                Cargo.lock|Cargo.toml|*/Cargo.toml)
-                  ;;
-                .cargo/*)
-                  add_jobs macos
-                  ;;
-                crates/*)
-                  ;;
-                sgconfig.yml)
-                  add_jobs workspace
+                ast-grep/*|sgconfig.yml)
                   ;;
                 flake.lock|flake.nix)
-                  add_jobs container nix
+                  add_jobs container
                   use_current_nix=true
                   ;;
                 scripts/rust-cache-command)
-                  add_jobs workspace workspace_windows windows
+                  add_jobs workspace workspace_windows
                   ;;
                 deny.toml)
                   add_jobs cargo-deny
                   ;;
-                packaging/aur/rufin-bin/*)
-                  add_jobs aur_bin
-                  ;;
-                packaging/aur/rufin-git/PKGBUILD)
-                  add_jobs aur_bin aur_git
-                  ;;
-                packaging/aur/rufin-git/*)
-                  add_jobs aur_git
-                  ;;
-                packaging/aur/*)
-                  add_jobs aur_bin aur_git
-                  ;;
                 packaging/container/*)
                   add_jobs container
                   build_container_image=true
+                  ;;
+                packaging/*|.github/workflows/*.yml|.github/workflows/*.yaml)
                   ;;
                 *.avif|*.gif|*.ico|*.icns|*.jpeg|*.jpg|*.png|*.po|*.pot|*.svg|*.webp)
                   ;;
@@ -252,8 +208,15 @@ jobs:
           fi
 
           if [[ -n "${selected_jobs[container]+selected}" ]]; then
-            unset 'selected_jobs[cargo-deny]' 'selected_jobs[workspace]'
+            unset 'selected_jobs[workspace]' 'selected_jobs[source_checks]'
           fi
+
+          for job in "${package_jobs[@]}" aur_git android container "${workspace_jobs[@]}"; do
+            if [[ -n "${selected_jobs[$job]+selected}" ]]; then
+              add_jobs cargo-deny
+              break
+            fi
+          done
 
           if ((${#selected_jobs[@]})); then
             jobs="$(
@@ -289,7 +252,7 @@ jobs:
 
   aur_bin:
     name: AUR rufin-bin
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_bin')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -297,9 +260,17 @@ jobs:
       package: rufin-bin
       publish: false
 
+  android:
+    name: Android
+    needs: [changes, cargo-deny]
+    if: contains(fromJSON(needs.changes.outputs.jobs), 'android')
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
   aur_git:
     name: AUR rufin-git
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_git')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -309,7 +280,7 @@ jobs:
 
   rpm:
     name: RPM
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'rpm')
     uses: ./.github/workflows/rpm-source.yml
     with:
@@ -318,7 +289,7 @@ jobs:
 
   nix:
     name: Nix
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'nix')
     uses: ./.github/workflows/nix.yml
     with:
@@ -329,7 +300,7 @@ jobs:
 
   flatpak:
     name: Flatpak
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'flatpak')
     uses: ./.github/workflows/flatpak-build.yml
     with:
@@ -337,7 +308,7 @@ jobs:
 
   macos:
     name: Build macOS
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'macos')
     uses: ./.github/workflows/macos-build.yml
     with:
@@ -345,7 +316,7 @@ jobs:
 
   windows:
     name: Build Windows
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'windows')
     uses: ./.github/workflows/windows-build.yml
     with:
@@ -353,7 +324,7 @@ jobs:
 
   container:
     name: Container
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'container')
     runs-on: ubuntu-latest
 
@@ -381,9 +352,41 @@ jobs:
           scripts/container setup
           scripts/container run default none just _check-all
 
+  source_checks:
+    name: Source checks
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.jobs), 'source_checks')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://rufin.cachix.org
+            extra-trusted-public-keys = rufin.cachix.org-1:7+XHqna/b9jZpCorYvZIoE0UjLju4IKbXlJGt35+SNc=
+
+      - name: Check Rust formatting
+        run: nix --accept-flake-config develop .#checks --command cargo fmt --all -- --check
+
+      - name: Check translation template
+        run: nix --accept-flake-config develop .#checks --command cargo run --locked -p xtask -- generate i18n-template --check
+
+      - name: Check Linux Cargo sources
+        run: nix --accept-flake-config develop .#checks --command cargo run --locked -p xtask -- generate flatpak-sources --check
+
+      - name: Check RefCell borrows
+        run: nix --accept-flake-config develop .#checks --command just _ast-grep
+
   workspace:
     name: Workspace
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace')
     runs-on: ubuntu-latest
     env:
@@ -435,47 +438,33 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           cmd-format: bash scripts/rust-cache-command nix "${{ steps.nix-environment.outputs.target }}" {0}
 
-      - name: Check Linux package dependencies
-        if: github.event_name != 'push'
-        run: nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command cargo run --locked -p xtask -- generate linux-packaging --check
-
-      - name: Check translation template
-        if: github.event_name != 'push'
-        run: nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command cargo run --locked -p xtask -- generate i18n-template --check
-
-      - name: Check Rust formatting
-        if: github.event_name != 'push'
-        run: nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command cargo fmt --all -- --check
-
-      - name: Check RefCell borrows
-        if: github.event_name != 'push'
-        run: >-
-          nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          just _ast-grep
-
       - name: Check Rust lints
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          just _lint
+          cargo clippy --workspace --exclude ui --exclude rufin --all-targets --locked
+          --features app-identity/development
 
       - name: Run Rust tests
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          just _test
+          cargo nextest run --config-file nextest.toml --workspace --exclude ui --exclude rufin --all-targets --locked
+          --features app-identity/development --test-threads 4
 
       - name: Warm Rust build cache
         if: github.event_name == 'push'
         run: |
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo check --workspace --all-targets --locked
+            cargo check --workspace --exclude ui --exclude rufin --all-targets --locked \
+              --features app-identity/development
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo test --workspace --locked --no-run --lib --bins --tests --benches --examples
+            cargo test --workspace --exclude ui --exclude rufin --all-targets --locked --no-run \
+              --features app-identity/development
 
   workspace_macos:
     name: Workspace (macOS)
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_macos')
     runs-on: macos-15
     env:
@@ -492,8 +481,8 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          brew install adwaita-icon-theme cmake gettext game-music-emu gstreamer \
-            gtk4 libadwaita libnice-gstreamer libopenmpt libsoup librsvg meson ninja openssl@3 \
+          brew install adwaita-icon-theme cargo-nextest chromaprint cmake gettext game-music-emu gstreamer \
+            gtk4 libadwaita libbs2b libnice-gstreamer libopenmpt libsoup librsvg meson ninja openssl@3 \
             pkgconf shared-mime-info wavpack
           gettext_prefix="$(brew --prefix gettext)"
           echo "GETTEXT_DIR=$gettext_prefix" >> "$GITHUB_ENV"
@@ -530,21 +519,19 @@ jobs:
           shared-key: macos-arm64
           workspaces: ". -> .local/target"
 
-      - name: Run platform tests
-        if: github.event_name != 'push'
-        run: >-
-          cargo test --workspace --locked
-          --lib --bins --tests --benches --examples
-
-      - name: Warm Rust build cache
-        if: github.event_name == 'push'
-        run: >-
-          cargo test --workspace --locked --no-run
-          --lib --bins --tests --benches --examples
+      - name: Test platform packages or warm their cache
+        run: |
+          args=(--locked --all-targets
+            -p library -p sources -p secrets -p desktop-integration
+            -p audio-processing -p playback-gstreamer)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            args+=(--no-run)
+          fi
+          cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   workspace_windows:
     name: Workspace (Windows)
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_windows')
     runs-on: windows-latest
     env:
@@ -595,6 +582,13 @@ jobs:
           echo "CARGO_HOME=$(cygpath -m "$GITHUB_WORKSPACE/.local/cargo")" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
 
+      - name: Install nextest
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          curl -LsSf https://get.nexte.st/0.9.133/windows-tar | tar zxf - -C "$MINGW_PREFIX/bin"
+          cargo nextest --version
+
       - name: Prepare playback runtime
         shell: msys2 {0}
         run: |
@@ -611,19 +605,16 @@ jobs:
           shared-key: windows-ucrt64
           workspaces: ". -> .local/target"
 
-      - name: Run platform tests
-        if: github.event_name != 'push'
+      - name: Test platform packages or warm their cache
         shell: msys2 {0}
-        run: >-
-          cargo test --workspace --locked
-          --lib --bins --tests --benches --examples
-
-      - name: Warm Rust build cache
-        if: github.event_name == 'push'
-        shell: msys2 {0}
-        run: >-
-          cargo test --workspace --locked --no-run
-          --lib --bins --tests --benches --examples
+        run: |
+          args=(--locked --all-targets
+            -p library -p sources -p secrets -p desktop-integration
+            -p audio-processing -p playback-gstreamer -p windows-updater)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            args+=(--no-run)
+          fi
+          cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   cargo-deny:
     name: cargo-deny
@@ -649,6 +640,7 @@ jobs:
     name: Required
     needs:
       - changes
+      - android
       - aur_bin
       - aur_git
       - rpm
@@ -657,6 +649,7 @@ jobs:
       - macos
       - windows
       - container
+      - source_checks
       - workspace
       - workspace_macos
       - workspace_windows

@@ -80,27 +80,41 @@ pub fn controller_colors(
     settings: &crate::settings::Settings,
     directory: &Path,
 ) -> BTreeMap<String, String> {
-    let crate::settings::ThemePreference::Named(id) = &settings.theme_preference else {
-        return BTreeMap::new();
-    };
+    let preference = &settings.appearance.theme_preference;
     let mut themes = builtins();
-    if id.starts_with("custom:") {
+    if matches!(preference, crate::settings::ThemePreference::Named(id) if id.starts_with("custom:"))
+    {
         let (custom, errors) = custom(directory);
         for error in errors {
             tracing::warn!(%error, "could not load theme");
         }
         themes.extend(custom);
     }
-    let Some(theme) = themes.iter().find(|theme| &theme.id == id) else {
+    let Some(theme) = preference.selected(&themes) else {
         return BTreeMap::new();
     };
+    theme_colors(
+        theme,
+        &themes,
+        settings.appearance.accent_preference,
+        &settings.appearance.theme_accents,
+    )
+}
+
+pub fn theme_colors(
+    theme: &Theme,
+    themes: &[Theme],
+    accent: crate::settings::AccentPreference,
+    accents: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let id = &theme.id;
     let mut colors: BTreeMap<String, String> = theme
-        .colors(&themes, settings.theme_accents.get(id).map(String::as_str))
+        .colors(themes, accents.get(id).map(String::as_str))
         .into_iter()
         .map(|(key, value)| (format!("--{key}"), value))
         .collect();
     if theme.accents.is_empty()
-        && let Some(color) = settings.accent_preference.color()
+        && let Some(color) = accent.color()
     {
         colors.insert("--accent-bg-color".into(), color.into());
         colors.insert("--accent-color".into(), color.into());
@@ -220,4 +234,17 @@ pub fn create_folder(directory: &Path) -> std::io::Result<bool> {
         return Ok(true);
     }
     Ok(false)
+}
+
+pub fn import(directory: &Path, name: &str, bytes: &[u8]) -> Result<String, String> {
+    serde_json::from_slice::<Theme>(bytes).map_err(|error| error.to_string())?;
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .ok_or_else(|| "Theme file needs a name".to_string())?;
+    std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    std::fs::write(directory.join(format!("{stem}.json")), bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(format!("custom:{stem}"))
 }

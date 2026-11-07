@@ -10,12 +10,20 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+blake3.workspace = true
+serde.workspace = true
+uniffi = { workspace = true, optional = true }
+gstreamer-controller = { workspace = true, features = ["v1_26"] }
+url.workspace = true
 ebur128.workspace = true
+library.workspace = true
 gstreamer = { workspace = true, features = ["v1_26"] }
 gstreamer-app = { workspace = true, features = ["v1_26"] }
 gstreamer-audio = { workspace = true, features = ["v1_26"] }
-playback.workspace = true
 rustfft.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

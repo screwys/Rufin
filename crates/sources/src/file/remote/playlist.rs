@@ -1,24 +1,32 @@
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
-use library::{Database, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
+use library::{Catalog, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
 use url::Url;
 
-use super::{RemoteSource, input::FileInput, metadata::WorkingFile};
+use super::{FileSource, input::FileInput};
 use crate::{SourceError, SourceResult};
 
-impl RemoteSource {
+impl FileSource {
     pub(crate) async fn import_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         target: Option<PlaylistKey>,
     ) -> SourceResult<PlaylistImportReport> {
-        let location = self.location(path)?;
-        let copy = self.working_copy(path, &location).await.map_err(error)?;
+        self.location(path)?;
+        let display_path = if self.document_access().is_some() {
+            crate::file::documents::display_path(path)
+        } else {
+            path.to_owned()
+        };
+        let copy = tempfile::NamedTempFile::new().map_err(error)?;
+        self.copy_file(path, copy.path())
+            .await?
+            .ok_or(SourceError::NotFound)?;
         let mut playlist = PlaylistFile::read(
-            BufReader::new(std::fs::File::open(&copy.file).map_err(error)?),
-            Path::new(&location),
+            BufReader::new(std::fs::File::open(copy.path()).map_err(error)?),
+            Path::new(&display_path),
         )?;
         if target.is_none() {
             playlist.identity = None;
@@ -27,28 +35,31 @@ impl RemoteSource {
         let entries = std::mem::take(&mut playlist.entries);
         playlist.entries.reserve(entries.len());
         for mut entry in entries {
-            if let Some(location) = self.playlist_location(path, &entry.locator) {
-                if database
+            if let Some(location) = self.playlist_location(path, &entry.locator).await? {
+                if catalog
                     .file_path_is_rejected(&self.source_id, &location)
                     .await?
                 {
                     skipped += 1;
                     continue;
                 }
-                entry.locator = database
+                entry.locator = catalog
                     .media_uri_for_file_path(self.source_id.as_str(), &location)
                     .await?
                     .unwrap_or_else(|| {
                         library::source_entity_uri(
                             &self.source_id,
                             "track",
-                            &format!("file:{:016x}", crate::policy::stable_hash(&location)),
+                            &format!(
+                                "file:{:016x}",
+                                crate::policy::stable_hash(&super::file_identity(&location))
+                            ),
                         )
                     });
             }
             playlist.entries.push(entry);
         }
-        let mut report = database
+        let mut report = catalog
             .import_playlist_document(playlist, Path::new(path), target, |_| None)
             .await?;
         report.skipped += skipped;
@@ -57,13 +68,18 @@ impl RemoteSource {
 
     pub(crate) async fn save_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         file: tempfile::TempPath,
         mode: PlaylistPathMode,
         expected_revision: Option<&str>,
     ) -> SourceResult<()> {
         self.location(path)?;
+        let display_path = if self.document_access().is_some() {
+            crate::file::documents::display_path(path)
+        } else {
+            path.to_owned()
+        };
         let input = self.input().await?;
         let (existed, revision) = match self.stat(&input, path).await {
             Ok(file) => {
@@ -92,21 +108,29 @@ impl RemoteSource {
         let prepared = tempfile::NamedTempFile::new().map_err(error)?;
         let mut playlist = PlaylistFile::read(
             BufReader::new(std::fs::File::open(&file).map_err(error)?),
-            Path::new(path),
+            Path::new(&display_path),
         )?;
         for entry in &mut playlist.entries {
             let uri = &entry.locator;
             if library::source_entity_parts(uri)
                 .is_some_and(|(source, kind, _)| source == self.source_id && kind == "track")
-                && let Some(observation) = database.observed_media_file(uri).await?
-                && observation.cue_start_millis.is_none()
+                && let Some(playable) = catalog.playable_by_uri(uri).await?
+                && playable.cue_path.is_none()
+                && let Some(file) = &playable.file
             {
-                let file = self.relative(&observation.path)?;
+                let file = self.relative(&file.path)?;
+                let file = if self.document_access().is_some() {
+                    crate::file::documents::display_path(&file)
+                } else {
+                    file
+                };
                 if mode == PlaylistPathMode::Absolute {
                     entry.locator = self.location(&file)?;
                     continue;
                 }
-                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                let parent = display_path
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
                 let parents = parent
                     .split('/')
                     .filter(|part| !part.is_empty())
@@ -137,27 +161,41 @@ impl RemoteSource {
             }
         }
         let mut output = BufWriter::new(prepared.reopen().map_err(error)?);
-        playlist.write(Path::new(path), mode, &mut output)?;
+        playlist.write(Path::new(&display_path), mode, &mut output)?;
         output.flush().map_err(error)?;
         drop(output);
-        self.save_file(&WorkingFile {
-            file: prepared.into_temp_path(),
-            relative: path.into(),
-            revision,
-            existed,
-            input,
-        })
-        .await
-        .map_err(|failure| match failure {
-            crate::SourceMetadataError::Conflict => SourceError::Server {
-                status: 412,
-                message: "The playlist file changed before saving".into(),
-            },
-            failure => error(failure),
-        })
+        self.commit_file(path, prepared.path(), revision.as_deref(), existed)
+            .await
+            .map_err(|failure| match failure {
+                crate::SourceMetadataError::Conflict => SourceError::Server {
+                    status: 412,
+                    message: "The playlist file changed before saving".into(),
+                },
+                failure => error(failure),
+            })
     }
 
-    fn playlist_location(&self, playlist: &str, value: &str) -> Option<String> {
+    async fn playlist_location(&self, playlist: &str, value: &str) -> SourceResult<Option<String>> {
+        if self.document_access().is_some() {
+            let relative = match Url::parse(value) {
+                Ok(uri) if uri.scheme() == "rufin-document" => self.relative(value)?,
+                Ok(_) => return Ok(None),
+                Err(_) => super::referenced_path(
+                    crate::file::documents::relative_parts(playlist).0,
+                    value,
+                )?,
+            };
+            let input = self.input().await?;
+            return match self.stat(&input, &relative).await {
+                Ok(entry) => Ok(Some(entry.path)),
+                Err(SourceError::NotFound) => Ok(Some(self.location(&relative)?)),
+                Err(error) => Err(error),
+            };
+        }
+        Ok(self.network_playlist_location(playlist, value))
+    }
+
+    fn network_playlist_location(&self, playlist: &str, value: &str) -> Option<String> {
         if let Ok(uri) = Url::parse(value) {
             if !uri.username().is_empty()
                 || uri.password().is_some()
@@ -166,10 +204,11 @@ impl RemoteSource {
             {
                 return None;
             }
-            for address in std::iter::once(&self.namespace_url)
-                .chain(std::iter::once(&self.settings.url))
-                .chain(&self.settings.alternate_urls)
-            {
+            for address in std::iter::once(&self.namespace_url).chain(
+                self.network().ok().into_iter().flat_map(|(settings, _)| {
+                    std::iter::once(&settings.url).chain(&settings.alternate_urls)
+                }),
+            ) {
                 let base = super::collection_url(address).ok()?;
                 if uri.scheme() == base.scheme()
                     && uri.host() == base.host()
@@ -196,6 +235,18 @@ impl RemoteSource {
         self.location(to)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Link { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
+            FileInput::Documents(access) => {
+                let access = std::sync::Arc::clone(access);
+                let (from, to) = (from.to_owned(), to.to_owned());
+                tokio::task::spawn_blocking(move || access.rename(&from, &to))
+                    .await
+                    .map_err(error)?
+            }
             FileInput::Smb(client) => client.rename(from, to, false).await,
             FileInput::WebDav(client) => {
                 let from = url::Url::parse(&self.input_path(input.input(), from)?)
@@ -216,10 +267,22 @@ impl RemoteSource {
         ))
     }
 
-    pub(crate) async fn delete_playlist_file(&self, path: &str) -> SourceResult<()> {
+    pub async fn remove_file(&self, path: &str) -> SourceResult<()> {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Link { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
+            FileInput::Documents(access) => {
+                let access = std::sync::Arc::clone(access);
+                let path = path.to_owned();
+                tokio::task::spawn_blocking(move || access.remove(&path))
+                    .await
+                    .map_err(error)?
+            }
             FileInput::Smb(client) => client.remove(path).await,
             FileInput::WebDav(client) => {
                 let url = url::Url::parse(&self.input_path(input.input(), path)?)
@@ -261,6 +324,7 @@ mod tests {
                 ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{path}</d:href><d:propstat><d:prop>{properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"))
             }).mount(&server).await;
             let settings = FileSourceSettings {
+                excluded_folders: Vec::new(),
                 url: format!("{}/", server.uri()),
                 alternate_urls: vec![],
                 folders: vec![],
@@ -278,16 +342,16 @@ mod tests {
                     "DAV".into(),
                 )
                 .unwrap();
-            let source = RemoteSource::open(&config, None).unwrap();
+            let source = FileSource::open(&config, None).unwrap();
             let directory = tempfile::tempdir().unwrap();
-            let database = Database::open(directory.path().join("library.db"))
+            let catalog = Catalog::open(directory.path().join("library.db"))
                 .await
                 .unwrap();
             let mut output = tempfile::NamedTempFile::new().unwrap();
             writeln!(output, "#EXTM3U\nhttps://example.test/song").unwrap();
             let failure = source
                 .save_playlist_file(
-                    &database,
+                    &catalog,
                     "mix.m3u8",
                     output.into_temp_path(),
                     PlaylistPathMode::Automatic,

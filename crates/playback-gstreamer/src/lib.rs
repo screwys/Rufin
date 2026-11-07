@@ -1,11 +1,12 @@
-use audio_processing::{connect_server_certificate_policy, ensure_gstreamer_initialized};
+use audio_processing::ResolvedStream;
+use audio_processing::{
+    ContentFailure, configure_sources, content_failure, ensure_gstreamer_initialized,
+};
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
-use playback::ResolvedStream;
 use playback::*;
 use std::collections::VecDeque;
-use std::f64::consts::FRAC_PI_2;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -15,6 +16,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 mod audio;
 mod engine;
+mod file_audio;
 mod pipeline;
 #[cfg(unix)]
 mod process;
@@ -22,14 +24,23 @@ mod visualizer;
 
 pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
+
+/// Starts the GStreamer backend that every Rufin host plays through.
+pub fn start_backend(
+    processing: tokio::sync::watch::Receiver<ProcessingRequest>,
+) -> Result<Box<dyn PlaybackBackend>, String> {
+    GStreamerPlaybackBackend::new(processing)
+        .map(|backend| Box::new(backend) as Box<dyn PlaybackBackend>)
+        .map_err(|error| error.to_string())
+}
 #[cfg(unix)]
 pub use process::restart_with_http1;
 
-fn gstreamer_error_details(
+fn gstreamer_playback_error(
     message: &gst::Message,
     stage: &str,
     audio_sink: Option<&str>,
-) -> Option<String> {
+) -> Option<BackendFailure> {
     let gst::MessageView::Error(error) = message.view() else {
         return None;
     };
@@ -37,24 +48,107 @@ fn gstreamer_error_details(
         .src()
         .map(|source| source.path_string().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let debug = error
+    let details = error
         .debug()
         .map(|debug| debug.to_string())
         .unwrap_or_else(|| "unavailable".to_string());
     let audio_sink = audio_sink.unwrap_or("unconfigured");
-    Some(format!(
-        "GStreamer {stage} failed; element={source}; audio_sink={audio_sink}; error={}; debug={debug}",
-        error.error()
-    ))
+    let cause = error.error();
+    let kind = failure_kind(
+        &cause,
+        message
+            .src()
+            .and_then(|source| source.downcast_ref::<gst::Element>()),
+    );
+    error!(stage, element = %source, audio_sink, error = %cause, ?kind, debug = %details, "GStreamer playback failed");
+    Some(BackendFailure::with_kind(kind, kind.summary()))
 }
 
-const SEEK_SETTLE_WINDOW: Duration = Duration::from_millis(1_000);
-const TRACK_START_SETTLE_WINDOW: Duration = Duration::from_millis(10_000);
-const STARTUP_SEEK_SETTLE_WINDOW: Duration = Duration::from_millis(10_000);
-const SEEK_POSITION_TOLERANCE_MILLIS: u64 = 1_500;
+fn failure_kind(error: &glib::Error, element: Option<&gst::Element>) -> FailureKind {
+    let class = element
+        .and_then(|element| element.factory())
+        .map(|factory| factory.klass().to_string())
+        .unwrap_or_default();
+    let has_class = |name| class.split('/').any(|part| part == name);
+    if has_class("Sink") {
+        return FailureKind::Output;
+    }
+    if let Some(error) = error.kind::<gst::ResourceError>() {
+        return match error {
+            gst::ResourceError::NotFound => FailureKind::UnavailableMedia,
+            gst::ResourceError::NotAuthorized => FailureKind::DeniedAccess,
+            _ if has_class("Network") => FailureKind::Connection,
+            gst::ResourceError::OpenRead | gst::ResourceError::Read => {
+                FailureKind::UnavailableMedia
+            }
+            _ => FailureKind::Unclassified,
+        };
+    }
+    match content_failure(error, element) {
+        Some(ContentFailure::Unsupported) => FailureKind::UnsupportedFormat,
+        Some(ContentFailure::Corrupt) => FailureKind::Decode,
+        // A network source stops its stream when the connection fails.
+        None if has_class("Network") => FailureKind::Connection,
+        None => FailureKind::Unclassified,
+    }
+}
 
 fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_errors_choose_skip_or_stop() {
+        ensure_gstreamer_initialized().unwrap();
+        let element = |factory| gst::ElementFactory::make(factory).build().unwrap();
+        let file = element("filesrc");
+        let sink = element("fakesink");
+        let http = element("souphttpsrc");
+        let cases = [
+            (
+                glib::Error::new(gst::ResourceError::NotFound, "missing"),
+                Some(&file),
+                FailureKind::UnavailableMedia,
+            ),
+            (
+                glib::Error::new(gst::ResourceError::NotAuthorized, "denied"),
+                Some(&file),
+                FailureKind::DeniedAccess,
+            ),
+            (
+                glib::Error::new(gst::ResourceError::Write, "device lost"),
+                Some(&sink),
+                FailureKind::Output,
+            ),
+            (
+                glib::Error::new(gst::StreamError::CodecNotFound, "no decoder"),
+                None,
+                FailureKind::UnsupportedFormat,
+            ),
+            (
+                glib::Error::new(gst::StreamError::Decode, "corrupt"),
+                None,
+                FailureKind::Decode,
+            ),
+            (
+                glib::Error::new(gst::StreamError::Failed, "connection refused"),
+                Some(&http),
+                FailureKind::Connection,
+            ),
+            (
+                glib::Error::new(gst::CoreError::StateChange, "state"),
+                None,
+                FailureKind::Unclassified,
+            ),
+        ];
+        for (error, element, kind) in cases {
+            assert_eq!(failure_kind(&error, element), kind, "{error}");
+        }
+    }
 }

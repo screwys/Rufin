@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    process_memory::configure_allocator();
     if let Some(result) = rufin_controller::discovery_worker_argument() {
         return result;
     }

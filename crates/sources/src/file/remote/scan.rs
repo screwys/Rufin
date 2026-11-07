@@ -1,127 +1,174 @@
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use futures_util::{StreamExt, stream};
-use library::{Database, LocalFileKind, LocalFileState, LocalFileWrite, ReadCancellation, Scan};
+use library::{LocalFileKind, LocalFileState, LocalFileWrite};
 
-use super::RemoteSource;
+use super::FileSource;
 use super::reader::FileReader;
+use crate::file::media;
 use crate::file::remote::input::{FileInput, FileInputServer};
-use crate::file::{media, scan::stage_audio_tracks_batch};
-use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
+use crate::file::walk::{self, Entry, Root};
+use crate::{LocalImageRef, SourceError, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 2;
+pub(crate) const PARSER_VERSION: i64 = 11;
 
-impl RemoteSource {
+pub(crate) fn audio_revision(
+    path: &str,
+    revision: Option<&str>,
+    size: Option<i64>,
+) -> blake3::Hasher {
+    let mut hash = blake3::Hasher::new();
+    hash.update(path.as_bytes());
+    hash.update(revision.unwrap_or_default().as_bytes());
+    hash.update(&size.unwrap_or_default().to_le_bytes());
+    // Lyrics indexing does not change the interpreted audio.
+    hash.update(&9_i64.to_le_bytes());
+    hash
+}
+
+impl FileSource {
     pub(crate) async fn stat(
         &self,
         input: &FileInputServer,
         relative: &str,
     ) -> SourceResult<LocalFileWrite> {
-        match input.input() {
+        match self.stat_entry(input, relative).await? {
+            (_, Some((path, document))) => self.document_observation(&path, document),
+            (entry, None) => self.observation(
+                relative,
+                entry.directory,
+                entry.size.and_then(|size| u64::try_from(size).ok()),
+                entry.revision,
+                entry.native_id,
+            ),
+        }
+    }
+
+    /// The facts the protocol reports for one path, named by its last segment. A document
+    /// also gives its resolved path and entry.
+    async fn stat_entry(
+        &self,
+        input: &FileInputServer,
+        relative: &str,
+    ) -> SourceResult<(Entry, Option<(String, crate::DocumentEntry)>)> {
+        let name = |path: &str| path.rsplit('/').next().unwrap_or_default().to_owned();
+        let entry = match input.input() {
+            FileInput::Link { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
+            FileInput::Documents(access) => {
+                let access = Arc::clone(access);
+                let path = relative.to_owned();
+                let (path, document) =
+                    tokio::task::spawn_blocking(move || access.resolve_path(&path))
+                        .await
+                        .map_err(|error| SourceError::Other(error.to_string()))??;
+                let entry = Entry {
+                    name: name(&crate::file::documents::display_path(&path)),
+                    directory: document.directory,
+                    size: document.size.and_then(|size| i64::try_from(size).ok()),
+                    native_id: Some(document.native_id.clone()),
+                    revision: document.revision.clone(),
+                    ..Entry::default()
+                };
+                return Ok((entry, Some((path, document))));
+            }
             FileInput::Smb(client) => {
                 let entry = client.stat(relative).await?;
-                self.observation(
-                    relative,
-                    entry.directory,
-                    Some(entry.size),
-                    Some(entry.revision),
-                    entry.native_id,
-                )
+                Entry {
+                    name: name(relative),
+                    directory: entry.directory,
+                    size: i64::try_from(entry.size).ok(),
+                    native_id: entry.native_id,
+                    revision: Some(entry.revision),
+                    ..Entry::default()
+                }
             }
             FileInput::WebDav(client) => {
                 let url = url::Url::parse(&self.input_path(input.input(), relative)?)
                     .map_err(|_| SourceError::NotFound)?;
                 let entry = client.stat(&url).await?;
-                let revision = entry.revision();
-                self.observation(
-                    relative,
-                    entry.directory,
-                    entry.size,
-                    revision,
-                    entry.native_id,
-                )
+                Entry {
+                    name: name(relative),
+                    directory: entry.directory,
+                    size: entry.size.and_then(|size| i64::try_from(size).ok()),
+                    revision: entry.revision(),
+                    native_id: entry.native_id,
+                    ..Entry::default()
+                }
             }
-        }
+        };
+        Ok((entry, None))
     }
 
-    pub(crate) async fn publish_saved_file(
+    /// Walks the source, then reads the folder artwork of what changed.
+    pub(crate) async fn walk(
         &self,
-        database: &Database,
-        media_uri: &str,
-        copy: &super::metadata::WorkingFile,
-    ) -> SourceResult<library::ScanOutcome> {
-        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        self.stage_saved_file(&mut scan, media_uri, copy).await?;
-        self.stage_artwork(database, &mut scan, &|| false).await?;
-        scan.finish().await.map_err(Into::into)
-    }
-
-    pub(crate) async fn stage_saved_file(
-        &self,
-        scan: &mut Scan,
-        media_uri: &str,
-        copy: &super::metadata::WorkingFile,
+        observation: &mut library::Observation<'_>,
+        scope: walk::WalkScope<'_>,
+        progress: &(dyn Fn(crate::SourceProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        walk::walk(
+            self,
+            observation,
+            &[self.location("")?],
+            scope,
+            &self.artwork,
+            progress,
+            cancelled,
+        )
+        .await
+    }
+
+    pub(crate) async fn read_saved_file(
+        &self,
+        media_uri: &str,
+        relative: &str,
+        input: &Arc<FileInputServer>,
+        temporary: &std::path::Path,
+    ) -> SourceResult<(LocalFileWrite, library::TrackObservation)> {
         let (_, _, object_id) =
             library::source_entity_parts(media_uri).ok_or(SourceError::NotFound)?;
-        let mut observation = self.stat(&copy.input, &copy.relative).await?;
-        let mut file =
-            std::fs::File::open(&copy.file).map_err(|e| SourceError::Other(e.to_string()))?;
-        let uri = url::Url::from_file_path(&copy.file).map_err(|_| SourceError::NotFound)?;
-        let relative = copy.relative.clone();
-        let parsed = tokio::task::spawn_blocking(move || {
-            let mut worker = media::Worker::network();
-            let parsed = media::read_media_input(
-                &mut worker,
-                relative.into(),
-                &mut file,
-                uri.as_str(),
-                None,
-            );
-            let picture = crate::file::artwork::inspect_embedded_input(
-                &mut worker.discovery,
-                &mut file,
-                uri.as_str(),
-            );
-            (parsed, picture)
-        })
-        .await
-        .map_err(|e| SourceError::Other(e.to_string()))?;
-        let (media::MediaRead::Accepted(mut track), picture) = parsed else {
-            return Err(SourceError::Other("Saved media could not be read".into()));
+        let mut observation = self.stat(input, relative).await?;
+        let display_path = if self.document_access().is_some() {
+            crate::file::documents::display_path(relative)
+        } else {
+            relative.to_owned()
         };
-        observation.picture_index = picture.map(i64::from);
-        track.local_artwork = picture.map(|picture_index| LocalImageRef::Embedded {
-            source_id: self.source_id.clone(),
-            path: observation.path.clone(),
-            revision: observation.revision.clone().unwrap_or_default(),
-            picture_index,
-        });
-        track.id = object_id;
-        self.locate_track(&mut track, &observation);
+        let mut track = media::read_saved_media(temporary, display_path.into()).await?;
+        self.read_track_lyrics(None, relative, &mut track).await?;
+        track.observe_images(&mut observation)?;
         observation.state = LocalFileState::Accepted;
-        scan.begin_batch().await?;
-        stage_audio_tracks_batch(scan, &[*track]).await?;
-        scan.write_local_files(&[(observation, vec![])]).await?;
-        scan.finish_batch().await?;
-        Ok(())
+        track.local_artwork = track
+            .picture_index
+            .and_then(|index| u32::try_from(index).ok())
+            .map(|picture_index| LocalImageRef::Embedded {
+                source_id: self.source_id.clone(),
+                path: observation.path.clone(),
+                revision: observation.revision.clone().unwrap_or_default(),
+                picture_index,
+            });
+        track.track.object_id = object_id;
+        self.locate_track(&mut track, &observation);
+        Ok((observation, track.into_observation(media::accepted_at())))
     }
 
     pub(crate) fn locate_track(&self, track: &mut media::ScannedTrack, file: &LocalFileWrite) {
-        track.source_path = file.path.clone();
-        track.local_uri = None;
-        let mut revision = blake3::Hasher::new();
-        revision.update(file.path.as_bytes());
-        revision.update(file.revision.as_deref().unwrap_or_default().as_bytes());
-        revision.update(&file.size_bytes.unwrap_or_default().to_le_bytes());
-        revision.update(&PARSER_VERSION.to_le_bytes());
-        track.audio_revision = revision;
+        track.track.source_path = Some(file.path.clone());
+        track.track.media_uri = None;
+        track.audio_revision =
+            audio_revision(&file.path, file.revision.as_deref(), file.size_bytes);
+        track.revision_hashes_audio = true;
         if let Some(artwork) = &mut track.local_artwork {
             match artwork {
                 LocalImageRef::File {
                     source_id,
                     path,
                     revision,
+                    ..
                 }
                 | LocalImageRef::Embedded {
                     source_id,
@@ -136,371 +183,46 @@ impl RemoteSource {
             }
         }
     }
-    pub(crate) async fn stage_catalog(
-        &self,
-        database: &Database,
-        scan: &mut Scan,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let input = self.input().await?;
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Files,
-            completed: 0,
-            total: None,
-        });
-        for folder in if self.settings.folders.is_empty() {
-            vec![String::new()]
-        } else {
-            self.settings.folders.clone()
-        } {
-            let root = self.stat(&input, &folder).await?;
-            if root.kind != LocalFileKind::Directory {
-                return Err(SourceError::InvalidConfig(
-                    "Selected file source path is not a directory".into(),
-                ));
-            }
-            scan.write_local_files(&[(root, vec![])]).await?;
-        }
-        let mut after = None;
-        loop {
-            if cancelled() {
-                return Err(SourceError::Cancelled);
-            }
-            let page = scan
-                .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
-                .await?;
-            let Some(directory) = page.into_iter().next() else {
-                break;
-            };
-            let unchanged = if matches!(input.input(), FileInput::WebDav(client) if client.recursive_etags())
-            {
-                let observation = scan
-                    .local_inventory_files(std::slice::from_ref(&directory))
-                    .await?
-                    .pop()
-                    .ok_or(SourceError::NotFound)?;
-                scan.retain_file_tree(&observation).await?
-            } else {
-                false
-            };
-            if !unchanged {
-                if !self
-                    .retain_synced_directory(database, &input, scan, &directory)
-                    .await?
-                {
-                    self.list_directory(&input, scan, &self.relative(&directory)?, cancelled)
-                        .await?;
-                }
-            }
-            after = Some(directory);
-        }
-        self.stage_files(database, scan, progress, cancelled, None)
-            .await?;
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
-            completed: 0,
-            total: None,
-        });
-        self.stage_artwork(database, scan, cancelled).await
-    }
-
-    pub(crate) async fn stage_files(
-        &self,
-        database: &Database,
-        scan: &mut Scan,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-        rename: Option<&(String, String)>,
-    ) -> SourceResult<()> {
-        let report = |completed| {
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Tracks,
-                completed,
-                total: None,
-            })
-        };
-        report(0);
-        let mut completed = self
-            .stage_cues(database, scan, &report, cancelled, rename)
-            .await?;
-        let workers: [_; 4] =
-            std::array::from_fn(|_| Arc::new(Mutex::new(media::Worker::network())));
-        let mut after = None;
-        loop {
-            if cancelled() {
-                return Err(SourceError::Cancelled);
-            }
-            let observations = scan
-                .local_inventory_file_page(LocalFileKind::Media, after.as_deref())
-                .await?;
-            if observations.is_empty() {
-                break;
-            }
-            after = observations.last().map(|file| file.path.clone());
-            let candidates = if let Some(source) = scan.existing_source() {
-                database
-                    .local_file_reuse_candidates(source, &observations, &ReadCancellation::new())
-                    .await?
-            } else {
-                vec![]
-            };
-            let dependencies = scan
-                .local_dependency_paths(
-                    &observations
-                        .iter()
-                        .map(|file| file.path.clone())
-                        .collect::<Vec<_>>(),
-                )
-                .await?;
-            let files = observations
-                .into_iter()
-                .map(|file| {
-                    let reusable = candidates.iter().find(|old| {
-                        old.path == file.path
-                            && file.revision.is_some()
-                            && old.revision == file.revision
-                            && old.parse_version == Some(PARSER_VERSION)
-                            && (old.state == LocalFileState::Rejected
-                                || old.state == LocalFileState::Accepted
-                                    && old.track_object_id.is_some())
-                    });
-                    (file, reusable.cloned())
-                })
-                .collect::<Vec<_>>();
-            let retained = files
-                .iter()
-                .filter(|(file, old)| {
-                    !dependencies.contains(&file.path)
-                        && old
-                            .as_ref()
-                            .is_some_and(|old| old.state == LocalFileState::Accepted)
-                })
-                .map(|(file, _)| file.path.clone())
-                .collect::<Vec<_>>();
-            if !retained.is_empty() {
-                scan.begin_batch().await?;
-                scan.retain_local_media_paths(&retained).await?;
-                scan.finish_batch().await?;
-            }
-            let mut files = stream::iter(files.into_iter().enumerate().map(
-                |(index, (file, reusable))| {
-                    let dependency = dependencies.contains(&file.path);
-                    let worker = Arc::clone(&workers[index % workers.len()]);
-                    async move {
-                        let parsed = if dependency || reusable.is_some() || cancelled() {
-                            None
-                        } else {
-                            Some(self.read_audio(&file, worker).await)
-                        };
-                        (file, reusable, parsed)
-                    }
-                },
-            ))
-            .buffered(workers.len());
-            while let Some((mut file, reusable, parsed)) = files.next().await {
-                if cancelled() {
-                    return Err(SourceError::Cancelled);
-                }
-                if dependencies.contains(&file.path) {
-                    if file.state == LocalFileState::Observed
-                        && let Some(old) = candidates
-                            .iter()
-                            .find(|old| old.path == file.path && old.revision == file.revision)
-                    {
-                        file.state = old.state;
-                        file.picture_index = old.picture_index;
-                        scan.write_local_files(&[(file, old.dependencies.clone())])
-                            .await?;
-                    }
-                    continue;
-                }
-                let exact = candidates.iter().find(|old| old.path == file.path);
-                let renamed = if let Some((old, new)) = rename
-                    && let Some(suffix) = file.path.strip_prefix(new)
-                    && (suffix.is_empty() || suffix.starts_with('/'))
-                    && let Some(source) = scan.existing_source()
-                {
-                    let mut from = file.clone();
-                    from.path = format!("{old}{suffix}");
-                    database
-                        .local_file_reuse_candidates(source, &[from], &ReadCancellation::new())
-                        .await?
-                } else {
-                    vec![]
-                };
-                let mut prior = exact.or_else(|| renamed.first());
-                if prior.is_none()
-                    && let Some(id) = &file.native_id
-                {
-                    let mut matches = candidates
-                        .iter()
-                        .filter(|old| old.native_id.as_ref() == Some(id));
-                    let first = matches.next();
-                    if matches.next().is_none()
-                        && scan.local_inventory_native_paths(id).await? == [file.path.clone()]
-                    {
-                        prior = first;
-                    }
-                }
-                if let Some(old) = reusable {
-                    file.state = old.state;
-                    file.picture_index = old.picture_index;
-                    scan.begin_batch().await?;
-                    scan.write_local_files(&[(file, old.dependencies.clone())])
-                        .await?;
-                    scan.finish_batch().await?;
-                } else {
-                    let parsed = match parsed.expect("uncached media is read before staging") {
-                        Ok(parsed) => parsed,
-                        Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
-                        Err(error) => {
-                            tracing::warn!(error = %error, "could not read remote media file");
-                            media::MediaRead::Unreadable
-                        }
-                    };
-                    match parsed {
-                        media::MediaRead::Accepted(mut track) => {
-                            if let Some(id) = prior.and_then(|old| old.track_object_id.as_ref()) {
-                                track.id = id.clone();
-                            } else {
-                                track.id =
-                                    format!("file:{:016x}", crate::policy::stable_hash(&file.path));
-                            }
-                            file.picture_index = match &track.local_artwork {
-                                Some(LocalImageRef::Embedded { picture_index, .. }) => {
-                                    Some(i64::from(*picture_index))
-                                }
-                                _ => None,
-                            };
-                            self.locate_track(&mut track, &file);
-                            file.state = LocalFileState::Accepted;
-                            scan.begin_batch().await?;
-                            stage_audio_tracks_batch(scan, &[*track]).await?;
-                            scan.write_local_files(&[(file, vec![])]).await?;
-                            scan.finish_batch().await?;
-                            completed += 1;
-                            report(completed);
-                        }
-                        media::MediaRead::Rejected => {
-                            file.state = LocalFileState::Rejected;
-                            scan.write_local_files(&[(file, vec![])]).await?;
-                        }
-                        media::MediaRead::Unreadable => {
-                            file.state = LocalFileState::Unreadable;
-                            scan.incomplete();
-                            scan.write_local_files(&[(file, vec![])]).await?;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn retain_synced_directory(
-        &self,
-        database: &Database,
-        input: &FileInputServer,
-        scan: &mut Scan,
-        path: &str,
-    ) -> SourceResult<bool> {
-        let FileInput::WebDav(client) = input.input() else {
-            return Ok(false);
-        };
-        let Some(source) = scan.existing_source() else {
-            return Ok(false);
-        };
-        let Some(file) = scan.local_inventory_files(&[path.into()]).await?.pop() else {
-            return Ok(false);
-        };
-        let previous = database
-            .local_file_reuse_candidates(source, &[file], &ReadCancellation::new())
-            .await?;
-        let Some(token) = previous
-            .iter()
-            .find(|old| old.path == path)
-            .and_then(|old| old.revision.as_deref())
-            .and_then(super::webdav::dav::sync_token)
-        else {
-            return Ok(false);
-        };
-        let url = url::Url::parse(&self.input_path(input.input(), &self.relative(path)?)?)
-            .map_err(|_| SourceError::NotFound)?;
-        let mut changed = false;
-        let result = client
-            .sync(&url, &token, |entry| {
-                let href = client.resolve_href(&url, &entry.href);
-                if entry
-                    .status
-                    .is_some_and(|status| !(200..300).contains(&status))
-                    || href.as_ref().is_ok_and(|href| {
-                        href.path().trim_end_matches('/') != url.path().trim_end_matches('/')
-                    })
-                {
-                    changed = true;
-                }
-                std::future::ready(href.map(|_| ()))
-            })
-            .await;
-        match result {
-            Ok(Some(_)) if !changed => {
-                scan.retain_file_directory_children(path).await?;
-                Ok(true)
-            }
-            Ok(_)
-            | Err(SourceError::Server {
-                status: 403 | 405 | 409 | 410 | 501,
-                ..
-            }) => Ok(false),
-            Err(error) => Err(error),
-        }
-    }
-
+    /// Reads a media file; a failed lyrics read clears the row's parser version so the next
+    /// walk reads it again.
     pub(crate) async fn read_audio(
         &self,
-        file: &LocalFileWrite,
+        file: &mut LocalFileWrite,
         worker: Arc<Mutex<media::Worker>>,
+        siblings: Option<&BTreeSet<String>>,
     ) -> SourceResult<media::MediaRead> {
         let relative = self.relative(&file.path)?;
-        if media::excluded_from_audio_scan(std::path::Path::new(&relative)) {
+        if media::excluded_from_audio_scan(std::path::Path::new(&file.relative_path)) {
             return Ok(media::MediaRead::Rejected);
         }
         let input = self.input().await?;
         let path = self.input_path(input.input(), &relative)?;
-        let stream = input
-            .playback_stream(
-                &path,
-                file.revision.as_deref().unwrap_or_default(),
-                &file.path,
-            )
-            .await?;
-        let uri = stream.uri().to_string();
-        let mut reader = FileReader::open(stream).await?;
+        let mut reader = FileReader::open(
+            &input,
+            &path,
+            file.revision.as_deref().unwrap_or_default(),
+            &file.path,
+        )
+        .await?;
+        let uri = reader.uri().to_owned();
         let source_id = self.source_id.clone();
         let artwork_path = file.path.clone();
         let revision = file.revision.clone().unwrap_or_default();
-        tokio::task::spawn_blocking(move || {
+        let display_path = file.relative_path.clone();
+        let mut parsed = tokio::task::spawn_blocking(move || {
             let mut worker = worker.lock().unwrap_or_else(|p| p.into_inner());
-            let mut parsed = media::read_media_input(
-                &mut worker,
-                relative.clone().into(),
-                &mut reader,
-                &uri,
-                None,
-            );
+            let mut parsed =
+                media::read_media_input(&mut worker, display_path.into(), &mut reader, &uri, None);
             if let media::MediaRead::Accepted(track) = &mut parsed {
-                track.local_artwork = crate::file::artwork::inspect_embedded_input(
-                    &mut worker.discovery,
-                    &mut reader,
-                    &uri,
-                )
-                .map(|picture_index| LocalImageRef::Embedded {
-                    source_id,
-                    path: artwork_path,
-                    picture_index,
-                    revision,
-                });
+                track.local_artwork = track
+                    .picture_index
+                    .and_then(|index| u32::try_from(index).ok())
+                    .map(|picture_index| LocalImageRef::Embedded {
+                        source_id,
+                        path: artwork_path,
+                        picture_index,
+                        revision,
+                    });
             }
             if reader.failed() {
                 media::MediaRead::Unreadable
@@ -509,116 +231,54 @@ impl RemoteSource {
             }
         })
         .await
-        .map_err(|e| SourceError::Other(e.to_string()))
+        .map_err(|e| SourceError::Other(e.to_string()))?;
+        if let media::MediaRead::Accepted(track) = &mut parsed {
+            if let Err(error) = self.read_track_lyrics(siblings, &relative, track).await {
+                tracing::warn!(%error, "Could not read file lyrics");
+                track.lyrics = None;
+                file.parse_version = None;
+            }
+        }
+        Ok(parsed)
     }
 
-    pub(crate) async fn list_directory(
+    pub(crate) fn document_observation(
         &self,
-        input: &Arc<FileInputServer>,
-        scan: &mut Scan,
         relative: &str,
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let (send, receive) = async_channel::bounded(128);
-        let listing = async {
-            match input.input() {
-                FileInput::Smb(client) => {
-                    client
-                        .list(relative, move |entry: crate::file::remote::smb::Entry| {
-                            let send = send.clone();
-                            async move {
-                                if super::metadata::is_write_temporary(&entry.path) {
-                                    return Ok(());
-                                }
-                                send.send(self.observation(
-                                    &entry.path,
-                                    entry.directory,
-                                    Some(entry.size),
-                                    Some(entry.revision),
-                                    entry.native_id,
-                                )?)
-                                .await
-                                .map_err(|_| SourceError::Cancelled)
-                            }
-                        })
-                        .await
-                }
-                FileInput::WebDav(client) => {
-                    let mut collection =
-                        url::Url::parse(&self.input_path(input.input(), relative)?)
-                            .map_err(|_| SourceError::NotFound)?;
-                    if !collection.path().ends_with('/') {
-                        collection
-                            .path_segments_mut()
-                            .map_err(|_| SourceError::NotFound)?
-                            .push("");
-                    }
-                    let collection_path = collection.path().trim_end_matches('/').to_string();
-                    client
-                        .list(
-                            &collection.clone(),
-                            1,
-                            move |entry: crate::file::remote::webdav::dav::Entry| {
-                                let send = send.clone();
-                                let collection = collection.clone();
-                                let collection_path = collection_path.clone();
-                                async move {
-                                    let url = client.resolve_href(&collection, &entry.href)?;
-                                    if url.path().trim_end_matches('/') == collection_path {
-                                        return Ok(());
-                                    }
-                                    let encoded = url
-                                        .path()
-                                        .strip_prefix(client.root().path())
-                                        .ok_or(SourceError::NotFound)?;
-                                    let relative = percent_encoding::percent_decode_str(encoded)
-                                        .decode_utf8()
-                                        .map_err(|_| SourceError::NotFound)?;
-                                    if super::metadata::is_write_temporary(&relative) {
-                                        return Ok(());
-                                    }
-                                    let revision = entry.revision();
-                                    send.send(self.observation(
-                                        relative.trim_end_matches('/'),
-                                        entry.directory,
-                                        entry.size,
-                                        revision,
-                                        entry.native_id,
-                                    )?)
-                                    .await
-                                    .map_err(|_| SourceError::Cancelled)
-                                }
-                            },
-                        )
-                        .await
-                }
-            }
-        };
-        let staging = async {
-            let mut batch = Vec::with_capacity(128);
-            while let Ok(file) = receive.recv().await {
-                if cancelled() {
-                    return Err(SourceError::Cancelled);
-                }
-                batch.push((file, vec![]));
-                if batch.len() == 128 {
-                    scan.write_local_files(&batch).await?;
-                    batch.clear();
-                }
-            }
-            scan.write_local_files(&batch).await?;
-            Ok::<_, SourceError>(())
-        };
-        tokio::try_join!(listing, staging)?;
-        if let Some(mut directory) = scan
-            .local_inventory_files(&[self.location(relative)?])
-            .await?
-            .pop()
+        entry: crate::DocumentEntry,
+    ) -> SourceResult<LocalFileWrite> {
+        let relative = if entry.directory
+            && !relative.is_empty()
+            && !relative
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .contains('\u{1f}')
         {
-            directory.state = LocalFileState::Accepted;
-            scan.write_local_files(&[(directory, vec![])]).await?;
-        }
-        Ok(())
+            format!(
+                "{relative}\u{1f}{}",
+                percent_encoding::utf8_percent_encode(
+                    &entry.uri,
+                    percent_encoding::NON_ALPHANUMERIC
+                )
+            )
+        } else {
+            relative.to_owned()
+        };
+        let relative = if entry.directory {
+            relative
+        } else {
+            crate::file::documents::document_relative(&relative, &entry.native_id, &entry.uri)
+        };
+        let mut file = self.observation(
+            &relative,
+            entry.directory,
+            entry.size,
+            entry.revision,
+            Some(entry.native_id),
+        )?;
+        file.relative_path = crate::file::documents::display_path(&relative);
+        Ok(file)
     }
 
     pub(crate) fn observation(
@@ -629,17 +289,19 @@ impl RemoteSource {
         revision: Option<String>,
         native_id: Option<String>,
     ) -> SourceResult<LocalFileWrite> {
-        let extension = relative
+        let display_path = crate::file::documents::relative_parts(relative).0;
+        let extension = display_path
             .rsplit('.')
             .next()
             .unwrap_or_default()
             .to_ascii_lowercase();
         let kind = if directory {
             LocalFileKind::Directory
+        } else if crate::file::artwork::supported_image(std::path::Path::new(display_path)) {
+            LocalFileKind::Image
         } else {
             match extension.as_str() {
                 "cue" => LocalFileKind::Cue,
-                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" => LocalFileKind::Image,
                 _ => LocalFileKind::Media,
             }
         };
@@ -652,11 +314,313 @@ impl RemoteSource {
             mtime_ns: 0,
             device_id: None,
             inode: None,
+            birth_ns: None,
             native_id,
             revision,
             picture_index: None,
-            parse_version: Some(PARSER_VERSION),
-            state: LocalFileState::Observed,
+            artist_pictures: None,
+            parse_version: Some(if directory {
+                self.directory_version
+            } else {
+                PARSER_VERSION
+            }),
+            state: LocalFileState::Accepted,
         })
+    }
+}
+
+impl walk::FileSource for FileSource {
+    fn roots(&self) -> SourceResult<Vec<Root>> {
+        Ok(vec![Root {
+            root: self.location("")?,
+            starts: self
+                .folders()
+                .into_iter()
+                .filter(|folder| !self.excludes(folder))
+                .map(|folder| (folder.clone(), folder))
+                .collect(),
+        }])
+    }
+
+    fn excluded(&self, _root: &str, relative: &str) -> bool {
+        self.excludes(relative) || super::metadata::is_write_temporary(relative)
+    }
+
+    fn artwork(&self) -> crate::file::artwork::ArtworkFiles<'_> {
+        crate::file::artwork::ArtworkFiles::Remote(self)
+    }
+
+    fn row(
+        &self,
+        _root: &str,
+        relative: &str,
+        native: &str,
+        entry: &Entry,
+    ) -> SourceResult<LocalFileWrite> {
+        let mut file = self.observation(
+            native,
+            entry.directory,
+            entry.size.and_then(|size| u64::try_from(size).ok()),
+            entry.revision.clone(),
+            entry.native_id.clone(),
+        )?;
+        relative.clone_into(&mut file.relative_path);
+        Ok(file)
+    }
+
+    fn place(&self, path: &str) -> Option<(String, String, String)> {
+        let native = match self.relative(path) {
+            Ok(native) => native,
+            Err(_) if !path.contains("://") => path.trim_matches('/').to_owned(),
+            Err(_) => return None,
+        };
+        let relative = crate::file::documents::display_path(&native);
+        self.includes(&relative)
+            .then(|| Some((self.location("").ok()?, relative, native)))
+            .flatten()
+    }
+
+    /// One directory's entries, as the walk orders and locates them.
+    async fn list(&self, _root: &str, native: &str) -> SourceResult<Vec<Entry>> {
+        let input = self.input().await?;
+        let mut entries = Vec::new();
+        match input.input() {
+            FileInput::Link { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
+            FileInput::Documents(access) => {
+                let access = Arc::clone(access);
+                let path = native.to_owned();
+                let parent = tokio::task::spawn_blocking(move || access.resolve(&path))
+                    .await
+                    .map_err(|error| SourceError::Other(error.to_string()))??;
+                let mut offset = 0;
+                loop {
+                    let uri = parent.uri.clone();
+                    let page =
+                        tokio::task::spawn_blocking(move || crate::list_documents(&uri, offset))
+                            .await
+                            .map_err(|error| SourceError::Other(error.to_string()))??;
+                    for entry in page.entries {
+                        let native = if entry.directory {
+                            format!(
+                                "{}\u{1f}{}",
+                                entry.name,
+                                percent_encoding::utf8_percent_encode(
+                                    &entry.uri,
+                                    percent_encoding::NON_ALPHANUMERIC
+                                )
+                            )
+                        } else {
+                            crate::file::documents::document_relative(
+                                &entry.name,
+                                &entry.native_id,
+                                &entry.uri,
+                            )
+                        };
+                        entries.push(Entry {
+                            name: entry.name,
+                            native,
+                            directory: entry.directory,
+                            size: entry.size.and_then(|size| i64::try_from(size).ok()),
+                            native_id: Some(entry.native_id),
+                            revision: entry.revision,
+                            ..Entry::default()
+                        });
+                    }
+                    match page.next {
+                        Some(next) => offset = next,
+                        None => break,
+                    }
+                }
+            }
+            FileInput::Smb(client) => {
+                let found = std::sync::Mutex::new(Vec::new());
+                client
+                    .list(native, |entry: crate::file::remote::smb::Entry| {
+                        let name = entry.path.rsplit('/').next().unwrap_or_default().to_owned();
+                        found
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .push(Entry {
+                                native: name.clone(),
+                                name,
+                                directory: entry.directory,
+                                size: (!entry.directory)
+                                    .then(|| i64::try_from(entry.size).ok())
+                                    .flatten(),
+                                native_id: entry.native_id,
+                                revision: Some(entry.revision),
+                                ..Entry::default()
+                            });
+                        std::future::ready(Ok(()))
+                    })
+                    .await?;
+                entries = found
+                    .into_inner()
+                    .unwrap_or_else(|error| error.into_inner());
+            }
+            FileInput::WebDav(client) => {
+                let mut collection = url::Url::parse(&self.input_path(input.input(), native)?)
+                    .map_err(|_| SourceError::NotFound)?;
+                if !collection.path().ends_with('/') {
+                    collection
+                        .path_segments_mut()
+                        .map_err(|_| SourceError::NotFound)?
+                        .push("");
+                }
+                let own = collection.path().trim_end_matches('/').to_string();
+                client
+                    .list(
+                        &collection,
+                        1,
+                        |entry: crate::file::remote::webdav::dav::Entry| {
+                            let result = (|| {
+                                let url = client.resolve_href(&collection, &entry.href)?;
+                                if url.path().trim_end_matches('/') == own {
+                                    return Ok(());
+                                }
+                                let encoded = url
+                                    .path()
+                                    .trim_end_matches('/')
+                                    .rsplit('/')
+                                    .next()
+                                    .unwrap_or_default();
+                                let name = percent_encoding::percent_decode_str(encoded)
+                                    .decode_utf8()
+                                    .map_err(|_| SourceError::NotFound)?
+                                    .into_owned();
+                                entries.push(Entry {
+                                    native: name.clone(),
+                                    name,
+                                    directory: entry.directory,
+                                    size: entry.size.and_then(|size| i64::try_from(size).ok()),
+                                    revision: entry.revision(),
+                                    native_id: entry.native_id.clone(),
+                                    ..Entry::default()
+                                });
+                                Ok(())
+                            })();
+                            std::future::ready(result)
+                        },
+                    )
+                    .await?;
+            }
+        }
+        Ok(entries)
+    }
+
+    /// A CUE sheet and the media files it plays.
+    async fn read_cue(
+        &self,
+        file: &mut LocalFileWrite,
+        _native: &str,
+        worker: Arc<Mutex<media::Worker>>,
+        siblings: Option<&BTreeSet<String>>,
+    ) -> SourceResult<walk::CueRead> {
+        let relative = self.relative(&file.path)?;
+        let input = self.input().await?;
+        let text = self.small_file(&input, &relative, 1024 * 1024).await?;
+        let Some(sheet) = std::str::from_utf8(&text)
+            .ok()
+            .and_then(crate::file::cue::parse_cue_sheet)
+        else {
+            return Ok(walk::CueRead::Rejected);
+        };
+        let prefix = format!(
+            "cue:{:016x}",
+            crate::policy::stable_hash(&super::file_identity(&file.path))
+        );
+        let (mut inputs, mut tracks) = (Vec::new(), Vec::new());
+        for entry in &sheet.files {
+            let referenced = super::referenced_path(
+                crate::file::documents::relative_parts(&relative).0,
+                &entry.path,
+            )?;
+            let mut backing_file = match self.stat(&input, &referenced).await {
+                Ok(file) => file,
+                Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
+                Err(error) => {
+                    tracing::warn!(%error, "Could not inspect CUE backing audio");
+                    return Ok(walk::CueRead::Unreadable);
+                }
+            };
+            inputs.push(backing_file.path.clone());
+            let mut backing = match self
+                .read_audio(&mut backing_file, Arc::clone(&worker), siblings)
+                .await?
+            {
+                media::MediaRead::Accepted(backing) => backing,
+                _ => return Ok(walk::CueRead::Unreadable),
+            };
+            self.locate_track(&mut backing, &backing_file);
+            let Some(segments) = crate::file::cue::cue_segments(
+                entry,
+                backing.track.metadata.duration_millis as u64,
+            ) else {
+                return Ok(walk::CueRead::Rejected);
+            };
+            for (cue, end) in segments {
+                // The relative CUE name supplies Local's album/tag fallbacks; URLs never become native paths.
+                let mut track = crate::file::cue::cue_track(
+                    std::path::Path::new(&relative),
+                    &sheet.album,
+                    cue,
+                    end,
+                    &backing,
+                );
+                track.track.object_id = format!("{prefix}:{}", cue.number);
+                track.track.cue_path = Some(file.path.clone());
+                if let Err(error) = self
+                    .read_track_lyrics(siblings, &referenced, &mut track)
+                    .await
+                {
+                    tracing::warn!(%error, "Could not read CUE track lyrics");
+                    track.lyrics = None;
+                    file.parse_version = None;
+                }
+                tracks.push(track.into_observation(media::accepted_at()));
+            }
+        }
+        Ok(walk::CueRead::Accepted { inputs, tracks })
+    }
+
+    async fn stat(&self, _root: &str, native: &str) -> SourceResult<Entry> {
+        let input = self.input().await?;
+        let (mut entry, _) = self.stat_entry(&input, native).await?;
+        entry.native = native.rsplit('/').next().unwrap_or_default().to_owned();
+        Ok(entry)
+    }
+
+    async fn read_media(
+        &self,
+        file: &mut LocalFileWrite,
+        _native: &str,
+        worker: Arc<Mutex<media::Worker>>,
+        siblings: Option<&BTreeSet<String>>,
+    ) -> SourceResult<media::MediaRead> {
+        let mut read = self.read_audio(file, worker, siblings).await?;
+        if let media::MediaRead::Accepted(track) = &mut read {
+            track.track.object_id = format!(
+                "file:{:016x}",
+                crate::policy::stable_hash(&super::file_identity(&file.path))
+            );
+            self.locate_track(track, file);
+        }
+        Ok(read)
+    }
+
+    fn unchanged_subtree(&self, stored: &LocalFileWrite, listed: &LocalFileWrite) -> bool {
+        stored.state == LocalFileState::Accepted
+            && stored.revision.is_some()
+            && stored.revision == listed.revision
+            && stored.parse_version == listed.parse_version
+            && self.input.try_lock().is_ok_and(|input| {
+                input.as_ref().is_some_and(|input| {
+                    matches!(input.input(), FileInput::WebDav(client) if client.recursive_etags())
+                })
+            })
     }
 }

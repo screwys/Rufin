@@ -13,6 +13,7 @@ use tokio::time::{Instant, timeout_at};
 use tracing::instrument;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DiscoveryProvider {
     Jellyfin,
     Emby,
@@ -20,6 +21,7 @@ pub enum DiscoveryProvider {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DiscoveredServer {
     pub id: Option<String>,
     pub name: String,
@@ -492,6 +494,7 @@ async fn probe_plex_localhost_server(client: &Client, target: &str) -> Option<Di
 }
 
 fn parse_plex_server(packet: &[u8], sender: SocketAddr) -> Option<DiscoveredServer> {
+    // GDM identifiers and addresses are hints. The account resource owns token destinations.
     let packet = std::str::from_utf8(packet).ok()?;
     let mut lines = packet.lines();
     let mut status = lines.next()?.split_whitespace();

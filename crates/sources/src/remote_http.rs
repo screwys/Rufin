@@ -1,4 +1,6 @@
 use crate::{ImageBytes, SourceError, SourceResult};
+use bytes::Buf;
+use http_body_util::BodyExt;
 use reqwest::{Client, StatusCode, header};
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,9 +55,36 @@ fn configured_client_builder(
     timeouts: RemoteTimeouts,
 ) -> reqwest::ClientBuilder {
     Client::builder()
+        .referer(false)
+        .redirect(authenticated_redirect_policy())
         .danger_accept_invalid_certs(trust_invalid_cert)
         .connect_timeout(timeouts.connect)
         .timeout(timeouts.request)
+}
+
+pub(crate) fn authenticated_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt
+            .previous()
+            .first()
+            .is_some_and(|from| from.origin() != attempt.url().origin())
+        {
+            attempt.stop()
+        } else {
+            reqwest::redirect::Policy::limited(10).redirect(attempt)
+        }
+    })
+}
+
+pub(crate) fn build_url_client(
+    trust_invalid_cert: bool,
+    timeouts: RemoteTimeouts,
+    policy: RemoteHttpPolicy,
+) -> SourceResult<Client> {
+    configured_client_builder(trust_invalid_cert, timeouts)
+        .redirect(reqwest::redirect::Policy::default())
+        .build()
+        .map_err(|error| map_reqwest_error(error, policy))
 }
 
 pub async fn json<T: DeserializeOwned>(
@@ -64,9 +93,9 @@ pub async fn json<T: DeserializeOwned>(
     limit: BodyLimit,
 ) -> SourceResult<T> {
     let checked = checked_response(request, policy).await?;
-    let bytes =
-        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    deserialize_json(&bytes, &checked.request)
+    let body =
+        response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    deserialize_json(body, &checked.request)
 }
 
 pub async fn json_with_header<T: DeserializeOwned>(
@@ -82,16 +111,32 @@ pub async fn json_with_header<T: DeserializeOwned>(
         .get(response_header)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let bytes =
-        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    Ok((deserialize_json(&bytes, &checked.request)?, value))
+    let body =
+        response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    Ok((deserialize_json(body, &checked.request)?, value))
+}
+
+/// A JSON response with the server's clock from its Date header, in unix seconds.
+pub async fn json_dated<T: DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<(T, Option<i64>)> {
+    let (value, date) = json_with_header(request, policy, limit, &header::DATE).await?;
+    let date = date
+        .and_then(|date| chrono::DateTime::parse_from_rfc2822(&date).ok())
+        .map(|date| date.timestamp());
+    Ok((value, date))
 }
 
 fn deserialize_json<T: DeserializeOwned>(
-    bytes: &[u8],
+    mut body: impl Buf,
     request: &RequestMetadata,
 ) -> SourceResult<T> {
-    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    let bytes = body.copy_to_bytes(body.remaining());
+    let text = String::from_utf8_lossy(&bytes);
+    let text = replace_unpaired_surrogates(&text);
+    let mut deserializer = serde_json::Deserializer::from_str(&text);
     serde_path_to_error::deserialize::<_, T>(&mut deserializer).map_err(|error| {
         let field = error.path().to_string();
         warn!(
@@ -113,9 +158,57 @@ fn deserialize_json<T: DeserializeOwned>(
     })
 }
 
+fn replace_unpaired_surrogates(text: &str) -> std::borrow::Cow<'_, str> {
+    let code = |offset| {
+        text.get(offset..offset + 6)
+            .and_then(|escape| escape.strip_prefix("\\u"))
+            .and_then(|hex| u16::from_str_radix(hex, 16).ok())
+    };
+    let mut result = std::borrow::Cow::Borrowed(text);
+    let mut position = 0;
+    while position + 1 < text.len() {
+        if text.as_bytes()[position] != b'\\' {
+            position += 1;
+            continue;
+        }
+        if let Some(value) = code(position)
+            && (0xd800..=0xdfff).contains(&value)
+        {
+            if value <= 0xdbff
+                && code(position + 6).is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
+            {
+                position += 12;
+                continue;
+            }
+            result
+                .to_mut()
+                .replace_range(position..position + 6, "\\ufffd");
+            position += 6;
+        } else {
+            // Skip the escaped character, including a literal backslash before `u`.
+            position += 2;
+        }
+    }
+    result
+}
+
 pub async fn unit(request: reqwest::RequestBuilder, policy: RemoteHttpPolicy) -> SourceResult<()> {
     checked_response(request, policy).await?;
     Ok(())
+}
+
+pub async fn unit_with_header(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    header: &header::HeaderName,
+) -> SourceResult<Option<String>> {
+    let checked = checked_response(request, policy).await?;
+    Ok(checked
+        .response
+        .headers()
+        .get(header)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string))
 }
 
 pub async fn bytes(
@@ -124,6 +217,25 @@ pub async fn bytes(
     limit: BodyLimit,
 ) -> SourceResult<ImageBytes> {
     let checked = checked_response(request, policy).await?;
+    image_response(checked, policy, limit).await
+}
+
+pub(crate) async fn media_bytes(
+    request: reqwest::RequestBuilder,
+    anonymous: &Client,
+    timeout: Duration,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<ImageBytes> {
+    let checked = checked_response_with_media(request, policy, Some((anonymous, timeout))).await?;
+    image_response(checked, policy, limit).await
+}
+
+async fn image_response(
+    checked: CheckedResponse,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<ImageBytes> {
     let content_type = checked
         .response
         .headers()
@@ -176,8 +288,34 @@ async fn checked_response(
     request: reqwest::RequestBuilder,
     policy: RemoteHttpPolicy,
 ) -> SourceResult<CheckedResponse> {
+    checked_response_with_media(request, policy, None).await
+}
+
+pub(crate) async fn media_response(
+    request: reqwest::RequestBuilder,
+    anonymous: &Client,
+    timeout: Duration,
+    policy: RemoteHttpPolicy,
+) -> SourceResult<reqwest::Response> {
+    Ok(
+        checked_response_with_media(request, policy, Some((anonymous, timeout)))
+            .await?
+            .response,
+    )
+}
+
+async fn checked_response_with_media(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    media: Option<(&Client, Duration)>,
+) -> SourceResult<CheckedResponse> {
     let (client, request) = request.build_split();
-    let request = request.map_err(|error| map_reqwest_error(error, policy))?;
+    let mut request = request.map_err(|error| map_reqwest_error(error, policy))?;
+    let timeout = media.map(|(_, timeout)| request.timeout().copied().unwrap_or(timeout));
+    if let Some(timeout) = timeout {
+        *request.timeout_mut() = Some(timeout);
+    }
+    let mut headers = request.headers().clone();
     let request_metadata = RequestMetadata::new(&request, policy.service);
     let started = Instant::now();
     debug!(
@@ -188,8 +326,56 @@ async fn checked_response(
         query_keys = %request_metadata.query_keys,
         "sending remote request"
     );
-    let response = client.execute(request).await.map_err(|error| {
-        let error = map_reqwest_error(error, policy);
+    let response = async {
+        let mut response = client
+            .execute(request)
+            .await
+            .map_err(|error| map_reqwest_error(error, policy))?;
+        if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308)
+            && let Some(next) = response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| std::str::from_utf8(value.as_bytes()).ok())
+                .and_then(|value| response.url().join(value).ok())
+            && next.origin() != response.url().origin()
+        {
+            let Some((anonymous, _)) = media else {
+                return Err(SourceError::Network(
+                    "Authenticated request redirected outside the configured server".into(),
+                ));
+            };
+            // Media may leave the server, but its original credentials must stay there.
+            for name in [
+                "authorization",
+                "cookie",
+                "cookie2",
+                "proxy-authorization",
+                "www-authenticate",
+                "x-emby-authorization",
+                "x-emby-token",
+                "x-connect-usertoken",
+                "x-plex-token",
+                "x-nd-authorization",
+                "host",
+            ] {
+                headers.remove(name);
+            }
+            let remaining = timeout
+                .unwrap()
+                .checked_sub(started.elapsed())
+                .ok_or_else(|| SourceError::Network("Remote request timed out".into()))?;
+            response = anonymous
+                .get(next)
+                .headers(headers)
+                .timeout(remaining)
+                .send()
+                .await
+                .map_err(|error| map_reqwest_error(error, policy))?;
+        }
+        Ok::<_, SourceError>(response)
+    }
+    .await
+    .map_err(|error| {
         warn!(
             request = request_metadata.id,
             service = request_metadata.service,
@@ -248,11 +434,23 @@ async fn response_text_or_status(
 }
 
 async fn response_bytes_bounded(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     policy: RemoteHttpPolicy,
     limit: BodyLimit,
     request: Option<&RequestMetadata>,
 ) -> SourceResult<Vec<u8>> {
+    let mut body = response_body_bounded(response, policy, limit, request).await?;
+    let mut bytes = vec![0; body.remaining()];
+    body.copy_to_slice(&mut bytes);
+    Ok(bytes)
+}
+
+async fn response_body_bounded(
+    response: reqwest::Response,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+    request: Option<&RequestMetadata>,
+) -> SourceResult<impl Buf> {
     if response
         .content_length()
         .is_some_and(|length| length > limit.max_bytes as u64)
@@ -260,37 +458,25 @@ async fn response_bytes_bounded(
         return Err(size_error(limit));
     }
 
-    let mut bytes = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(limit.max_bytes as u64) as usize,
-    );
-    while let Some(chunk) = response
-        .chunk()
+    let body = http_body_util::Limited::new(reqwest::Body::from(response), limit.max_bytes)
+        .collect()
         .await
-        .map_err(|error| map_reqwest_error(error, policy))?
-    {
-        if bytes
-            .len()
-            .checked_add(chunk.len())
-            .is_none_or(|length| length > limit.max_bytes)
-        {
-            return Err(size_error(limit));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+        .map_err(|error| match error.downcast::<reqwest::Error>() {
+            Ok(error) => map_reqwest_error(*error, policy),
+            Err(_) => size_error(limit),
+        })?
+        .aggregate();
     if let Some(request) = request {
         debug!(
             request = request.id,
             service = request.service,
             method = %request.method,
             endpoint = %request.endpoint,
-            bytes = bytes.len(),
+            bytes = body.remaining(),
             "read remote response body"
         );
     }
-    Ok(bytes)
+    Ok(body)
 }
 
 pub(crate) async fn bounded_response_body(
@@ -379,8 +565,8 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     #[expect(dead_code, reason = "the fixture must fail before producing Songs")]
-    struct Songs {
-        songs: Vec<Song>,
+    struct Tracks {
+        songs: Vec<Track>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -388,35 +574,73 @@ mod tests {
         dead_code,
         reason = "the invalid duration is the deserialization boundary"
     )]
-    struct Song {
+    struct Track {
         duration: u32,
     }
 
     #[tokio::test]
     async fn json_reads_bounded_body() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/payload"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "value": "ok"
-            })))
-            .mount(&server)
-            .await;
-
         let client = Client::new();
-        let url = format!("{}/payload", server.uri());
-        let payload: Payload = json(
-            client.get(url),
-            POLICY,
-            BodyLimit {
-                max_bytes: 32,
-                context: "test JSON response",
-            },
-        )
-        .await
-        .expect("payload");
-
-        assert_eq!(payload.value, "ok");
+        for (body, expected) in [
+            (br#"{"value":"ok"}"#.to_vec(), "ok"),
+            (
+                serde_json::to_vec(
+                    &serde_json::json!({"value":"İstanbul; 東京; العربية; Ёжик; Édith"}),
+                )
+                .unwrap(),
+                "İstanbul; 東京; العربية; Ёжик; Édith",
+            ),
+            (b"{\"value\":\"Bad \xff title\"}".to_vec(), "Bad � title"),
+            (br#"{"value":"a\uD800b\udfff"}"#.to_vec(), "a�b�"),
+            (
+                br#"{"value":"\ud83d\ude00 \u00e9 \\uD800"}"#.to_vec(),
+                "😀 é \\uD800",
+            ),
+            (br#"{"value":"\ud800\ud800\udc00"}"#.to_vec(), "�𐀀"),
+        ] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/payload"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+                .mount(&server)
+                .await;
+            let payload: Payload = json(
+                client.get(format!("{}/payload", server.uri())),
+                POLICY,
+                BodyLimit {
+                    max_bytes: 256,
+                    context: "test JSON response",
+                },
+            )
+            .await
+            .expect("payload");
+            assert_eq!(payload.value, expected);
+        }
+        for body in [
+            r#"{"value":"broken""#,
+            r#"{"value":"\ud80x"}"#,
+            r#"{"value":"\u123"}"#,
+        ] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/payload"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .mount(&server)
+                .await;
+            assert!(
+                json::<Payload>(
+                    client.get(format!("{}/payload", server.uri())),
+                    POLICY,
+                    BodyLimit {
+                        max_bytes: 256,
+                        context: "test JSON response"
+                    }
+                )
+                .await
+                .is_err()
+            );
+        }
     }
 
     #[tokio::test]
@@ -431,7 +655,7 @@ mod tests {
             .await;
 
         let client = Client::new();
-        let error = json::<Songs>(
+        let error = json::<Tracks>(
             client.get(format!("{}/songs", server.uri())),
             POLICY,
             BodyLimit {

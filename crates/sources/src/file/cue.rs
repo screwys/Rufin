@@ -5,9 +5,17 @@ use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CueSheet {
-    pub album_title: Option<String>,
-    pub album_performer: Option<String>,
+    pub album: CueAlbum,
     pub files: Vec<CueFile>,
+}
+
+/// What a sheet says about its whole album.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct CueAlbum {
+    pub title: Option<String>,
+    pub performer: Option<String>,
+    /// `REM DATE`, as written.
+    pub date: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,8 +42,7 @@ struct OpenTrack {
 
 pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
     let mut sheet = CueSheet {
-        album_title: None,
-        album_performer: None,
+        album: CueAlbum::default(),
         files: Vec::new(),
     };
     let mut current_file: Option<CueFile> = None;
@@ -48,7 +55,14 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
             continue;
         };
         match command.to_ascii_uppercase().as_str() {
-            "REM" => {}
+            "REM" => {
+                if fields
+                    .next_word()
+                    .is_some_and(|field| field.eq_ignore_ascii_case("DATE"))
+                {
+                    sheet.album.date = fields.next_value();
+                }
+            }
             "TITLE" => {
                 let Some(value) = fields.next_value() else {
                     continue;
@@ -56,7 +70,7 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
                 if let Some(track) = current_track.as_mut() {
                     track.title = Some(value);
                 } else {
-                    sheet.album_title = Some(value);
+                    sheet.album.title = Some(value);
                 }
             }
             "PERFORMER" => {
@@ -66,11 +80,17 @@ pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
                 if let Some(track) = current_track.as_mut() {
                     track.performer = Some(value);
                 } else {
-                    sheet.album_performer = Some(value);
+                    sheet.album.performer = Some(value);
                 }
             }
             "FILE" => {
-                valid &= push_track(&mut current_file, current_track.take());
+                // A pregap can be in the previous file while INDEX 01 is in this file.
+                if current_track
+                    .as_ref()
+                    .is_some_and(|track| track.index_start_ms.is_some())
+                {
+                    valid &= push_track(&mut current_file, current_track.take());
+                }
                 push_file(&mut sheet, current_file.take());
                 let Some(path) = fields.next_value() else {
                     continue;
@@ -253,8 +273,8 @@ FILE "album.flac" WAVE
         )
         .expect("cue sheet");
 
-        assert_eq!(sheet.album_title.as_deref(), Some("Album Title"));
-        assert_eq!(sheet.album_performer.as_deref(), Some("Album Artist"));
+        assert_eq!(sheet.album.title.as_deref(), Some("Album Title"));
+        assert_eq!(sheet.album.performer.as_deref(), Some("Album Artist"));
         assert_eq!(sheet.files.len(), 1);
         assert_eq!(sheet.files[0].path, "album.flac");
         assert_eq!(sheet.files[0].tracks.len(), 2);
@@ -263,60 +283,85 @@ FILE "album.flac" WAVE
     }
 }
 
+/// Each track of one CUE file with where it ends in its backing media; `None` when a track
+/// starts at or after its end, or ends past the media.
+pub(crate) fn cue_segments(file: &CueFile, duration_millis: u64) -> Option<Vec<(&CueTrack, u64)>> {
+    file.tracks
+        .iter()
+        .enumerate()
+        .map(|(position, cue)| {
+            let end = file
+                .tracks
+                .get(position + 1)
+                .map_or(duration_millis, |next| next.index_start_ms);
+            (cue.index_start_ms < end && end <= duration_millis).then_some((cue, end))
+        })
+        .collect()
+}
+
 pub(crate) fn cue_track(
     cue_path: &Path,
-    album_title: Option<&str>,
-    album_performer: Option<&str>,
+    album: &CueAlbum,
     cue: &CueTrack,
     end_millis: u64,
     backing: &ScannedTrack,
 ) -> ScannedTrack {
-    let mut track = backing.clone();
-    let album_artist = album_performer
-        .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album_artist.clone());
-    track.id = media::cue_track_id(cue_path, cue.number);
-    track.album = album_title
-        .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album.clone());
-    track.artist = cue
+    let mut scanned = backing.clone();
+    let track = &mut scanned.track;
+    let album_artist = album.performer.clone().unwrap_or_else(|| {
+        track
+            .metadata
+            .album_display_artist
+            .clone()
+            .unwrap_or_default()
+    });
+    track.object_id = media::cue_track_id(cue_path, cue.number);
+    if let Some(date) = crate::policy::normalized_date(album.date.clone()) {
+        track.metadata.year = crate::policy::date_year(&date).map(i64::from);
+        track.metadata.release_date = Some(date);
+    }
+    if let Some(title) = &album.title {
+        track.metadata.album = title.to_owned();
+        track.metadata.album_tags.get_or_insert_default().sort_text = title.to_lowercase();
+    }
+    track.metadata.artist = cue
         .performer
         .clone()
         .unwrap_or_else(|| album_artist.clone());
-    track.album_artists = media::split_names(&album_artist)
-        .iter()
+    let album_artists = media::split_names(&album_artist)
+        .into_iter()
+        .map(|name| media::artist_credit(name, None))
+        .collect::<Vec<_>>();
+    track.metadata.artists = media::split_names(&track.metadata.artist)
+        .into_iter()
         .map(|name| media::artist_credit(name, None))
         .collect();
-    track.artists = media::split_names(&track.artist)
-        .iter()
-        .map(|name| media::artist_credit(name, None))
-        .collect();
-    track.album_id = media::album_id(
-        &track.album_artists,
-        &track.album,
-        track.musicbrainz_album_id.as_deref(),
+    track.album_object_id = Some(media::album_id(
+        &album_artists,
+        &track.metadata.album,
+        track.metadata.musicbrainz_album_id.as_deref(),
         Some(cue_path),
-    );
-    track.title = cue
+    ));
+    track.metadata.album_artists = album_artists;
+    track.metadata.title = cue
         .title
         .clone()
         .unwrap_or_else(|| format!("Track {}", cue.number));
-    track.sort_title = None;
-    if album_title.is_some() {
-        track.sort_album = None;
-    }
-    track.duration_seconds = end_millis
-        .saturating_sub(cue.index_start_ms)
-        .div_euclid(1_000)
-        .max(1)
-        .min(u64::from(u32::MAX)) as u32;
-    track.disc_number = track.disc_number.max(1);
-    track.track_number = cue.number;
-    track.musicbrainz_recording_id = None;
-    track.musicbrainz_release_track_id = None;
-    track.comment = None;
+    track.metadata.sort_text = track.metadata.title.to_lowercase();
+    track.metadata.duration_millis = i64::from(
+        end_millis
+            .saturating_sub(cue.index_start_ms)
+            .div_euclid(1_000)
+            .max(1)
+            .min(u64::from(u32::MAX)) as u32,
+    ) * 1_000;
+    track.metadata.disc_number = track.metadata.disc_number.max(1);
+    track.metadata.track_number = i64::from(cue.number);
+    track.metadata.musicbrainz_recording_id = None;
+    track.metadata.musicbrainz_release_track_id = None;
+    track.metadata.comment = None;
     track.cue_path = Some(cue_path.to_string_lossy().into_owned());
     track.cue_start_millis = i64::try_from(cue.index_start_ms).ok();
     track.cue_end_millis = i64::try_from(end_millis).ok();
-    track
+    scanned
 }

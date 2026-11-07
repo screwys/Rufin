@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwActionRow" id="row">
+    <property name="focusable">true</property>
+    <child type="prefix"><object class="GtkBox" id="artwork">
+      <property name="margin-top">6</property><property name="margin-bottom">6</property>
+    </object></child>
+    <child type="prefix"><object class="GtkImage" id="drag">
+      <property name="icon-name">rufin-list-drag-handle-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Drag to reorder</property>
+      <style><class name="dim-label"/></style>
+    </object></child>
+    <child type="suffix"><object class="GtkButton" id="up">
+      <property name="icon-name">rufin-go-up-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Move up</property>
+      <property name="valign">center</property><style><class name="flat"/></style>
+    </object></child>
+    <child type="suffix"><object class="GtkButton" id="down">
+      <property name="icon-name">rufin-go-down-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Move down</property>
+      <property name="valign">center</property><style><class name="flat"/></style>
+    </object></child>
+    <child type="suffix"><object class="GtkButton" id="cancel">
+      <property name="icon-name">rufin-window-close-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Cancel download</property>
+      <property name="valign">center</property><style><class name="flat"/></style>
+    </object></child>
+    <child type="suffix"><object class="GtkButton" id="clear">
+      <property name="icon-name">rufin-user-trash-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Cancel download and clear downloaded items</property>
+      <property name="valign">center</property><style><class name="flat"/><class name="destructive-action"/></style>
+    </object></child>
+  </object>
+</interface>

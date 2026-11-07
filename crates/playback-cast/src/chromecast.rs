@@ -10,9 +10,12 @@ use fcast_sender_sdk::device::{
     MediaTrackType, Metadata, PlaybackState as FutoPlaybackState, QueueState, ReceiverError,
     Source, TrackList,
 };
-use playback::{BackendCommand, BackendEvent, BackendState, PreparedStream, RunId};
+use playback::{
+    BackendCommand, BackendEvent, BackendFailure, BackendState, PreparedStream, ProcessingRequest,
+    RunId,
+};
 
-use crate::relay::{PublishedResource, RelayServer};
+use crate::relay::{PublishRequest, PublishedResource, RelayRepresentation, RelayServer};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const STATUS_INTERVAL_MILLIS: u64 = 500;
@@ -20,6 +23,10 @@ const STATUS_INTERVAL_MILLIS: u64 = 500;
 struct CastMedia {
     run: RunId,
     published: PublishedResource,
+    stream: PreparedStream,
+    processing: ProcessingRequest,
+    position_millis: u64,
+    position_observed: Instant,
 }
 
 enum SdkEvent {
@@ -29,8 +36,10 @@ enum SdkEvent {
     Position(f64),
     Duration(f64),
     State(FutoPlaybackState),
+    Source(String),
     Stopped,
     Error(String),
+    OperationFailed(String),
 }
 
 struct FutoEventHandler {
@@ -70,7 +79,11 @@ impl DeviceEventHandler for FutoEventHandler {
 
     fn speed_changed(&self, _speed: f64) {}
 
-    fn source_changed(&self, _source: Source) {}
+    fn source_changed(&self, source: Source) {
+        if let Source::Url { url, .. } = source {
+            self.publish(SdkEvent::Source(url));
+        }
+    }
 
     fn playback_stopped(&self) {
         self.publish(SdkEvent::Stopped);
@@ -89,7 +102,7 @@ impl DeviceEventHandler for FutoEventHandler {
     fn queue_changed(&self, _queue: QueueState) {}
 
     fn command_error(&self, error: ReceiverError) {
-        self.publish(SdkEvent::Error(format!(
+        self.publish(SdkEvent::OperationFailed(format!(
             "Google Cast receiver rejected a command: {error:?}"
         )));
     }
@@ -111,6 +124,16 @@ pub(crate) struct GoogleCastController {
     playback_observed: bool,
     output_volume: f64,
     muted: bool,
+    processing: ProcessingRequest,
+    playing: bool,
+    visualizer_enabled: bool,
+    visualizer_playing: bool,
+    pending_reload: bool,
+    awaiting_load: bool,
+    seekable: bool,
+    previous: Option<CastMedia>,
+    // The receiver reports a resource's URL before its positions.
+    observed_source: Option<String>,
 }
 
 impl GoogleCastController {
@@ -162,6 +185,15 @@ impl GoogleCastController {
             playback_observed: false,
             output_volume: 1.0,
             muted: false,
+            processing: ProcessingRequest::default(),
+            playing: false,
+            visualizer_enabled: false,
+            visualizer_playing: false,
+            pending_reload: false,
+            awaiting_load: false,
+            seekable: false,
+            previous: None,
+            observed_source: None,
         })
     }
 
@@ -182,7 +214,20 @@ impl GoogleCastController {
                 ..
             } => self.start(run, &current, start_position_millis, relay),
             BackendCommand::Play { run } if self.current_run() == Some(run) => {
-                self.device.resume_playback().map_err(string_error)?;
+                if self.pending_reload {
+                    self.reload(
+                        self.current
+                            .as_ref()
+                            .map_or(0, |current| current.position_millis),
+                        relay,
+                    )?;
+                } else {
+                    self.device.resume_playback().map_err(string_error)?;
+                }
+                self.playing = true;
+                if let Some(current) = &mut self.current {
+                    current.position_observed = Instant::now();
+                }
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Playing,
@@ -190,6 +235,8 @@ impl GoogleCastController {
             }
             BackendCommand::Pause { run } if self.current_run() == Some(run) => {
                 self.device.pause_playback().map_err(string_error)?;
+                self.playing = false;
+                self.visualizer_playing = false;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Paused,
@@ -207,15 +254,36 @@ impl GoogleCastController {
             BackendCommand::Seek {
                 run,
                 position_millis,
-            } if self.current_run() == Some(run)
-                && self
-                    .current
-                    .as_ref()
-                    .is_some_and(|current| current.published.seekable) =>
-            {
-                self.device
-                    .seek(position_millis as f64 / 1_000.0)
-                    .map_err(string_error)?;
+            } if self.current_run() == Some(run) => {
+                let current = self.current.as_ref().expect("current cast media");
+                let native = current.published.native_seek;
+                // Generated media cannot start at its end; the track is finished there.
+                if !native
+                    && stream_duration_millis(&current.stream)
+                        .is_some_and(|duration| position_millis >= duration)
+                {
+                    let _ = self.device.stop_playback();
+                    self.finish_current(relay);
+                    return Ok(vec![BackendEvent::Ended { run }]);
+                }
+                // A native seek keeps the receiver paused and the direct representation.
+                if native {
+                    self.device
+                        .seek(position_millis as f64 / 1_000.0)
+                        .map_err(string_error)?;
+                    self.current
+                        .as_mut()
+                        .expect("current cast media")
+                        .position_millis = position_millis;
+                } else if !self.playing {
+                    self.current
+                        .as_mut()
+                        .expect("current cast media")
+                        .position_millis = position_millis;
+                    self.pending_reload = true;
+                } else {
+                    self.reload(position_millis, relay)?;
+                }
                 Ok(vec![BackendEvent::Position {
                     run,
                     millis: position_millis,
@@ -233,10 +301,26 @@ impl GoogleCastController {
                     output: None,
                 }])
             }
+            BackendCommand::SetVisualizerEnabled(enabled) => {
+                if self.visualizer_enabled == enabled {
+                    return Ok(Vec::new());
+                }
+                self.visualizer_enabled = enabled;
+                if enabled
+                    && let Some(current) = &self.current
+                    && current.published.native_seek
+                {
+                    if self.playing {
+                        self.reload(current.position_millis, relay)?;
+                    } else {
+                        self.pending_reload = true;
+                    }
+                }
+                Ok(Vec::new())
+            }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
             | BackendCommand::SetPlaybackRate(_)
-            | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
             | BackendCommand::Stop { .. }
@@ -245,9 +329,35 @@ impl GoogleCastController {
     }
 
     pub(crate) fn poll(&mut self, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        if let Some(error) = self
+            .current
+            .as_ref()
+            .and_then(|current| relay.error(&current.published))
+        {
+            self.pending_reload = true;
+            return Ok(vec![BackendEvent::ProcessingFailed {
+                output: self.processing.output.clone(),
+                message: error,
+            }]);
+        }
         let mut events = Vec::new();
+        if let Some(current) = &self.current
+            && let Some(seekable) = relay.source_seekable(&current.published)
+            && seekable != self.seekable
+        {
+            self.seekable = seekable;
+            events.push(BackendEvent::Seekable {
+                run: current.run,
+                seekable,
+            });
+        }
         while let Some(event) = self.next_sdk_event() {
             self.accept_sdk_event(event, relay, &mut events)?;
+        }
+        if !self.awaiting_load
+            && let Some(current) = &self.current
+        {
+            events.extend(relay.processing_events(&current.published, &current.processing.output));
         }
         Ok(events)
     }
@@ -266,45 +376,32 @@ impl GoogleCastController {
     ) -> Result<Vec<BackendEvent>, String> {
         self.clear_session();
         relay.clear();
-        let published = relay.publish(stream)?;
+        let published =
+            relay.publish(stream, self.publish_request(stream, position_millis, false))?;
         let duration_millis = stream_duration_millis(stream);
-        let title = stream
-            .occurrence
-            .as_ref()
-            .map(|occurrence| occurrence.item.title.trim())
-            .filter(|title| !title.is_empty())
-            .map(str::to_string);
-        let metadata = (title.is_some() || published.artwork_uri.is_some()).then(|| Metadata {
-            title,
-            thumbnail_url: published.artwork_uri.clone(),
-        });
-        let request = LoadRequest::Url {
-            content_type: published.content_type.clone(),
-            url: published.uri.clone(),
-            resume_position: published
-                .seekable
-                .then_some(position_millis as f64 / 1_000.0),
-            speed: None,
-            volume: None,
-            metadata,
-            request_headers: None,
-        };
+        if let Err(error) = self.load(stream, &published, position_millis) {
+            relay.remove(&published);
+            return Err(error);
+        }
         self.current = Some(CastMedia {
             run,
             published: published.clone(),
+            stream: stream.clone(),
+            processing: self.processing.clone(),
+            position_millis,
+            position_observed: Instant::now(),
         });
         self.playback_observed = false;
-        if let Err(error) = self.device.load(request, Some(STATUS_INTERVAL_MILLIS)) {
-            self.clear_session();
-            relay.remove(&published);
-            return Err(error.to_string());
-        }
-
+        self.visualizer_playing = false;
+        self.playing = true;
+        self.awaiting_load = true;
+        self.seekable = true;
+        self.pending_reload = false;
         let mut events = vec![
             BackendEvent::Started { run },
             BackendEvent::Seekable {
                 run,
-                seekable: published.seekable,
+                seekable: self.seekable,
             },
             BackendEvent::State {
                 run,
@@ -315,6 +412,115 @@ impl GoogleCastController {
             events.push(BackendEvent::Duration { run, millis });
         }
         Ok(events)
+    }
+
+    fn publish_request(
+        &self,
+        stream: &PreparedStream,
+        position: u64,
+        reload: bool,
+    ) -> PublishRequest {
+        let generated = reload
+            || self.visualizer_enabled
+            || self.processing.config != Default::default()
+            || stream.window().is_some()
+            || !crate::relay::directly_supported(&crate::relay::source_content_type(stream))
+            || self.processing.cast_encoding.codec == library::AudioCodec::Flac;
+        PublishRequest {
+            representation: if generated {
+                RelayRepresentation::Generated(self.processing.cast_encoding)
+            } else {
+                RelayRepresentation::Source
+            },
+            processing: self.processing.config.clone(),
+            logical_offset_millis: position,
+        }
+    }
+
+    fn load(
+        &self,
+        stream: &PreparedStream,
+        published: &PublishedResource,
+        position: u64,
+    ) -> Result<(), String> {
+        let title = stream
+            .row
+            .as_ref()
+            .map(|row| row.track.metadata.title.trim())
+            .filter(|title| !title.is_empty())
+            .map(str::to_string);
+        let metadata = (title.is_some() || published.artwork_uri.is_some()).then(|| Metadata {
+            title,
+            thumbnail_url: published.artwork_uri.clone(),
+        });
+        self.device
+            .load(
+                LoadRequest::Url {
+                    content_type: published.content_type.clone(),
+                    url: published.uri.clone(),
+                    resume_position: published.native_seek.then_some(position as f64 / 1000.0),
+                    speed: None,
+                    volume: None,
+                    metadata,
+                    request_headers: None,
+                },
+                Some(STATUS_INTERVAL_MILLIS),
+            )
+            .map_err(string_error)
+    }
+
+    pub(crate) fn set_processing(
+        &mut self,
+        processing: ProcessingRequest,
+        relay: &RelayServer,
+    ) -> Result<Vec<BackendEvent>, String> {
+        let changed = self.processing.config != processing.config
+            || self.processing.cast_encoding != processing.cast_encoding;
+        self.processing = processing;
+        if (!changed && !self.pending_reload) || self.current.is_none() {
+            return Ok(Vec::new());
+        }
+        self.pending_reload = true;
+        if self.playing {
+            self.reload(
+                self.current
+                    .as_ref()
+                    .map_or(0, |current| current.position_millis),
+                relay,
+            )?;
+        }
+        Ok(Vec::new())
+    }
+
+    fn reload(&mut self, position: u64, relay: &RelayServer) -> Result<(), String> {
+        let current = self
+            .current
+            .as_ref()
+            .ok_or("Google Cast current media is unavailable")?;
+        let stream = current.stream.clone();
+        let run = current.run;
+        let published = relay.publish(&stream, self.publish_request(&stream, position, true))?;
+        if let Err(error) = self.load(&stream, &published, position) {
+            relay.remove(&published);
+            return Err(error);
+        }
+        if let Some(previous) = self.previous.take() {
+            relay.remove(&previous.published);
+        }
+        self.previous = self.current.take();
+        self.current = Some(CastMedia {
+            run,
+            published,
+            stream,
+            processing: self.processing.clone(),
+            position_millis: position,
+            position_observed: Instant::now(),
+        });
+        self.awaiting_load = true;
+        self.pending_reload = false;
+        self.playback_observed = false;
+        self.visualizer_playing = false;
+        Ok(())
     }
 
     fn next_sdk_event(&mut self) -> Option<SdkEvent> {
@@ -358,10 +564,20 @@ impl GoogleCastController {
                     });
                 }
             }
+            SdkEvent::Source(url) => self.observed_source = Some(url),
             SdkEvent::Position(seconds) => {
                 let Some(run) = self.current_run() else {
                     return Ok(());
                 };
+                // Until a reload is reported, a position from the previous resource would be
+                // read against the new offset and duration, and could end playback early.
+                if self.awaiting_load
+                    && self.current.as_ref().is_some_and(|current| {
+                        self.observed_source.as_deref() != Some(current.published.uri.as_str())
+                    })
+                {
+                    return Ok(());
+                }
                 let renderer_millis = (seconds.max(0.0) * 1_000.0).round() as u64;
                 if self
                     .current
@@ -378,10 +594,16 @@ impl GoogleCastController {
                         .as_ref()
                         .map(|current| current.published.logical_position_millis(renderer_millis))
                         .unwrap_or(renderer_millis);
-                    update.push(BackendEvent::Position {
-                        run,
-                        millis: logical_position,
-                    });
+                    if !self.pending_reload {
+                        if let Some(current) = &mut self.current {
+                            current.position_millis = logical_position;
+                            current.position_observed = Instant::now();
+                        }
+                        update.push(BackendEvent::Position {
+                            run,
+                            millis: logical_position,
+                        });
+                    }
                 }
             }
             SdkEvent::Duration(seconds) => {
@@ -391,7 +613,16 @@ impl GoogleCastController {
                 {
                     update.push(BackendEvent::Duration {
                         run,
-                        millis: (seconds * 1_000.0).round() as u64,
+                        millis: self
+                            .current
+                            .as_ref()
+                            .and_then(|current| stream_duration_millis(&current.stream))
+                            .unwrap_or_else(|| {
+                                self.current
+                                    .as_ref()
+                                    .map_or(0, |current| current.published.logical_offset_millis)
+                                    .saturating_add((seconds * 1_000.0).round() as u64)
+                            }),
                     });
                 }
             }
@@ -399,13 +630,51 @@ impl GoogleCastController {
                 let Some(run) = self.current_run() else {
                     return Ok(());
                 };
-                match cast_state_outcome(state, self.playback_observed)? {
+                let outcome = match cast_state_outcome(state, self.playback_observed) {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        self.finish_current(relay);
+                        return Err(error);
+                    }
+                };
+                match outcome {
                     CastStateOutcome::Ignore => {}
                     CastStateOutcome::State(state) => {
+                        if state == BackendState::Playing
+                            && !self.visualizer_playing
+                            && let Some(current) = &mut self.current
+                        {
+                            current.position_observed = Instant::now();
+                        }
+                        self.visualizer_playing = state == BackendState::Playing;
                         if matches!(state, BackendState::Playing | BackendState::Paused) {
                             self.playback_observed = true;
                         }
-                        update.push(BackendEvent::State { run, state });
+                        if matches!(state, BackendState::Playing | BackendState::Paused) {
+                            self.playing = state == BackendState::Playing;
+                            if self.awaiting_load {
+                                self.awaiting_load = false;
+                                if let Some(previous) = self.previous.take() {
+                                    relay.remove(&previous.published);
+                                }
+                                if let Some(current) = &self.current
+                                    && current.published.native_seek
+                                {
+                                    update.push(BackendEvent::ProcessingApplied {
+                                        output: current.processing.output.clone(),
+                                        config: current.processing.config.clone(),
+                                        sample_rate: None,
+                                        preamp_db: 0.0,
+                                    });
+                                    update.push(BackendEvent::ProcessingMeter {
+                                        output: current.processing.output.clone(),
+                                        peak_db: Vec::new(),
+                                        spectrum_db: Vec::new(),
+                                    });
+                                }
+                            }
+                        }
+                        update.push(BackendEvent::TransportObserved { run, state });
                     }
                     CastStateOutcome::Ended => {
                         self.finish_current(relay);
@@ -414,9 +683,12 @@ impl GoogleCastController {
                 }
             }
             SdkEvent::Stopped => {
+                if self.awaiting_load {
+                    return Ok(());
+                }
                 if let Some(run) = self.current_run() {
                     self.finish_current(relay);
-                    update.push(BackendEvent::State {
+                    update.push(BackendEvent::TransportObserved {
                         run,
                         state: BackendState::Stopped,
                     });
@@ -424,15 +696,41 @@ impl GoogleCastController {
             }
             SdkEvent::Error(error) => {
                 if self.current.is_some() {
-                    self.finish_current(relay);
+                    if self.awaiting_load && self.previous.is_some() {
+                        if let Some(rejected) = self.current.take() {
+                            relay.remove(&rejected.published);
+                        }
+                        self.current = self.previous.take();
+                        self.pending_reload = true;
+                        self.awaiting_load = false;
+                        update.push(BackendEvent::ProcessingFailed {
+                            output: self.processing.output.clone(),
+                            message: error,
+                        });
+                        return Ok(());
+                    } else {
+                        self.finish_current(relay);
+                    }
                     return Err(error);
                 }
+            }
+            SdkEvent::OperationFailed(error) => {
+                update.push(BackendEvent::OperationFailed {
+                    run: self.current_run(),
+                    error: BackendFailure::new(error),
+                });
             }
         }
         Ok(())
     }
 
     fn finish_current(&mut self, relay: &RelayServer) {
+        if let Some(previous) = self.previous.take() {
+            relay.remove(&previous.published);
+        }
+        self.awaiting_load = false;
+        self.pending_reload = false;
+        self.playing = false;
         if let Some(current) = self.current.take() {
             relay.remove(&current.published);
         }
@@ -440,12 +738,31 @@ impl GoogleCastController {
     }
 
     fn clear_session(&mut self) {
+        self.previous = None;
+        self.awaiting_load = false;
+        self.pending_reload = false;
+        self.playing = false;
         self.current = None;
         self.playback_observed = false;
     }
 
-    fn current_run(&self) -> Option<RunId> {
+    pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|current| current.run)
+    }
+
+    pub(crate) fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        if !self.visualizer_enabled
+            || !self.visualizer_playing
+            || self.awaiting_load
+            || self.pending_reload
+        {
+            return None;
+        }
+        let current = self.current.as_ref()?;
+        let position = current
+            .position_millis
+            .saturating_add(current.position_observed.elapsed().as_millis() as u64);
+        relay.visualizer(&current.published, current.run, position)
     }
 }
 
@@ -454,10 +771,11 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .end_millis()
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
-            stream
-                .occurrence
-                .as_ref()
-                .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
+            stream.row.as_ref().and_then(|occurrence| {
+                u64::try_from(occurrence.track.metadata.duration_millis)
+                    .ok()
+                    .filter(|value| *value > 0)
+            })
         })
 }
 

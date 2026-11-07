@@ -10,15 +10,14 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::remote::webdav::client::{Authentication, WebDavClient};
 use crate::{SourceConfiguration, SourceError, SourceId, SourceResult};
 
-mod artwork;
+pub(crate) mod artwork;
 pub(crate) mod changes;
-mod cue;
+mod folder_file;
 pub(crate) mod input;
-mod metadata;
+pub(crate) mod metadata;
 mod playlist;
-mod profile_file;
 pub(crate) mod reader;
-mod scan;
+pub(crate) mod scan;
 pub(crate) mod smb;
 #[cfg(test)]
 mod tests;
@@ -26,17 +25,38 @@ pub(crate) mod webdav;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum FileAuthentication {
     Password,
     Anonymous,
     Bearer,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+#[serde(from = "(String, String)", into = "(String, String)")]
+pub struct FileHeader {
+    pub name: String,
+    pub value: String,
+}
+
+impl From<(String, String)> for FileHeader {
+    fn from((name, value): (String, String)) -> Self {
+        Self { name, value }
+    }
+}
+impl From<FileHeader> for (String, String) {
+    fn from(header: FileHeader) -> Self {
+        (header.name, header.value)
+    }
+}
+
 /// Header values and the password/token belong in the existing credential store.
 #[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileCredentials {
     pub secret: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<FileHeader>,
 }
 
 impl std::fmt::Debug for FileCredentials {
@@ -48,9 +68,10 @@ impl std::fmt::Debug for FileCredentials {
 }
 
 #[derive(Clone, Default, Eq, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileCredentialsEdit {
     pub secret: Option<String>,
-    pub headers: Option<Vec<(String, String)>>,
+    pub headers: Option<Vec<FileHeader>>,
 }
 
 impl std::fmt::Debug for FileCredentialsEdit {
@@ -70,7 +91,7 @@ pub(crate) async fn connect(
 ) -> SourceResult<crate::ConnectedSource> {
     let configuration = settings.configuration(source_id, kind, name)?;
     let credential = Some(serde_json::to_string(&credentials)?);
-    let source = RemoteSource::open(&configuration, credential.clone())?;
+    let source = FileSource::open(&configuration, credential.clone())?;
     let input = source.input().await?;
     if source.stat(&input, "").await?.kind != library::LocalFileKind::Directory {
         return Err(SourceError::InvalidConfig(
@@ -117,7 +138,7 @@ pub(crate) async fn edit(
             crate::SourceEditResult::ConfigurationOnly(next)
         });
     }
-    let source = RemoteSource::open(&next, encoded.clone())?;
+    let source = FileSource::open(&next, encoded.clone())?;
     source.input().await?;
     Ok(crate::SourceEditResult::Connected(Box::new(
         crate::ConnectedSource::files(next, source, encoded),
@@ -125,11 +146,14 @@ pub(crate) async fn edit(
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileSourceSettings {
     pub url: String,
     pub alternate_urls: Vec<String>,
     #[serde(default)]
     pub folders: Vec<String>,
+    #[serde(default)]
+    pub excluded_folders: Vec<String>,
     pub username: String,
     pub domain: String,
     pub authentication: FileAuthentication,
@@ -186,14 +210,29 @@ pub(crate) fn detail_folder_uri(
     Ok(url.into())
 }
 
-pub(crate) struct RemoteSource {
+const DIRECTORY_VERSION: i64 = 9 << 8 | scan::PARSER_VERSION; // A parser change rereads subtrees.
+
+pub struct FileSource {
     source_id: SourceId,
     kind: String,
     name: String,
     namespace_url: String,
-    settings: FileSourceSettings,
-    credentials: FileCredentials,
+    backend: FileBackend,
+    directory_version: i64,
     input: Mutex<Option<Arc<FileInputServer>>>,
+    pub(crate) artwork: crate::file::walk::ArtworkState,
+}
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Each source owns one backend configuration"
+)]
+enum FileBackend {
+    Network {
+        settings: FileSourceSettings,
+        credentials: FileCredentials,
+    },
+    Documents(Arc<crate::file::documents::DocumentAccess>),
 }
 
 impl FileSourceSettings {
@@ -262,13 +301,114 @@ impl FileSourceSettings {
     }
 }
 
-impl RemoteSource {
+impl FileSource {
+    pub(crate) fn documents(
+        configuration: &SourceConfiguration,
+        root: crate::DocumentRoot,
+    ) -> Self {
+        let mut source = Self::document_profile(root);
+        source.source_id = configuration.source_id.clone();
+        source.kind = configuration.kind.clone();
+        source.name = configuration.name.clone();
+        source
+    }
+
+    pub fn document_profile(root: crate::DocumentRoot) -> Self {
+        let namespace_url = format!("rufin-document://{}/", root.id);
+        Self {
+            source_id: SourceId::new(root.id.clone()),
+            kind: crate::file::local::LOCAL_SOURCE_ID.into(),
+            name: root.name.clone(),
+            namespace_url,
+            backend: FileBackend::Documents(Arc::new(crate::file::documents::DocumentAccess::new(
+                root,
+            ))),
+            directory_version: DIRECTORY_VERSION,
+            input: Mutex::new(None),
+            artwork: Default::default(),
+        }
+    }
+
+    fn network(&self) -> SourceResult<(&FileSourceSettings, &FileCredentials)> {
+        match &self.backend {
+            FileBackend::Network {
+                settings,
+                credentials,
+            } => Ok((settings, credentials)),
+            FileBackend::Documents(_) => Err(SourceError::InvalidRequest(
+                "This source uses document access",
+            )),
+        }
+    }
+
+    pub(crate) fn document_access(&self) -> Option<&Arc<crate::file::documents::DocumentAccess>> {
+        match &self.backend {
+            FileBackend::Documents(access) => Some(access),
+            _ => None,
+        }
+    }
+
+    fn folders(&self) -> Vec<String> {
+        match &self.backend {
+            FileBackend::Network { settings, .. } if !settings.folders.is_empty() => {
+                settings.folders.clone()
+            }
+            _ => vec![String::new()],
+        }
+    }
+
+    pub(crate) async fn media_file_exists(&self, path: &str) -> SourceResult<bool> {
+        let relative = self.relative(path)?;
+        let input = self.input().await?;
+        match self.stat(&input, &relative).await {
+            Ok(file) => Ok(file.kind != library::LocalFileKind::Directory),
+            Err(SourceError::NotFound) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn open(
         configuration: &SourceConfiguration,
         credential: Option<String>,
     ) -> SourceResult<Self> {
-        let settings = FileSourceSettings::from_configuration(configuration)?;
+        let mut settings = FileSourceSettings::from_configuration(configuration)?;
+        settings.excluded_folders = settings
+            .excluded_folders
+            .into_iter()
+            .filter(|path| !path.is_empty())
+            .map(|path| {
+                let mut parts = Vec::new();
+                for part in path.split('/') {
+                    match part {
+                        "" | "." => {}
+                        ".." if parts.last().is_some_and(|last| *last != "..") => {
+                            parts.pop();
+                        }
+                        _ => parts.push(part),
+                    }
+                }
+                if parts.is_empty() {
+                    "/".to_string()
+                } else {
+                    parts.join("/")
+                }
+            })
+            .collect();
         let payload: Payload = crate::config::decode_provider_payload(configuration)?;
+        let directory_version = if settings.excluded_folders.is_empty() {
+            DIRECTORY_VERSION
+        } else {
+            // A directory listing depends on both the reader and the excluded paths.
+            let mut hash = blake3::Hasher::new();
+            hash.update(&DIRECTORY_VERSION.to_le_bytes());
+            for folder in &settings.excluded_folders {
+                hash.update(&(folder.len() as u64).to_le_bytes());
+                hash.update(folder.as_bytes());
+            }
+            let mut bytes = [0; 8];
+            bytes.copy_from_slice(&hash.finalize().as_bytes()[..8]);
+            i64::from_le_bytes(bytes)
+        };
         let credentials = credential
             .map(|text| serde_json::from_str(&text))
             .transpose()?
@@ -278,9 +418,13 @@ impl RemoteSource {
             kind: configuration.kind.clone(),
             name: configuration.name.clone(),
             namespace_url: payload.namespace_url,
-            settings,
-            credentials,
+            backend: FileBackend::Network {
+                settings,
+                credentials,
+            },
+            directory_version,
             input: Mutex::new(None),
+            artwork: Default::default(),
         })
     }
 
@@ -296,12 +440,8 @@ impl RemoteSource {
             return Ok(None);
         }
         let mut hash = blake3::Hasher::new();
-        hash.update(&scan::PARSER_VERSION.to_le_bytes());
-        for folder in if self.settings.folders.is_empty() {
-            vec![String::new()]
-        } else {
-            self.settings.folders.clone()
-        } {
+        hash.update(&self.directory_version.to_le_bytes());
+        for folder in self.folders() {
             let url = Url::parse(&self.input_path(input.input(), &folder)?)
                 .map_err(|_| SourceError::NotFound)?;
             let entry = client.stat(&url).await?;
@@ -324,13 +464,20 @@ impl RemoteSource {
             && !match input.input() {
                 FileInput::Smb(client) => client.is_disconnected(),
                 FileInput::WebDav(client) => client.is_disconnected(),
+                FileInput::Documents(_) | FileInput::Link { .. } => false,
             }
         {
             return Ok(Arc::clone(input));
         }
         *current = None;
+        if let FileBackend::Documents(access) = &self.backend {
+            let input = FileInputServer::start(FileInput::Documents(Arc::clone(access))).await?;
+            *current = Some(Arc::clone(&input));
+            return Ok(input);
+        }
+        let (settings, _) = self.network()?;
         let mut failure = SourceError::NotFound;
-        for address in std::iter::once(&self.settings.url).chain(&self.settings.alternate_urls) {
+        for address in std::iter::once(&settings.url).chain(&settings.alternate_urls) {
             match self.connect_input(address).await {
                 Ok(input) => {
                     let input = FileInputServer::start(input).await?;
@@ -351,16 +498,17 @@ impl RemoteSource {
     }
 
     async fn connect_input(&self, address: &str) -> SourceResult<FileInput> {
+        let (settings, credentials) = self.network()?;
         let url = collection_url(address)?;
         if self.kind == "smb" {
             let parts = decoded_parts(&url)?;
-            let guest = self.settings.authentication == FileAuthentication::Anonymous;
+            let guest = settings.authentication == FileAuthentication::Anonymous;
             let username = if guest {
                 String::new()
-            } else if self.settings.domain.is_empty() {
-                self.settings.username.clone()
+            } else if settings.domain.is_empty() {
+                settings.username.clone()
             } else {
-                format!("{}\\{}", self.settings.domain, self.settings.username)
+                format!("{}\\{}", settings.domain, settings.username)
             };
             let client = crate::file::remote::smb::SmbClient::connect(
                 url.host_str().ok_or(SourceError::NotFound)?,
@@ -370,33 +518,31 @@ impl RemoteSource {
                 if guest {
                     String::new()
                 } else {
-                    self.credentials.secret.clone()
+                    credentials.secret.clone()
                 },
                 guest,
-                self.settings.require_smb_encryption,
+                settings.require_smb_encryption,
             )
             .await?
             .with_root(parts[1..].join("/"))
             .await?;
             Ok(FileInput::Smb(Arc::new(client)))
         } else {
-            let authentication = match self.settings.authentication {
+            let authentication = match settings.authentication {
                 FileAuthentication::Anonymous => Authentication::Anonymous,
                 FileAuthentication::Password => Authentication::Password {
-                    username: self.settings.username.clone(),
-                    password: self.credentials.secret.clone(),
+                    username: settings.username.clone(),
+                    password: credentials.secret.clone(),
                 },
-                FileAuthentication::Bearer => {
-                    Authentication::Bearer(self.credentials.secret.clone())
-                }
+                FileAuthentication::Bearer => Authentication::Bearer(credentials.secret.clone()),
             };
-            let headers = webdav::client::custom_headers(&self.credentials.headers)?;
+            let headers = webdav::client::custom_headers(&credentials.headers)?;
             let client = WebDavClient::new(
                 url,
                 authentication,
                 headers,
-                self.settings.trust_invalid_certificate,
-                self.settings.certificate_pem.as_deref().map(str::as_bytes),
+                settings.trust_invalid_certificate,
+                settings.certificate_pem.as_deref().map(str::as_bytes),
             )?;
             if !client.stat(client.root()).await?.directory {
                 return Err(SourceError::InvalidConfig(
@@ -408,17 +554,45 @@ impl RemoteSource {
     }
 
     pub(crate) fn includes(&self, relative: &str) -> bool {
-        self.settings.folders.is_empty()
-            || self.settings.folders.iter().any(|folder| {
-                relative == folder
+        let Ok((settings, _)) = self.network() else {
+            return true;
+        };
+        !self.excludes(relative)
+            && (settings.folders.is_empty()
+                || settings.folders.iter().any(|folder| {
+                    relative == folder
+                        || relative
+                            .strip_prefix(folder)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                }))
+    }
+
+    pub(crate) fn excludes(&self, relative: &str) -> bool {
+        let Ok((settings, _)) = self.network() else {
+            return false;
+        };
+        settings
+            .excluded_folders
+            .iter()
+            .filter(|folder| !folder.is_empty())
+            .any(|folder| {
+                let folder = folder.trim_matches('/');
+                folder.is_empty()
+                    || relative == folder
                     || relative
                         .strip_prefix(folder)
                         .is_some_and(|rest| rest.starts_with('/'))
             })
     }
 
-    fn location(&self, relative: &str) -> SourceResult<String> {
+    pub(crate) fn location(&self, relative: &str) -> SourceResult<String> {
+        let (relative, document) = if self.document_access().is_some() {
+            crate::file::documents::relative_parts(relative)
+        } else {
+            (relative, None)
+        };
         let mut url = collection_url(&self.namespace_url)?;
+        url.set_fragment(document);
         {
             let mut parts = url.path_segments_mut().map_err(|_| SourceError::NotFound)?;
             parts.pop_if_empty();
@@ -437,7 +611,7 @@ impl RemoteSource {
         Ok(url.into())
     }
 
-    fn relative(&self, location: &str) -> SourceResult<String> {
+    pub(crate) fn relative(&self, location: &str) -> SourceResult<String> {
         let base = collection_url(&self.namespace_url)?;
         let url = Url::parse(location).map_err(|_| SourceError::NotFound)?;
         // SMB URLs have opaque web origins; compare their actual server authority.
@@ -453,12 +627,19 @@ impl RemoteSource {
             .map_err(|_| SourceError::NotFound)?
             .into_owned();
         self.location(&relative)?;
-        Ok(relative.trim_end_matches('/').into())
+        Ok(
+            match url.fragment().filter(|_| self.document_access().is_some()) {
+                Some(uri) => format!("{}#{uri}", relative.trim_end_matches('/')),
+                None => relative.trim_end_matches('/').into(),
+            },
+        )
     }
 
-    fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
+    pub(crate) fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
         match input {
-            FileInput::Smb(_) => Ok(relative.into()),
+            FileInput::Smb(_) | FileInput::Documents(_) | FileInput::Link { .. } => {
+                Ok(relative.into())
+            }
             FileInput::WebDav(client) => {
                 let mut url = client.root().clone();
                 {
@@ -475,31 +656,23 @@ impl RemoteSource {
 
     pub(crate) async fn stream(
         &self,
-        database: &library::Database,
+        file: &library::PlayableFile,
         media_uri: &str,
-    ) -> SourceResult<playback::ResolvedStream> {
-        let (source, kind, _) =
-            library::source_entity_parts(media_uri).ok_or(SourceError::NotFound)?;
-        if source != self.source_id || kind != "track" {
-            return Err(SourceError::NotFound);
-        }
-        let file = database
-            .observed_media_file(media_uri)
-            .await?
-            .ok_or(SourceError::NotFound)?;
+        window: Option<(u64, u64)>,
+    ) -> SourceResult<audio_processing::ResolvedStream> {
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
-        let mut stream = input
+        let stream = input
             .playback_stream(
                 &self.input_path(input.input(), &relative)?,
                 file.revision.as_deref().unwrap_or_default(),
                 media_uri,
             )
             .await?;
-        if let Some((start, end)) = file.cue_start_millis.zip(file.cue_end_millis) {
-            stream = stream.with_window(start.max(0) as u64, end.max(0) as u64);
-        }
-        Ok(stream)
+        Ok(match window {
+            Some((start, end)) => stream.with_window(start, end),
+            None => stream,
+        })
     }
 
     pub(crate) async fn small_file(
@@ -509,7 +682,13 @@ impl RemoteSource {
         limit: usize,
     ) -> SourceResult<Vec<u8>> {
         let path = self.input_path(input.input(), relative)?;
-        let stream = input.stream(&path, &self.location(relative)?);
+        let stream = if matches!(input.input(), FileInput::Documents(_)) {
+            input
+                .playback_stream(&path, "", &self.location(relative)?)
+                .await?
+        } else {
+            input.stream(&path, &self.location(relative)?)
+        };
         let client = reqwest::Client::builder()
             .no_proxy()
             .read_timeout(std::time::Duration::from_secs(30))
@@ -558,6 +737,7 @@ impl RemoteSource {
                 source_id,
                 path,
                 revision,
+                ..
             }
             | crate::LocalImageRef::Embedded {
                 source_id,
@@ -577,14 +757,17 @@ impl RemoteSource {
                 content_type: crate::file::artwork::content_type(std::path::Path::new(&relative)),
             }),
             crate::LocalImageRef::Embedded { picture_index, .. } => {
-                let stream = input
-                    .playback_stream(&self.input_path(input.input(), &relative)?, revision, path)
-                    .await?;
-                let uri = stream.uri().to_string();
-                let mut reader = crate::file::remote::reader::FileReader::open(stream).await?;
+                let mut reader = crate::file::remote::reader::FileReader::open(
+                    &input,
+                    &self.input_path(input.input(), &relative)?,
+                    revision,
+                    path,
+                )
+                .await?;
+                let uri = reader.uri().to_owned();
                 tokio::task::spawn_blocking(move || {
                     crate::file::artwork::read_image_input(
-                        &mut crate::file::discovery::Reader::network(),
+                        &mut crate::file::discovery::Reader::default(),
                         &mut reader,
                         &uri,
                         picture_index,
@@ -655,4 +838,10 @@ fn referenced_path(cue: &str, value: &str) -> SourceResult<String> {
         }
     }
     Ok(parts.join("/"))
+}
+
+pub(super) fn file_identity(location: &str) -> std::borrow::Cow<'_, str> {
+    library::document_locator_parts(location)
+        .map(|(native_id, _)| std::borrow::Cow::Owned(native_id))
+        .unwrap_or_else(|| std::borrow::Cow::Borrowed(location))
 }
