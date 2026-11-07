@@ -25,7 +25,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -292,7 +292,7 @@ private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConne
     if (bindings.size <= 1) {
         DetailCover(detailArtwork(bindings.firstOrNull() ?: summary.row.artworkIdentity, player, size), Modifier.size(size))
     } else {
-        Column(Modifier.size(size).clip(RoundedCornerShape(12.dp))) {
+        Column(Modifier.size(size).clip(CoverShape)) {
             repeat(2) { y ->
                 Row {
                     repeat(2) { x ->
@@ -330,7 +330,7 @@ private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: 
 @Composable
 private fun DetailCover(artwork: PlayerArtwork?, modifier: Modifier,
 ) {
-    Box(modifier.clip(RoundedCornerShape(8.dp))) {
+    Box(modifier.clip(CoverShape)) {
         if (artwork == null) FallbackCover(Modifier.fillMaxSize()) else Artwork(artwork, Modifier.fillMaxSize())
     }
 }

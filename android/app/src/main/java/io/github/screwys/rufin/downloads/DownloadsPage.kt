@@ -3,7 +3,7 @@ package io.github.screwys.rufin.downloads
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,7 +53,7 @@ internal fun DownloadsPage(model: RufinConnection, player: PlayerConnection, onS
                     val art = rememberArtwork(row.preview?.artworkBinding, player, with(LocalDensity.current) { 56.dp.roundToPx() })
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Artwork(art, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
+                            Artwork(art, Modifier.size(56.dp).clip(CoverShape))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text(downloadSubjectTitle(job.subject), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 val subtitle = row.preview?.let { "${it.metadata.album} · ${it.metadata.artist}" }.orEmpty()

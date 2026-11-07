@@ -64,6 +64,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -139,7 +140,7 @@ internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
                 feedback.artworkIdentity?.let { identity ->
                     val pixels = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.roundToPx() }
                     io.github.screwys.rufin.ui.Artwork(io.github.screwys.rufin.ui.rememberArtwork(identity, player, pixels),
-                        Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)))
+                        Modifier.size(40.dp).clip(CoverShape))
                 }
                 Text(feedback.message, style = MaterialTheme.typography.bodyMedium)
             }

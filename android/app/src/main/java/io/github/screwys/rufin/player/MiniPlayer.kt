@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
@@ -102,7 +103,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
         Column {
             Row(Modifier.heightIn(min = 68.dp).padding(horizontal = 10.dp, vertical = 10.dp),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Artwork(artwork, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+                Artwork(artwork, Modifier.size(48.dp).clip(CoverShape))
                 AnimatedContent(current.title to current.subtitle, Modifier.weight(1f).padding(start = 10.dp, end = 4.dp),
                     transitionSpec = { (slideInHorizontally(tween(if (reduceMotion) 0 else 180)) { it / 3 } + fadeIn(tween(if (reduceMotion) 0 else 180))) togetherWith
                         (slideOutHorizontally(tween(if (reduceMotion) 0 else 180)) { -it / 3 } + fadeOut(tween(if (reduceMotion) 0 else 120))) },

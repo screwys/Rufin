@@ -10,7 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
@@ -161,7 +161,7 @@ private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEdito
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Artwork(connection.artwork, Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)))
+                Artwork(connection.artwork, Modifier.size(220.dp).clip(CoverShape))
                 if (connection.loadingArtwork) CircularProgressIndicator()
             }
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -204,7 +204,7 @@ private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEdito
                 }
                 ListItem(headlineContent = { Text(result.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(result.detail, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Artwork(image, Modifier.size(64.dp).clip(RoundedCornerShape(8.dp))) },
+                    leadingContent = { Artwork(image, Modifier.size(64.dp).clip(CoverShape)) },
                     trailingContent = { IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.sourceUrl))) }) {
                         RufinIcon("rufin-external-link-symbolic", translate("Open"), Modifier.size(20.dp)) } },
                     modifier = Modifier.clickable(enabled = editable) { connection.chooseArtwork(result.imageUrl) })

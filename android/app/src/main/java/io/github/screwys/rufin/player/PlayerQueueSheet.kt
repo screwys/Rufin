@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -321,6 +322,6 @@ private fun QueueSheetCover(row: QueueRow, player: PlayerConnection) {
     val identity = remember(row) { row.track().artworkBinding }
     val artwork = rememberArtwork(identity, player, pixels)
     Box(Modifier.size(48.dp)) {
-        Artwork(artwork, Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)))
+        Artwork(artwork, Modifier.fillMaxSize().clip(CoverShape))
     }
 }
