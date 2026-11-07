@@ -417,11 +417,12 @@ async fn artwork(
             }
             artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
         };
-        let png =
-            tokio::task::spawn_blocking(move || image.pixels().resized_to_fit(size)?.encode_png())
-                .await
-                .map_err(internal)?
-                .map_err(internal)?;
+        let png = tokio::task::spawn_blocking(move || {
+            image.pixels().resized_to_cover(size)?.encode_png()
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
         (png, "image/png")
     };
     Ok(Response::builder()

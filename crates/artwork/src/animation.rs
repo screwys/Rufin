@@ -10,7 +10,7 @@ use jxl::api::{
     JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
 };
 
-use crate::decode::{decode_error, is_jxl, rgba_image, scale_to_fit};
+use crate::decode::{decode_error, is_jxl, rgba_image, scale_to_cover};
 use crate::{ArtworkError, RgbaImage};
 
 pub struct AnimationFrame {
@@ -94,7 +94,7 @@ impl Decoder {
                 frame
             }
         };
-        image = scale_to_fit(image, render_size, FilterType::Bilinear)?;
+        image = scale_to_cover(&image, render_size, FilterType::Bilinear)?;
         Ok(Some(AnimationFrame {
             pixels: rgba_image(image)?,
             duration,
