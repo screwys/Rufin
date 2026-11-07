@@ -2263,7 +2263,8 @@ impl ListRead {
                 self.favorites_only
                     || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
                 sort.activity_sensitive(),
-                false,
+                // Playlist rows carry their downloaded counts.
+                self.kind == ListKind::Playlists,
                 self.kind == ListKind::Playlists,
             ],
         }
