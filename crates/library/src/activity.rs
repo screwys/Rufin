@@ -139,23 +139,6 @@ impl Catalog {
         Ok(key)
     }
 
-    /// Listens after `after` in key order, at most `limit`.
-    pub async fn listens_after(
-        &self,
-        after: ListenKey,
-        limit: usize,
-    ) -> LibraryResult<Vec<ActivityRecord>> {
-        let mut connection = self.acquire_reader().await?;
-        let rows: Vec<ActivityExportRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "{ACTIVITY_EXPORT_SELECT} WHERE listen_key>?1 ORDER BY listen_key LIMIT ?2"
-        )))
-        .bind(after)
-        .bind(limit as i64)
-        .fetch_all(&mut *connection)
-        .await?;
-        Ok(rows.into_iter().map(ActivityRecord::from).collect())
-    }
-
     /// Writes listens another installation accepted, in one Write and with no scrobble. Each
     /// takes a key of this Store; a listen already here keeps the longer listening.
     pub async fn import_listens(&self, listens: &[ActivityRecord]) -> LibraryResult<u64> {
@@ -178,23 +161,30 @@ impl Catalog {
         Ok(changed)
     }
 
-    /// The play ids of the listens that have one, with their keys.
-    pub async fn listen_ids(&self) -> LibraryResult<Vec<(String, i64)>> {
+    /// The play ids of the listens that have one.
+    pub async fn listen_ids(&self) -> LibraryResult<Vec<String>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as(
-            "SELECT external_id,listen_key FROM listens WHERE external_id IS NOT NULL ORDER BY external_id",
+        Ok(sqlx::query_scalar(
+            "SELECT external_id FROM listens WHERE external_id IS NOT NULL ORDER BY external_id",
         )
         .fetch_all(&mut *connection)
         .await?)
     }
 
-    /// The listens with these play ids.
-    pub async fn listens_by_id(&self, ids: &[String]) -> LibraryResult<Vec<ActivityRecord>> {
+    /// The listens with these play ids, and those of these tracks.
+    pub async fn listens(
+        &self,
+        ids: &[String],
+        tracks: &[crate::TrackKey],
+    ) -> LibraryResult<Vec<ActivityRecord>> {
         let mut connection = self.acquire_reader().await?;
         let rows: Vec<ActivityExportRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "{ACTIVITY_EXPORT_SELECT} WHERE external_id IN(SELECT value FROM json_each(?1)) ORDER BY listen_key"
+            "{ACTIVITY_EXPORT_SELECT} WHERE external_id IN(SELECT value FROM json_each(?1))
+             OR media_uri IN(SELECT media_uri FROM tracks WHERE track_key IN(SELECT value FROM json_each(?2)))
+             ORDER BY listen_key"
         )))
         .bind(serde_json::to_string(ids)?)
+        .bind(serde_json::to_string(tracks)?)
         .fetch_all(&mut *connection)
         .await?;
         Ok(rows.into_iter().map(ActivityRecord::from).collect())

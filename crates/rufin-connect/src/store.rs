@@ -27,8 +27,6 @@ CREATE TABLE IF NOT EXISTS connect_profile (
     device TEXT NOT NULL,
     -- Last hybrid clock issued or seen: unix milliseconds << 16 | counter.
     clock INTEGER NOT NULL DEFAULT 0,
-    -- Highest listen_key encoded; Listened changes re-read from 16 below it.
-    listened INTEGER NOT NULL DEFAULT 0,
     -- The folder channel location as JSON ({\"path\"}, {\"document\"} or {\"connection\",\"path\"}), or NULL.
     folder TEXT,
     -- Last of this device's own sequences written to its folder directory.
@@ -87,7 +85,6 @@ pub struct ProfileRow {
     pub profile: String,
     pub device: String,
     pub clock: i64,
-    pub listened: i64,
     pub folder: Option<String>,
     pub written: i64,
 }
@@ -298,9 +295,9 @@ impl Store {
         Ok(count as u64)
     }
 
-    /// Records this device's changes with new clocks and sequences, in one transaction with the
-    /// listen cursor. Returns the last sequence when a row was written.
-    pub async fn write(&self, changes: Vec<Change>, listened: Option<i64>) -> Result<Option<i64>> {
+    /// Records this device's changes with new clocks and sequences, in one transaction. Returns
+    /// the last sequence when a row was written.
+    pub async fn write(&self, changes: Vec<Change>) -> Result<Option<i64>> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let mut clock: i64 =
             sqlx::query_scalar("SELECT COALESCE((SELECT clock FROM connect_profile),0)")
@@ -323,9 +320,8 @@ impl Store {
             })
             .collect::<Vec<_>>();
         let sequence = insert(&mut transaction, &rows).await?;
-        sqlx::query("UPDATE connect_profile SET clock=?1,listened=COALESCE(?2,listened)")
+        sqlx::query("UPDATE connect_profile SET clock=?1")
             .bind(clock)
-            .bind(listened)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
@@ -458,7 +454,7 @@ async fn connect(path: &Path, create: bool) -> Result<SqlitePool> {
 
 async fn read_profile(pool: &SqlitePool) -> Result<Option<ProfileRow>> {
     Ok(
-        sqlx::query_as("SELECT profile,device,clock,listened,folder,written FROM connect_profile")
+        sqlx::query_as("SELECT profile,device,clock,folder,written FROM connect_profile")
             .fetch_optional(pool)
             .await?,
     )
@@ -556,7 +552,7 @@ mod tests {
             deleted: false,
             value: Some(serde_json::json!({"name": "Laptop", "trusted": true})),
         };
-        assert!(store.write(vec![change], None).await.unwrap().is_some());
+        assert!(store.write(vec![change]).await.unwrap().is_some());
         drop(store);
         assert!(Store::open(&path).await.unwrap().is_none());
         assert!(!path.exists());

@@ -391,7 +391,7 @@ impl Records {
     pub(super) async fn write_device(&self, device: &str) -> Result<Option<i64>, String> {
         let _work = self.work.lock().await;
         let changes = self.device_changes(device).await?;
-        self.write(changes, None).await
+        self.write(changes).await
     }
 
     async fn device_changes(&self, device: &str) -> Result<Vec<store::Change>, String> {
@@ -434,15 +434,11 @@ impl Records {
             format!("queue:{}", self.device),
         ];
         changes.extend(self.diff(Vec::new(), Select::Ids(&playback), true).await?);
-        self.write(changes, None).await
+        self.write(changes).await
     }
 
-    async fn write(
-        &self,
-        changes: Vec<store::Change>,
-        listened: Option<i64>,
-    ) -> Result<Option<i64>, String> {
-        if changes.is_empty() && listened.is_none() {
+    async fn write(&self, changes: Vec<store::Change>) -> Result<Option<i64>, String> {
+        if changes.is_empty() {
             return Ok(None);
         }
         let sessions = changes
@@ -450,11 +446,7 @@ impl Records {
             .filter(|change| kind(&change.id) == "session")
             .map(|change| (change.id.clone(), change.value.clone()))
             .collect::<Vec<_>>();
-        let sequence = self
-            .store
-            .write(changes, listened)
-            .await
-            .map_err(string_error)?;
+        let sequence = self.store.write(changes).await.map_err(string_error)?;
         self.remember_sessions(sessions);
         Ok(sequence)
     }
@@ -543,11 +535,10 @@ impl Records {
             for (kind, tombstones) in COMPARED {
                 written.extend(self.compare(kind, tombstones).await?);
             }
-            let (listens, listened) = self.unrecorded_listens().await?;
-            written.extend(listens);
+            written.extend(self.unrecorded_listens().await?);
             written.extend(self.unrecorded_analysis().await?);
             written.extend(self.session_changes(true).await?);
-            return self.write(written, listened).await;
+            return self.write(written).await;
         };
         let mut kinds = Vec::new();
         let (mut playlists, mut smart) = (Vec::new(), Vec::new());
@@ -556,12 +547,12 @@ impl Records {
         let mut entries = Vec::new();
         let mut hashes = Vec::new();
         let mut albums = Vec::new();
-        let mut heard = false;
+        let mut heard = Vec::new();
         let mut queue = None;
         for scope in scopes {
             match scope {
                 Scope::Held { uris } => states.extend(uris.iter().cloned()),
-                Scope::Listened { .. } => heard = true,
+                Scope::Listened { track } => heard.push(*track),
                 Scope::Lyrics { uri } => lyrics.push(uri.clone()),
                 Scope::Playlist {
                     key,
@@ -637,16 +628,13 @@ impl Records {
         if !albums.is_empty() {
             written.extend(self.compare_ids("album-loudness", albums).await?);
         }
-        let mut listened = None;
-        if heard {
-            let (listens, last) = self.heard_listens().await?;
-            written.extend(listens);
-            listened = last;
+        if !heard.is_empty() {
+            written.extend(self.heard_listens(&heard).await?);
         }
         if let Some(entries) = queue {
             written.extend(self.session_changes(entries).await?);
         }
-        self.write(written, listened).await
+        self.write(written).await
     }
 
     /// The setting records, this device's record and its queue, after a settings change.
@@ -654,7 +642,7 @@ impl Records {
         let _work = self.work.lock().await;
         let mut changes = self.settings_changes().await?;
         changes.extend(self.session_changes(false).await?);
-        self.write(changes, None).await
+        self.write(changes).await
     }
 
     async fn settings_changes(&self) -> Result<Vec<store::Change>, String> {
@@ -687,19 +675,8 @@ impl Records {
     }
 
     /// Listens without a record, and tombstones for records of listens that are gone.
-    async fn unrecorded_listens(&self) -> Result<(Vec<store::Change>, Option<i64>), String> {
+    async fn unrecorded_listens(&self) -> Result<Vec<store::Change>, String> {
         let listens = self.catalog.listen_ids().await.map_err(string_error)?;
-        let listened = self
-            .store
-            .profile()
-            .await
-            .map_err(string_error)?
-            .map(|row| row.listened);
-        let last = listens
-            .iter()
-            .map(|(_, key)| *key)
-            .max()
-            .filter(|last| Some(*last) != listened);
         let stored = self
             .store
             .digests(Select::Kind("listen"))
@@ -707,12 +684,11 @@ impl Records {
             .map_err(string_error)?;
         let present = listens
             .iter()
-            .map(|(id, _)| format!("listen:{id}"))
+            .map(|id| format!("listen:{id}"))
             .collect::<HashSet<_>>();
         let missing = listens
             .into_iter()
-            .filter(|(id, _)| !stored.contains_key(&format!("listen:{id}")))
-            .map(|(id, _)| id)
+            .filter(|id| !stored.contains_key(&format!("listen:{id}")))
             .collect::<Vec<_>>();
         let gone = stored
             .into_iter()
@@ -723,32 +699,23 @@ impl Records {
         for page in missing.chunks(PAGE).chain(gone.chunks(PAGE)) {
             changes.extend(self.compare_ids("listen", page.to_vec()).await?);
         }
-        Ok((changes, last))
+        Ok(changes)
     }
 
-    /// Listens recorded since the last pass, and a few before: a listen can be written again
-    /// with a longer listening time.
-    async fn heard_listens(&self) -> Result<(Vec<store::Change>, Option<i64>), String> {
-        let profile = self.store.profile().await.map_err(string_error)?;
-        let mut after = profile.map_or(0, |row| row.listened).saturating_sub(16);
-        let mut changes = Vec::new();
-        let mut last = None;
-        loop {
-            let listens = self
-                .catalog
-                .listens_after(library::ListenKey::from_raw(after), PAGE)
-                .await
-                .map_err(string_error)?;
-            let Some(final_key) = listens.last().map(|listen| listen.listen_key) else {
-                break;
-            };
-            after = final_key;
-            last = Some(final_key);
-            let items = self.encode_listens(listens).await?;
-            let ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-            changes.extend(self.diff(items, Select::Ids(&ids), false).await?);
-        }
-        Ok((changes, last))
+    /// The listens of tracks heard: new ones, and ones written again with a longer listening
+    /// time.
+    async fn heard_listens(
+        &self,
+        tracks: &[library::TrackKey],
+    ) -> Result<Vec<store::Change>, String> {
+        let listens = self
+            .catalog
+            .listens(&[], tracks)
+            .await
+            .map_err(string_error)?;
+        let items = self.encode_listens(listens).await?;
+        let ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+        self.diff(items, Select::Ids(&ids), false).await
     }
 
     async fn unrecorded_analysis(&self) -> Result<Vec<store::Change>, String> {
@@ -786,11 +753,7 @@ impl Records {
             },
             "listen" => match objects {
                 Some(ids) => {
-                    let listens = self
-                        .catalog
-                        .listens_by_id(ids)
-                        .await
-                        .map_err(string_error)?;
+                    let listens = self.catalog.listens(ids, &[]).await.map_err(string_error)?;
                     self.encode_listens(listens).await?
                 }
                 None => Vec::new(),

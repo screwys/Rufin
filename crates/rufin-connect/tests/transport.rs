@@ -232,7 +232,7 @@ async fn enrollment_records_media_and_removal() {
         a_store.write(vec![
             change("setting:preference:display", None),
             change(&format!("device:{}", a.identity()), Some(serde_json::json!({"name": "Work Laptop", "trusted": true}))),
-        ], None).await.unwrap();
+        ]).await.unwrap();
         trust(&a, &[(&a, true)]);
 
         b.begin_pairing(&a.invitation().await.unwrap()).await.unwrap();
@@ -331,7 +331,7 @@ async fn enrollment_records_media_and_removal() {
         c_store.turn_on(&profile).await.unwrap();
         serve(&c, &profile, &c_store, Arc::default()).await;
         let edit = serde_json::json!("made on C");
-        let sequence = c_store.write(vec![change("setting:preference:third", Some(edit.clone()))], None).await.unwrap();
+        let sequence = c_store.write(vec![change("setting:preference:third", Some(edit.clone()))]).await.unwrap();
         assert_eq!(sequence, Some(c_store.sequence().await.unwrap()));
         let (_, rows) = pull(&a, &a_store, &c, &profile).await.unwrap();
         assert_eq!(rows.len(), 1);
@@ -340,7 +340,7 @@ async fn enrollment_records_media_and_removal() {
         assert_eq!((rows[0].value.as_ref(), rows[0].device.as_str()), (Some(&edit), c.identity().as_str()));
         // B's copy loses to nothing it already holds, and its own write wins over C's.
         assert!(b_store.newer(rows.into_iter().map(|row| ((), row)).collect()).await.unwrap().is_empty());
-        b_store.write(vec![change("setting:preference:third", Some(serde_json::json!("made on B")))], None).await.unwrap();
+        b_store.write(vec![change("setting:preference:third", Some(serde_json::json!("made on B")))]).await.unwrap();
         let (_, rows) = pull(&c, &c_store, &a, &profile).await.unwrap();
         assert!(rows.is_empty());
         pull(&a, &a_store, &b, &profile).await.unwrap();
@@ -461,13 +461,10 @@ async fn a_push_reaches_an_online_device_while_another_is_offline() {
         c.shutdown().await.unwrap();
         for value in ["first edit", "second edit"] {
             let sequence = a_store
-                .write(
-                    vec![change(
-                        "setting:preference:theme",
-                        Some(serde_json::json!(value)),
-                    )],
-                    None,
-                )
+                .write(vec![change(
+                    "setting:preference:theme",
+                    Some(serde_json::json!(value)),
+                )])
                 .await
                 .unwrap()
                 .unwrap();
@@ -512,13 +509,10 @@ async fn offline_edits_catch_up_after_restarting_with_the_saved_cursor() {
         let (b, mut b_events) = node("Laptop", credentials.clone()).await;
         let (profile, a_store) = host(&a, a_dir.path(), Arc::default()).await;
         a_store
-            .write(
-                vec![change(
-                    "setting:preference:theme",
-                    Some(serde_json::json!("initial")),
-                )],
-                None,
-            )
+            .write(vec![change(
+                "setting:preference:theme",
+                Some(serde_json::json!("initial")),
+            )])
             .await
             .unwrap();
         pair(&a, &mut a_events, &b, &mut b_events).await;
@@ -533,13 +527,10 @@ async fn offline_edits_catch_up_after_restarting_with_the_saved_cursor() {
         drop((b, b_events, b_store));
 
         a_store
-            .write(
-                vec![change(
-                    "setting:preference:theme",
-                    Some(serde_json::json!("edited while offline")),
-                )],
-                None,
-            )
+            .write(vec![change(
+                "setting:preference:theme",
+                Some(serde_json::json!("edited while offline")),
+            )])
             .await
             .unwrap();
         let (b, mut b_events) = node("Laptop", credentials).await;
