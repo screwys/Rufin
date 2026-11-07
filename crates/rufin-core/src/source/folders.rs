@@ -91,10 +91,7 @@ pub async fn resolve_folder(
             tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
         }
     }
-    let resolved = match folder_object_id {
-        Some(object) => folder_key(catalog, selected.source_key, object, cancellation).await?,
-        None => None,
-    };
+    let resolved = folder_key(catalog, selected.source_key, folder_object_id, cancellation).await?;
     exact_cached_folder_scope(
         folder_object_id.is_some(),
         resolved,
@@ -103,13 +100,17 @@ pub async fn resolve_folder(
     .map(FolderProjection::Cached)
 }
 
-/// The key of a source's cached folder by object id.
+/// The key of a source's cached folder by object id: None for no folder, and while the Store
+/// holds no such folder, where a source's pages and download rules read the whole source.
 pub(crate) async fn folder_key(
     catalog: &library::Catalog,
     source: library::SourceKey,
-    object_id: &str,
+    object_id: Option<&str>,
     cancellation: &ReadCancellation,
 ) -> LibraryResult<Option<FolderKey>> {
+    let Some(object_id) = object_id else {
+        return Ok(None);
+    };
     Ok(catalog
         .catalog_keys(
             library::CatalogKind::Folder,

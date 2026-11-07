@@ -1506,18 +1506,12 @@ impl Actor {
             let Some(source_key) = self.catalog.source_key(&source_id) else {
                 continue;
             };
-            let folder = match item.music_folder_id.as_deref() {
-                Some(id) => {
-                    let cancel = library::ReadCancellation::new();
-                    // Unattached until the saved folder's row lands, then a library change.
-                    match crate::source::folders::folder_key(&self.catalog, source_key, id, &cancel)
-                        .await
-                    {
-                        Ok(Some(key)) => Some(key),
-                        _ => continue,
-                    }
-                }
-                None => None,
+            let id = item.music_folder_id.as_deref();
+            let cancel = library::ReadCancellation::new();
+            let Ok(folder) =
+                crate::source::folders::folder_key(&self.catalog, source_key, id, &cancel).await
+            else {
+                continue;
             };
             if self.attached.get(&source_id).is_some_and(|attached| {
                 attached.source_key == source_key && attached.folder == folder

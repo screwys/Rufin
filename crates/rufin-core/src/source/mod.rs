@@ -779,14 +779,11 @@ impl SourceOwner {
         music_folder_object_id: Option<String>,
     ) -> Result<SelectedLibrary, String> {
         let catalog = &self.shared.catalog;
-        let music_folder_key = match music_folder_object_id.as_deref() {
-            Some(object_id) => {
-                folders::folder_key(catalog, source_key, object_id, &ReadCancellation::new())
-                    .await
-                    .map_err(string_error)?
-            }
-            None => None,
-        };
+        let folder = music_folder_object_id.as_deref();
+        let music_folder_key =
+            folders::folder_key(catalog, source_key, folder, &ReadCancellation::new())
+                .await
+                .map_err(string_error)?;
         let music_folders = catalog.music_folders(source_key);
         Ok(SelectedLibrary {
             source_id,
@@ -2541,14 +2538,11 @@ impl SourceOwner {
                 let source_key = catalog
                     .source_key(&source_id)
                     .ok_or_else(source_access_unavailable)?;
-                let key = match folder_object_id.as_deref() {
-                    Some(id) => {
-                        folders::folder_key(catalog, source_key, id, &ReadCancellation::new())
-                            .await
-                            .map_err(string_error)?
-                    }
-                    None => None,
-                };
+                let folder = folder_object_id.as_deref();
+                let key =
+                    folders::folder_key(catalog, source_key, folder, &ReadCancellation::new())
+                        .await
+                        .map_err(string_error)?;
                 if folder_object_id.is_some() && key.is_none() {
                     return Ok(());
                 }
