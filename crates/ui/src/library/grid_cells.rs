@@ -140,9 +140,6 @@ crate::composite_box!(
 
 pub trait ReusableCollectionGridCell<T>: 'static {
     fn widget(&self) -> gtk::Widget;
-    fn activatable(&self, _: &T) -> bool {
-        true
-    }
     fn bind(&self, position: u32, value: T);
     fn clear(&self);
     fn set_ready(&self, _ready: bool) {}
@@ -462,9 +459,8 @@ where
                         }
                         cell.widget().set_sensitive(true);
                         cell.widget().set_can_target(true);
-                        let activatable = cell.activatable(&value);
-                        item.set_activatable(activatable);
-                        item.set_selectable(activatable);
+                        item.set_activatable(true);
+                        item.set_selectable(true);
                         cell.bind(item.position(), value);
                         cell.set_ready(true);
                         if let Some(child) = item.child() {

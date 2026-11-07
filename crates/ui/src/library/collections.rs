@@ -635,7 +635,6 @@ where
         Vec::new(),
         move |field| album_column(&column_shell, field),
         |field| column_fit_width(field, column_width(field)),
-        true,
         Some(Box::new(move |_, album: AlbumRow| {
             activate_shell.open_route(Route::AlbumDetail(album.media_uri.clone()));
         })),
@@ -663,7 +662,6 @@ where
         Vec::new(),
         move |field| artist_column(&column_shell, field),
         |field| column_fit_width(field, column_width(field)),
-        true,
         Some(Box::new(move |_, artist: ArtistRow| {
             activate_shell.open_route(Route::of_artist(&artist));
         })),
@@ -693,7 +691,6 @@ pub fn dynamic_collection_table<T, M>(
     fixed_columns: Vec<(gtk::ColumnViewColumn, i32)>,
     column_for_field: impl Fn(LibraryField) -> gtk::ColumnViewColumn + 'static,
     width_for_field: impl Fn(LibraryField) -> i32 + 'static,
-    _single_click_activate: bool,
     activate: Option<Box<dyn Fn(u32, T)>>,
     selection: Option<gtk::SelectionModel>,
     initial_width: i32,
@@ -716,7 +713,7 @@ where
             .map(|(field, column)| (column.clone(), width_for_field(*field))),
     );
     let (table, width_fit, navigation) =
-        collection_table_with_width(model, active, initial_width, false, activate, selection);
+        collection_table_with_width(model, active, initial_width, activate, selection);
     table.add_css_class("external-header");
     let projection = CollectionTableProjection {
         table,
@@ -743,7 +740,6 @@ fn collection_table_with_width<T, M>(
     model: M,
     columns: Vec<(gtk::ColumnViewColumn, i32)>,
     initial_width: i32,
-    _single_click_activate: bool,
     activate: Option<Box<dyn Fn(u32, T)>>,
     selection: Option<gtk::SelectionModel>,
 ) -> (
@@ -924,7 +920,6 @@ pub fn track_table(
             column
         },
         move |field| track_column_fit_width(key, field),
-        false,
         Some(activate),
         Some(selection_model),
         shell.table_initial_width(options.content_inset),

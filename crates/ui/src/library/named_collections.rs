@@ -592,7 +592,6 @@ where
             move |field| named_collection_column::<T>(&column_shell, field, key)
         },
         move |field| column_fit_width(field, named_column_width(key, field)),
-        true,
         Some(Box::new(move |_, item: T| {
             activate_shell.open_route(item.route())
         })),

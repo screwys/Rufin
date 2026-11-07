@@ -218,7 +218,6 @@ fn playlist_entry_table(
         Vec::new(),
         move |field| playlist_entry_column(&column_shell, field, playlist, playing.clone()),
         playlist_entry_column_width,
-        false,
         Some(Box::new(move |position, _: TrackRow| {
             activate_model.play(
                 &products,

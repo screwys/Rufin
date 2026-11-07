@@ -191,7 +191,6 @@ fn folder_table(
         Vec::new(),
         move |field| folder_column(&column_shell, column_rows.clone(), &playing, field),
         |field| super::columns::track_column_width(LibraryListKey::Folders, field),
-        false,
         Some(Box::new(activate)),
         Some(selection.upcast()),
         initial_width,

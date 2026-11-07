@@ -823,7 +823,6 @@ fn search_collection(
                             column_fit_width(field, column_width(field))
                         }
                     },
-                    true,
                     Some(Box::new(move |_, item: SearchItem| {
                         item.activate(&activate_shell)
                     })),
