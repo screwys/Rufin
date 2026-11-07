@@ -180,6 +180,8 @@ pub type LibraryResult<T> = Result<T, LibraryError>;
 pub struct RouteSeedWindow {
     relative: f64,
     position: Option<usize>,
+    /// Rows from and up to, read as they are in place of the aligned window.
+    rows: Option<(usize, usize)>,
 }
 
 impl RouteSeedWindow {
@@ -197,17 +199,28 @@ impl RouteSeedWindow {
                 0.0
             },
             position: None,
+            rows: None,
         }
     }
 
     pub fn position(position: usize) -> Self {
         Self {
-            relative: 0.0,
             position: Some(position),
+            ..Self::top()
+        }
+    }
+
+    pub fn rows(rows: std::ops::Range<usize>) -> Self {
+        Self {
+            rows: Some((rows.start, rows.end)),
+            ..Self::top()
         }
     }
 
     pub fn range(self, len: usize) -> std::ops::Range<usize> {
+        if let Some((start, end)) = self.rows {
+            return start.min(len)..end.min(len);
+        }
         let position = self
             .position
             .unwrap_or_else(|| ((len.saturating_sub(1)) as f64 * self.relative).round() as usize)

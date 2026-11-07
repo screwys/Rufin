@@ -229,24 +229,12 @@ pub(super) async fn open(
             token.route.clone(),
             selected,
             token.options.clone(),
-            library::RouteSeedWindow::position(offset),
+            library::RouteSeedWindow::rows(offset..offset.saturating_add(limit)),
             cards(&token.route),
             &cancel,
         )
         .await
         .map_err(read_error)?;
-    let end = offset.saturating_add(limit).min(opened.view.len());
-    let start = offset.min(end);
-    let seeded = opened.first..opened.first + opened.rows.len();
-    let rows = if seeded.start <= start && end <= seeded.end {
-        opened.rows[start - seeded.start..end - seeded.start].to_vec()
-    } else {
-        opened
-            .view
-            .rows(start..end, &cancel)
-            .await
-            .map_err(read_error)?
-    };
     // A smart playlist page keeps the time it opened at.
     let token = PageToken {
         options: opened.view.options().clone(),
@@ -261,8 +249,8 @@ pub(super) async fn open(
         token,
         view: opened.view,
         header: opened.header,
-        offset: start,
-        rows,
+        offset: opened.first,
+        rows: opened.rows,
         missed: missed.filter(|value| value.as_object().is_some_and(|value| !value.is_empty())),
     })
 }
