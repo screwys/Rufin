@@ -134,7 +134,6 @@ pub enum Cursor<'a> {
 /// Which records to compare a diff pass with.
 #[derive(Clone, Copy, Debug)]
 pub enum Select<'a> {
-    All,
     Ids(&'a [String]),
     /// Every record of a kind.
     Kind(&'a str),
@@ -228,11 +227,6 @@ impl Store {
     /// Stored digests by id, tombstones included.
     pub async fn digests(&self, select: Select<'_>) -> Result<HashMap<String, String>> {
         let rows = match select {
-            Select::All => {
-                sqlx::query_as("SELECT id,lower(hex(digest)) FROM connect_records")
-                    .fetch_all(&self.pool)
-                    .await?
-            }
             Select::Ids(ids) => sqlx::query_as("SELECT id,lower(hex(digest)) FROM connect_records WHERE id IN (SELECT value FROM json_each(?1))")
                 .bind(serde_json::to_string(ids)?)
                 .fetch_all(&self.pool)
