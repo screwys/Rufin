@@ -645,12 +645,34 @@ async fn rule_media_uris(
     let cancellation = library::ReadCancellation::new();
     match rule {
         DownloadRule::EntireLibrary | DownloadRule::Favorites => {
+            let favorites = matches!(rule, DownloadRule::Favorites);
             let mut query = library::MemberRead::new(library::Collection::Source(source));
             query.folder = folder;
-            query.favorites_only = matches!(rule, DownloadRule::Favorites);
-            catalog
-                .selected_track_uris(&query.selection(), None, &cancellation)
-                .await
+            query.favorites_only = favorites;
+            // Favorites also take the tracks of favorite albums and artists, whole.
+            let favorite = |kind| library::MemberSelection::Parents {
+                read: library::ListRead {
+                    folder,
+                    favorites_only: true,
+                    ..library::ListRead::new(kind, Some(source), library::LibraryField::Title)
+                },
+                ranges: None,
+                members: Box::new(library::MemberRead::new(library::Collection::Album(
+                    library::AlbumKey::from_raw(0),
+                ))),
+            };
+            let mut selections = vec![query.selection()];
+            if favorites {
+                selections.push(favorite(library::ListKind::Albums));
+                selections.push(favorite(library::ListKind::Artists {
+                    album_artist: false,
+                }));
+            }
+            let selection = library::MemberSelection::Concat(selections);
+            let mut uris = (catalog.selected_track_uris(&selection, None, &cancellation)).await?;
+            let mut seen = HashSet::new();
+            uris.retain(|uri| seen.insert(uri.clone()));
+            Ok(uris)
         }
         DownloadRule::AllPlaylists => {
             catalog
