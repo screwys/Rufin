@@ -1453,8 +1453,9 @@ impl Source {
             return Err(SourceError::InvalidRequest("File Search is Catalog-owned"));
         }
         self.catalog_operation(catalog, async |changes| {
+            // As a walk, feed writes newer than the request win; the server searches the folder.
+            changes.start_observation().await?;
             let source_id = self.source_id.as_str();
-            // The server searches the selected music folder.
             let folder_id = music_folder.map(|(_, id)| id);
             let batch = match &self.implementation {
                 Implementation::Plex(source) => {
@@ -1498,10 +1499,9 @@ impl Source {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .extend(partial);
-            let source = changes.source;
             Ok(catalog
                 .search_rows_by_objects(
-                    source,
+                    changes.source,
                     music_folder.map(|(key, _)| key),
                     false,
                     &tracks,
