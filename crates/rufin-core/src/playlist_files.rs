@@ -59,7 +59,12 @@ impl Feature for Links {
                 .iter()
                 .flat_map(|change| &change.scopes)
                 .filter_map(|scope| match scope {
-                    Scope::Playlist { key, .. } if catalog.is_linked(*key) => Some(*key),
+                    // A link's settings change saves edits that waited for automatic saving.
+                    Scope::Playlist { key, .. } | Scope::PlaylistLink { key }
+                        if catalog.is_linked(*key) =>
+                    {
+                        Some(*key)
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>();
