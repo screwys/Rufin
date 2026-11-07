@@ -485,10 +485,10 @@ impl<'a> ArtworkFiles<'a> {
                 .ancestors()
                 .skip(1)
                 .filter(|directory| {
-                    track
-                        .root
-                        .as_ref()
-                        .is_some_and(|root| directory.starts_with(root))
+                    track.root.as_ref().is_some_and(|root| {
+                        directory.starts_with(root)
+                            || *root == track.path && Path::new(root).parent() == Some(*directory)
+                    })
                 })
                 .map(|directory| {
                     format!(
