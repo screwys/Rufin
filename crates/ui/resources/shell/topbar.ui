@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwWindowTitle" id="mini_title"/>
   <object class="GtkBox" id="window_content">
     <property name="orientation">vertical</property>
     <child><object class="GtkHeaderBar" id="header">
@@ -28,13 +30,16 @@
         <accessibility><property name="label" translatable="yes">Forward</property></accessibility>
         <style><class name="flat"/><class name="topbar-button"/></style>
       </object></child>
-      <child><object class="GtkMenuButton" id="controller">
-        <property name="icon-name">rufin-phonelink-symbolic</property>
-        <property name="tooltip-text" translatable="yes">Controller</property>
-        <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
-        <style><class name="flat"/><class name="topbar-button"/></style>
+      <child><object class="GtkBox" id="playback_targets">
+        <property name="spacing">2</property>
+        <child><object class="GtkMenuButton" id="controller">
+          <property name="icon-name">rufin-phonelink-symbolic</property>
+          <property name="tooltip-text" translatable="yes">Controller</property>
+          <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
+          <style><class name="flat"/><class name="topbar-button"/></style>
+        </object></child>
+        <child><object class="GtkBox" id="casting_host"/></child>
       </object></child>
-      <child><object class="GtkBox" id="casting_host"/></child>
     </object></child>
     <property name="title-widget"><object class="GtkOverlay" id="search_host">
       <style><class name="topbar-search"/></style>
@@ -65,7 +70,7 @@
         <style><class name="search-enter"/></style>
       </object></child>
     </object></property>
-    <child type="end"><object class="GtkBox">
+    <child type="end"><object class="GtkBox" id="actions">
       <property name="spacing">2</property>
       <child><object class="GtkMenuButton" id="source">
         <property name="icon-name">rufin-library-symbolic</property>

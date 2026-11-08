@@ -5,7 +5,7 @@
   <object class="GtkBox" id="root">
     <property name="orientation">horizontal</property>
     <property name="hexpand">true</property>
-    <property name="valign">center</property>
+    <property name="valign">end</property>
     <style><class name="bottom-player"/></style>
   </object>
 
@@ -245,6 +245,21 @@
         <style><class name="player-action-buttons"/></style>
         <property name="orientation">horizontal</property><property name="spacing">2</property>
         <property name="halign">end</property><property name="valign">center</property>
+        <child>
+          <object class="GtkMenuButton" id="volume_button">
+            <property name="visible">false</property>
+            <property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Volume</property>
+            <accessibility><property name="label" translatable="yes">Volume</property></accessibility>
+            <property name="child"><object class="GtkImage" id="volume_button_icon"><property name="icon-name">rufin-audio-volume-high-symbolic</property></object></property>
+            <property name="popover">
+              <object class="GtkPopover">
+                <property name="child"><object class="GtkBox" id="volume_popover_box"><property name="orientation">vertical</property></object></property>
+              </object>
+            </property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/></style>
+          </object>
+        </child>
         <child>
           <object class="GtkMenuButton" id="settings_button">
             <property name="icon-name">rufin-mixer-sliders-symbolic</property><property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>

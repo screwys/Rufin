@@ -14,16 +14,18 @@ pub(super) const COMPACT_RAIL_WIDTH: i32 = 72;
 pub(super) const LEFT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const RIGHT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const NORMAL_SIDEBAR_WIDTH: i32 = rufin_core::settings::DEFAULT_LEFT_SIDEBAR_WIDTH;
-pub(crate) const MIN_APP_WINDOW_WIDTH: i32 = 450;
-pub(crate) const MIN_USEFUL_MAIN_WIDTH: i32 = MIN_APP_WINDOW_WIDTH;
-pub(super) const MIN_APP_WINDOW_HEIGHT: i32 = 400;
+/// Pages keep at least this width; sidebars give way to it.
+pub(crate) const MIN_USEFUL_MAIN_WIDTH: i32 = 450;
 
 const LEFT_SIDEBAR_COLLAPSE_DETENT: i32 = rufin_core::settings::MIN_LEFT_SIDEBAR_WIDTH - 40;
 const LEFT_SIDEBAR_EXPAND_DETENT: i32 = rufin_core::settings::MIN_LEFT_SIDEBAR_WIDTH;
 type ShellAllocationCallback = Rc<dyn Fn(i32, i32)>;
 
 mod shell_allocation_owner_imp {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
     use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -33,6 +35,8 @@ mod shell_allocation_owner_imp {
     pub struct ShellAllocationOwner {
         pub(super) before_allocate: RefCell<Option<AllocationCallback>>,
         pub(super) after_allocate: RefCell<Option<AllocationCallback>>,
+        pub(super) minimum_width: Cell<Option<i32>>,
+        pub(super) minimum_height: Cell<Option<i32>>,
     }
 
     #[glib::object_subclass]
@@ -54,6 +58,11 @@ mod shell_allocation_owner_imp {
 
     impl WidgetImpl for ShellAllocationOwner {
         fn request_mode(&self) -> gtk::SizeRequestMode {
+            if self.minimum_width.get().is_some() || self.minimum_height.get().is_some() {
+                // Like a breakpoint bin: the child may be smaller than its minimum, so it is never
+                // measured for a size below that minimum.
+                return gtk::SizeRequestMode::ConstantSize;
+            }
             self.obj()
                 .first_child()
                 .map(|child| child.request_mode())
@@ -61,10 +70,30 @@ mod shell_allocation_owner_imp {
         }
 
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
-            self.obj()
+            let own_minimum = match orientation {
+                gtk::Orientation::Horizontal => self.minimum_width.get(),
+                _ => self.minimum_height.get(),
+            };
+            let for_size =
+                if self.minimum_width.get().is_some() || self.minimum_height.get().is_some() {
+                    -1
+                } else {
+                    for_size
+                };
+            let (minimum, natural, minimum_baseline, natural_baseline) = self
+                .obj()
                 .first_child()
                 .map(|child| child.measure(orientation, for_size))
-                .unwrap_or((0, 0, -1, -1))
+                .unwrap_or((0, 0, -1, -1));
+            match own_minimum {
+                Some(own_minimum) => (
+                    own_minimum,
+                    natural.max(own_minimum),
+                    minimum_baseline,
+                    natural_baseline,
+                ),
+                None => (minimum, natural, minimum_baseline, natural_baseline),
+            }
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
@@ -74,7 +103,16 @@ mod shell_allocation_owner_imp {
             }
 
             if let Some(child) = self.obj().first_child() {
-                child.allocate(width, height, baseline, None);
+                // Below the child's minimum, the layout chosen above has not taken effect yet; the
+                // child keeps its minimum and is clipped until the next allocation.
+                let minimum_width = child.measure(gtk::Orientation::Horizontal, -1).0;
+                let minimum_height = child.measure(gtk::Orientation::Vertical, -1).0;
+                child.allocate(
+                    width.max(minimum_width),
+                    height.max(minimum_height),
+                    baseline,
+                    None,
+                );
             }
 
             let after_allocate = self.after_allocate.borrow().clone();
@@ -98,7 +136,7 @@ gtk::glib::wrapper! {
 }
 
 impl ShellAllocationOwner {
-    fn new(child: &impl IsA<gtk::Widget>) -> Self {
+    pub(super) fn new(child: &impl IsA<gtk::Widget>) -> Self {
         let owner: Self = glib::Object::new();
         owner.set_hexpand(true);
         owner.set_vexpand(true);
@@ -107,6 +145,18 @@ impl ShellAllocationOwner {
         owner.set_accessible_role(gtk::AccessibleRole::Presentation);
         child.set_parent(&owner);
         owner
+    }
+
+    /// Reports these minimums instead of the child's, like a libadwaita breakpoint bin: the window
+    /// can then shrink past the current layout's minimum, and `before_allocate` picks a layout
+    /// that fits.
+    pub(super) fn set_minimum_size(&self, width: Option<i32>, height: Option<i32>) {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().minimum_width.set(width);
+        self.imp().minimum_height.set(height);
+        self.set_overflow(gtk::Overflow::Hidden);
+        self.queue_resize();
     }
 
     fn set_before_allocate(&self, before_allocate: impl Fn(i32, i32) + 'static) {
@@ -141,8 +191,14 @@ pub(super) struct ShellLayoutState {
 
 impl ShellLayoutState {
     pub(super) fn new(root_stack: &gtk::Stack) -> Self {
+        let owner = ShellAllocationOwner::new(root_stack);
+        // The smallest window is the mini player: the bar's playback controls alone, as a strip.
+        owner.set_minimum_size(
+            Some(crate::player::bottom::BOTTOM_PLAYER_CONTROLS_MIN_WIDTH),
+            Some(crate::player::bottom::BOTTOM_PLAYER_STRIP_HEIGHT),
+        );
         Self {
-            owner: ShellAllocationOwner::new(root_stack),
+            owner,
             left_drag_preview: Cell::new(None),
             right_drag_width: Cell::new(None),
         }
@@ -193,7 +249,7 @@ fn fitted_left_sidebar_drag_width(
     window_width: i32,
     requested: i32,
 ) -> Option<(i32, bool)> {
-    let window_width = window_width.max(MIN_APP_WINDOW_WIDTH);
+    let window_width = window_width.max(MIN_USEFUL_MAIN_WIDTH);
     let resolved = resolve_layout(settings, window_width);
     let right_reservation = if resolved.right_sidebar.is_visible() {
         MIN_RIGHT_SIDEBAR_WIDTH + RIGHT_PANE_SEPARATOR_WIDTH
@@ -225,7 +281,7 @@ fn fitted_left_sidebar_drag_width(
 }
 
 pub(crate) fn resolve_layout(settings: &LayoutSettings, window_width: i32) -> ResolvedLayout {
-    let window_width = window_width.max(MIN_APP_WINDOW_WIDTH);
+    let window_width = window_width.max(MIN_USEFUL_MAIN_WIDTH);
     let (profile, configured) =
         if settings.narrow_enabled && window_width < settings.narrow_threshold {
             (ActiveLayoutProfile::Narrow, &settings.narrow_profile)
@@ -280,7 +336,7 @@ fn resolve_layout_for_profile(
     }
 
     if right_sidebar == RightSidebarMode::Hidden && left_sidebar == ResolvedLeftSidebarMode::Full {
-        let available = window_width - MIN_APP_WINDOW_WIDTH - LEFT_PANE_SEPARATOR_WIDTH;
+        let available = window_width - MIN_USEFUL_MAIN_WIDTH - LEFT_PANE_SEPARATOR_WIDTH;
         if available >= MIN_LEFT_SIDEBAR_WIDTH {
             left_sidebar_width = preferred_left_width.min(available);
         } else {
@@ -289,7 +345,7 @@ fn resolve_layout_for_profile(
         }
     }
     if left_sidebar == ResolvedLeftSidebarMode::Compact
-        && window_width - left_sidebar_width - LEFT_PANE_SEPARATOR_WIDTH < MIN_APP_WINDOW_WIDTH
+        && window_width - left_sidebar_width - LEFT_PANE_SEPARATOR_WIDTH < MIN_USEFUL_MAIN_WIDTH
     {
         left_sidebar = ResolvedLeftSidebarMode::Hidden;
         right_sidebar = RightSidebarMode::Hidden;
@@ -452,6 +508,7 @@ impl Shell {
             right_drag_width,
         );
         self.apply_resolved_layout_for_allocation(resolved);
+        self.apply_window_size(width, height);
         if self.fullscreen_player_visible() {
             self.player_ui
                 .apply_fullscreen_responsive_layout_for_size(width, height);
@@ -553,6 +610,34 @@ impl Shell {
         }
     }
 
+    /// Narrow windows fold the top bar; windows too small for pages show only the mini player.
+    fn apply_window_size(self: &Rc<Self>, width: i32, height: i32) {
+        let mini = crate::player::MiniPlayer::for_content(width, height);
+        let narrow = width < crate::player::bottom::BOTTOM_PLAYER_NARROW_WIDTH;
+        set_widget_visible(
+            &self.chrome.app_content_stack,
+            mini == crate::player::MiniPlayer::Off,
+        );
+        set_widget_visible(
+            &self.chrome.app_content_overlay,
+            mini != crate::player::MiniPlayer::Short,
+        );
+        self.chrome.topbar.apply_window_size(
+            narrow,
+            mini != crate::player::MiniPlayer::Off,
+            &self.player_ui.views.fullscreen_player.playback_targets_host,
+        );
+        // The bar spans the window, so it follows the size chosen here rather than its own
+        // allocation, which stays at its old minimum until this layout takes effect.
+        let controls = &self.player_ui.views.player_controls;
+        let size_changed =
+            (controls.width.replace(width) != width) | (controls.height.replace(height) != height);
+        self.player_ui.apply_mini_player(mini);
+        if size_changed {
+            self.player_ui.apply_bottom_player_layout();
+        }
+    }
+
     fn apply_fullscreen_topology(&self, app_active: bool) {
         let fullscreen = &self.player_ui.views.fullscreen_player;
         if !app_active {
@@ -567,9 +652,6 @@ impl Shell {
             if fullscreen.root.can_target() {
                 fullscreen.root.set_can_target(false);
             }
-            if fullscreen.root.is_sensitive() {
-                fullscreen.root.set_sensitive(false);
-            }
             set_widget_visible(&fullscreen.root, false);
             return;
         }
@@ -578,16 +660,18 @@ impl Shell {
             return;
         }
         let visible = fullscreen.visible.get();
-        fullscreen.set_slide_offset(0);
+        if !visible {
+            // An open player keeps the offset of a drag in progress.
+            fullscreen.set_slide_offset(0);
+        }
         let opacity = if visible { 1.0 } else { 0.0 };
         if fullscreen.root.opacity() != opacity {
             fullscreen.root.set_opacity(opacity);
         }
+        // A closed player is hidden and untargetable. It is never made insensitive: GTK keeps
+        // that state on the controller and output buttons after they move back to the header.
         if fullscreen.root.can_target() != visible {
             fullscreen.root.set_can_target(visible);
-        }
-        if fullscreen.root.is_sensitive() != visible {
-            fullscreen.root.set_sensitive(visible);
         }
         set_widget_visible(&fullscreen.root, visible);
     }
@@ -1357,14 +1441,14 @@ mod tests {
         settings.default_profile.right_sidebar = RightSidebarMode::Hidden;
 
         let minimum_full_window_width =
-            MIN_APP_WINDOW_WIDTH + LEFT_PANE_SEPARATOR_WIDTH + MIN_LEFT_SIDEBAR_WIDTH;
+            MIN_USEFUL_MAIN_WIDTH + LEFT_PANE_SEPARATOR_WIDTH + MIN_LEFT_SIDEBAR_WIDTH;
         let shrunk = resolve_layout(&settings, minimum_full_window_width);
         let compact = resolve_layout(&settings, minimum_full_window_width - 1);
         let hidden = resolve_layout(&settings, 505);
 
         assert_eq!(shrunk.left_sidebar, ResolvedLeftSidebarMode::Full);
         assert_eq!(shrunk.left_sidebar_width, MIN_LEFT_SIDEBAR_WIDTH);
-        assert_eq!(shrunk.main_width, MIN_APP_WINDOW_WIDTH);
+        assert_eq!(shrunk.main_width, MIN_USEFUL_MAIN_WIDTH);
         assert_eq!(compact.left_sidebar, ResolvedLeftSidebarMode::Compact);
         assert_eq!(compact.left_sidebar_width, COMPACT_RAIL_WIDTH);
         assert_eq!(hidden.left_sidebar, ResolvedLeftSidebarMode::Hidden);
@@ -1418,7 +1502,7 @@ mod tests {
 
         assert_eq!(resolved.left_sidebar, ResolvedLeftSidebarMode::Hidden);
         assert_eq!(resolved.right_sidebar, RightSidebarMode::Hidden);
-        assert_eq!(resolved.main_width, MIN_APP_WINDOW_WIDTH);
+        assert_eq!(resolved.main_width, MIN_USEFUL_MAIN_WIDTH);
     }
 
     #[test]

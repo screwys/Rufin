@@ -1,5 +1,6 @@
 use super::equalizer::EqualizerSurface;
 use crate::widgets::artwork::ArtworkTile;
+use crate::widgets::swipe::{SWIPE_ACTION_DISTANCE, SwipeAxis, install_touch_swipe};
 use adw::prelude::*;
 use localization::tr;
 use playback::PlaybackView;
@@ -10,6 +11,8 @@ use std::{
 pub const FULLSCREEN_PLAYER_OPEN_TRANSITION_MS: u32 = 420;
 pub const FULLSCREEN_PLAYER_CLOSE_TRANSITION_MS: u32 = 320;
 pub const FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE: i32 = 96;
+/// How far the fullscreen player is dragged down before letting go closes it.
+const FULLSCREEN_PLAYER_DRAG_CLOSE_DISTANCE: f64 = 120.0;
 
 #[derive(Clone, Copy, Default)]
 enum PaneLayout {
@@ -54,6 +57,11 @@ pub struct FullscreenPlayerParts {
     pub animation_tick: RefCell<Option<gtk::TickCallbackId>>,
     pub slide_offset: Rc<Cell<i32>>,
     pub close_button: gtk::Button,
+    topbar: gtk::Box,
+    /// Holds the controller and output buttons while the window is too narrow for them.
+    pub playback_targets_host: gtk::Box,
+    /// The tall mini player shows only the cover; what is playing is in the window's title.
+    pub mini: Cell<bool>,
     left_pane: gtk::Box,
     right_pane: gtk::Box,
     hero: gtk::Box,
@@ -119,7 +127,7 @@ impl FullscreenPlayerParts {
     }
 
     pub fn has_experience(&self) -> bool {
-        self.lyrics_enabled.get() || self.visualizer_enabled.get()
+        !self.mini.get() && (self.lyrics_enabled.get() || self.visualizer_enabled.get())
     }
 
     pub fn attach_lyrics_pane(&self, pane: &crate::player::lyrics::LyricsPane) {
@@ -190,6 +198,8 @@ pub fn build_fullscreen_player(
     crate::objects!(builder, resource, {
         root: gtk::Overlay,
         close_button: gtk::Button,
+        topbar: gtk::Box,
+        playback_targets_host: gtk::Box,
         left_pane: gtk::Box,
         right_pane: gtk::Box,
         focus_button: gtk::ToggleButton,
@@ -271,6 +281,9 @@ pub fn build_fullscreen_player(
         animation_tick: RefCell::new(None),
         slide_offset: Rc::new(Cell::new(0)),
         close_button,
+        topbar,
+        playback_targets_host,
+        mini: Cell::new(false),
         left_pane,
         right_pane,
         hero,
@@ -510,6 +523,75 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
                 shell.close_fullscreen_player();
             }
         });
+
+    // Dragging the top bar or the cover down follows the finger and closes the fullscreen player;
+    // swiping the cover sideways skips like the bar does.
+    for (target, skips) in [
+        (
+            shell
+                .views
+                .fullscreen_player
+                .topbar
+                .clone()
+                .upcast::<gtk::Widget>(),
+            false,
+        ),
+        (shell.views.fullscreen_player.hero.clone().upcast(), true),
+    ] {
+        let claims_shell = Rc::downgrade(shell);
+        let moved_shell = Rc::downgrade(shell);
+        let released_shell = Rc::downgrade(shell);
+        install_touch_swipe(
+            &target,
+            move |axis, _, dy| {
+                let Some(shell) = claims_shell.upgrade() else {
+                    return false;
+                };
+                match axis {
+                    SwipeAxis::Horizontal => skips,
+                    SwipeAxis::Vertical => {
+                        dy > 0.0
+                            && shell.mini.get() != super::MiniPlayer::Tall
+                            && shell
+                                .views
+                                .fullscreen_player
+                                .animation_tick
+                                .borrow()
+                                .is_none()
+                    }
+                }
+            },
+            move |axis, _, dy| {
+                if axis == SwipeAxis::Vertical
+                    && let Some(shell) = moved_shell.upgrade()
+                {
+                    shell
+                        .views
+                        .fullscreen_player
+                        .set_slide_offset(dy.max(0.0).round() as i32);
+                }
+            },
+            move |axis, dx, dy| {
+                let Some(shell) = released_shell.upgrade() else {
+                    return;
+                };
+                match axis {
+                    SwipeAxis::Horizontal if dx.abs() >= SWIPE_ACTION_DISTANCE => {
+                        shell.swipe_track(dx);
+                    }
+                    SwipeAxis::Horizontal => {}
+                    SwipeAxis::Vertical => {
+                        let offset = Some(shell.views.fullscreen_player.slide_offset.get());
+                        if dy >= FULLSCREEN_PLAYER_DRAG_CLOSE_DISTANCE {
+                            shell.hide_fullscreen_player(offset, true);
+                        } else {
+                            shell.animate_fullscreen_player(true, offset, true);
+                        }
+                    }
+                }
+            },
+        );
+    }
 
     let weak = Rc::downgrade(shell);
     shell
@@ -807,24 +889,38 @@ impl crate::player::PlayerUi {
     }
 
     pub fn open_fullscreen_player(self: &Rc<Self>) {
-        let Some(player) = self.selected_playback().as_deref().cloned() else {
-            return;
-        };
-        if player.transport.current.is_none() {
-            return;
+        if self
+            .selected_playback()
+            .is_some_and(|player| player.transport.current.is_some())
+        {
+            self.show_fullscreen_player(true);
         }
+    }
+
+    pub(super) fn show_fullscreen_player(self: &Rc<Self>, animated: bool) {
         self.views.fullscreen_player.visible.set(true);
-        self.animate_fullscreen_player(true);
+        self.animate_fullscreen_player(true, None, animated);
         self.apply_fullscreen_display_settings();
-        let presentation = NowPlayingPresentation::new(Some(&player));
+        let player = self.selected_playback().as_deref().cloned();
+        let presentation = NowPlayingPresentation::new(player.as_ref());
         self.apply_fullscreen_now_playing_text(&presentation);
-        self.apply_fullscreen_responsive_layout();
+        self.apply_fullscreen_mode();
         self.apply_fullscreen_now_playing_cover(&presentation);
-        self.sync_fullscreen_surfaces();
-        let _focused = self.views.fullscreen_player.close_button.grab_focus();
+        self.apply_bottom_player_layout();
+        if animated {
+            let _focused = self.views.fullscreen_player.close_button.grab_focus();
+        }
     }
 
     pub fn close_fullscreen_player(self: &Rc<Self>) {
+        // In the tall mini player the fullscreen player is the window's content.
+        if self.mini.get() != super::MiniPlayer::Tall {
+            self.hide_fullscreen_player(None, true);
+        }
+    }
+
+    /// Closes the fullscreen player, sliding it down from `from` when a drag already moved it.
+    pub(super) fn hide_fullscreen_player(self: &Rc<Self>, from: Option<i32>, animated: bool) {
         if !self.views.fullscreen_player.visible.replace(false) {
             return;
         }
@@ -834,9 +930,23 @@ impl crate::player::PlayerUi {
             task.abort();
             parts.related_seed.borrow_mut().take();
         }
-        self.animate_fullscreen_player(false);
+        self.animate_fullscreen_player(false, from, animated);
         self.sync_visualizer_state();
         self.sync_visible_lyrics_surfaces();
+        self.apply_bottom_player_layout();
+    }
+
+    /// Applies what the fullscreen player shows after the mini player starts or ends.
+    pub(super) fn refresh_fullscreen_mode(self: &Rc<Self>) {
+        if self.fullscreen_player_visible() {
+            self.apply_fullscreen_mode();
+        }
+    }
+
+    fn apply_fullscreen_mode(self: &Rc<Self>) {
+        self.views.fullscreen_player.apply_mode();
+        self.apply_fullscreen_responsive_layout();
+        self.sync_fullscreen_surfaces();
     }
 
     pub fn toggle_fullscreen_player(self: &Rc<Self>) {
@@ -874,9 +984,17 @@ impl crate::player::PlayerUi {
 
     pub fn apply_fullscreen_responsive_layout_for_size(self: &Rc<Self>, width: i32, height: i32) {
         let parts = &self.views.fullscreen_player;
+        let mini = parts.mini.get();
         let collapsed = width < 800;
         let changed = parts.collapsed.replace(collapsed) != collapsed;
-        let (first, second) = parts.pane_layout.get().visibility(collapsed);
+        let (first, second) = if mini {
+            (true, false)
+        } else {
+            parts.pane_layout.get().visibility(collapsed)
+        };
+        parts.topbar.set_visible(!mini);
+        parts.details_scroll.set_visible(!mini);
+        parts.cover_button.set_can_target(!mini);
         let has_experience = parts.has_experience();
         let focused = parts.focus_button.is_active() && has_experience;
         parts
@@ -905,12 +1023,16 @@ impl crate::player::PlayerUi {
         } else {
             parts.hero.set_vexpand(true);
             parts.hero.set_height_request(-1);
-            let max_cover_from_height = height.saturating_sub(BOTTOM_PLAYER_HEIGHT + 228);
+            // Leave room for the details under the cover, which the mini player shows in the title.
+            let (details_height, height_share, smallest) =
+                if mini { (32, 100, 48) } else { (228, 50, 96) };
+            let max_cover_from_height =
+                height.saturating_sub(BOTTOM_PLAYER_HEIGHT + details_height);
             let max_cover_from_width = pane_width.saturating_sub(48);
             let cover_size = max_cover_from_height
                 .min(max_cover_from_width)
-                .min((height * 50) / 100)
-                .clamp(96, 480);
+                .min((height * height_share) / 100)
+                .clamp(smallest, 480);
             parts.cover.set_square_size(cover_size);
         }
         if changed {
@@ -1020,7 +1142,12 @@ impl crate::player::PlayerUi {
         }
     }
 
-    fn animate_fullscreen_player(self: &Rc<Self>, opening: bool) {
+    fn animate_fullscreen_player(
+        self: &Rc<Self>,
+        opening: bool,
+        from: Option<i32>,
+        animated: bool,
+    ) {
         if let Some(tick) = self
             .views
             .fullscreen_player
@@ -1032,11 +1159,13 @@ impl crate::player::PlayerUi {
         }
 
         let root = self.views.fullscreen_player.root.clone();
-        if opening {
+        if opening && from.is_none() {
             self.views.fullscreen_player.background.set_visible(false);
             root.remove_css_class("artwork-background");
         }
         let height = self.fullscreen_player_hidden_offset();
+        let from_offset = f64::from(from.unwrap_or(if opening { height } else { 0 }));
+        let to_offset = if opening { 0.0 } else { f64::from(height) };
         let duration_us = i64::from(if opening {
             FULLSCREEN_PLAYER_OPEN_TRANSITION_MS
         } else {
@@ -1047,10 +1176,9 @@ impl crate::player::PlayerUi {
         root.set_visible(true);
         root.set_opacity(1.0);
         root.set_can_target(opening);
-        root.set_sensitive(opening);
         self.views
             .fullscreen_player
-            .set_slide_offset(if opening { height } else { 0 });
+            .set_slide_offset(from_offset.round() as i32);
 
         let tick_shell = Rc::clone(self);
         let tick_started_at = Rc::clone(&started_at);
@@ -1064,17 +1192,13 @@ impl crate::player::PlayerUi {
                 now
             });
             let elapsed = now.saturating_sub(start);
-            let progress = if root.settings().is_gtk_enable_animations() {
+            let progress = if animated && root.settings().is_gtk_enable_animations() {
                 (elapsed as f64 / duration_us as f64).clamp(0.0, 1.0)
             } else {
                 1.0
             };
             let eased = 1.0 - (1.0 - progress).powi(3);
-            let offset = if opening {
-                (1.0 - eased) * f64::from(height)
-            } else {
-                eased * f64::from(height)
-            };
+            let offset = from_offset + (to_offset - from_offset) * eased;
             tick_shell
                 .views
                 .fullscreen_player
@@ -1082,7 +1206,6 @@ impl crate::player::PlayerUi {
 
             if progress >= 1.0 {
                 root.set_can_target(opening);
-                root.set_sensitive(opening);
                 if opening {
                     tick_shell.views.fullscreen_player.set_slide_offset(0);
                     root.set_opacity(1.0);

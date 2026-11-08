@@ -35,10 +35,7 @@ use crate::widgets::feedback::ControlFeedbackState;
 
 use super::chrome::{WindowChrome, build_content_chrome};
 use super::events::install_product_event_receivers;
-use super::layout::{
-    COMPACT_RAIL_WIDTH, MIN_APP_WINDOW_HEIGHT, MIN_APP_WINDOW_WIDTH, NORMAL_SIDEBAR_WIDTH,
-    ShellLayoutState,
-};
+use super::layout::{COMPACT_RAIL_WIDTH, NORMAL_SIDEBAR_WIDTH, ShellLayoutState};
 use super::navigation::{
     NavigationState, NavigationWidgets, build_compact_navigation, build_normal_navigation,
     install_normal_navigation_activation,
@@ -92,10 +89,6 @@ pub async fn build(
         startup_loading_host: gtk::Box,
         startup_loading_status: gtk::Label,
     });
-    root_stack.set_width_request(MIN_APP_WINDOW_WIDTH);
-    root_stack.set_height_request(
-        (MIN_APP_WINDOW_HEIGHT - topbar.header.measure(gtk::Orientation::Vertical, -1).0).max(1),
-    );
     left_resize_handle.set_cursor_from_name(Some("col-resize"));
 
     let layout_state = ShellLayoutState::new(&root_stack);
@@ -109,6 +102,7 @@ pub async fn build(
         window_width,
         window_height,
         &topbar.window_content,
+        topbar.titlebar.upcast_ref(),
         &topbar.header,
         window_bar_preview,
     );
