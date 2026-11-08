@@ -10,10 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateBounds
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -112,10 +108,6 @@ internal fun SettingsRow(
     shape: Shape? = null,
     selected: Boolean = false,
 ) {
-    // Inner corners are small; a pressed segment rounds them, as Material 3 Expressive's do.
-    var pressed by remember { mutableStateOf(false) }
-    val corner by animateDpAsState(if (pressed) 18.dp else 5.dp, tween(if (LocalReduceMotion.current) 0 else 120),
-        label = "settingsRowCorner")
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = summary?.let { { Text(it) } },
@@ -123,16 +115,7 @@ internal fun SettingsRow(
         trailingContent = trailing,
         colors = ListItemDefaults.colors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.clip(shape ?: RoundedCornerShape(corner))
-            .pointerInput(Unit) {
-                // Watches the press without taking it, so the row's own click or toggle still gets it.
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    pressed = true
-                    waitForUpOrCancellation()
-                    pressed = false
-                }
-            }.then(modifier),
+        modifier = Modifier.clip(shape ?: RoundedCornerShape(5.dp)).then(modifier),
     )
 }
 
