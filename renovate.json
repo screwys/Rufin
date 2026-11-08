@@ -7,6 +7,9 @@
     "enabled": true
   },
   "dependencyDashboard": false,
+  "semanticCommits": "enabled",
+  "semanticCommitType": "deps",
+  "semanticCommitScope": null,
   "minimumReleaseAge": "7 days",
   "lockFileMaintenance": {
     "enabled": true
