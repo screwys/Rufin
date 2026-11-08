@@ -71,14 +71,6 @@ impl CatalogUi {
         self.source.configured.borrow().selected_source_id.clone()
     }
 
-    pub fn refresh_home_section(&self, kind: rufin_core::settings::HomeSectionKind) {
-        if let Some(selected) = self.selected_library() {
-            self.products
-                .source
-                .refresh_home(selected.source_id.clone(), kind);
-        }
-    }
-
     pub fn cycle_favorite_category(&self) {
         self.set_favorite_category(self.navigation.favorite_category.get().next());
     }

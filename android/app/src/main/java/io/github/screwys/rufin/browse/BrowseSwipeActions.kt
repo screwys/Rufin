@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import androidx.compose.runtime.compositionLocalOf
+
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Menu
 import androidx.compose.animation.core.Animatable
@@ -99,12 +101,15 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
     CompositionLocalProvider(LocalBrowseGestureActions provides actions, content = content)
 }
 
+/** Whether rows here take swipe actions: only on detail pages, where no route swipe competes. */
+internal val LocalRowSwipes = compositionLocalOf { false }
+
 @Composable
 internal fun BrowseSwipeActions(
     listed: BrowseItem, enabled: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val configured = LocalBrowseGestureActions.current
+    val configured = LocalBrowseGestureActions.current.takeIf { LocalRowSwipes.current }
     // A swipe acts on the row as it shows now, with the favorites and ratings committed since.
     val item = configured?.browse?.shown(listed) ?: listed
     val library = configured?.browse?.library

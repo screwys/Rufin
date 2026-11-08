@@ -651,8 +651,11 @@ pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
 }
 /// The labels under the title of a Home album card.
 pub const HOME_ALBUM_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
-/// The labels under the title of a Home track card.
+/// The labels under the title of a Home track row.
 pub const HOME_TRACK_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
+/// The labels under the name of a Home genre row.
+pub const HOME_GENRE_FIELDS: [LibraryField; 2] =
+    [LibraryField::AlbumCount, LibraryField::SongCount];
 /// The fields `layout` can show for `key`.
 pub fn available_fields(key: LibraryListKey, layout: LibraryLayout) -> &'static [LibraryField] {
     match layout {
@@ -911,6 +914,11 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             .position(|field| *field == LibraryField::Tools)
     {
         fields.insert(position, LibraryField::Favorite);
+    }
+    // Phones open a row's menu by holding or swiping it, so their rows leave the ⋯ column out
+    // until it is shown.
+    if cfg!(target_os = "android") {
+        fields.retain(|field| *field != LibraryField::Tools);
     }
     fields
 }

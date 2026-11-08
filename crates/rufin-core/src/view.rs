@@ -1347,7 +1347,7 @@ impl View {
                 .selection()
         };
         let selections = match &section {
-            HomeSection::Showcase(row) => vec![album(&row.album)],
+            HomeSection::Showcase(showcase) => vec![album(&showcase.current.album)],
             HomeSection::Genres(genres) => genres
                 .iter()
                 .map(|genre| {
@@ -1939,7 +1939,8 @@ impl View {
 /// One Home section, as every client shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HomeSection {
-    Showcase(Box<HomeAlbumRow>),
+    /// The showcase album, with the ones either side of it in its order.
+    Showcase(Box<library::HomeShowcase>),
     /// Explore, Most played, Newly added, Recently played or Recently released.
     Rows {
         block: HomeBlockKind,
@@ -2025,6 +2026,18 @@ impl HomeSection {
             )
             .collect()
     }
+
+    /// Whether it shows columns of rows rather than cards: genres, and sections that hold
+    /// tracks, which lead their rows.
+    pub fn shows_rows(&self) -> bool {
+        match self {
+            Self::Rows { rows, .. } | Self::Provider(HomeProviderSection { rows, .. }) => {
+                !rows.tracks.is_empty()
+            }
+            Self::Genres(_) => true,
+            Self::Showcase(_) => false,
+        }
+    }
 }
 
 /// Home's sections in the order clients show them: the visible `blocks` in their order, except
@@ -2057,8 +2070,8 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
                 return home
                     .showcase
                     .as_ref()
-                    .filter(|row| album(row))
-                    .map(|row| HomeSection::Showcase(Box::new(row.clone())));
+                    .filter(|showcase| album(&showcase.current))
+                    .map(|showcase| HomeSection::Showcase(Box::new(showcase.clone())));
             }
             HomeBlockKind::Genres => {
                 return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));

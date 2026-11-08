@@ -585,10 +585,25 @@ pub struct AndroidArtwork {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// The showcase band's three gradient stops for this cover.
+    pub band: Vec<AndroidRgb>,
 }
 
 impl From<&artwork::RgbaImage> for AndroidArtwork {
     fn from(image: &artwork::RgbaImage) -> Self {
+        let band = artwork::showcase_band(
+            image.rgba(),
+            image.width(),
+            image.height(),
+            image.row_stride(),
+        )
+        .into_iter()
+        .map(|[red, green, blue]| AndroidRgb {
+            red: f32::from(red) / 255.0,
+            green: f32::from(green) / 255.0,
+            blue: f32::from(blue) / 255.0,
+        })
+        .collect();
         let mut rgba = image.rgba().to_vec();
         // Android bitmap buffers use premultiplied color channels.
         for pixel in rgba.chunks_exact_mut(4) {
@@ -601,6 +616,7 @@ impl From<&artwork::RgbaImage> for AndroidArtwork {
             width: image.width(),
             height: image.height(),
             rgba,
+            band,
         }
     }
 }

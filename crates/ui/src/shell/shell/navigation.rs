@@ -13,8 +13,8 @@ use crate::widgets::selection::PlayTarget;
 use rufin_core::collection_context::CollectionTarget;
 
 use crate::widgets::interactions::{
-    CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
-    replace_native_menu_checkmarks, show_native_menu_icons,
+    CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers, replace_native_menu_checkmarks,
+    show_native_menu_icons,
 };
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -26,7 +26,7 @@ use rufin_core::settings::{SidebarPin, SidebarRouteItem};
 use tracing::warn;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};
-use crate::widgets::controls::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON, icon_button};
+use crate::widgets::controls::install_row_transport_controls;
 use crate::widgets::mounted_route::route_current_track;
 use localization::tr;
 
@@ -416,6 +416,13 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         "app.show-shortcuts",
         "rufin-preferences-desktop-keyboard-shortcuts-symbolic",
     );
+    // F5; the menu shows the accelerator the action carries.
+    append_menu_action(
+        &preferences,
+        &tr("Resync Library"),
+        "win.refresh-library",
+        "rufin-view-refresh-symbolic",
+    );
     append_menu_action(
         &preferences,
         &primary_menu_private_mode_label(shell.as_ref()),
@@ -569,7 +576,7 @@ fn append_sidebar_pins(shell: &Rc<Shell>) {
         return;
     }
 
-    let heading = gtk::Label::new(Some(&tr("Pins")));
+    let heading = gtk::Label::new(Some(&tr("Saved")));
     heading.add_css_class(SIDEBAR_PINS_HEADING_CLASS);
     heading.set_xalign(0.0);
     shell.navigation_view.normal_nav_pins.append(&heading);
@@ -791,7 +798,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .first_child()
         .filter(|child| child.has_css_class(SIDEBAR_PINS_HEADING_CLASS))
         .unwrap_or_else(|| {
-            let heading = gtk::Label::new(Some(&tr("Pins")));
+            let heading = gtk::Label::new(Some(&tr("Saved")));
             heading.add_css_class(SIDEBAR_PINS_HEADING_CLASS);
             heading.set_xalign(0.0);
             normal.prepend(&heading);
@@ -1039,52 +1046,14 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
 
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 1);
-    controls.add_css_class("sidebar-pin-controls");
-    controls.set_halign(gtk::Align::End);
-    controls.set_valign(gtk::Align::Center);
-    controls.set_margin_end(2);
-    controls.set_visible(false);
-    let playback_target = pin.playback_target();
-    if let Some(playback_target) = playback_target {
-        for (icon_name, label, placement) in [
-            (PLAY_ICON, "Play", QueuePlacement::Now),
-            (PLAY_NEXT_ICON, "Play Next", QueuePlacement::Next),
-            (PLAY_LATER_ICON, "Play Later", QueuePlacement::Last),
-        ] {
-            controls.append(&sidebar_pin_transport_button(
-                shell,
-                &playback_target,
-                icon_name,
-                label,
-                placement,
-            ));
-        }
+    if let Some(target) = pin.playback_target() {
+        let shell = Rc::downgrade(shell);
+        install_row_transport_controls(&row, move |placement| {
+            if let Some(shell) = shell.upgrade() {
+                crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
+            }
+        });
     }
-    row.add_overlay(&controls);
-    row.set_measure_overlay(&controls, false);
-
-    let motion = gtk::EventControllerMotion::new();
-    let controls_for_enter = controls.clone();
-    motion.connect_enter(move |_, _, _| controls_for_enter.set_visible(true));
-    let controls_for_leave = controls.clone();
-    let row_for_leave = row.downgrade();
-    motion.connect_leave(move |_| {
-        if row_for_leave
-            .upgrade()
-            .is_some_and(|row| !row.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS))
-        {
-            controls_for_leave.set_visible(false);
-        }
-    });
-    let motion_for_hold = motion.clone();
-    let controls_for_hold = controls.clone();
-    row.connect_css_classes_notify(move |row| {
-        if !row.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS) {
-            controls_for_hold.set_visible(motion_for_hold.contains_pointer());
-        }
-    });
-    row.add_controller(motion);
 
     let context_shell = Rc::downgrade(shell);
     let context_pin = pin.clone();
@@ -1440,24 +1409,6 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     duration_metadata.append(&duration);
     metadata.append(&duration_metadata);
     metadata
-}
-
-fn sidebar_pin_transport_button(
-    shell: &Rc<Shell>,
-    target: &PlayTarget,
-    icon_name: &str,
-    label: &str,
-    placement: QueuePlacement,
-) -> gtk::Button {
-    let button = icon_button(icon_name, label);
-    button.add_css_class("sidebar-pin-control");
-    let shell = Rc::downgrade(shell);
-    let target = target.clone();
-    button.connect_clicked(move |_| {
-        let Some(shell) = shell.upgrade() else { return };
-        crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
-    });
-    button
 }
 
 /// A pin's widget name. Collection pins use the collection's context id, which plays match.

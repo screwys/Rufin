@@ -19,7 +19,6 @@ pub struct PlaybackArtworkPath {
 
 mod animation;
 mod cover_group;
-pub mod presentation;
 mod texture_cache;
 mod tile;
 

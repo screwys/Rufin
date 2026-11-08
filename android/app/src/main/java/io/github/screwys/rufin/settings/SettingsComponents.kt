@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -61,6 +62,8 @@ internal fun SettingsPage(modifier: Modifier = Modifier, embedded: Boolean = fal
 
 @Composable
 internal fun SettingsGroup(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    // As Navic's segmented lists: a heading in the accent over the options, each its own tonal
+    // segment with a small gap, the group's outer corners round.
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         title?.let {
             Text(it, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.titleSmall,
@@ -102,7 +105,7 @@ internal fun SettingsRow(
     summary: String? = null,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    shape: Shape = RoundedCornerShape(4.dp),
+    shape: Shape? = null,
     selected: Boolean = false,
 ) {
     ListItem(
@@ -110,8 +113,9 @@ internal fun SettingsRow(
         supportingContent = summary?.let { { Text(it) } },
         leadingContent = leading,
         trailingContent = trailing,
-        colors = ListItemDefaults.colors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.clip(shape).then(modifier),
+        colors = ListItemDefaults.colors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.clip(shape ?: RoundedCornerShape(5.dp)).then(modifier),
     )
 }
 
@@ -130,23 +134,6 @@ internal fun settingsButtonColors() = ButtonDefaults.outlinedButtonColors(
     containerColor = MaterialTheme.colorScheme.surfaceContainer,
     contentColor = MaterialTheme.colorScheme.onSurface,
     disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-)
-
-@Composable
-internal fun settingsChipColors() = FilterChipDefaults.filterChipColors(
-    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-    labelColor = MaterialTheme.colorScheme.onSurface,
-    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-    disabledSelectedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-)
-
-internal fun settingsRowShape(index: Int, count: Int) = RoundedCornerShape(
-    topStart = if (index == 0) 18.dp else 4.dp,
-    topEnd = if (index == 0) 18.dp else 4.dp,
-    bottomStart = if (index == count - 1) 18.dp else 4.dp,
-    bottomEnd = if (index == count - 1) 18.dp else 4.dp,
 )
 
 @Composable
@@ -195,7 +182,7 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
         Box(Modifier.animateBounds(lookahead, boundsTransform = { _, _ -> tween(if (reduceMotion || dragged == id) 0 else 160) })
             .onSizeChanged { heights[id] = it.height }.zIndex(if (dragged == id) 1f else 0f)
             .graphicsLayer { translationY = dragOffset }) {
-        SettingsRow(item.title, shape = settingsRowShape(index, order.size),
+        SettingsRow(item.title,
             leading = {
                 Box(Modifier.size(40.dp).pointerInput(id, item.reorderable, items, gap) {
                     if (item.reorderable) detectVerticalDragGestures(

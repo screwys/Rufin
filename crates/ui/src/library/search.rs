@@ -389,7 +389,7 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
     fn clear(&self) {
         self.release_artwork();
         self.snippet.bind(None);
-        self.body.clear(&self.shell);
+        self.body.clear();
         self.favorite.set_visible(false);
         self.favorite.set_sensitive(false);
         self.current.take();

@@ -6,6 +6,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.colorspace.ColorSpaces
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import io.github.screwys.rufin.ui.LocalShowDownloadedBadges
@@ -36,7 +38,8 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
     CompositionLocalProvider(LocalTranslationRevision provides preferences.translationRevision,
         LocalShowDownloadedBadges provides preferences.showDownloadedBadges,
         LocalReduceMotion provides preferences.reduceMotion) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        // Menus and small surfaces take a mobile rounding, not the 4 dp default.
+        MaterialTheme(colorScheme = scheme, shapes = Shapes(extraSmall = RoundedCornerShape(12.dp)), content = content)
     }
 }
 
@@ -58,6 +61,9 @@ internal fun resolveThemeScheme(resolver: ThemeColors, defaults: ColorScheme, sy
     val card = (resolver.named("card-bg-color") ?: defaults.surfaceContainer).compositeOver(surface)
     val accent = if (systemAccent) defaults.primary else resolver.named("accent-bg-color") ?: defaults.primary
     val accentContainer = accent.copy(alpha = .16f).compositeOver(surface)
+    // As Material You's tonal surfaces: boxes take a little of the accent, more the higher they sit,
+    // instead of the shared theme's neutral greys.
+    fun tinted(color: Color, amount: Float) = accent.copy(alpha = amount).compositeOver(color)
     return defaults.copy(
         primary = accent, onPrimary = if (systemAccent) defaults.onPrimary else resolver.named("accent-fg-color") ?: defaults.onPrimary,
         secondary = if (systemAccent) accent else resolver.named("accent-color") ?: accent,
@@ -66,9 +72,9 @@ internal fun resolveThemeScheme(resolver: ThemeColors, defaults: ColorScheme, sy
         onSurfaceVariant = foreground.copy(alpha = .78f),
         background = window, onBackground = resolver.named("window-fg-color") ?: foreground,
         surface = surface, onSurface = foreground,
-        surfaceContainer = card, surfaceContainerLow = window,
-        surfaceContainerHigh = resolver.named("dialog-bg-color") ?: card,
-        surfaceContainerHighest = resolver.named("popover-bg-color") ?: card,
+        surfaceContainer = tinted(card, .05f), surfaceContainerLow = window,
+        surfaceContainerHigh = tinted(resolver.named("dialog-bg-color") ?: card, .08f),
+        surfaceContainerHighest = tinted(resolver.named("popover-bg-color") ?: card, .11f),
         error = resolver.named("error-color") ?: defaults.error,
         errorContainer = resolver.named("error-bg-color") ?: defaults.errorContainer,
         onErrorContainer = resolver.named("error-fg-color") ?: defaults.onErrorContainer,

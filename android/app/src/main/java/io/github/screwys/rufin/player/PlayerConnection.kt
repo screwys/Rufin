@@ -349,10 +349,12 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
     fun activateQueue(position: ULong) = action { playbackOwner?.activate(position) }
     fun removeQueue(position: ULong) = action { playbackOwner?.remove(position) }
-    suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {
+    fun removeQueue(positions: List<ULong>) = action { playbackOwner?.removeMany(QueueSelection.Positions(positions)) }
+    /** Moves the rows at `positions` together before `target` (after it with `after`), or to the end. */
+    suspend fun moveQueue(positions: List<ULong>, target: ULong?, after: Boolean = false) {
         val current = playbackOwner ?: return
         val destination = target?.let { if (after) QueueReorderTarget.After(it) else QueueReorderTarget.Before(it) } ?: QueueReorderTarget.End
-        withContext(Dispatchers.IO) { current.reorder(QueueSelection.Positions(listOf(position)), destination) }
+        withContext(Dispatchers.IO) { current.reorder(QueueSelection.Positions(positions), destination) }
     }
     fun clearQueue(includeCurrent: Boolean) = action { playbackOwner?.clear(includeCurrent) }
     fun visualizer(enabled: Boolean) = action { bridge?.setVisualizerEnabled(enabled) }

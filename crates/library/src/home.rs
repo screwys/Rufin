@@ -145,9 +145,18 @@ pub struct HomeProviderSection {
     pub rows: HomeSectionRows,
 }
 
+/// The showcase album and its neighbours in the order its steps walk; with one album all
+/// three are that album.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HomeShowcase {
+    pub previous: HomeAlbumRow,
+    pub current: HomeAlbumRow,
+    pub next: HomeAlbumRow,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HomePage {
-    pub showcase: Option<HomeAlbumRow>,
+    pub showcase: Option<HomeShowcase>,
     pub explore: Vec<HomeAlbumRow>,
     pub most_played: HomeSectionRows,
     pub newly_added: HomeSectionRows,
@@ -173,7 +182,7 @@ impl Catalog {
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
-        showcase_variation: i64,
+        showcase_position: i64,
         explore_variation: i64,
         blocks: &[HomeBlockKind],
         cancellation: &ReadCancellation,
@@ -214,13 +223,14 @@ impl Catalog {
                 None => None,
             };
             let derived = self.derived(&context, scope);
-            let albums = snapshot
-                .albums
-                .iter()
-                .filter(|(slot, album)| {
-                    album.source == owner && derived.albums[*slot as usize].tracks > 0
+            // Newly added and Recently released sort the selected source's albums with tracks
+            // in the music folder; the showcase and Explore walk the slots instead.
+            let albums = || {
+                snapshot.albums.iter().filter_map(|(slot, album)| {
+                    (album.source == owner && derived.albums[slot as usize].tracks > 0)
+                        .then_some(album)
                 })
-                .collect::<Vec<_>>();
+            };
             let title = |album: &AlbumRec| snapshot.text(album.title).to_owned();
             let visible_track = |key: i64| {
                 snapshot.tracks.get(key).is_some_and(|track| {
@@ -254,29 +264,19 @@ impl Catalog {
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
             let mut chosen = Chosen::default();
-            if blocks.contains(&HomeBlockKind::Showcase) && !albums.is_empty() {
-                let mut ordered = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
-                let index = showcase_variation.rem_euclid(ordered.len() as i64) as usize;
-                let album = *ordered
-                    .select_nth_unstable_by_key(index, |album| album.key)
-                    .1;
-                chosen
-                    .showcase
-                    .push((AlbumKey::from_raw(i64::from(album.key)), title(album)));
+            let walk = AlbumWalk::new(&snapshot, owner, &derived);
+            if blocks.contains(&HomeBlockKind::Showcase) {
+                chosen.showcase = walk
+                    .showcase(showcase_position)
+                    .map(|positions| positions.map(|position| walk.member(position)).to_vec())
+                    .unwrap_or_default();
             }
             if blocks.contains(&HomeBlockKind::Explore) {
-                // A fixed shuffle of album keys, entered at a point the variation picks.
-                let pivot = explore_album_pivot(source, explore_variation);
-                let ordered = albums
-                    .iter()
-                    .map(|(_, album)| {
-                        let hash = i64::from(album.key).wrapping_mul(1_103_515_245) % 2_147_483_647;
-                        ((hash < pivot, hash, album.key), *album)
-                    })
-                    .collect::<Vec<_>>();
-                chosen.explore = first(ordered, |a, b| a.0.cmp(&b.0))
-                    .into_iter()
-                    .map(|(_, album)| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
+                // The walk entered at a point the variation picks.
+                chosen.explore = walk
+                    .from(explore_album_pivot(source, explore_variation))
+                    .take(HOME_LIMIT as usize)
+                    .map(|position| walk.member(position))
                     .collect();
             }
             let tracks = || {
@@ -330,7 +330,7 @@ impl Catalog {
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::NewlyAdded) {
-                let added = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
+                let added = albums().collect::<Vec<_>>();
                 let order = |a: &&AlbumRec, b: &&AlbumRec| {
                     (a.added == u32::MAX)
                         .cmp(&(b.added == u32::MAX))
@@ -344,9 +344,7 @@ impl Catalog {
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::RecentlyReleased) {
-                let released = albums
-                    .iter()
-                    .map(|(_, album)| *album)
+                let released = albums()
                     .filter(|album| {
                         album.release != 0 || (album.year != i16::MIN && album.year != 0)
                     })
@@ -508,8 +506,9 @@ impl Catalog {
                     albums: home_albums(albums),
                 }
             };
+        let showcase = showcase_rows(chosen.showcase, &album_rows);
         let page = HomePage {
-            showcase: home_albums(chosen.showcase).pop(),
+            showcase,
             explore: home_albums(chosen.explore),
             most_played: section_rows(most_played),
             newly_added: section_rows(newly_added),
@@ -536,6 +535,182 @@ impl Catalog {
         transaction.commit().await?;
         Ok(page)
     }
+}
+
+impl Catalog {
+    /// Steps Home's showcase from `position` one album forward or back. Answers the position it
+    /// lands on, which the next step starts from, and the showcase there: three picks and one
+    /// read of their rows, not a Home read.
+    pub async fn step_home_showcase(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        position: i64,
+        forward: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<(i64, Option<HomeShowcase>)> {
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let picked = {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot);
+            let owner = snapshot.source_slot(source);
+            let scope = folder.map(|folder| snapshot.folders.slot(folder.raw()));
+            match (owner, scope) {
+                (Some(owner), None | Some(Some(_))) => {
+                    let derived = self.derived(&context, scope.flatten());
+                    let walk = AlbumWalk::new(&snapshot, owner, &derived);
+                    let step = if forward { 1 } else { -1 };
+                    walk.land(position, 1)
+                        .and_then(|current| walk.land(current + step, step))
+                        .and_then(|landed| Some((landed, walk.showcase(landed)?)))
+                        .map(|(landed, positions)| {
+                            (
+                                landed,
+                                positions.map(|position| walk.member(position)).to_vec(),
+                            )
+                        })
+                }
+                _ => None,
+            }
+        };
+        let Some((landed, members)) = picked else {
+            return Ok((position, None));
+        };
+        let items = members
+            .iter()
+            .map(|(key, _)| Item::Album(*key))
+            .collect::<Vec<_>>();
+        let shape = crate::read::Shape {
+            folder,
+            ..crate::read::Shape::of(None)
+        };
+        let rows = self
+            .rows_of_on(&mut transaction, &items, &shape, true)
+            .await?;
+        transaction.commit().await?;
+        let album_rows = rows
+            .into_iter()
+            .filter_map(|row| match row {
+                Row::Album(row) => Some((row.album_key, row)),
+                _ => None,
+            })
+            .collect();
+        Ok((landed, showcase_rows(members, &album_rows)))
+    }
+}
+
+/// The showcase of the previous, current and next album `members`: none without its current
+/// row; a neighbour without its row shows the current album.
+fn showcase_rows(
+    members: Vec<(AlbumKey, String)>,
+    rows: &std::collections::HashMap<AlbumKey, AlbumRow>,
+) -> Option<HomeShowcase> {
+    let row = |(key, title): (AlbumKey, String)| {
+        let album = rows.get(&key)?.clone();
+        let title = if title.is_empty() {
+            album.title.clone()
+        } else {
+            title
+        };
+        Some(HomeAlbumRow { album, title })
+    };
+    let [previous, current, next] = <[_; 3]>::try_from(members).ok()?;
+    let current = row(current)?;
+    let beside = |member| row(member).unwrap_or_else(|| current.clone());
+    Some(HomeShowcase {
+        previous: beside(previous),
+        next: beside(next),
+        current,
+    })
+}
+
+/// A walk over the Catalog's album slots that visits every slot once a cycle: position `v`
+/// is slot `v × stride mod n`, the stride coprime with `n` and near `n × 0.618`, so albums
+/// imported together do not come up together. Only the selected source's albums with tracks
+/// in the music folder count; the others are passed over. No list is built.
+struct AlbumWalk<'a> {
+    snapshot: &'a crate::catalog::snapshot::Snapshot,
+    owner: u16,
+    derived: &'a crate::catalog::views::Derived,
+    slots: i64,
+    stride: i64,
+}
+
+impl<'a> AlbumWalk<'a> {
+    fn new(
+        snapshot: &'a crate::catalog::snapshot::Snapshot,
+        owner: u16,
+        derived: &'a crate::catalog::views::Derived,
+    ) -> Self {
+        let slots = snapshot.albums.records.len() as i64;
+        let mut stride = ((slots as f64 * 0.618) as i64).max(1);
+        while gcd(stride, slots.max(1)) != 1 {
+            stride += 1;
+        }
+        Self {
+            snapshot,
+            owner,
+            derived,
+            slots,
+            stride,
+        }
+    }
+
+    fn slot(&self, position: i64) -> u32 {
+        (position.rem_euclid(self.slots) * self.stride % self.slots) as u32
+    }
+
+    fn counts(&self, position: i64) -> bool {
+        let slot = self.slot(position);
+        self.snapshot
+            .albums
+            .live(slot)
+            .is_some_and(|album| album.source == self.owner)
+            && self
+                .derived
+                .albums
+                .get(slot as usize)
+                .is_some_and(|album| album.tracks > 0)
+    }
+
+    /// The first counted position from `position` going `step` (1 or −1); none within a cycle
+    /// means no album counts.
+    fn land(&self, position: i64, step: i64) -> Option<i64> {
+        (0..self.slots)
+            .map(|offset| position + offset * step)
+            .find(|position| self.counts(*position))
+    }
+
+    /// The counted positions from `position` on, each once.
+    fn from(&self, position: i64) -> impl Iterator<Item = i64> + '_ {
+        (0..self.slots)
+            .map(move |offset| position + offset)
+            .filter(|position| self.counts(*position))
+    }
+
+    /// The album shown at `position` and the ones before and after it in the walk.
+    fn showcase(&self, position: i64) -> Option<[i64; 3]> {
+        let current = self.land(position, 1)?;
+        let previous = self.land(current - 1, -1)?;
+        let next = self.land(current + 1, 1)?;
+        Some([previous, current, next])
+    }
+
+    fn member(&self, position: i64) -> (AlbumKey, String) {
+        let album = &self.snapshot.albums.records[self.slot(position) as usize];
+        (
+            AlbumKey::from_raw(i64::from(album.key)),
+            self.snapshot.text(album.title).to_owned(),
+        )
+    }
+}
+
+fn gcd(mut a: i64, mut b: i64) -> i64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
 }
 
 fn explore_album_pivot(source: SourceKey, variation: i64) -> i64 {

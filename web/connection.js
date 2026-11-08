@@ -315,4 +315,4 @@ const state = {
   stream: null,
 };
 
-export { init, api, fragment, session, state };
+export { init, api, browserHeaders, fragment, session, state };

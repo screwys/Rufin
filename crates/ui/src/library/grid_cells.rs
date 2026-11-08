@@ -194,10 +194,6 @@ fn collection_grid_column_limit(
     grid_column_count(available_width, display).min(u32::MAX as usize) as u32
 }
 
-pub fn collection_grid_column_count(available_width: i32) -> usize {
-    grid_column_count(available_width, &Default::default())
-}
-
 pub fn grid_dimensions(
     settings: &rufin_core::settings::layout::DisplaySettings,
 ) -> (i32, i32, i32) {
@@ -233,133 +229,6 @@ pub fn grid_column_count(
     let minimum_needed_columns =
         available_width.saturating_add(maximum_slot_width - 1) / maximum_slot_width;
     minimum_needed_columns.max(1).min(maximum_fitting_columns) as usize
-}
-
-#[derive(Clone)]
-pub struct FixedPageCollectionRow {
-    row: gtk::FlowBox,
-    page_size: Rc<Cell<usize>>,
-}
-
-impl FixedPageCollectionRow {
-    pub fn widget(&self) -> gtk::FlowBox {
-        self.row.clone()
-    }
-
-    pub fn set_page_size(&self, page_size: usize) {
-        let page_size = page_size.max(1);
-        if self.page_size.replace(page_size) == page_size {
-            return;
-        }
-        self.row
-            .set_max_children_per_line(page_size.min(u32::MAX as usize) as u32);
-        self.row
-            .set_min_children_per_line(page_size.min(u32::MAX as usize) as u32);
-    }
-}
-
-#[derive(Clone)]
-enum FixedPageSlot<T> {
-    Item { position: u32, value: T },
-    Empty,
-}
-
-fn refill_fixed_page_slots<T: Clone + 'static>(
-    source: &gio::ListStore,
-    presentation: &gio::ListStore,
-    page_size: usize,
-) {
-    let additions = (0..page_size.max(1))
-        .map(|index| {
-            let slot = item_at::<T>(source, index as u32).map_or(FixedPageSlot::Empty, |value| {
-                FixedPageSlot::Item {
-                    position: index as u32,
-                    value,
-                }
-            });
-            glib::BoxedAnyObject::new(slot)
-        })
-        .collect::<Vec<_>>();
-    presentation.splice(0, presentation.n_items(), &additions);
-}
-
-pub fn fixed_page_collection_row<T, Make, Activate>(
-    model: gio::ListStore,
-    columns: usize,
-    make_widget: Make,
-    activate: Activate,
-) -> FixedPageCollectionRow
-where
-    T: Clone + 'static,
-    Make: Fn(u32, T) -> gtk::Widget + 'static,
-    Activate: Fn(u32, T) + 'static,
-{
-    let columns = columns.max(1);
-    let maximum_columns = columns.min(u32::MAX as usize) as u32;
-    let row = gtk::FlowBox::new();
-    row.add_css_class("album-grid");
-    row.set_homogeneous(true);
-    row.set_column_spacing(0);
-    row.set_min_children_per_line(maximum_columns);
-    row.set_max_children_per_line(maximum_columns);
-    row.set_selection_mode(gtk::SelectionMode::None);
-    row.set_activate_on_single_click(false);
-    row.set_hexpand(true);
-    row.set_vexpand(false);
-    row.set_halign(gtk::Align::Fill);
-    row.set_valign(gtk::Align::Start);
-
-    let page_size = Rc::new(Cell::new(columns));
-    let presentation = gio::ListStore::new::<glib::BoxedAnyObject>();
-    row.bind_model(Some(&presentation), move |item| {
-        let item = item
-            .downcast_ref::<glib::BoxedAnyObject>()
-            .expect("fixed Home row item type");
-        match item.borrow::<FixedPageSlot<T>>().clone() {
-            FixedPageSlot::Item { position, value } => {
-                let widget = make_widget(position, value);
-                cards::collection_grid_card_inset(&widget, COLLECTION_GRID_MIN_CARD_WIDTH).upcast()
-            }
-            FixedPageSlot::Empty => {
-                let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-                let child = gtk::FlowBoxChild::new();
-                child.add_css_class("collection-grid-empty");
-                child.set_can_target(false);
-                child.set_focusable(false);
-                child.set_sensitive(false);
-                child.set_accessible_role(gtk::AccessibleRole::Presentation);
-                child.set_child(Some(&cards::collection_grid_card_inset(
-                    &spacer,
-                    COLLECTION_GRID_MIN_CARD_WIDTH,
-                )));
-                child.upcast()
-            }
-        }
-    });
-    let activate_presentation = presentation.clone();
-    row.connect_child_activated(move |_, child| {
-        let position = child.index();
-        if position < 0 {
-            return;
-        }
-        let Some(item) = activate_presentation.item(position as u32) else {
-            return;
-        };
-        let item = item
-            .downcast_ref::<glib::BoxedAnyObject>()
-            .expect("fixed Home activation item type");
-        if let FixedPageSlot::Item { position, value } = item.borrow::<FixedPageSlot<T>>().clone() {
-            activate(position, value);
-        }
-    });
-
-    let change_presentation = presentation.clone();
-    let change_page_size = Rc::clone(&page_size);
-    model.connect_items_changed(move |source, _, _, _| {
-        refill_fixed_page_slots::<T>(source, &change_presentation, change_page_size.get());
-    });
-    refill_fixed_page_slots::<T>(&model, &presentation, columns);
-    FixedPageCollectionRow { row, page_size }
 }
 
 impl CollectionGridProjection {
@@ -680,7 +549,6 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             };
             Some((source, track.title().to_string()))
         });
-        body.set_download_badge(shell.downloads.download_badge(false));
         Self {
             body,
             shell: Rc::downgrade(shell),
@@ -720,7 +588,6 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
                 .bind_playing_target(&shell, Some(PlayTarget::of_track(track))),
             (None, None) => {}
         }
-        self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
         self.current.replace(Some(row));
         self.position.set(position);
@@ -728,7 +595,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
     fn clear(&self) {
         if let Some(shell) = self.shell.upgrade() {
             shell.artwork.clear_artwork_tile(&self.cover);
-            self.body.clear(&shell);
+            self.body.clear();
         }
         if let Some(playing) = &self.playing {
             playing.unbind(self.body.title.upcast_ref());
@@ -839,7 +706,6 @@ impl AlbumGridCell {
         install_grid_favorite(shell, &current, &favorite, |row| {
             FavoriteTarget::Album(row.media_uri.clone())
         });
-        body.set_download_badge(shell.downloads.download_badge(true));
         Self {
             body,
             shell: Rc::downgrade(shell),
@@ -922,7 +788,6 @@ impl ArtistGridCell {
         install_grid_favorite(shell, &current, &favorite, |row| {
             FavoriteTarget::Artist(row.media_uri.clone())
         });
-        body.set_download_badge(shell.downloads.download_badge(true));
         Self {
             body,
             shell: Rc::downgrade(shell),
@@ -951,15 +816,13 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         self.body.bind(&row.name, |field| {
             DetailLinks::text(&artist_field(&row, field))
         });
-        self.body
-            .set_download_target(&shell, row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }
     fn clear(&self) {
         if let Some(shell) = self.shell.upgrade() {
             shell.artwork.clear_artwork_tile(&self.cover);
-            self.body.clear(&shell);
+            self.body.clear();
         }
         set_grid_favorite(&self.favorite, None);
         self.current.take();
@@ -997,15 +860,13 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         );
         self.body
             .bind(&row.title, |field| album_field_links(&row, field));
-        self.body
-            .set_download_target(&shell, row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }
     fn clear(&self) {
         if let Some(shell) = self.shell.upgrade() {
             shell.artwork.clear_artwork_tile(&self.cover);
-            self.body.clear(&shell);
+            self.body.clear();
         }
         set_grid_favorite(&self.favorite, None);
         self.current.take();
@@ -1090,8 +951,6 @@ impl MediaPlayingBinding {
 pub struct CollectionGridCardCell {
     pub card: CollectionGridCardView,
     pub title: gtk::Label,
-    title_row: gtk::Box,
-    downloaded: RefCell<Option<gtk::Image>>,
     fields: RefCell<Vec<CollectionGridFieldCell>>,
     ready: Cell<bool>,
     playing_target: RefCell<Option<Rc<MediaPlayingBinding>>>,
@@ -1118,8 +977,10 @@ impl CollectionGridCardCell {
         card.prepend(&cover);
         let title = card.imp().title.get();
         connect_label_tooltip(&title);
-        let title_row = card.imp().title_row.get();
-        crate::widgets::recycled_cells::install_playing_indicator(&title, &title_row);
+        crate::widgets::recycled_cells::install_playing_indicator(
+            &title,
+            &card.imp().title_row.get(),
+        );
         let field_cells = fields
             .iter()
             .copied()
@@ -1131,20 +992,11 @@ impl CollectionGridCardCell {
         let cell = Self {
             card,
             title,
-            title_row,
-            downloaded: RefCell::new(None),
             fields: RefCell::new(field_cells),
             ready: Cell::new(false),
             playing_target: RefCell::new(None),
         };
         cell
-    }
-
-    pub fn set_download_badge(&self, badge: gtk::Image) {
-        if let Some(previous) = self.downloaded.replace(Some(badge.clone())) {
-            self.title_row.remove(&previous);
-        }
-        self.title_row.append(&badge);
     }
 
     pub fn set_folder(&self, folder: bool) {
@@ -1158,12 +1010,6 @@ impl CollectionGridCardCell {
         binding.bind(shell, target);
     }
 
-    pub fn set_download_target(&self, shell: &Rc<CatalogUi>, downloaded: bool) {
-        if let Some(badge) = self.downloaded.borrow().as_ref() {
-            shell.downloads.bind_download_badge(badge, downloaded);
-        }
-    }
-
     pub fn widget(&self) -> gtk::Widget {
         self.card.clone().upcast()
     }
@@ -1175,15 +1021,12 @@ impl CollectionGridCardCell {
         }
     }
 
-    pub fn clear(&self, shell: &Rc<CatalogUi>) {
+    pub fn clear(&self) {
         if let Some(binding) = self.playing_target.borrow().as_ref() {
             binding.target.take();
         }
         crate::widgets::recycled_cells::set_track_playing(self.title.upcast_ref(), false, false);
         self.title.set_text("");
-        if let Some(downloaded) = self.downloaded.borrow().as_ref() {
-            shell.downloads.clear_download_badge(downloaded);
-        }
         for field in self.fields.borrow().iter() {
             field.clear();
         }
@@ -1283,16 +1126,22 @@ mod tests {
     fn collection_grid_columns_follow_the_shared_card_width_band() {
         let minimum_slot = COLLECTION_GRID_MIN_CARD_WIDTH + COLLECTION_GRID_CARD_MARGIN * 2;
         let maximum_slot = COLLECTION_GRID_MAX_CARD_WIDTH + COLLECTION_GRID_CARD_MARGIN * 2;
-        assert_eq!(collection_grid_column_count(435), 3);
-        assert_eq!(collection_grid_column_count(450), 3);
-        assert_eq!(collection_grid_column_count(496), 3);
-        assert_eq!(collection_grid_column_count(minimum_slot * 3 - 1), 2);
-        assert_eq!(collection_grid_column_count(maximum_slot * 2 + 1), 3);
+        assert_eq!(grid_column_count(435, &Default::default()), 3);
+        assert_eq!(grid_column_count(450, &Default::default()), 3);
+        assert_eq!(grid_column_count(496, &Default::default()), 3);
+        assert_eq!(
+            grid_column_count(minimum_slot * 3 - 1, &Default::default()),
+            2
+        );
+        assert_eq!(
+            grid_column_count(maximum_slot * 2 + 1, &Default::default()),
+            3
+        );
         assert_eq!(
             collection_grid_column_limit(600, 0, 0, &Default::default()),
             3
         );
-        assert_eq!(collection_grid_column_count(1_600), 8);
-        assert_eq!(collection_grid_column_count(3_200), 16);
+        assert_eq!(grid_column_count(1_600, &Default::default()), 8);
+        assert_eq!(grid_column_count(3_200, &Default::default()), 16);
     }
 }

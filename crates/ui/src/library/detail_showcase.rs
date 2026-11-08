@@ -1,33 +1,38 @@
 use std::{
     cell::{Cell, RefCell},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
-use ::library::{AlbumRow, AlbumView, ArtistView};
+use ::library::{AlbumRow, AlbumView, ArtistView, Row};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
+use localization::{msgid, tr};
+use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 use tracing::warn;
 
+use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
-use crate::widgets::artwork::presentation::add_album_seed_gradient_class;
+use crate::library::route_layout::{
+    DETAIL_SHOWCASE_STACKED_WIDTH as STACKED_WIDTH, detail_showcase_cover_size,
+};
+use crate::menus::media_menus::{CollectionPlay, row_favorite};
 use crate::widgets::artwork::{ArtworkTile, CoverGroupProjection};
-use crate::widgets::controls::{ActionButtonVariant, configure_action_button, icon_button};
-use crate::widgets::controls::{PLAY_LATER_ICON, PLAY_NEXT_ICON};
-use crate::widgets::interactions::{ContextMenuOpen, RADIO_ICON};
+use crate::widgets::cover_controls::{
+    cover_hover_controls_with_favorite, cover_hover_min_width, showcase_cover_overlay,
+};
+use crate::widgets::interactions::ContextMenuOpen;
 use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::localization::bind_label_text_with;
-use localization::tr;
-
-use crate::library::route_layout::detail_showcase_cover_size;
-use crate::menus::media_menus::CollectionPlay;
-use crate::widgets::cover_controls::{
-    CoverHoverControls, cover_hover_controls, cover_play_hover_controls, showcase_cover_overlay,
-};
+use crate::widgets::media_drag::MediaDragSource;
 use rufin_core::route::Route;
 
-const DETAIL_HEADER_SPACING: i32 = 18;
+/// From this width titles take their largest size.
+const LARGE_WIDTH: i32 = 840;
+const GENRE_SPACING: i32 = 6;
+const STEP_BUTTON_SIZE: i32 = 34;
+
 mod showcase_imp {
     use super::*;
 
@@ -35,37 +40,35 @@ mod showcase_imp {
     #[template(resource = "/io/github/screwys/Rufin/ui/routes/detail_showcase.ui")]
     pub struct DetailShowcaseView {
         #[template_child]
-        pub cover_column: TemplateChild<gtk::Box>,
+        pub layers: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub band: TemplateChild<gtk::DrawingArea>,
+        #[template_child]
+        pub body: TemplateChild<gtk::Box>,
         #[template_child]
         pub cover_host: TemplateChild<gtk::Box>,
         #[template_child]
-        pub external_links: TemplateChild<gtk::Box>,
+        pub heading: TemplateChild<gtk::Box>,
         #[template_child]
-        pub metadata: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub text_stack: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub kind_row: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub kind: TemplateChild<gtk::Label>,
-        #[template_child]
-        pub kind_controls: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub genres: TemplateChild<AllocationOwner>,
-        #[template_child]
-        pub genre_row: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub genre_overflow: TemplateChild<gtk::MenuButton>,
-        #[template_child]
-        pub genre_overflow_list: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub title: TemplateChild<gtk::Label>,
+        pub names: TemplateChild<gtk::Box>,
         #[template_child]
         pub title_slide: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
         pub title_viewport: TemplateChild<gtk::Viewport>,
         #[template_child]
+        pub title: TemplateChild<gtk::Label>,
+        #[template_child]
         pub details: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub below: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub facts: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub facts_fade: TemplateChild<crate::widgets::edge_fade::TextFade>,
+        #[template_child]
+        pub facts_slide: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
+        pub facts_viewport: TemplateChild<gtk::Viewport>,
         #[template_child]
         pub summary: TemplateChild<gtk::Box>,
         #[template_child]
@@ -85,13 +88,47 @@ mod showcase_imp {
         #[template_child]
         pub summary_icon_2: TemplateChild<gtk::Image>,
         #[template_child]
-        pub source_link: TemplateChild<gtk::LinkButton>,
-        #[template_child]
-        pub source_link_icon: TemplateChild<gtk::Image>,
-        #[template_child]
         pub summary_label_2: TemplateChild<gtk::Label>,
         #[template_child]
+        pub external_links: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub genres: TemplateChild<AllocationOwner>,
+        #[template_child]
+        pub genre_row: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub genre_overflow: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub genre_overflow_list: TemplateChild<gtk::Box>,
+        #[template_child]
         pub actions: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub play: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub play_text: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub radio: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub favorite: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub download: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub more: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub step_previous: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub step_next: TemplateChild<gtk::Button>,
+        /// The row the header shows, which its buttons act on.
+        pub row: RefCell<Option<Row>>,
+        pub(crate) shell: RefCell<Weak<CatalogUi>>,
+        pub offers_download: Cell<bool>,
+        /// The favorite in the cover's corner on hover; it toggles the same favorite as ♡.
+        pub cover_favorite: RefCell<Option<gtk::Button>>,
+        /// Play's width with its label, to tell whether the label fits again.
+        pub labelled_play: Cell<i32>,
+        /// The band's gradient stops, from the cover once it shows.
+        pub band_stops: Cell<[[u8; 3]; 3]>,
+        /// The shape and width last laid out, to fit the text again when it changes.
+        pub fitted: Cell<Option<(ShowcaseShape, i32)>>,
     }
 
     #[glib::object_subclass]
@@ -125,46 +162,298 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
-impl DetailShowcaseView {
-    pub fn new(
-        route_class: &'static str,
-        seed: u32,
-        kind: &'static str,
-        genre_kind: bool,
-        title: &str,
-    ) -> Self {
-        let view: Self = glib::Object::new();
-        crate::widgets::text_slide::install(
-            &view.imp().title_slide,
-            &view.imp().title_viewport,
-            &view.imp().title,
-        );
-        view.add_css_class("detail-showcase");
-        view.add_css_class(route_class);
-        add_album_seed_gradient_class(&view, seed);
-        bind_label_text_with(&view.imp().kind, move || tr(kind));
-        if genre_kind {
-            view.imp().kind_row.add_css_class("album-detail-genre-row");
+/// How a header lays out: Home's, a detail page's or an artist sub-page's.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShowcaseShape {
+    /// Facts and genres under the band; the cover takes its own row when narrow.
+    Detail,
+    /// Facts on the band and the buttons beside the cover, at every width.
+    Home,
+    /// The band alone.
+    Plain,
+}
+
+impl ShowcaseShape {
+    /// The cover's side at `width`.
+    pub fn cover_size(self, width: i32) -> i32 {
+        ShowcaseLayout::of(self, width).cover
+    }
+}
+
+/// A header's geometry at one width.
+struct ShowcaseLayout {
+    /// The cover in its own row, centred, with the text under it.
+    stacked: bool,
+    band: i32,
+    cover: i32,
+    /// The cover's top edge below the band's.
+    cover_top: i32,
+    inset: i32,
+    /// Between the cover and the text.
+    gap: i32,
+    size_class: &'static str,
+}
+
+impl ShowcaseLayout {
+    fn of(shape: ShowcaseShape, width: i32) -> Self {
+        let narrow = width < STACKED_WIDTH;
+        let size_class = if narrow {
+            "detail-showcase-small"
+        } else if width < LARGE_WIDTH {
+            "detail-showcase-medium"
+        } else {
+            "detail-showcase-large"
+        };
+        let (stacked, band, cover, cover_top, inset, gap) = match (shape, narrow) {
+            (ShowcaseShape::Detail, false) => {
+                (false, 196, detail_showcase_cover_size(width), 68, 24, 28)
+            }
+            (ShowcaseShape::Detail, true) => {
+                (true, 136, detail_showcase_cover_size(width), 24, 16, 22)
+            }
+            // Home leaves room at the sides for ‹ ›.
+            (ShowcaseShape::Home, false) => (
+                false,
+                196,
+                150 + (width - STACKED_WIDTH).min(200) * 46 / 200,
+                52,
+                48,
+                28,
+            ),
+            (ShowcaseShape::Home, true) => (
+                false,
+                150,
+                // Never narrower than its hover controls.
+                ((width - 32) * 3 / 10).clamp(cover_hover_min_width(), 150),
+                38,
+                16,
+                16,
+            ),
+            (ShowcaseShape::Plain, false) => (false, 120, 0, 0, 24, 0),
+            (ShowcaseShape::Plain, true) => (false, 104, 0, 0, 16, 0),
+        };
+        Self {
+            stacked,
+            band,
+            cover,
+            cover_top,
+            inset,
+            gap,
+            size_class,
         }
+    }
+}
+
+/// The cover a header mounts.
+pub enum ShowcaseCover {
+    Single(MediaCoverProjection),
+    /// A playlist's or a genre's covers; a click opens them.
+    Group(CoverGroupProjection, Rc<dyn Fn()>),
+}
+
+impl ShowcaseCover {
+    fn connect_texture(&self, shown: Rc<dyn Fn(&gtk::gdk::Texture)>) {
+        match self {
+            Self::Single(cover) => cover.tile.connect_texture(shown),
+            Self::Group(cover, _) => cover.connect_texture(shown),
+        }
+    }
+
+    fn resize(&self, size: i32) {
+        match self {
+            Self::Single(cover) => cover.resize(size),
+            Self::Group(cover, _) => cover.resize(size),
+        }
+    }
+}
+
+/// What a mounted header shows and does.
+pub struct ShowcaseMount {
+    pub shape: ShowcaseShape,
+    pub initial_width: i32,
+    pub cover: ShowcaseCover,
+    /// The cover's hover Play: "Play album".
+    pub play_label: &'static str,
+    pub play: CollectionPlay,
+    /// The row's menu, from ⋯, the cover's corner and a secondary click.
+    pub menu: ContextMenuOpen,
+    /// Whether Download shows when the row offers it; Home's header has none.
+    pub download: bool,
+}
+
+impl DetailShowcaseView {
+    /// A header titled `title`; its band takes the cover's colours once the cover shows.
+    pub fn new(title: &str) -> Self {
+        let view: Self = glib::Object::new();
+        let imp = view.imp();
+        crate::widgets::text_slide::install(&imp.title_slide, &imp.title_viewport, &*imp.title);
+        // The facts slide as the title does when they are wider than the room.
+        crate::widgets::text_slide::install(&imp.facts_slide, &imp.facts_viewport, &*imp.summary);
+        imp.band_stops.set(::artwork::showcase_band(&[], 0, 0, 0));
+        let weak = view.downgrade();
+        imp.band.set_draw_func(move |_, cairo, width, height| {
+            if let Some(view) = weak.upgrade() {
+                view.paint_band(cairo, f64::from(width), f64::from(height));
+            }
+        });
         view.set_title(title);
         view
     }
 
+    /// The design's band: a 135° gradient through the cover's colours, darkening toward the
+    /// edge the cover overlaps.
+    fn paint_band(&self, cairo: &gtk::cairo::Context, width: f64, height: f64) {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let radius = 8.0_f64.min(height / 2.0);
+        cairo.new_sub_path();
+        cairo.arc(width - radius, radius, radius, -FRAC_PI_2, 0.0);
+        cairo.arc(width - radius, height - radius, radius, 0.0, FRAC_PI_2);
+        cairo.arc(radius, height - radius, radius, FRAC_PI_2, PI);
+        cairo.arc(radius, radius, radius, PI, 3.0 * FRAC_PI_2);
+        cairo.close_path();
+        // CSS places a 135° gradient's ends so the corners are its 0 % and 100 %.
+        let reach = (width + height) / 4.0;
+        let (x, y) = (width / 2.0, height / 2.0);
+        let diagonal = gtk::cairo::LinearGradient::new(x - reach, y - reach, x + reach, y + reach);
+        for (offset, [r, g, b]) in [0.0, 0.58, 1.0]
+            .into_iter()
+            .zip(self.imp().band_stops.get())
+        {
+            diagonal.add_color_stop_rgb(
+                offset,
+                f64::from(r) / 255.0,
+                f64::from(g) / 255.0,
+                f64::from(b) / 255.0,
+            );
+        }
+        let shade = gtk::cairo::LinearGradient::new(0.0, 0.0, 0.0, height);
+        shade.add_color_stop_rgba(0.3, 0.0, 0.0, 0.0, 0.0);
+        shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.3);
+        for source in [&diagonal, &shade] {
+            if cairo.set_source(source).is_err() || cairo.fill_preserve().is_err() {
+                return;
+            }
+        }
+        cairo.new_path();
+    }
+
+    /// Takes the band's colours from `binding`'s artwork, for a header that shows no cover.
+    pub(crate) fn take_band_colours_from(&self, shell: &CatalogUi, binding: ArtworkBinding) {
+        let artwork = Rc::clone(&shell.artwork);
+        let view = self.downgrade();
+        glib::MainContext::ref_thread_default().spawn_local(async move {
+            if let Some(texture) = artwork.load_texture(binding, 64).await
+                && let Some(view) = view.upgrade()
+            {
+                view.take_band_colours(&texture);
+            }
+        });
+    }
+
+    /// Takes the band's colours from the texture the cover shows.
+    fn take_band_colours(&self, texture: &gtk::gdk::Texture) {
+        let mut downloader = gtk::gdk::TextureDownloader::new(texture);
+        downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+        let (pixels, stride) = downloader.download_bytes();
+        let stops = ::artwork::showcase_band(
+            &pixels,
+            texture.width().max(0) as u32,
+            texture.height().max(0) as u32,
+            stride as u32,
+        );
+        let imp = self.imp();
+        if imp.band_stops.replace(stops) != stops {
+            imp.band.queue_draw();
+        }
+    }
+
     pub fn set_title(&self, text: &str) {
         self.imp().title.set_text(text);
+        self.refit();
     }
 
-    pub fn append_kind_control(&self, child: &impl IsA<gtk::Widget>) {
-        self.imp().kind_controls.append(child);
+    /// Adds a line under the title: an album's artist, or the sub-page an artist's band heads.
+    pub fn append_detail(&self, child: &impl IsA<gtk::Widget>) {
+        self.imp().details.set_visible(true);
+        self.imp().details.append(child);
     }
 
-    pub fn clear_kind_controls(&self) {
-        while let Some(child) = self.imp().kind_controls.first_child() {
-            self.imp().kind_controls.remove(&child);
+    /// Adds a fact after the summary's: an artist's album and track counts.
+    pub fn append_fact(&self, child: &impl IsA<gtk::Widget>) {
+        // Buttons (an artist's counts) carry their own boxes; the row around them takes none.
+        self.imp().facts_fade.remove_css_class("detail-facts-boxed");
+        self.imp().summary.append(child);
+    }
+
+    pub fn replace_summary(&self, values: &[(&str, String)]) {
+        let imp = self.imp();
+        let items = [
+            (
+                &imp.summary_item_0,
+                &imp.summary_icon_0,
+                &imp.summary_label_0,
+            ),
+            (
+                &imp.summary_item_1,
+                &imp.summary_icon_1,
+                &imp.summary_label_1,
+            ),
+            (
+                &imp.summary_item_2,
+                &imp.summary_icon_2,
+                &imp.summary_label_2,
+            ),
+        ];
+        let mut shown_before = false;
+        for (index, (item, icon, label)) in items.into_iter().enumerate() {
+            let value = values
+                .get(index)
+                .filter(|(_, text)| summary_value_is_visible(text));
+            if let Some((icon_name, text)) = value {
+                icon.set_icon_name(Some(icon_name));
+                label.set_text(text);
+            }
+            item.set_visible(value.is_some());
+            // A fact after a shown one is divided from it (on Home's band, by a |).
+            if shown_before {
+                item.add_css_class("detail-fact-follows");
+            } else {
+                item.remove_css_class("detail-fact-follows");
+            }
+            shown_before |= value.is_some();
         }
-        self.imp().genres.set_visible(false);
+        if shown_before {
+            imp.facts_fade.add_css_class("detail-facts-boxed");
+        } else {
+            imp.facts_fade.remove_css_class("detail-facts-boxed");
+        }
+        self.refit();
     }
 
+    pub fn bind_summary_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
+        let imp = self.imp();
+        let labels = [
+            &imp.summary_label_0,
+            &imp.summary_label_1,
+            &imp.summary_label_2,
+        ];
+        if let Some(label) = labels.get(index) {
+            bind_label_text_with(label, text);
+        }
+    }
+
+    /// Ends the facts row with `links`: the external sites, or the playlist's source.
+    pub fn replace_external_links(&self, links: Option<gtk::Widget>) {
+        let host = &self.imp().external_links;
+        while let Some(child) = host.first_child() {
+            host.remove(&child);
+        }
+        if let Some(links) = links {
+            host.append(&links);
+        }
+    }
+
+    /// Shows `genres` as chips that fill the width; those that do not fit go under +n.
     pub(crate) fn set_genres<'a>(
         &self,
         shell: &Rc<CatalogUi>,
@@ -181,295 +470,425 @@ impl DetailShowcaseView {
         while let Some(child) = imp.genre_overflow_list.first_child() {
             imp.genre_overflow_list.remove(&child);
         }
-        let mut buttons = Vec::new();
+        let mut chips = Vec::new();
         for (name, key) in genres
             .into_iter()
-            .filter(|(name, _)| !name.trim().is_empty())
+            .map(|(name, key)| (name.trim(), key))
+            .filter(|(name, _)| !name.is_empty())
         {
-            let button = detail_genre_pill_button(name.trim());
+            let chip = genre_chip(name);
             let shell = Rc::downgrade(shell);
-            button.connect_clicked(move |_| {
+            chip.connect_clicked(move |_| {
                 if let Some(shell) = shell.upgrade() {
                     shell.open_route(Route::GenreDetail(key));
                 }
             });
-            imp.genre_overflow_list.append(&button);
-            buttons.push(button);
+            imp.genre_overflow_list.append(&chip);
+            chips.push(chip);
         }
-        imp.genres.set_visible(!buttons.is_empty());
+        imp.genres.set_visible(!chips.is_empty());
         let overflow = imp.genre_overflow.get();
         let row = imp.genre_row.get();
         let popup = imp.genre_overflow_list.get();
         imp.genres.set_width_callback(Some(Rc::new(move |width| {
-            let widths: Vec<_> = buttons
+            let widths: Vec<_> = chips
                 .iter()
-                .map(|button| button.measure(gtk::Orientation::Horizontal, -1).1)
+                .map(|chip| chip.measure(gtk::Orientation::Horizontal, -1).1 + GENRE_SPACING)
                 .collect();
-            let total = widths.iter().sum::<i32>() + 2 * (widths.len() as i32 - 1).max(0);
-            let overflowing = total > width;
-            let available = if overflowing {
-                width - overflow.measure(gtk::Orientation::Horizontal, -1).1 - 2
-            } else {
-                width
+            let fits = |count: usize, reserve: i32| {
+                widths[..count].iter().sum::<i32>() + reserve <= width + GENRE_SPACING
             };
-            let mut used = 0;
-            let count = widths
-                .iter()
-                .take_while(|natural| {
-                    used += **natural + 2;
-                    used - 2 <= available
-                })
-                .count();
-            for (parent, children) in [(&row, &buttons[..count]), (&popup, &buttons[count..])] {
+            let count = if fits(chips.len(), 0) {
+                chips.len()
+            } else {
+                overflow.set_label(&format!("+{}", chips.len()));
+                let reserve = overflow.measure(gtk::Orientation::Horizontal, -1).1 + GENRE_SPACING;
+                (0..chips.len())
+                    .rev()
+                    .find(|count| fits(*count, reserve))
+                    .unwrap_or(0)
+            };
+            for (parent, shown) in [(&row, &chips[..count]), (&popup, &chips[count..])] {
                 let mut previous = None;
-                for button in children {
-                    if button.parent().as_ref() != Some(parent.upcast_ref()) {
-                        if let Some(old) = button.parent().and_downcast::<gtk::Box>() {
-                            old.remove(button);
+                for chip in shown {
+                    if chip.parent().as_ref() != Some(parent.upcast_ref()) {
+                        if let Some(old) = chip.parent().and_downcast::<gtk::Box>() {
+                            old.remove(chip);
                         }
-                        parent.insert_child_after(button, previous);
+                        parent.insert_child_after(chip, previous);
                     }
-                    previous = Some(button);
+                    previous = Some(chip);
                 }
             }
-            overflow.set_visible(overflowing);
+            overflow.set_label(&format!("+{}", chips.len() - count));
+            overflow.set_visible(count < chips.len());
         })));
     }
 
-    pub fn append_detail(&self, child: &impl IsA<gtk::Widget>) {
-        self.imp().details.set_visible(true);
-        self.imp().details.append(child);
+    /// Mounts the header for `row`: its cover with the hover controls, its buttons, and its
+    /// shape at each width.
+    pub(crate) fn mount(
+        &self,
+        shell: &Rc<CatalogUi>,
+        row: Row,
+        mount: ShowcaseMount,
+    ) -> gtk::Widget {
+        let ShowcaseMount {
+            shape,
+            initial_width,
+            cover,
+            play_label,
+            play,
+            menu,
+            download,
+        } = mount;
+        let (controls, cover_favorite) = cover_hover_controls_with_favorite(0, play_label, false);
+        let favorite = self.imp().favorite.downgrade();
+        cover_favorite.connect_clicked(move |_| {
+            if let Some(favorite) = favorite.upgrade() {
+                favorite.emit_clicked();
+            }
+        });
+        self.imp().cover_favorite.replace(Some(cover_favorite));
+        for (button, placement) in [
+            (&controls.play, QueuePlacement::Now),
+            (&controls.play_next, QueuePlacement::Next),
+            (&controls.play_last, QueuePlacement::Last),
+        ] {
+            let play = Rc::clone(&play);
+            button.connect_clicked(move |_| play(placement, false));
+        }
+        let weak = self.downgrade();
+        cover.connect_texture(Rc::new(move |texture| {
+            if let Some(view) = weak.upgrade() {
+                view.take_band_colours(texture);
+            }
+        }));
+        let button = match &cover {
+            ShowcaseCover::Single(cover) => cover.button(),
+            ShowcaseCover::Group(cover, open) => {
+                let button = detail_cover_button(&cover.widget());
+                let open = Rc::clone(open);
+                button.connect_clicked(move |_| open());
+                button
+            }
+        };
+        self.imp().cover_host.append(&showcase_cover_overlay(
+            button.upcast_ref(),
+            controls,
+            Some(Rc::clone(&menu)),
+        ));
+        self.bind_actions(shell, play, menu, download);
+        self.show_row(row);
+        if shape == ShowcaseShape::Home {
+            self.place_facts_on_band();
+        }
+        self.present(shape, initial_width, Some(cover))
     }
 
-    pub fn actions(&self) -> gtk::Box {
-        self.imp().actions.get()
+    /// Mounts a header with only its band: an artist's sub-page.
+    pub fn mount_plain(&self, initial_width: i32) -> gtk::Widget {
+        let imp = self.imp();
+        imp.cover_host.set_visible(false);
+        imp.below.set_visible(false);
+        imp.actions.set_visible(false);
+        self.present(ShowcaseShape::Plain, initial_width, None)
     }
 
-    pub fn replace_summary(&self, values: &[(&str, String)]) {
-        let items = [
-            (
-                self.imp().summary_item_0.get(),
-                self.imp().summary_icon_0.get(),
-                self.imp().summary_label_0.get(),
-            ),
-            (
-                self.imp().summary_item_1.get(),
-                self.imp().summary_icon_1.get(),
-                self.imp().summary_label_1.get(),
-            ),
-            (
-                self.imp().summary_item_2.get(),
-                self.imp().summary_icon_2.get(),
-                self.imp().summary_label_2.get(),
-            ),
-        ];
-        let mut any = false;
-        for (index, (item, icon, label)) in items.into_iter().enumerate() {
-            if let Some((icon_name, text)) = values
-                .get(index)
-                .filter(|(_, text)| summary_value_is_visible(text))
-            {
-                icon.set_icon_name(Some(icon_name));
-                label.set_text(text);
-                item.set_visible(true);
-                any = true;
-            } else {
-                item.set_visible(false);
+    /// Shows `row`'s radio, favorite and downloads in the buttons, which then act on it.
+    pub fn show_row(&self, row: Row) {
+        let imp = self.imp();
+        let Some(shell) = imp.shell.borrow().upgrade() else {
+            return;
+        };
+        let offered = rufin_core::menu::swipes(
+            &shell.products.source,
+            &shell.settings.current.borrow(),
+            &row,
+        );
+        imp.radio.set_visible(offered.radio.is_some());
+        imp.favorite.set_visible(offered.favorite);
+        let cover_favorite = imp.cover_favorite.borrow().clone();
+        if let Some(cover_favorite) = &cover_favorite {
+            // Hover shows and hides it, so a row without a favorite keeps it unmapped.
+            cover_favorite.set_child_visible(offered.favorite);
+        }
+        if let Some((_, favorite)) = row_favorite(&row) {
+            for button in std::iter::once(&*imp.favorite).chain(cover_favorite.as_ref()) {
+                set_favorite_button_active(button, favorite);
             }
         }
-        self.imp().summary.set_visible(any);
-    }
-
-    pub fn set_source_summary(&self, icon: &str, name: &str, uri: Option<&str>) {
-        self.imp().summary_icon_2.set_icon_name(Some(icon));
-        self.imp().summary_icon_2.set_pixel_size(
-            crate::widgets::source_labels::source_icon_pixel_size(icon, 14),
-        );
-        self.imp()
-            .summary_icon_2
-            .update_property(&[gtk::accessible::Property::Label(name)]);
-        self.imp().summary_label_2.set_visible(false);
-        self.imp().summary_item_2.set_tooltip_text(Some(name));
-        self.imp().summary_icon_2.set_visible(uri.is_none());
-        self.imp().source_link.set_visible(uri.is_some());
-        if let Some(uri) = uri {
-            self.imp().source_link.set_uri(uri);
-            self.imp().source_link.set_tooltip_text(Some(name));
-            self.imp()
-                .source_link
-                .update_property(&[gtk::accessible::Property::Label(name)]);
-            self.imp().source_link_icon.set_icon_name(Some(icon));
-            self.imp().source_link_icon.set_pixel_size(
-                crate::widgets::source_labels::source_icon_pixel_size(icon, 14),
-            );
+        let downloaded = offered.remove_download;
+        imp.download
+            .set_visible(imp.offers_download.get() && (offered.download || downloaded));
+        if downloaded {
+            imp.download.add_css_class("active-toggle");
+        } else {
+            imp.download.remove_css_class("active-toggle");
         }
-        self.imp().summary_item_2.set_visible(true);
-        self.imp().summary.set_visible(true);
+        imp.download.set_tooltip_text(Some(&tr(if downloaded {
+            msgid("Remove Downloads")
+        } else {
+            msgid("Download")
+        })));
+        imp.row.replace(Some(row));
+        self.refit();
     }
 
-    pub fn bind_summary_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
-        let labels = [
-            self.imp().summary_label_0.get(),
-            self.imp().summary_label_1.get(),
-            self.imp().summary_label_2.get(),
-        ];
-        if let Some(label) = labels.get(index) {
-            bind_label_text_with(label, text);
+    /// Lays the header out again at its last width, after its text changed.
+    fn refit(&self) {
+        if let Some((shape, width)) = self.imp().fitted.get() {
+            self.apply_layout(&ShowcaseLayout::of(shape, width), shape, width);
         }
     }
 
-    pub fn replace_external_links(&self, links: Option<gtk::Widget>) {
-        while let Some(child) = self.imp().external_links.first_child() {
-            self.imp().external_links.remove(&child);
+    /// Beside the cover: the band tall enough that the title, its line and the facts end above its
+    /// edge.
+    fn fit_text(&self, layout: &ShowcaseLayout, width: i32) {
+        let imp = self.imp();
+        let text_width = (width - 2 * layout.inset - layout.cover - layout.gap).max(1);
+        let text = imp.names.measure(gtk::Orientation::Vertical, text_width).1;
+        let band = layout.band.max(text + 12 + 16);
+        imp.band.set_height_request(band);
+        imp.heading.set_height_request(band - 12);
+        let step_top = (band - STEP_BUTTON_SIZE) / 2;
+        imp.step_previous.set_margin_top(step_top);
+        imp.step_next.set_margin_top(step_top);
+    }
+
+    /// Shows ‹ › at the band's sides while the pointer is over the header, and steps on a
+    /// horizontal touch swipe; both call `step` with whether they go forward.
+    pub fn enable_steps(&self, step: Rc<dyn Fn(bool)>) {
+        let imp = self.imp();
+        for (button, forward) in [(&*imp.step_previous, false), (&*imp.step_next, true)] {
+            let step = Rc::clone(&step);
+            button.connect_clicked(move |_| step(forward));
         }
-        if let Some(links) = links {
-            links.set_halign(gtk::Align::Center);
-            self.imp().external_links.append(&links);
-        }
-        self.imp()
-            .external_links
-            .set_visible(self.imp().external_links.first_child().is_some());
+        let buttons = [imp.step_previous.downgrade(), imp.step_next.downgrade()];
+        let reveal = move |shown: bool| {
+            for button in buttons.iter().filter_map(glib::WeakRef::upgrade) {
+                button.set_visible(shown);
+            }
+        };
+        let motion = gtk::EventControllerMotion::new();
+        let enter = reveal.clone();
+        motion.connect_enter(move |_, _, _| enter(true));
+        motion.connect_leave(move |_| reveal(false));
+        imp.layers.add_controller(motion);
+        // A touch drag that is mostly sideways is the header's; a vertical one scrolls Home.
+        let swipe = gtk::GestureDrag::new();
+        swipe.set_touch_only(true);
+        swipe.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let sideways = Rc::new(Cell::new(false));
+        let decided = Rc::clone(&sideways);
+        swipe.connect_drag_begin(move |_, _, _| decided.set(false));
+        let decided = Rc::clone(&sideways);
+        swipe.connect_drag_update(move |swipe, dx, dy| {
+            if !decided.get() && dx.abs().max(dy.abs()) > 12.0 {
+                if dx.abs() > dy.abs() * 1.5 {
+                    decided.set(true);
+                    swipe.set_state(gtk::EventSequenceState::Claimed);
+                } else {
+                    swipe.set_state(gtk::EventSequenceState::Denied);
+                }
+            }
+        });
+        swipe.connect_drag_end(move |_, dx, _| {
+            if sideways.get() && dx.abs() > 48.0 {
+                step(dx < 0.0);
+            }
+        });
+        imp.layers.add_controller(swipe);
     }
 
-    pub fn add_external_links_class(&self, class: &'static str) {
-        self.imp().external_links.add_css_class(class);
+    fn bind_actions(
+        &self,
+        shell: &Rc<CatalogUi>,
+        play: CollectionPlay,
+        menu: ContextMenuOpen,
+        download: bool,
+    ) {
+        let imp = self.imp();
+        imp.shell.replace(Rc::downgrade(shell));
+        imp.offers_download.set(download);
+        imp.play
+            .connect_clicked(move |_| play(QueuePlacement::Now, false));
+        // The menu hangs from the button row under ⋯: a popover is no child for a button.
+        let row = imp.actions.downgrade();
+        imp.more.connect_clicked(move |button| {
+            let Some(row) = row.upgrade() else {
+                return;
+            };
+            let under = gtk::graphene::Point::new(0.0, button.height() as f32);
+            let point = button
+                .compute_point(&row, &under)
+                .map(|point| (f64::from(point.x()), f64::from(point.y())));
+            menu(row.upcast_ref(), point);
+        });
+        let view = self.downgrade();
+        imp.radio.connect_clicked(move |_| {
+            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+                return;
+            };
+            if let Some(seed) = rufin_core::menu::radio_seed(&row) {
+                shell
+                    .products
+                    .playback
+                    .play_radio(RadioPlayRequest::now(seed));
+            }
+        });
+        let view = self.downgrade();
+        imp.favorite.connect_clicked(move |button| {
+            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+                return;
+            };
+            if let Some((target, _)) = row_favorite(&row) {
+                shell.set_favorite(target, !favorite_button_is_active(button));
+            }
+        });
+        let view = self.downgrade();
+        imp.download.connect_clicked(move |button| {
+            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+                return;
+            };
+            if let Some(target) = rufin_core::view::PlayTarget::of_row(&row) {
+                crate::menus::media_menus::download(
+                    shell.shell(),
+                    &MediaDragSource::capture_target(target),
+                    button.has_css_class("active-toggle"),
+                );
+            }
+        });
     }
 
-    fn attach_cover(&self, cover: &impl IsA<gtk::Widget>) {
-        self.imp().cover_host.append(cover);
+    /// The row the header shows.
+    pub fn row(&self) -> Option<Row> {
+        self.imp().row.borrow().clone()
     }
 
-    fn set_media_layout(&self) {
-        self.add_css_class("detail-showcase-horizontal");
-        self.set_spacing(DETAIL_HEADER_SPACING);
-        self.imp().metadata.set_valign(gtk::Align::Start);
-        self.imp().text_stack.set_spacing(8);
+    /// The page and the row the buttons act on.
+    fn shown(&self) -> Option<(Rc<CatalogUi>, Row)> {
+        let imp = self.imp();
+        Some((imp.shell.borrow().upgrade()?, imp.row.borrow().clone()?))
     }
 
-    fn set_collection_layout(&self, spacing: i32) {
-        self.add_css_class("playlist-detail-showcase");
-        self.set_spacing(spacing);
-        self.imp().metadata.set_valign(gtk::Align::Center);
-        self.imp().text_stack.set_spacing(10);
+    /// Home's facts sit on the band, under the title, with nothing under the band.
+    fn place_facts_on_band(&self) {
+        let imp = self.imp();
+        imp.below.remove(&*imp.facts);
+        imp.names.append(&*imp.facts);
+        imp.facts.set_margin_top(6);
+        imp.facts_fade.add_css_class("detail-facts-pill");
+        imp.below.set_visible(false);
     }
-}
 
-pub struct MediaShowcase {
-    pub view: DetailShowcaseView,
-    pub initial_width: i32,
-    pub cover: MediaCoverProjection,
-    pub cover_controls: CoverHoverControls,
-    pub context_menu: Option<ContextMenuOpen>,
-    pub actions_min_cover_size: Option<i32>,
-}
-
-pub struct CollectionDetailShowcase {
-    pub view: DetailShowcaseView,
-    pub initial_width: i32,
-    pub compact_spacing: i32,
-    pub wide_spacing: i32,
-    pub cover: CoverGroupProjection,
-    pub cover_controls: CoverHoverControls,
-    pub context_menu: Option<ContextMenuOpen>,
-    pub open_cover: Rc<dyn Fn()>,
-}
-
-pub fn media_showcase(config: MediaShowcase) -> gtk::Widget {
-    let view = config.view;
-    view.set_media_layout();
-    view.attach_cover(&showcase_cover_overlay(
-        config.cover.button().upcast_ref(),
-        config.cover_controls,
-        config.context_menu,
-    ));
-    let adaptive_actions = config
-        .actions_min_cover_size
-        .map(|threshold| (view.actions().upcast(), threshold));
-    let presentation = MediaShowcasePresentation {
-        cover_width: Cell::new(0),
-        view: view.clone(),
-        cover: config.cover,
-        adaptive_actions,
-    };
-    presentation.apply_width(config.initial_width);
-    let frame = detail_showcase_frame(view.upcast());
-    width_allocation_owner(&frame, move |width| {
-        presentation.apply_width(width);
-    })
-    .upcast()
-}
-
-struct MediaShowcasePresentation {
-    cover_width: Cell<i32>,
-    view: DetailShowcaseView,
-    cover: MediaCoverProjection,
-    adaptive_actions: Option<(gtk::Widget, i32)>,
-}
-
-impl MediaShowcasePresentation {
-    fn apply_width(&self, width: i32) {
-        if width <= 1 || self.cover_width.replace(width) == width {
-            return;
-        }
-        update_tiny_detail_showcase(&self.view, width);
-        let cover_size = crate::library::route_layout::detail_showcase_cover_size(width);
-        self.view.imp().cover_column.set_width_request(cover_size);
-        self.cover.resize(cover_size);
-        if let Some((actions, threshold)) = self.adaptive_actions.as_ref() {
-            actions.set_visible(cover_size >= *threshold);
-        }
+    fn present(
+        &self,
+        shape: ShowcaseShape,
+        initial_width: i32,
+        cover: Option<ShowcaseCover>,
+    ) -> gtk::Widget {
+        let view = self.clone();
+        let shown = Cell::new(0);
+        let apply = move |width: i32| {
+            if width <= 1 || shown.replace(width) == width {
+                return;
+            }
+            let layout = ShowcaseLayout::of(shape, width);
+            view.apply_layout(&layout, shape, width);
+            if let Some(cover) = &cover {
+                cover.resize(layout.cover);
+            }
+        };
+        apply(initial_width);
+        width_allocation_owner(self, apply).upcast()
     }
-}
 
-pub fn collection_detail_showcase(config: CollectionDetailShowcase) -> gtk::Widget {
-    let view = config.view;
-    view.set_collection_layout(config.wide_spacing);
-    let button = detail_cover_button(&config.cover.widget());
-    button.connect_clicked(move |_| (config.open_cover)());
-    view.attach_cover(&showcase_cover_overlay(
-        button.upcast_ref(),
-        config.cover_controls,
-        config.context_menu,
-    ));
-
-    let presentation = CollectionShowcasePresentation {
-        cover_width: Cell::new(0),
-        view: view.clone(),
-        cover: config.cover,
-        compact_spacing: config.compact_spacing,
-        wide_spacing: config.wide_spacing,
-    };
-    presentation.apply_width(config.initial_width);
-    let frame = detail_showcase_frame(view.upcast());
-    width_allocation_owner(&frame, move |width| {
-        presentation.apply_width(width);
-    })
-    .upcast()
-}
-
-struct CollectionShowcasePresentation {
-    cover_width: Cell<i32>,
-    view: DetailShowcaseView,
-    cover: CoverGroupProjection,
-    compact_spacing: i32,
-    wide_spacing: i32,
-}
-
-impl CollectionShowcasePresentation {
-    fn apply_width(&self, width: i32) {
-        if width <= 1 || self.cover_width.replace(width) == width {
-            return;
-        }
-        update_tiny_detail_showcase(&self.view, width);
-        self.view.set_spacing(
-            if super::playlist_detail::playlist_detail_compact_for_width(width) {
-                self.compact_spacing
+    fn apply_layout(&self, layout: &ShowcaseLayout, shape: ShowcaseShape, width: i32) {
+        let imp = self.imp();
+        for class in [
+            "detail-showcase-small",
+            "detail-showcase-medium",
+            "detail-showcase-large",
+        ] {
+            if class == layout.size_class {
+                self.add_css_class(class);
             } else {
-                self.wide_spacing
-            },
-        );
-        let cover_size = super::playlist_detail::playlist_cover_size(width);
-        self.cover.resize(cover_size);
+                self.remove_css_class(class);
+            }
+        }
+        imp.band.set_height_request(layout.band);
+        // Beside the cover, the title sits on the band, which is always dark; under the cover, the
+        // title and its line are centred on it.
+        if layout.stacked {
+            imp.names.remove_css_class("detail-on-band");
+        } else {
+            imp.names.add_css_class("detail-on-band");
+        }
+        imp.title.set_xalign(if layout.stacked { 0.5 } else { 0.0 });
+        imp.details.set_halign(if layout.stacked {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Fill
+        });
+        imp.body.set_orientation(if layout.stacked {
+            gtk::Orientation::Vertical
+        } else {
+            gtk::Orientation::Horizontal
+        });
+        imp.body.set_spacing(layout.gap);
+        imp.body.set_margin_start(layout.inset);
+        imp.body.set_margin_end(layout.inset);
+        imp.cover_host.set_margin_top(layout.cover_top);
+        imp.cover_host.set_halign(if layout.stacked {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Start
+        });
+        // Beside the cover the title ends just above the band's edge, and the rest starts
+        // just under it.
+        imp.heading
+            .set_height_request(if layout.stacked { -1 } else { layout.band - 12 });
+        imp.below
+            .set_margin_top(if layout.stacked { 10 } else { 24 });
+        imp.actions
+            .set_margin_top(if imp.below.is_visible() { 18 } else { 24 });
+        let step_top = (layout.band - STEP_BUTTON_SIZE) / 2;
+        imp.step_previous.set_margin_top(step_top);
+        imp.step_next.set_margin_top(step_top);
+        // Room under a cover that sits beside the text, so its shadow is not cut.
+        imp.body
+            .set_margin_bottom(if layout.stacked || layout.cover == 0 {
+                0
+            } else {
+                28
+            });
+        // Play gives up its label when the buttons do not fit their room, so ⋯ stays in view.
+        let room = if layout.stacked {
+            width - 2 * layout.inset
+        } else {
+            width - 2 * layout.inset - layout.cover - layout.gap
+        };
+        let play = imp.play.measure(gtk::Orientation::Horizontal, -1).1;
+        if imp.play_text.is_visible() {
+            imp.labelled_play.set(play);
+        }
+        let labelled = imp.actions.measure(gtk::Orientation::Horizontal, -1).1 - play
+            + imp.labelled_play.get()
+            <= room;
+        imp.play_text.set_visible(labelled);
+        if labelled {
+            imp.play.remove_css_class("detail-pill-icon");
+        } else {
+            imp.play.add_css_class("detail-pill-icon");
+        }
+        let tooltip = tr("Play");
+        imp.play
+            .set_tooltip_text((!labelled).then_some(tooltip.as_str()));
+        imp.fitted.set(Some((shape, width)));
+        if !layout.stacked {
+            self.fit_text(layout, width);
+        }
     }
 }
 
@@ -477,95 +896,12 @@ fn summary_value_is_visible(text: &str) -> bool {
     !text.is_empty()
 }
 
-pub fn detail_action_button(icon_name: &str, label: &str) -> gtk::Button {
-    let button = icon_button(icon_name, label);
-    configure_action_button(&button, ActionButtonVariant::DetailAction);
-    button
-}
-
-pub fn detail_primary_action_button(icon_name: &str, label: &str) -> gtk::Button {
-    let button = icon_button(icon_name, label);
-    configure_action_button(&button, ActionButtonVariant::DetailPrimary);
-    button
-}
-
-pub fn detail_radio_button() -> gtk::Button {
-    let button = gtk::Button::new();
+fn genre_chip(label: &str) -> gtk::Button {
+    let button = gtk::Button::with_label(label);
     button.add_css_class("flat");
-    button.add_css_class("detail-kind-radio-button");
-    button.set_halign(gtk::Align::Start);
+    button.add_css_class("detail-genre-chip");
     button.set_valign(gtk::Align::Center);
-    button.set_tooltip_text(Some(&tr("Play radio")));
-    let icon = gtk::Image::from_icon_name(RADIO_ICON);
-    icon.set_pixel_size(16);
-    button.set_child(Some(&icon));
-    button
-}
-
-pub fn detail_playback_controls(
-    actions: &gtk::Box,
-    play_label: &str,
-    favorite_active: Option<bool>,
-    play: CollectionPlay,
-) -> CoverHoverControls {
-    let controls = favorite_active.map_or_else(
-        || cover_play_hover_controls(0, play_label),
-        |favorite| cover_hover_controls(0, play_label, favorite),
-    );
-
-    let primary = detail_primary_action_button(crate::widgets::controls::PLAY_ICON, "Play");
-    connect_collection_play(
-        &primary,
-        Rc::clone(&play),
-        rufin_core::playback::QueuePlacement::Now,
-    );
-    actions.append(&primary);
-
-    for (icon, label, placement, hover) in [
-        (
-            PLAY_NEXT_ICON,
-            "Next",
-            rufin_core::playback::QueuePlacement::Next,
-            controls.play_next.clone(),
-        ),
-        (
-            PLAY_LATER_ICON,
-            "Play Later",
-            rufin_core::playback::QueuePlacement::Last,
-            controls.play_last.clone(),
-        ),
-    ] {
-        let button = detail_action_button(icon, label);
-        connect_collection_play(&button, Rc::clone(&play), placement);
-        actions.append(&button);
-        connect_collection_play(&hover, Rc::clone(&play), placement);
-    }
-    connect_collection_play(
-        &controls.play,
-        play,
-        rufin_core::playback::QueuePlacement::Now,
-    );
-    controls
-}
-
-fn connect_collection_play(
-    button: &gtk::Button,
-    play: CollectionPlay,
-    placement: rufin_core::playback::QueuePlacement,
-) {
-    button.connect_clicked(move |_| play(placement, false));
-}
-
-fn detail_genre_pill_button(label: &str) -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.add_css_class("album-detail-genre-pill");
-    button.set_valign(gtk::Align::Center);
-    button.set_hexpand(false);
     button.set_tooltip_text(Some(label));
-    let text = gtk::Label::new(Some(label));
-    text.set_xalign(0.0);
-    button.set_child(Some(&text));
     button
 }
 
@@ -595,7 +931,7 @@ impl MediaCoverProjection {
         self.tile.set_square_size(size);
     }
 
-    pub fn replace(&self, shell: &Rc<CatalogUi>, candidates: ArtworkBinding) {
+    pub(crate) fn replace(&self, shell: &Rc<CatalogUi>, candidates: ArtworkBinding) {
         self.candidates.replace(candidates.clone());
         shell
             .artwork
@@ -683,27 +1019,37 @@ fn detail_cover_button(cover: &gtk::Widget) -> gtk::Button {
     button
 }
 
-pub fn detail_showcase_frame(header: gtk::Widget) -> gtk::Widget {
-    header.set_hexpand(true);
-    header.set_halign(gtk::Align::Fill);
-    header.set_width_request(1);
-    header
-}
-
-fn update_tiny_detail_showcase(widget: &DetailShowcaseView, width: i32) {
-    if width < 520 {
-        widget.add_css_class("detail-showcase-tiny");
-    } else {
-        widget.remove_css_class("detail-showcase-tiny");
+/// A playlist's source at the end of its facts: a link to it on its server, or its icon.
+pub fn source_link(shell: &CatalogUi, icon: &str, name: &str, uri: Option<String>) -> gtk::Widget {
+    let row = detail_external_link_row();
+    let button = detail_link_button(icon, name);
+    button.update_property(&[gtk::accessible::Property::Label(name)]);
+    match uri {
+        Some(uri) => connect_web_link(&button, shell.chrome.window.downgrade(), uri),
+        None => button.set_can_target(false),
     }
+    row.append(&button);
+    row.upcast()
 }
 
-pub fn fit_detail_text(label: &gtk::Label, text: &str) {
-    let count = text.chars().count();
-    if count >= 42 {
-        label.add_css_class("detail-text-very-long");
-    } else if count >= 24 {
-        label.add_css_class("detail-text-long");
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responsive_detail_artwork_covers_every_presented_size() {
+        let render = detail_cover_render_size();
+        for shape in [ShowcaseShape::Detail, ShowcaseShape::Home] {
+            for width in [240, 360, 520, 560, 760, 1_200, i32::MAX] {
+                assert!(render >= shape.cover_size(width));
+            }
+        }
+    }
+
+    #[test]
+    fn empty_summary_values_hide_the_icon_and_text() {
+        assert!(!summary_value_is_visible(""));
+        assert!(summary_value_is_visible("0"));
     }
 }
 
@@ -763,25 +1109,6 @@ fn detail_external_links(
         }
     }
     row.first_child().is_some().then(|| row.upcast())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn responsive_detail_artwork_covers_every_presented_size() {
-        let render = detail_cover_render_size();
-        for width in [240, 360, 520, 760, 1_200, i32::MAX] {
-            assert!(render >= detail_showcase_cover_size(width));
-        }
-    }
-
-    #[test]
-    fn empty_summary_values_hide_the_icon_and_text() {
-        assert!(!summary_value_is_visible(""));
-        assert!(summary_value_is_visible("0"));
-    }
 }
 
 fn detail_external_link_row() -> gtk::Box {

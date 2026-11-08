@@ -44,10 +44,15 @@
       "source": "source ID",
       "library": "library ID, or null for All Music"
     },
-    "GET /api/home?source=...": "Home sections in the app's order with the app's titles: the visible blocks in their configured order, with the server's own sections right after the Showcase. Each section lists its tracks, then its albums. You can set folder, or block to read one block's section.",
+    "GET /api/home?source=...": "Home sections in the app's order with the app's titles: the visible blocks in their configured order, with the server's own sections right after the Showcase. Each section lists its tracks, then its albums; the Showcase lists the album before the one it shows, that album, and the album after. You can set folder, or block to read one block's section.",
     "POST /api/home": {
       "source": "source ID",
       "block": "Explore | MostPlayed | NewlyAdded | RecentlyPlayed | RecentlyReleased"
+    },
+    "POST /api/home/showcase": {
+      "source": "source ID",
+      "forward": "true for the next album, false for the one before",
+      "returns": "rows: the album before the one now shown, that album, and the album after; empty without albums. Home reads show it from then on."
     },
     "GET /api/appearance": "The app's theme and colors.",
     "POST /api/sources": "Connect, save and select a source, then scan its music in the background. Returns the source ID after selection. Follow /api/sources/events for scan progress. See source_setup for examples.",

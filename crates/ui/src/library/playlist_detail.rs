@@ -10,7 +10,6 @@ use localization::{msgid, track_count_text};
 use crate::library::CatalogUi;
 use crate::library::routes::PageReads;
 use crate::library::{LibraryListKey, LibraryListSettings};
-use crate::widgets::artwork::presentation::stable_seed;
 use crate::widgets::mounted_route::MountedRoute;
 use crate::widgets::view_model::Rows;
 use rufin_core::settings::presentation::format_duration_units;
@@ -18,19 +17,14 @@ use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    CollectionDetailShowcase, DetailShowcaseView, collection_detail_showcase,
-    detail_playback_controls, detail_radio_button,
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, source_link,
 };
 use crate::library::route_layout::{
-    DETAIL_SHOWCASE_METADATA_MIN_WIDTH, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
+    PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_showcase_cover_size,
 };
 use crate::menus::media_menus::present_row_menu;
 use crate::widgets::library_fields::playlist_artwork;
 use library::PlaylistListRow;
-
-const PLAYLIST_DETAIL_COMPACT_WIDTH: i32 = 760;
-const PLAYLIST_DETAIL_TINY_COVER_SIZE: i32 = 150;
-const PLAYLIST_DETAIL_WIDE_COVER_SIZE: i32 = 208;
 
 #[derive(Clone, PartialEq)]
 enum PlaylistDetailOwner {
@@ -85,13 +79,6 @@ impl PlaylistDetailOwner {
         }
     }
 
-    fn seed(&self) -> u32 {
-        match self {
-            Self::Saved { summary, .. } => stable_seed(&summary.object_id),
-            Self::Smart { summary, .. } => stable_seed(&summary.object_id),
-        }
-    }
-
     fn track_count(&self) -> i64 {
         match self {
             Self::Saved { summary, .. } => summary.track_count,
@@ -138,24 +125,44 @@ impl PlaylistDetailOwner {
         })
     }
 
-    fn install_context(
-        &self,
-        shell: &Rc<CatalogUi>,
-        target: &gtk::Widget,
-        play: CollectionPlay,
-        position: Option<(f64, f64)>,
-    ) {
-        let row = match self {
+    /// The row its menu and header buttons act on.
+    fn row(&self) -> library::Row {
+        library::Row::Playlist(match self {
             Self::Saved { summary, .. } => PlaylistListRow::Playlist(summary.clone()),
             Self::Smart { summary, .. } => PlaylistListRow::SmartPlaylist(summary.clone()),
-        };
-        present_row_menu(
-            target,
-            shell.shell(),
-            library::Row::Playlist(row),
-            Some(play),
-            position,
-        );
+        })
+    }
+
+    /// Its facts: tracks and duration.
+    fn summary(&self) -> [(&'static str, String); 2] {
+        [
+            (
+                "rufin-tracks-symbolic",
+                track_count_text(self.track_count().max(0) as u64),
+            ),
+            (
+                "rufin-preferences-system-time-symbolic",
+                format_duration_units((self.duration_millis().max(0) / 1_000) as u32),
+            ),
+        ]
+    }
+
+    /// Its source at the end of the facts.
+    fn source(&self, shell: &CatalogUi) -> gtk::Widget {
+        let (icon, name) = self.source_label(shell);
+        source_link(shell, icon, &name, self.source_url(shell))
+    }
+
+    /// A saved playlist's genres.
+    fn genres(&self) -> Vec<(&str, library::GenreKey)> {
+        match self {
+            Self::Saved { summary, .. } => summary
+                .genres
+                .iter()
+                .map(|genre| (genre.name.as_str(), genre.genre_key))
+                .collect(),
+            Self::Smart { .. } => Vec::new(),
+        }
     }
 }
 
@@ -307,39 +314,15 @@ impl CatalogUi {
         let artwork = owner.artwork();
         let cover = self.artwork.cover_group_projection_for_artwork(
             &artwork,
-            playlist_cover_size(width),
-            playlist_cover_size(i32::MAX),
+            ShowcaseShape::Detail.cover_size(width),
+            detail_showcase_cover_size(i32::MAX),
             false,
         );
         cover.widget().add_css_class("playlist-detail-cover");
-        let showcase_view = DetailShowcaseView::new(
-            "playlist-detail-showcase",
-            owner.seed(),
-            "Playlist",
-            true,
-            owner.name(),
-        );
-        self.append_playlist_detail_kind_controls(&showcase_view, &owner);
-        showcase_view.replace_summary(&[
-            (
-                "rufin-tracks-symbolic",
-                track_count_text(owner.track_count().max(0) as u64),
-            ),
-            (
-                "rufin-preferences-system-time-symbolic",
-                format_duration_units((owner.duration_millis().max(0) / 1_000) as u32),
-            ),
-        ]);
-        let (source_icon, source_name) = owner.source_label(self);
-        showcase_view.set_source_summary(
-            source_icon,
-            &source_name,
-            owner.source_url(self).as_deref(),
-        );
-        let actions = showcase_view.actions();
-        actions.set_halign(gtk::Align::Start);
-        let controls =
-            detail_playback_controls(&actions, msgid("Play playlist"), None, Rc::clone(&play));
+        let showcase_view = DetailShowcaseView::new(owner.name());
+        showcase_view.replace_summary(&owner.summary());
+        showcase_view.replace_external_links(Some(owner.source(self)));
+        showcase_view.set_genres(self, owner.genres());
         if let PlaylistDetailOwner::Saved { summary, .. } = &owner
             && summary.writable
         {
@@ -381,31 +364,37 @@ impl CatalogUi {
         let menu_shell = Rc::clone(self);
         let menu_owner = Rc::clone(&owner_state);
         let menu_play = Rc::clone(&play);
-        let context_menu = Rc::new(move |target: &gtk::Widget, position| {
-            menu_owner.borrow().install_context(
-                &menu_shell,
+        let menu = Rc::new(move |target: &gtk::Widget, position| {
+            let row = menu_owner.borrow().row();
+            present_row_menu(
                 target,
-                Rc::clone(&menu_play),
+                menu_shell.shell(),
+                row,
+                Some(Rc::clone(&menu_play)),
                 position,
             );
         });
-        let showcase = collection_detail_showcase(CollectionDetailShowcase {
-            view: showcase_view.clone(),
-            initial_width: width,
-            compact_spacing: 20,
-            wide_spacing: 28,
-            cover: cover.clone(),
-            cover_controls: controls,
-            context_menu: Some(context_menu),
-            open_cover: {
-                let shell = Rc::clone(self);
-                let owner = Rc::clone(&owner_state);
-                Rc::new(move || {
-                    let artwork = owner.borrow().artwork();
-                    shell.present_full_artwork_group(artwork);
-                })
+        let open_cover = {
+            let shell = Rc::clone(self);
+            let owner = Rc::clone(&owner_state);
+            Rc::new(move || {
+                let artwork = owner.borrow().artwork();
+                shell.present_full_artwork_group(artwork);
+            })
+        };
+        let showcase = showcase_view.mount(
+            self,
+            owner.row(),
+            ShowcaseMount {
+                shape: ShowcaseShape::Detail,
+                initial_width: width,
+                cover: ShowcaseCover::Group(cover.clone(), open_cover),
+                play_label: msgid("Play playlist"),
+                play: Rc::clone(&play),
+                menu,
+                download: true,
             },
-        });
+        );
         wrapper.append(&library_route_inset(showcase));
         wrapper.append(&tracks_widget);
 
@@ -423,24 +412,11 @@ impl CatalogUi {
                     return;
                 }
                 showcase.set_title(next.name());
-                showcase.replace_summary(&[
-                    (
-                        "rufin-tracks-symbolic",
-                        track_count_text(next.track_count().max(0) as u64),
-                    ),
-                    (
-                        "rufin-preferences-system-time-symbolic",
-                        format_duration_units((next.duration_millis().max(0) / 1_000) as u32),
-                    ),
-                ]);
-                let (source_icon, source_name) = next.source_label(&shell);
-                showcase.set_source_summary(
-                    source_icon,
-                    &source_name,
-                    next.source_url(&shell).as_deref(),
-                );
+                showcase.replace_summary(&next.summary());
+                showcase.replace_external_links(Some(next.source(&shell)));
+                showcase.set_genres(&shell, next.genres());
+                showcase.show_row(next.row());
                 cover.replace(&shell.artwork, &next.artwork());
-                shell.append_playlist_detail_kind_controls(&showcase, &next);
                 owner.replace(next);
             }) as Rc<dyn Fn(Option<library::Header>)>
         };
@@ -469,83 +445,11 @@ impl CatalogUi {
             .with_rows(&rows)
             .with_header(move || Some(owner_state.borrow().header()), apply_owner)
     }
-
-    fn append_playlist_detail_kind_controls(
-        self: &Rc<Self>,
-        showcase: &DetailShowcaseView,
-        owner: &PlaylistDetailOwner,
-    ) {
-        showcase.clear_kind_controls();
-        if let PlaylistDetailOwner::Saved { key, .. } = owner {
-            let radio = detail_radio_button();
-            let controller = self.products.playback.clone();
-            let key = *key;
-            radio.connect_clicked(move |_| {
-                controller.play_radio(rufin_core::playback::RadioPlayRequest::now(
-                    library::RadioSeed::Playlist(key),
-                ));
-            });
-            showcase.append_kind_control(&radio);
-        }
-        if let PlaylistDetailOwner::Saved { summary, .. } = owner {
-            showcase.set_genres(
-                self,
-                summary
-                    .genres
-                    .iter()
-                    .map(|genre| (genre.name.as_str(), genre.genre_key)),
-            );
-        }
-    }
-}
-
-pub fn playlist_cover_size(width: i32) -> i32 {
-    if width < DETAIL_SHOWCASE_METADATA_MIN_WIDTH {
-        width.clamp(96, PLAYLIST_DETAIL_TINY_COVER_SIZE)
-    } else if playlist_detail_compact_for_width(width) {
-        PLAYLIST_DETAIL_TINY_COVER_SIZE
-            + ((width - DETAIL_SHOWCASE_METADATA_MIN_WIDTH)
-                * (PLAYLIST_DETAIL_WIDE_COVER_SIZE - PLAYLIST_DETAIL_TINY_COVER_SIZE)
-                / (PLAYLIST_DETAIL_COMPACT_WIDTH - DETAIL_SHOWCASE_METADATA_MIN_WIDTH))
-    } else {
-        PLAYLIST_DETAIL_WIDE_COVER_SIZE
-    }
-}
-
-pub fn playlist_detail_compact_for_width(width: i32) -> bool {
-    width < PLAYLIST_DETAIL_COMPACT_WIDTH
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn playlist_cover_respects_checkpoint_breakpoints() {
-        assert_eq!(playlist_cover_size(359), PLAYLIST_DETAIL_TINY_COVER_SIZE);
-        assert_eq!(playlist_cover_size(420), PLAYLIST_DETAIL_TINY_COVER_SIZE);
-        assert_eq!(playlist_cover_size(760), PLAYLIST_DETAIL_WIDE_COVER_SIZE);
-    }
-
-    #[test]
-    fn mounted_detail_covers_track_width_without_resize_jumps() {
-        let media_limit = crate::library::route_layout::detail_showcase_cover_size(i32::MAX);
-        let collection_limit = playlist_cover_size(i32::MAX);
-        let mut previous_media = crate::library::route_layout::detail_showcase_cover_size(96);
-        let mut previous_collection = playlist_cover_size(96);
-        for width in 97..=900 {
-            let media = crate::library::route_layout::detail_showcase_cover_size(width);
-            let collection = playlist_cover_size(width);
-            assert!(media >= previous_media && media - previous_media <= 1);
-            assert!(collection >= previous_collection && collection - previous_collection <= 1);
-            assert!(media <= media_limit);
-            assert!(collection <= collection_limit);
-            assert!(media <= width);
-            assert!(collection <= width);
-            previous_media = media;
-            previous_collection = collection;
-        }
-    }
 
     #[test]
     fn provider_playlist_cover_is_not_nested_inside_representative_mosaic() {

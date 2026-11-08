@@ -136,7 +136,7 @@ private fun SearchResults(
         val searchFlow = remember(browse) { snapshotFlow { browse.searchRows }.map { PagingData.from(it, LOADED) } }
         val rows = searchFlow.collectAsLazyPagingItems()
         BrowseContent(rows, emptyList(), player, false, false, false, browse::open, onMenu,
-            { _, _ -> }, browse::refreshSection, browse::favorite, onPlaylist, onScrolled,
+            { _, _ -> }, browse::favorite, onPlaylist, onScrolled,
             loading = browse.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
         return
     }

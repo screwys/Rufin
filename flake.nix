@@ -50,7 +50,6 @@
                 ./resources/icons/hicolor
                 ./resources/io.github.screwys.Rufin.desktop
                 ./resources/io.github.screwys.Rufin.metainfo.xml
-                ./resources/showcase.css
                 ./resources/themes
                 ./locales
                 ./web

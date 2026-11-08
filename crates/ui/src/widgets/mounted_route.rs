@@ -48,7 +48,8 @@ pub type RouteCurrentTrackSelection = Rc<dyn Fn(Option<&RouteCurrentTrack>) -> b
 pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
-pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
+/// Shows a new read of Home's page in the Home already shown.
+pub type MountedHomePageApply = Rc<dyn Fn(std::sync::Arc<rufin_core::view::View>)>;
 /// Shows a committed change in what a route shows outside its rows and header.
 pub type MountedStates =
     Rc<dyn Fn(&rufin_core::source::feed::Changed, Option<&rufin_core::view::View>)>;

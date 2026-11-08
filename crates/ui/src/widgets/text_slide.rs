@@ -32,7 +32,8 @@ pub fn new_label() -> (gtk::Widget, gtk::Label) {
 struct Slide {
     scroll: glib::WeakRef<gtk::ScrolledWindow>,
     viewport: glib::WeakRef<gtk::Viewport>,
-    label: glib::WeakRef<gtk::Label>,
+    /// What slides: a label, or a row of them (a header's facts).
+    content: glib::WeakRef<gtk::Widget>,
     tick: RefCell<Option<gtk::TickCallbackId>>,
     started: Cell<Option<i64>>,
     completed: Cell<bool>,
@@ -50,16 +51,16 @@ impl Slide {
 
     fn reset(self: &Rc<Self>) {
         self.stop();
-        let (Some(scroll), Some(label)) = (self.scroll.upgrade(), self.label.upgrade()) else {
+        let (Some(scroll), Some(content)) = (self.scroll.upgrade(), self.content.upgrade()) else {
             return;
         };
-        if label.has_focus() {
+        if content.has_focus() {
             return;
         }
         let adjustment = scroll.hadjustment();
         let overflow = (adjustment.upper() - adjustment.page_size()).max(0.0);
-        let rtl = label.direction() == gtk::TextDirection::Rtl;
-        let metrics = label.pango_context().metrics(None, None);
+        let rtl = content.direction() == gtk::TextDirection::Rtl;
+        let metrics = content.pango_context().metrics(None, None);
         let pixels_per_second =
             f64::from(metrics.height()) / f64::from(gtk::pango::SCALE) * FONT_HEIGHTS_PER_SECOND;
         adjustment.set_value(if rtl { overflow } else { 0.0 });
@@ -86,7 +87,7 @@ impl Slide {
                 let Some(state) = weak.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
-                if let Some(label) = state.label.upgrade() {
+                if let Some(label) = state.content.upgrade().and_downcast::<gtk::Label>() {
                     align_glyphs(&label);
                 }
                 let start = state.started.get().unwrap_or_else(|| {
@@ -122,35 +123,46 @@ impl Slide {
     }
 
     fn sync(self: &Rc<Self>) {
-        let (Some(scroll), Some(viewport), Some(label)) = (
+        let (Some(scroll), Some(viewport), Some(content)) = (
             self.scroll.upgrade(),
             self.viewport.upgrade(),
-            self.label.upgrade(),
+            self.content.upgrade(),
         ) else {
             return;
         };
         let animate = scroll.settings().is_gtk_enable_animations();
-        align_glyphs(&label);
-        label.set_ellipsize(if animate {
-            gtk::pango::EllipsizeMode::None
-        } else {
-            gtk::pango::EllipsizeMode::End
-        });
+        let label = content.downcast_ref::<gtk::Label>();
+        if let Some(label) = label {
+            align_glyphs(label);
+            label.set_ellipsize(if animate {
+                gtk::pango::EllipsizeMode::None
+            } else {
+                gtk::pango::EllipsizeMode::End
+            });
+        }
         viewport.set_hscroll_policy(if animate {
             gtk::ScrollablePolicy::Natural
         } else {
             gtk::ScrollablePolicy::Minimum
         });
-        scroll.set_tooltip_text(Some(&label.text()));
+        if let Some(label) = label {
+            scroll.set_tooltip_text(Some(&label.text()));
+        }
         self.reset();
     }
 }
 
-pub fn install(scroll: &gtk::ScrolledWindow, viewport: &gtk::Viewport, label: &gtk::Label) {
+/// Slides `content` (a label, or a row of them) inside `scroll` when it is wider than the room.
+pub fn install(
+    scroll: &gtk::ScrolledWindow,
+    viewport: &gtk::Viewport,
+    content: &impl IsA<gtk::Widget>,
+) {
+    let content = content.as_ref();
     let state = Rc::new(Slide {
         scroll: scroll.downgrade(),
         viewport: viewport.downgrade(),
-        label: label.downgrade(),
+        content: content.downgrade(),
         tick: RefCell::new(None),
         started: Cell::new(None),
         completed: Cell::new(false),
@@ -163,13 +175,16 @@ pub fn install(scroll: &gtk::ScrolledWindow, viewport: &gtk::Viewport, label: &g
             state.reset();
         }
     });
-    let weak = Rc::downgrade(&state);
-    label.connect_label_notify(move |_| {
-        if let Some(state) = weak.upgrade() {
-            state.completed.set(false);
-            state.sync();
-        }
-    });
+    // A label's new text slides again; a row's change shows in the adjustment above.
+    if let Some(label) = content.downcast_ref::<gtk::Label>() {
+        let weak = Rc::downgrade(&state);
+        label.connect_label_notify(move |_| {
+            if let Some(state) = weak.upgrade() {
+                state.completed.set(false);
+                state.sync();
+            }
+        });
+    }
     let motion = gtk::EventControllerMotion::new();
     let weak = Rc::downgrade(&state);
     motion.connect_enter(move |_, _, _| {
@@ -181,7 +196,7 @@ pub fn install(scroll: &gtk::ScrolledWindow, viewport: &gtk::Viewport, label: &g
     });
     scroll.add_controller(motion);
     let weak = Rc::downgrade(&state);
-    label.connect_has_focus_notify(move |_| {
+    content.connect_has_focus_notify(move |_| {
         if let Some(state) = weak.upgrade() {
             state.reset();
         }

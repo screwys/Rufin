@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.activity
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
@@ -74,8 +76,8 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                     }
                 }
                 Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!more.yearly, { more.chooseYearly(false) }, label = { Text(translate("Month")) })
-                    FilterChip(more.yearly, { more.chooseYearly(true) }, label = { Text(translate("Year")) })
+                    ChoiceChip(!more.yearly, { more.chooseYearly(false) }, label = { Text(translate("Month")) })
+                    ChoiceChip(more.yearly, { more.chooseYearly(true) }, label = { Text(translate("Year")) })
                 }
                 if (more.reportLoading && report != null) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (more.reportError != null) ErrorRow(translate("Could not load listening overview"), translate("Retry"), more::retryOverview)

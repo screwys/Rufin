@@ -150,7 +150,7 @@ impl<'a> Shown<'a> {
         products: &ProductHandles,
         settings: &rufin_core::settings::app::Settings,
         list: &page::PageToken,
-        view: &rufin_core::view::View,
+        view: Option<&rufin_core::view::View>,
         row: Row,
         art: bool,
         title: Option<String>,
@@ -160,7 +160,7 @@ impl<'a> Shown<'a> {
         form: &'a Form,
     ) -> Self {
         let menu = rufin_core::menu::menu(&products.source, settings, &row);
-        let mut data = row_data(products, &row, art, &menu, list, Some(view));
+        let mut data = row_data(products, &row, art, &menu, list, view);
         if let Some(title) = &title {
             data[if matches!(row, Row::Tag(_)) {
                 "name"
@@ -346,22 +346,183 @@ impl<'a> Shown<'a> {
                 .finish()
         )
     }
+}
 
-    fn palette(&self) -> u32 {
-        let id = match &self.row {
-            Row::Album(album) | Row::AlbumHeading(album) => album.object_id.as_str(),
-            _ => "",
+/// A showcase: Home's, or a detail page's header. A gradient band with the cover over its
+/// edge, the title, the facts, the genres and the buttons.
+struct Head<'a> {
+    row: Shown<'a>,
+    home: bool,
+    /// An album's artist, under its title.
+    artist: bool,
+    facts: Vec<(&'static str, String)>,
+    /// Each genre's name and the page it opens.
+    genres: Vec<(String, String)>,
+    /// The band's gradient stops, from the cover's preview.
+    band: String,
+}
+
+impl<'a> Head<'a> {
+    fn new(
+        products: &ProductHandles,
+        settings: &rufin_core::settings::app::Settings,
+        scope: &page::PageToken,
+        row: Row,
+        title: Option<String>,
+        home: bool,
+        form: &'a Form,
+    ) -> Self {
+        use library::GenreKey;
+        let row = Shown::new(
+            products,
+            settings,
+            scope,
+            None,
+            row,
+            true,
+            title,
+            &[],
+            0,
+            "media-menu-showcase".to_owned(),
+            form,
+        );
+        let genre = |(name, key): (&str, GenreKey)| {
+            let page = scope.at(rufin_core::route::Route::GenreDetail(key));
+            (name.to_owned(), page.json())
         };
-        let seed = id.bytes().fold(0x811c9dc5u32, |seed, byte| {
-            seed.wrapping_mul(16777619) ^ u32::from(byte)
-        });
-        (seed ^ seed.rotate_left(13) ^ seed.rotate_right(9)) % 16
+        let (facts, genres): (Vec<_>, Vec<_>) = match &row.row {
+            Row::Album(album) | Row::AlbumHeading(album) => (
+                [
+                    (row.year() > 0)
+                        .then(|| ("rufin-x-office-calendar-symbolic", row.year().to_string())),
+                    Some(("rufin-tracks-symbolic", row.track_count())),
+                    Some((
+                        "rufin-preferences-system-time-symbolic",
+                        row.long_duration(),
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+                album
+                    .links
+                    .genres
+                    .iter()
+                    .map(|link| genre((&link.name, link.genre_key)))
+                    .collect(),
+            ),
+            Row::Artist(artist) => (
+                vec![
+                    (
+                        "rufin-albums-symbolic",
+                        localization::album_count_text(artist.summary.album_count.max(0) as u64),
+                    ),
+                    ("rufin-tracks-symbolic", row.track_count()),
+                ],
+                Vec::new(),
+            ),
+            other => (
+                vec![
+                    ("rufin-tracks-symbolic", row.track_count()),
+                    (
+                        "rufin-preferences-system-time-symbolic",
+                        row.long_duration(),
+                    ),
+                ],
+                match other {
+                    Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist
+                        .genres
+                        .iter()
+                        .map(|link| genre((&link.name, link.genre_key)))
+                        .collect(),
+                    _ => Vec::new(),
+                },
+            ),
+        };
+        let allow_external = settings.application.external_metadata_enabled;
+        let [first, middle, last] = row
+            .summary()
+            .and_then(|shown| shown.artwork.first().copied())
+            .and_then(|binding| {
+                products
+                    .artwork
+                    .preview(artwork::ArtworkBinding::opaque(binding), allow_external)
+            })
+            .map_or_else(
+                || artwork::showcase_band(&[], 0, 0, 0),
+                |preview| {
+                    let image = &preview.image;
+                    artwork::showcase_band(
+                        image.rgba(),
+                        image.width(),
+                        image.height(),
+                        image.row_stride(),
+                    )
+                },
+            )
+            .map(|[r, g, b]| format!("rgb({r} {g} {b})"));
+        Self {
+            artist: matches!(row.row, Row::Album(_) | Row::AlbumHeading(_)),
+            row,
+            home,
+            facts,
+            genres,
+            band: format!("--band-start: {first}; --band-middle: {middle}; --band-end: {last}"),
+        }
     }
+}
+
+/// The header of the page `header` opens.
+fn header_row(header: &library::Header) -> Row {
+    match header {
+        library::Header::Album(album) => Row::Album(album.row.clone()),
+        library::Header::Artist(artist) => Row::Artist(artist.row.clone()),
+        library::Header::Tag(tag) => Row::Tag(tag.clone()),
+        library::Header::Playlist(playlist) => {
+            Row::Playlist(PlaylistListRow::Playlist((**playlist).clone()))
+        }
+        library::Header::Smart(smart) => {
+            Row::Playlist(PlaylistListRow::SmartPlaylist((**smart).clone()))
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "showcase.html")]
+struct ShowcaseFragment<'a> {
+    head: Option<Head<'a>>,
+}
+
+/// Home's showcase at `showcase`, as the step that landed there answers it.
+pub(super) fn showcase(
+    products: &ProductHandles,
+    scope: &page::PageToken,
+    showcase: Option<&library::HomeShowcase>,
+    form: &Form,
+) -> Result<String, Error> {
+    let settings = products.settings.load();
+    ShowcaseFragment {
+        head: showcase.map(|showcase| {
+            Head::new(
+                products,
+                &settings,
+                scope,
+                Row::Album(showcase.current.album.clone()),
+                Some(showcase.current.title.clone()),
+                true,
+                form,
+            )
+        }),
+    }
+    .render()
+    .map_err(internal)
 }
 
 #[derive(Template)]
 #[template(path = "library.html")]
 struct Library<'a> {
+    /// The page's header, with its first rows.
+    head: Option<Head<'a>>,
     rows: Vec<Shown<'a>>,
     /// A track list's columns: its list's row fields. Track rows carry no artwork, so an
     /// Image field shows no column.
@@ -413,7 +574,7 @@ pub(super) fn library(
                 products,
                 &settings,
                 token,
-                &opened.view,
+                Some(&opened.view),
                 row.clone(),
                 true,
                 None,
@@ -428,6 +589,17 @@ pub(super) fn library(
     let list = token.list();
     let header = opened.header.as_ref();
     Library {
+        head: header.filter(|_| opened.offset == 0).map(|header| {
+            Head::new(
+                products,
+                &settings,
+                token,
+                header_row(header),
+                Some(page::title(products, token, Some(header))),
+                false,
+                form,
+            )
+        }),
         rows,
         columns: fields
             .iter()
@@ -463,7 +635,8 @@ pub(super) fn library(
             Some(library::Header::Playlist(playlist)) => playlist.name.clone(),
             _ => String::new(),
         },
-        play: opened.view.members().is_some(),
+        // A page with a header plays from its header.
+        play: opened.view.members().is_some() && header.is_none(),
         writable: matches!(header, Some(library::Header::Playlist(playlist)) if playlist.writable),
         playlists: token.route == rufin_core::route::Route::Playlists,
         missed: missed_text(opened),
@@ -475,7 +648,11 @@ pub(super) fn library(
 struct Section<'a> {
     block: String,
     title: String,
+    /// The showcase's header; other sections show rows.
+    head: Option<Head<'a>>,
     rows: Vec<Shown<'a>>,
+    /// The rows each column shows: two rows, or one card.
+    column_rows: usize,
 }
 
 #[derive(Template)]
@@ -521,8 +698,26 @@ pub(super) fn home(
                 } else {
                     block.clone()
                 };
+                if let rufin_core::view::HomeSection::Showcase(showcase) = section {
+                    return Section {
+                        title: section.title(),
+                        head: Some(Head::new(
+                            products,
+                            &settings,
+                            token,
+                            Row::Album(showcase.current.album.clone()),
+                            Some(showcase.current.title.clone()),
+                            true,
+                            form,
+                        )),
+                        rows: Vec::new(),
+                        column_rows: 1,
+                        block,
+                    };
+                }
                 Section {
                     title: section.title(),
+                    head: None,
                     rows: page::home_rows(section)
                         .into_iter()
                         .enumerate()
@@ -531,10 +726,9 @@ pub(super) fn home(
                                 products,
                                 &settings,
                                 token,
-                                &opened.view,
+                                Some(&opened.view),
                                 row,
-                                // Genre chips show their names only.
-                                block != "Genres",
+                                true,
                                 Some(title),
                                 fields,
                                 index,
@@ -543,6 +737,7 @@ pub(super) fn home(
                             )
                         })
                         .collect(),
+                    column_rows: if section.shows_rows() { 2 } else { 1 },
                     block,
                 }
             })
@@ -592,15 +787,6 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/session", post(login))
         .route("/session/logout", post(logout))
         .route("/translations.js", get(translations))
-        .route(
-            "/showcase.css",
-            get(|| async {
-                asset(
-                    "text/css; charset=utf-8",
-                    include_bytes!("../../../resources/showcase.css").as_slice(),
-                )
-            }),
-        )
         .route("/icons/{name}", get(icon))
         .route("/source-icons/{kind}", get(source_icon))
         .route("/{file}", get(web_file))

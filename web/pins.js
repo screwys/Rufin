@@ -32,7 +32,7 @@ let covers;
 function pinAction(pin) {
   const pinned = pins.some((shown) => JSON.stringify(shown) === JSON.stringify(pin));
   return [
-    pinned ? tr("Remove from Pins") : tr("Add to Pins"),
+    pinned ? tr("Remove from Saved") : tr("Add to Saved"),
     () => api("/pins", "POST", { pin, pinned: !pinned }),
     pinned ? "rufin-list-remove-symbolic" : "rufin-list-add-symbolic",
   ];

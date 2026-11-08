@@ -36,7 +36,7 @@ import androidx.compose.ui.Modifier
 import io.github.screwys.rufin.core.translate
 
 internal enum class MoreDestination(val title: String) {
-    Root("More"), Overview("Listening overview"), OverviewSettings("Listening overview"),
+    Root("Settings"), Overview("Listening overview"), OverviewSettings("Listening overview"),
     Versions("Version History"), Troubleshooting("Troubleshooting"),
     General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"),
     Playback("Playback"), Equalizer("Equalizer"), Library("Library"), Downloads("Downloads"),
@@ -44,8 +44,9 @@ internal enum class MoreDestination(val title: String) {
     Routes("Library"), Lyrics("Lyrics"), Visualizer("Visualizer"), DownloadSettings("Downloads"),
     BackupSettings("Backup Settings"), HomeSettings("Home Blocks");
 
+    // The sidebar's ☰ menu opens Settings and these three pages directly.
     val parent get() = when (this) {
-        Root -> null
+        Root, Overview, Versions, Troubleshooting -> null
         Routes, HomeSettings -> Customization
         Lyrics, Visualizer -> Playback
         BackupSettings -> Privacy
@@ -78,11 +79,6 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
     when (visible) {
         MoreDestination.Root -> SettingsPage {
             SettingsGroup {
-                SettingsLink("rufin-activity-overview-symbolic", translate("Listening overview")) { navigate(MoreDestination.Overview) }
-                SettingsLink("rufin-appointment-new-symbolic", translate("Version History")) { navigate(MoreDestination.Versions) }
-                SettingsLink("rufin-utilities-terminal-symbolic", translate("Troubleshooting")) { navigate(MoreDestination.Troubleshooting) }
-            }
-            SettingsGroup(translate("Settings")) {
                 SettingsLink("rufin-preferences-system-symbolic", translate("General")) { navigate(MoreDestination.General) }
                 SettingsLink("rufin-sliders-2-symbolic", translate("Customization")) { navigate(MoreDestination.Customization) }
                 SettingsLink("rufin-preferences-desktop-appearance-symbolic", translate("Theme")) { navigate(MoreDestination.Theme) }

@@ -121,6 +121,7 @@ fn routes() -> Router<ProductHandles> {
             "/api/home",
             list_route("home", (0, 0)).post(catalog::refresh_home),
         )
+        .route("/api/home/showcase", post(catalog::step_showcase))
         .route("/api/tracks", list_route("tracks", (100, 256)))
         .route("/api/albums", list_route("albums", (100, 128)))
         .route(
@@ -337,6 +338,10 @@ async fn queue_play(
         index: Option<usize>,
         anchor_uri: Option<String>,
         anchor_entry: Option<library::PlaylistEntryKey>,
+        /// Home's section to play, by its place among the page's sections.
+        section: Option<usize>,
+        #[serde(default)]
+        shuffled: bool,
         #[serde(flatten)]
         parameters: HashMap<String, Value>,
     }
@@ -398,21 +403,27 @@ async fn queue_play(
                 .map(|key| (key, Some(entry))),
             (None, Some(_), _) => return Err(gone()),
         };
-        match (anchor, input.ranges) {
+        match (anchor, input.ranges, input.section) {
+            (_, _, Some(section)) => page::open(products, token, 0, 0).await?.view.play_section(
+                section,
+                placement,
+                input.shuffled,
+            ),
             // Selected rows play in the page's order; an insert queues them or the page as GTK's
             // drop does.
-            (_, ranges) if insert || ranges.is_some() => page::selection(products, token, ranges)
-                .await?
-                .map(|selection| rufin_core::playback::PlayRequest::tracks(selection, placement)),
+            (_, ranges, None) if insert || ranges.is_some() => {
+                page::selection(products, token, ranges)
+                    .await?
+                    .map(|selection| {
+                        rufin_core::playback::PlayRequest::tracks(selection, placement)
+                    })
+            }
             // A page without a track plays whole, as its header and the card that opens it do.
-            (None, _) => Some(page::play(products, &token, placement).await?),
-            (Some((key, entry)), _) => page::open(products, token, 0, 0).await?.view.play_track(
-                key,
-                entry,
-                input.index.unwrap_or(0),
-                placement,
-                false,
-            ),
+            (None, _, None) => Some(page::play(products, &token, placement).await?),
+            (Some((key, entry)), _, None) => page::open(products, token, 0, 0)
+                .await?
+                .view
+                .play_track(key, entry, input.index.unwrap_or(0), placement, false),
         }
         .ok_or_else(gone)?
     };

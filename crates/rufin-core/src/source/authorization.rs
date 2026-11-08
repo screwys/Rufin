@@ -408,3 +408,23 @@ impl SourceAuthorization {
         }
     }
 }
+
+/// What a server address the user is typing may mean, for a list under the field: with
+/// `https://` first, then `http://`, while it names no scheme yet. Nothing while the field is
+/// empty, already has a scheme, or is the start of one.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn address_suggestions(typed: &str) -> Vec<String> {
+    let typed = typed.trim();
+    if typed.is_empty()
+        || typed.contains("://")
+        || ["https://", "http://"]
+            .iter()
+            .any(|scheme| scheme.starts_with(typed))
+    {
+        return Vec::new();
+    }
+    ["https://", "http://"]
+        .iter()
+        .map(|scheme| format!("{scheme}{typed}"))
+        .collect()
+}

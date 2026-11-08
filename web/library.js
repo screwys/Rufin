@@ -13,7 +13,7 @@ import {
   bindHoverControls,
 } from "./ui.js";
 
-import { api, fragment, session, state } from "./connection.js";
+import { api, browserHeaders, fragment, session, state } from "./connection.js";
 
 import {
   closeMenus,
@@ -70,7 +70,7 @@ async function loadLibrary(token, extra, signal, initialPage, at) {
   content.append(after);
   let total = null, pageHeight = 1, lastHeight = null, pending = null;
   libraryTotal = total;
-  let header = null, timer, resize;
+  let header = null, showcase = null, timer, resize;
   signal.addEventListener("abort", () => {
     clearTimeout(timer);
     resize?.disconnect();
@@ -90,7 +90,7 @@ async function loadLibrary(token, extra, signal, initialPage, at) {
   const logicalPosition = () => scrollPosition() * ratio();
   const targetPage = () => Math.min(Math.max(0, pageCount() - 1), Math.floor(logicalPosition() / pageHeight));
   const layout = () => {
-    content.style.minHeight = `${extent() + (header?.getBoundingClientRect().height || 0)}px`;
+    content.style.minHeight = `${extent() + (header?.getBoundingClientRect().height || 0) + (showcase?.getBoundingClientRect().height || 0)}px`;
     const ordered = [...pages.values()].sort((a, b) => a.start - b.start);
     let previous = before;
     for (const page of ordered) {
@@ -150,6 +150,15 @@ async function loadLibrary(token, extra, signal, initialPage, at) {
         content.prepend(header);
       }
       if (header) content.setAttribute("aria-rowcount", total + 1);
+      // The page's header comes with its first rows and stays above the list.
+      const lifted = node.querySelector(".detail-showcase");
+      if (lifted) {
+        showcase?.remove();
+        showcase = lifted;
+        content.prepend(showcase);
+        bindCard(showcase);
+        loadCardCovers(content, signal);
+      }
       node.hidden = false;
       const page = { start, node, remove, count };
       pages.set(start, page);
@@ -216,7 +225,7 @@ async function loadLibrary(token, extra, signal, initialPage, at) {
     await loadPage(start);
   }
   // What the page showed before stays until these rows replace it.
-  const kept = new Set([before, after, header, pages.get(start).node]);
+  const kept = new Set([before, after, header, showcase, pages.get(start).node]);
   for (const node of [...content.children]) if (!kept.has(node)) node.remove();
   measure();
   layout();
@@ -650,7 +659,12 @@ function init() {
 }
 
 function bindCards(host) {
-  for (const card of host.querySelectorAll("[data-row][data-kind]")) {
+  for (const card of host.querySelectorAll("[data-row][data-kind]")) bindCard(card);
+}
+
+function bindCard(card) {
+  {
+    const host = card.parentElement;
     bindHoverControls(card);
     const row = mediaRow(card),
       kind = card.dataset.kind;
@@ -680,7 +694,6 @@ function bindCards(host) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite(row, kind),
         ]);
-      if (options.pin) actions.push(pinAction(options.pin));
       // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
       if (options.export && kind === "playlist")
         actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
@@ -701,6 +714,8 @@ function bindCards(host) {
         ]);
       const destination = options.go_to && goToMenu(row);
       if (destination) actions.push(null, destination);
+      // The pin closes the menu, as on GTK and Android.
+      if (options.pin) actions.push(pinAction(options.pin));
       showMenu(actions, anchor, event);
     };
     card.addEventListener("click", (event) => {
@@ -710,6 +725,9 @@ function bindCards(host) {
       const action = button.dataset.action;
       run(() => {
         if (action === "open") return open();
+        if (action === "genre") return navigate(JSON.parse(button.dataset.page));
+        if (action === "genres") return genreMenu(card, button);
+        if (action === "step-showcase") return stepShowcase(card, button.dataset.forward === "true");
         if (action === "link") return openLinks(row, button.dataset.field, button);
         if (action === "favorite") return setFavorite(row, kind);
         if (action === "radio") return playRadio(row.menu.radio);
@@ -740,7 +758,47 @@ function bindCards(host) {
       event.preventDefault();
       run(() => menu(card, event));
     });
+    const genres = card.querySelector(".detail-genres");
+    if (genres) new ResizeObserver(() => fitGenres(genres)).observe(genres);
   }
+}
+
+// Genre chips fill the row; those that do not fit go under the last chip's +n.
+function fitGenres(row) {
+  const chips = [...row.querySelectorAll('[data-action="genre"]')];
+  const more = row.querySelector(".detail-genre-more");
+  chips.forEach((chip) => (chip.hidden = false));
+  more.hidden = true;
+  const fits = () => row.scrollWidth <= row.clientWidth;
+  if (fits()) return;
+  more.hidden = false;
+  for (let shown = chips.length - 1; shown >= 0 && !fits(); shown--) {
+    chips[shown].hidden = true;
+    more.textContent = `+${chips.length - shown}`;
+  }
+}
+
+function genreMenu(card, anchor) {
+  const hidden = [...card.querySelectorAll('[data-action="genre"][hidden]')];
+  showMenu(hidden.map((chip) => [chip.textContent, () => navigate(JSON.parse(chip.dataset.page))]), anchor);
+}
+
+// Steps Home's showcase; the header core answers slides in from the side it went to.
+async function stepShowcase(head, forward) {
+  const response = await fetch("/api/home/showcase", {
+    method: "POST",
+    headers: { ...browserHeaders(), "Content-Type": "application/json", "HX-Request": "true" },
+    body: JSON.stringify({ source: state.source, forward }),
+  });
+  if (!response.ok) throw new Error(tr("Request failed ({status})", { status: response.status }));
+  const template = document.createElement("template");
+  template.innerHTML = (await response.text()).trim();
+  const next = template.content.querySelector(".detail-showcase");
+  if (!next) return head.remove();
+  next.classList.add(forward ? "slide-next" : "slide-previous");
+  head.replaceWith(next);
+  bindCard(next);
+  loadCardCovers(next.parentElement, session.signal);
 }
 
 const requestedCovers = new WeakSet();
@@ -754,7 +812,7 @@ function cardCover(kind, row) {
 }
 
 function loadCardCovers(host, signal) {
-  const cards = [...host.querySelectorAll(".album-card:not([hidden])")].filter(
+  const cards = [...host.querySelectorAll(".album-card:not([hidden]), .detail-showcase")].filter(
     (card) => !requestedCovers.has(card),
   );
   cards.forEach((card) => requestedCovers.add(card));
@@ -789,49 +847,31 @@ function bindHome(signal, offsets) {
       loadCardCovers(section, signal);
       continue;
     }
-    let offset = offsets.get(section.dataset.block) || 0;
-    const layout = () => {
-      const columns = getComputedStyle(body.firstElementChild).gridTemplateColumns.split(" ").length;
-      const cards = body.querySelectorAll(".album-card");
-      offset = Math.min(
-        offset,
-        Math.max(0, Math.floor((cards.length - 1) / columns) * columns),
-      );
-      cards.forEach((card, index) => {
-        card.hidden = index < offset || index >= offset + columns;
-      });
-      section.querySelector('[data-action="previous-home"]').disabled =
-        offset === 0;
-      section.querySelector('[data-action="next-home"]').disabled =
-        offset + columns >= cards.length;
-      section.dataset.offset = offset;
-      loadCardCovers(section, signal);
-      return columns;
+    // ‹ › scroll the row by about its width and rest at its ends; a reread keeps its place.
+    const previous = section.querySelector('[data-action="previous-home"]');
+    const next = section.querySelector('[data-action="next-home"]');
+    const ends = () => {
+      previous.disabled = body.scrollLeft <= 0;
+      next.disabled = body.scrollLeft + body.clientWidth >= body.scrollWidth - 1;
+      section.dataset.offset = body.scrollLeft;
     };
-    section.querySelector('[data-action="previous-home"]').onclick = () => {
-      offset = Math.max(0, offset - layout());
-      layout();
-    };
-    section.querySelector('[data-action="next-home"]').onclick = () => {
-      offset += layout();
-      layout();
-    };
-    const refresh = section.querySelector('[data-action="refresh-home"]');
-    if (refresh)
-      refresh.onclick = () =>
-        run(async () => {
-          refresh.disabled = true;
-          // A change it commits reads Home again at this block's start.
-          offset = 0;
-          layout();
-          try {
-            await api("/home", "POST", { source: state.source, block: section.dataset.block }, signal);
-          } finally {
-            if (!signal.aborted) refresh.disabled = false;
-          }
-        });
-    layout();
-    layouts.push(layout);
+    body.scrollLeft = offsets.get(section.dataset.block) || 0;
+    body.addEventListener("scroll", ends, { passive: true, signal });
+    for (const [button, sign] of [[previous, -1], [next, 1]])
+      button.onclick = () => body.scrollBy({ left: sign * body.clientWidth * 0.9, behavior: "smooth" });
+    loadCardCovers(section, signal);
+    for (const [action, shuffled] of [["play-home", false], ["shuffle-home", true]])
+      section.querySelector(`[data-action="${action}"]`).onclick = () =>
+        run(() =>
+          api("/queue", "POST", {
+            mode: "replace",
+            page: JSON.parse($("content").querySelector("[data-page]").dataset.page),
+            section: Number(section.dataset.index),
+            shuffled,
+          }),
+        );
+    ends();
+    layouts.push(ends);
   }
   homeObserver = new ResizeObserver(() =>
     layouts.forEach((layout) => layout()),

@@ -27,6 +27,11 @@ pub fn cover_hover_transport_spacing(cover_width: i32) -> i32 {
     available_spacing.clamp(COVER_TRANSPORT_COMPACT_GAP, COVER_TRANSPORT_REGULAR_GAP)
 }
 
+/// The narrowest cover whose hover controls still fit inside it.
+pub fn cover_hover_min_width() -> i32 {
+    cover_hover_transport_width(COVER_TRANSPORT_COMPACT_GAP) + COVER_CORNER_HORIZONTAL_INSET * 2
+}
+
 pub struct CoverHoverControls {
     pub shade: gtk::Box,
     pub transport: gtk::Box,
@@ -157,14 +162,6 @@ pub fn showcase_cover_overlay(
     controls.add_to_overlay(&overlay);
     controls.connect_hover(&overlay);
     overlay
-}
-
-pub fn cover_hover_controls(
-    size: i32,
-    play_label: &str,
-    favorite_active: bool,
-) -> CoverHoverControls {
-    cover_hover_controls_with_favorite(size, play_label, favorite_active).0
 }
 
 pub fn cover_hover_controls_with_favorite(

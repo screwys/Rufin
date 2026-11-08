@@ -3,70 +3,61 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
-use library::{HomeAlbumRow, HomeProviderSection, RadioSeed, TagRow};
-use localization::{album_count_text, msgid, tr, track_count_text};
-use rufin_core::playback::RadioPlayRequest;
+use gtk::glib;
+use library::{HomeAlbumRow, HomeProviderSection};
+use localization::{msgid, track_count_text};
 
-use crate::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
-};
 use crate::library::CatalogUi;
-use crate::widgets::artwork::presentation::stable_seed;
-use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::layout::{configure_fill_width_clip, width_allocation_owner};
-use crate::widgets::localization::{bind_label_text_with, localized_label};
+use crate::widgets::interactions::ContextMenuOpen;
+use crate::widgets::layout::{AllocationOwner, allocation_owner, configure_fill_width_clip};
 use crate::widgets::mounted_route::MountedRoute;
+use rufin_core::settings::HomeBlockKind;
 use rufin_core::settings::presentation::format_duration_units;
-use rufin_core::settings::{HomeBlockKind, HomeSectionKind};
-use rufin_core::view::{HomeItem, HomeSection};
+use rufin_core::view::{HomeItem, HomeSection, View};
+use std::sync::Arc;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    DetailShowcaseView, MediaShowcase, detail_playback_controls, detail_radio_button,
-    home_album_cover_projection, media_showcase,
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, home_album_cover_projection,
 };
-use super::grid_cells::{
-    AlbumGridCell, FixedPageCollectionRow, ReusableCollectionGridCell, TrackGridCell,
-    collection_grid_column_count, fixed_page_collection_row,
-};
+use super::grid_cells::{AlbumGridCell, MediaPlayingBinding, ReusableCollectionGridCell};
 use crate::library::home_layout::home_section_header;
 use crate::menus::media_menus::present_row_menu;
 
 use crate::library::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
+use crate::widgets::controls::install_row_transport_controls;
 use crate::widgets::detail_links::DetailLinkBinding;
-use crate::widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, TrackPresentation};
+use crate::widgets::interactions::{CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers};
+use crate::widgets::library_fields::COLLECTION_GRID_CARD_MARGIN;
+use crate::widgets::selection::PlayTarget;
+use artwork::ArtworkBinding;
+use rufin_core::playback::QueuePlacement;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::album_row_artist_links;
 
-const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
-
-type HomeItemBinding = Rc<dyn Fn(HomeItem)>;
+type HomeRowBinding = Rc<dyn Fn(library::Row)>;
 
 #[derive(Clone)]
 struct MountedHomeSection {
-    data: Rc<RefCell<Vec<HomeItem>>>,
-    model: gio::ListStore,
-    row: FixedPageCollectionRow,
-    previous: glib::WeakRef<gtk::Button>,
-    next: glib::WeakRef<gtk::Button>,
-    page_start: Rc<Cell<usize>>,
-    page_size: Rc<Cell<usize>>,
-    cells: Rc<RefCell<Vec<(u32, HomeItemBinding)>>>,
+    shell: std::rc::Weak<CatalogUi>,
+    data: Rc<RefCell<Vec<library::Row>>>,
+    /// The scrolling row of entries.
+    row: gtk::Box,
+    /// Each shown entry's binding, in the order of `data`.
+    cells: Rc<RefCell<Vec<HomeRowBinding>>>,
+    /// The rows each column shows; 1 for cards.
+    column_rows: usize,
 }
 
 impl MountedHomeSection {
-    fn replace(&self, items: Vec<HomeItem>) {
+    fn replace(&self, items: Vec<library::Row>) {
         let same_order = {
             let previous = self.data.borrow();
             previous.len() == items.len()
                 && previous.iter().zip(&items).all(|(a, b)| match (a, b) {
-                    (HomeItem::Track(a), HomeItem::Track(b)) => {
-                        a.track.media_uri == b.track.media_uri
-                    }
-                    (HomeItem::Album(a), HomeItem::Album(b)) => {
-                        a.album.media_uri == b.album.media_uri
-                    }
+                    (library::Row::Track(a), library::Row::Track(b)) => a.media_uri == b.media_uri,
+                    (library::Row::Album(a), library::Row::Album(b)) => a.media_uri == b.media_uri,
+                    (library::Row::Tag(a), library::Row::Tag(b)) => a.key == b.key,
                     _ => false,
                 })
         };
@@ -86,28 +77,42 @@ impl MountedHomeSection {
         self.render();
     }
 
+    /// Builds the row's columns: cards, or columns of rows.
     fn render(&self) {
-        let data = self.data.borrow();
-        let page_size = self.page_size.get().max(1);
-        let page_start = clamped_page_start(self.page_start.get(), page_size, data.len());
-        let page_end = page_start.saturating_add(page_size).min(data.len());
-        let additions = data[page_start..page_end]
-            .iter()
-            .cloned()
-            .map(glib::BoxedAnyObject::new)
-            .collect::<Vec<_>>();
-        self.cells.borrow_mut().clear();
-        self.model.splice(0, self.model.n_items(), &additions);
-        self.page_start.set(page_start);
-        if let Some(previous) = self.previous.upgrade() {
-            previous.set_sensitive(page_start > 0);
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        while let Some(child) = self.row.first_child() {
+            self.row.remove(&child);
         }
-        if let Some(next) = self.next.upgrade() {
-            next.set_sensitive(page_end < data.len());
+        let mut cells = self.cells.borrow_mut();
+        cells.clear();
+        for items in self.data.borrow().chunks(self.column_rows) {
+            let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            for item in items.iter().cloned() {
+                let (cell, bind) = match item {
+                    library::Row::Album(album) if self.column_rows == 1 => {
+                        home_album_card(&shell, album)
+                    }
+                    item => home_row_widget(&shell, item),
+                };
+                cells.push(bind);
+                column.append(&cell);
+            }
+            let width = if self.column_rows == 1 {
+                CARD_WIDTH
+            } else {
+                ROW_COLUMN_WIDTH
+            };
+            self.row.append(&column);
+            // The scroller measures its row with no width, but a card's square cover follows its
+            // width: the column takes the height its content has at its own width.
+            let height = column.measure(gtk::Orientation::Vertical, width).1;
+            column.set_size_request(width, height);
         }
     }
 
-    fn update(&self, mut update: impl FnMut(&mut HomeItem) -> bool) {
+    fn update(&self, mut update: impl FnMut(&mut library::Row) -> bool) {
         let changed = {
             let mut data = self.data.borrow_mut();
             data.iter_mut()
@@ -121,7 +126,7 @@ impl MountedHomeSection {
     }
 
     /// Shows `item` at `position`.
-    fn set(&self, position: usize, item: HomeItem) {
+    fn set(&self, position: usize, item: library::Row) {
         match self.data.borrow_mut().get_mut(position) {
             Some(shown) => *shown = item.clone(),
             None => return,
@@ -129,44 +134,40 @@ impl MountedHomeSection {
         self.bind(position, item);
     }
 
-    /// Binds `item` to the cell that shows `position`, if one does.
-    fn bind(&self, position: usize, item: HomeItem) {
-        let bind = self
-            .cells
-            .borrow()
-            .iter()
-            .find(|(cell, _)| self.page_start.get().saturating_add(*cell as usize) == position)
-            .map(|(_, bind)| Rc::clone(bind));
+    /// Binds `item` to the entry that shows `position`.
+    fn bind(&self, position: usize, item: library::Row) {
+        let bind = self.cells.borrow().get(position).cloned();
         if let Some(bind) = bind {
             bind(item);
         }
     }
+}
 
-    fn shift(&self, next: bool) {
-        let page_size = self.page_size.get().max(1);
-        if next {
-            if self.page_start.get().saturating_add(page_size) < self.data.borrow().len() {
-                self.page_start
-                    .set(self.page_start.get().saturating_add(page_size));
-            }
-        } else {
-            self.page_start
-                .set(self.page_start.get().saturating_sub(page_size));
-        }
-        self.render();
-    }
+const CARD_WIDTH: i32 = 160;
+const CARD_GAP: i32 = 10;
+const ROW_COLUMN_WIDTH: i32 = 300;
+const ROW_COLUMN_GAP: i32 = 20;
+const ROW_COVER_SIZE: i32 = 52;
 
-    fn fit_width(&self, width: i32) {
-        if width <= 1 {
-            return;
-        }
-        let page_size = collection_grid_column_count(width);
-        if self.page_size.replace(page_size) == page_size {
-            return;
-        }
-        self.row.set_page_size(page_size);
-        self.render();
-    }
+/// The rows each column of `section` shows: two rows, or one card.
+fn column_rows(section: &HomeSection) -> usize {
+    if section.shows_rows() { 2 } else { 1 }
+}
+
+/// Scrolls `scroller` forward or back by the whole columns, `stride` apart, that fit its width, as
+/// Home's ‹ › do.
+fn scroll_page(scroller: &gtk::ScrolledWindow, stride: f64, forward: bool) {
+    let adjustment = scroller.hadjustment();
+    let columns = (adjustment.page_size() / stride).floor().max(1.0);
+    let first = (adjustment.value() / stride).round();
+    let to = ((first + if forward { columns } else { -columns }) * stride).clamp(
+        adjustment.lower(),
+        adjustment.upper() - adjustment.page_size(),
+    );
+    let target = adw::PropertyAnimationTarget::new(&adjustment, "value");
+    let scroll = adw::TimedAnimation::new(scroller, adjustment.value(), to, 250, target);
+    scroll.set_easing(adw::Easing::EaseOutCubic);
+    scroll.play();
 }
 
 #[derive(Clone)]
@@ -194,18 +195,239 @@ fn home_section_id(section: &HomeSection) -> HomeSectionId {
     }
 }
 
-/// A shown Home section: a row of items, or a widget built from the section it shows.
+/// A shown Home section: a page of items, or the showcase.
 #[derive(Clone)]
 enum ShownHomeSection {
     Rows(HomeSectionView),
-    Built(gtk::Widget, HomeSection),
+    Showcase(HomeShowcaseView),
 }
 
 impl ShownHomeSection {
     fn root(&self) -> &gtk::Widget {
         match self {
             Self::Rows(view) => &view.root,
-            Self::Built(widget, _) => widget,
+            Self::Showcase(view) => &view.0.root,
+        }
+    }
+}
+
+/// Home's showcase: one header at a time, sliding to the album before or after it.
+#[derive(Clone)]
+struct HomeShowcaseView(Rc<HomeShowcaseState>);
+
+struct HomeShowcaseState {
+    shell: std::rc::Weak<CatalogUi>,
+    root: gtk::Widget,
+    stack: gtk::Stack,
+    shown: RefCell<library::HomeShowcase>,
+    /// The visible header.
+    page: RefCell<DetailShowcaseView>,
+    /// A step sent to core whose read has not come back, and whether it went forward.
+    pending: Cell<Option<bool>>,
+}
+
+impl HomeShowcaseView {
+    fn new(shell: &Rc<CatalogUi>, showcase: library::HomeShowcase) -> Self {
+        let stack = gtk::Stack::new();
+        stack.set_hexpand(true);
+        stack.set_vhomogeneous(false);
+        stack.set_interpolate_size(true);
+        stack.set_transition_duration(260);
+        // A finished slide leaves only the header it slid to.
+        stack.connect_transition_running_notify(remove_hidden_pages);
+        Self(Rc::new_cyclic(
+            |state: &std::rc::Weak<HomeShowcaseState>| {
+                let (widget, page) = home_showcase_page(shell, &showcase.current, step_with(state));
+                stack.add_child(&widget);
+                let root = allocation_owner(&stack, |_, _| {});
+                let step = step_with(state);
+                install_touch_slide(&root, move |forward| step(forward));
+                HomeShowcaseState {
+                    shell: Rc::downgrade(shell),
+                    root: root.upcast(),
+                    stack,
+                    shown: RefCell::new(showcase),
+                    page: RefCell::new(page),
+                    pending: Cell::new(None),
+                }
+            },
+        ))
+    }
+
+    /// The album shown.
+    fn current(&self) -> HomeAlbumRow {
+        self.0.shown.borrow().current.clone()
+    }
+
+    /// Shows a committed change of the shown album: its favorite and downloads.
+    fn show_current(&self, row: HomeAlbumRow) {
+        self.0
+            .page
+            .borrow()
+            .show_row(library::Row::Album(row.album.clone()));
+        self.0.shown.borrow_mut().current = row;
+    }
+
+    /// Shows a new read: the album shown keeps its header, another one slides in.
+    fn show(&self, next: library::HomeShowcase) {
+        let state = &self.0;
+        let pending = state.pending.take();
+        let uri = |row: &HomeAlbumRow| row.album.media_uri.clone();
+        let (same, beside) = {
+            let shown = state.shown.borrow();
+            let beside = if uri(&shown.next) == uri(&next.current) {
+                Some(true)
+            } else if uri(&shown.previous) == uri(&next.current) {
+                Some(false)
+            } else {
+                None
+            };
+            (uri(&shown.current) == uri(&next.current), beside)
+        };
+        if same {
+            self.show_current(next.current.clone());
+            state.shown.replace(next);
+            return;
+        }
+        let current = next.current.clone();
+        state.shown.replace(next);
+        self.slide(&current, pending.or(beside));
+    }
+
+    /// Steps the showcase: the album beside it slides in at once, and the showcase core
+    /// answers follows.
+    fn step(&self, forward: bool) {
+        let state = &self.0;
+        let Some(source_id) = state.shell.upgrade().and_then(|shell| {
+            shell
+                .selected_library()
+                .map(|selected| selected.source_id.clone())
+        }) else {
+            return;
+        };
+        if state.pending.get().is_none() {
+            let beside = {
+                let shown = state.shown.borrow();
+                let beside = if forward {
+                    &shown.next
+                } else {
+                    &shown.previous
+                };
+                (beside.album.media_uri != shown.current.album.media_uri).then(|| beside.clone())
+            };
+            if let Some(album) = beside {
+                state.shown.borrow_mut().current = album.clone();
+                self.slide(&album, Some(forward));
+            }
+        }
+        state.pending.set(Some(forward));
+        let Some(shell) = state.shell.upgrade() else {
+            return;
+        };
+        let answer = shell.products.source.step_showcase(source_id, forward);
+        let view = Rc::downgrade(&self.0);
+        glib::spawn_future_local(async move {
+            if let Ok(Ok(Some(showcase))) = answer.recv().await
+                && let Some(state) = view.upgrade()
+            {
+                HomeShowcaseView(state).show(showcase);
+            }
+        });
+    }
+
+    /// Slides `album`'s header in: from the right going forward, from the left going back.
+    fn slide(&self, album: &HomeAlbumRow, forward: Option<bool>) {
+        let state = &self.0;
+        let Some(shell) = state.shell.upgrade() else {
+            return;
+        };
+        let (widget, page) = home_showcase_page(&shell, album, step_with(&Rc::downgrade(&self.0)));
+        state.stack.set_transition_type(match forward {
+            Some(true) => gtk::StackTransitionType::SlideLeft,
+            Some(false) => gtk::StackTransitionType::SlideRight,
+            None => gtk::StackTransitionType::Crossfade,
+        });
+        state.stack.add_child(&widget);
+        state.stack.set_visible_child(&widget);
+        state.page.replace(page);
+        if !state.stack.is_transition_running() {
+            remove_hidden_pages(&state.stack);
+        }
+    }
+}
+
+/// The step a header's ‹ › call.
+/// Moves the showcase in `owner` with a horizontal touch drag and settles when the finger lifts:
+/// past a fifth of its width it calls `step(true)` for a drag to the left, as › does, or
+/// `step(false)`, whose header slides in; otherwise the header slides back. It takes the touch once
+/// it moves sideways, before a drag of the cover starts; the mouse acts as before.
+fn install_touch_slide(owner: &AllocationOwner, step: impl Fn(bool) + 'static) {
+    owner.set_overflow(gtk::Overflow::Hidden);
+    let animation = Rc::new(RefCell::new(None::<adw::TimedAnimation>));
+    let sliding = Rc::new(Cell::new(false));
+    let slide = gtk::GestureDrag::new();
+    slide.set_touch_only(true);
+    slide.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let moved = owner.downgrade();
+    let held = Rc::clone(&animation);
+    let started = Rc::clone(&sliding);
+    slide.connect_drag_update(move |gesture, x, y| {
+        if !started.get() {
+            if x.abs() <= 6.0 || x.abs() <= y.abs() {
+                return;
+            }
+            started.set(true);
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            if let Some(animation) = held.take() {
+                animation.skip();
+            }
+        }
+        if let Some(owner) = moved.upgrade() {
+            owner.set_offset_x(x as f32);
+        }
+    });
+    let settled = owner.downgrade();
+    slide.connect_drag_end(move |_, x, _| {
+        let (true, Some(owner)) = (sliding.replace(false), settled.upgrade()) else {
+            return;
+        };
+        if x.abs() > f64::from(owner.width()) / 5.0 {
+            owner.set_offset_x(0.0);
+            step(x < 0.0);
+            return;
+        }
+        let target = adw::CallbackAnimationTarget::new(glib::clone!(
+            #[weak]
+            owner,
+            move |offset| owner.set_offset_x(offset as f32)
+        ));
+        let slide = adw::TimedAnimation::new(&owner, x, 0.0, 220, target);
+        slide.set_easing(adw::Easing::EaseOutCubic);
+        slide.play();
+        animation.replace(Some(slide));
+    });
+    owner.add_controller(slide);
+}
+
+fn step_with(state: &std::rc::Weak<HomeShowcaseState>) -> Rc<dyn Fn(bool)> {
+    let state = state.clone();
+    Rc::new(move |forward| {
+        if let Some(state) = state.upgrade() {
+            HomeShowcaseView(state).step(forward);
+        }
+    })
+}
+
+fn remove_hidden_pages(stack: &gtk::Stack) {
+    if stack.is_transition_running() {
+        return;
+    }
+    let visible = stack.visible_child();
+    let mut child = stack.first_child();
+    while let Some(page) = child {
+        child = page.next_sibling();
+        if Some(&page) != visible.as_ref() {
+            stack.remove(&page);
         }
     }
 }
@@ -213,10 +435,11 @@ impl ShownHomeSection {
 #[derive(Clone)]
 struct HomeRouteProjection {
     shell: std::rc::Weak<CatalogUi>,
-    /// The showcase album, for its menu and download counts, and its hearts.
-    showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
-    hearts: Rc<RefCell<Vec<gtk::Button>>>,
+    /// The showcase, for its album's state and download counts.
+    showcase: Rc<RefCell<Option<HomeShowcaseView>>>,
     shown: Rc<RefCell<Vec<(HomeSectionId, ShownHomeSection)>>>,
+    /// The page whose sections Home shows, which plays them.
+    view: Rc<RefCell<Arc<View>>>,
     content: gtk::Box,
     empty: gtk::Widget,
     /// The committed changes Home shows.
@@ -224,7 +447,7 @@ struct HomeRouteProjection {
 }
 
 impl HomeRouteProjection {
-    /// Shows a committed change in the showcase album, its hearts and the rows Home shows,
+    /// Shows a committed change in the showcase album and the rows Home shows,
     /// through core's [`rufin_core::shown::ShownChanges`]: only the rows it changes.
     fn show_changes(
         &self,
@@ -236,8 +459,8 @@ impl HomeRouteProjection {
         let showcase = self
             .showcase
             .borrow()
-            .clone()
-            .map(|row| HomeItem::Album(Box::new(row)));
+            .as_ref()
+            .map(|view| home_row(HomeItem::Album(Box::new(view.current()))));
         let shown = {
             let data = sections
                 .iter()
@@ -275,8 +498,8 @@ impl HomeRouteProjection {
                     None => home
                         .showcase
                         .borrow()
-                        .clone()
-                        .map(|row| HomeItem::Album(Box::new(row))),
+                        .as_ref()
+                        .map(|view| home_row(HomeItem::Album(Box::new(view.current())))),
                     Some((section, position)) => sections[section]
                         .mounted
                         .data
@@ -293,25 +516,34 @@ impl HomeRouteProjection {
         });
     }
 
-    /// Shows `row` where `at` says: the showcase and its hearts, or a section's position.
-    fn show_row(&self, sections: &[HomeSectionView], at: Option<(usize, usize)>, row: HomeItem) {
+    /// Shows `row` where `at` says: the showcase, or a section's position.
+    fn show_row(
+        &self,
+        sections: &[HomeSectionView],
+        at: Option<(usize, usize)>,
+        row: library::Row,
+    ) {
         match (at, row) {
-            (None, HomeItem::Album(row)) => {
-                for heart in self.hearts.borrow().iter() {
-                    crate::favorites::set_favorite_button_active(heart, row.album.state.favorite);
+            (None, library::Row::Album(album)) => {
+                if let Some(showcase) = self.showcase.borrow().as_ref() {
+                    showcase.show_current(HomeAlbumRow {
+                        title: album.title.clone(),
+                        album,
+                    });
                 }
-                self.showcase.replace(Some(*row));
             }
             (Some((section, position)), row) => sections[section].mounted.set(position, row),
-            (None, HomeItem::Track(_)) => {}
+            (None, _) => {}
         }
     }
 
-    /// Shows Home's sections in the order core composed them.
-    fn apply(&self, sections: Vec<HomeSection>) {
+    /// Shows the sections of Home's page `view` in the order core composed them.
+    fn apply(&self, view: Arc<View>) {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
+        let sections = view.home_sections().unwrap_or_default();
+        self.view.replace(view);
         let mut previous = self.shown.take();
         let mut shown = Vec::with_capacity(sections.len());
         let mut after = None::<gtk::Widget>;
@@ -322,33 +554,33 @@ impl HomeRouteProjection {
                 .iter()
                 .position(|(shown, _)| *shown == id)
                 .map(|index| previous.remove(index).1);
-            if let HomeSection::Showcase(row) = &section {
-                self.showcase.replace(Some(HomeAlbumRow::clone(row)));
-            }
             let next = match (kept, section) {
-                (Some(ShownHomeSection::Rows(view)), section @ HomeSection::Rows { .. }) => {
-                    view.mounted.replace(section.items());
-                    ShownHomeSection::Rows(view)
+                (Some(ShownHomeSection::Showcase(view)), HomeSection::Showcase(showcase)) => {
+                    view.show(*showcase);
+                    ShownHomeSection::Showcase(view)
                 }
-                (Some(ShownHomeSection::Rows(view)), section @ HomeSection::Provider(_)) => {
+                (Some(ShownHomeSection::Rows(view)), section)
+                    if !matches!(section, HomeSection::Showcase(_))
+                        && view.mounted.column_rows == column_rows(&section) =>
+                {
                     if let HomeSection::Provider(provider) = &section {
                         view.header.set_title(&home_provider_title(provider));
                     }
-                    view.mounted.replace(section.items());
+                    view.mounted.replace(home_rows(&section));
                     ShownHomeSection::Rows(view)
-                }
-                (Some(ShownHomeSection::Built(widget, built)), section) if built == section => {
-                    ShownHomeSection::Built(widget, built)
                 }
                 (kept, section) => {
                     if let Some(kept) = kept {
                         self.content.remove(kept.root());
                     }
-                    let next = self.build(&shell, section);
+                    let next = self.build(&shell, id.clone(), section);
                     self.content.append(next.root());
                     next
                 }
             };
+            if let ShownHomeSection::Showcase(view) = &next {
+                self.showcase.replace(Some(view.clone()));
+            }
             self.content
                 .reorder_child_after(next.root(), after.as_ref());
             after = Some(next.root().clone());
@@ -363,27 +595,39 @@ impl HomeRouteProjection {
         self.shown.replace(shown);
     }
 
-    fn build(&self, shell: &Rc<CatalogUi>, section: HomeSection) -> ShownHomeSection {
-        let items = section.items();
-        match section {
-            HomeSection::Rows { block, .. } => ShownHomeSection::Rows(shell.home_section_view(
-                &tr(rufin_core::settings::presentation::home_block_title(block)),
-                items,
-                block.section_kind(),
-            )),
-            HomeSection::Provider(provider) => ShownHomeSection::Rows(shell.home_section_view(
-                &home_provider_title(&provider),
-                items,
-                None,
-            )),
-            HomeSection::Showcase(row) => ShownHomeSection::Built(
-                shell.home_showcase(&row, Rc::clone(&self.showcase), &self.hearts),
-                HomeSection::Showcase(row),
-            ),
-            HomeSection::Genres(genres) => {
-                ShownHomeSection::Built(shell.home_genres(&genres), HomeSection::Genres(genres))
-            }
+    fn build(
+        &self,
+        shell: &Rc<CatalogUi>,
+        id: HomeSectionId,
+        section: HomeSection,
+    ) -> ShownHomeSection {
+        if let HomeSection::Showcase(showcase) = section {
+            return ShownHomeSection::Showcase(HomeShowcaseView::new(shell, *showcase));
         }
+        let view =
+            shell.home_section_view(&section.title(), home_rows(&section), column_rows(&section));
+        for (button, shuffled) in [(view.header.play(), false), (view.header.shuffle(), true)] {
+            let shell = Rc::downgrade(shell);
+            let shown = Rc::downgrade(&self.shown);
+            let page = Rc::downgrade(&self.view);
+            let id = id.clone();
+            button.connect_clicked(move |_| {
+                let (Some(shell), Some(shown), Some(page)) =
+                    (shell.upgrade(), shown.upgrade(), page.upgrade())
+                else {
+                    return;
+                };
+                // The section's place among the page's sections, as core plays it.
+                let index = shown.borrow().iter().position(|(shown, _)| *shown == id);
+                if let Some(request) = index.and_then(|index| {
+                    page.borrow()
+                        .play_section(index, QueuePlacement::Now, shuffled)
+                }) {
+                    shell.products.playback.play_selection(request);
+                }
+            });
+        }
+        ShownHomeSection::Rows(view)
     }
 
     fn sections(&self) -> Vec<HomeSectionView> {
@@ -392,9 +636,32 @@ impl HomeRouteProjection {
             .iter()
             .filter_map(|(_, shown)| match shown {
                 ShownHomeSection::Rows(view) => Some(view.clone()),
-                ShownHomeSection::Built(..) => None,
+                ShownHomeSection::Showcase(_) => None,
             })
             .collect()
+    }
+}
+
+/// The rows `section` shows, each with the title Home gives it.
+fn home_rows(section: &HomeSection) -> Vec<library::Row> {
+    if let HomeSection::Genres(genres) = section {
+        return genres.iter().cloned().map(library::Row::Tag).collect();
+    }
+    section.items().into_iter().map(home_row).collect()
+}
+
+fn home_row(item: HomeItem) -> library::Row {
+    match item {
+        HomeItem::Track(item) => {
+            let library::HomeTrackRow { mut track, title } = *item;
+            track.title = title;
+            library::Row::Track(track)
+        }
+        HomeItem::Album(item) => {
+            let HomeAlbumRow { mut album, title } = *item;
+            album.title = title;
+            library::Row::Album(album)
+        }
     }
 }
 
@@ -405,16 +672,8 @@ fn home_provider_title(provider: &HomeProviderSection) -> String {
     )
 }
 
-fn clamped_page_start(start: usize, page_size: usize, count: usize) -> usize {
-    if count == 0 {
-        0
-    } else {
-        start.min(((count - 1) / page_size.max(1)) * page_size.max(1))
-    }
-}
-
 impl CatalogUi {
-    pub fn home_route(self: &Rc<Self>, sections: Vec<HomeSection>) -> MountedRoute {
+    pub fn home_route(self: &Rc<Self>, view: Arc<View>) -> MountedRoute {
         let scroller = gtk::ScrolledWindow::new();
         configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
         scroller.set_vexpand(true);
@@ -433,19 +692,19 @@ impl CatalogUi {
         let projection = HomeRouteProjection {
             shell: Rc::downgrade(self),
             showcase: Rc::new(RefCell::new(None)),
-            hearts: Rc::new(RefCell::new(Vec::new())),
             shown: Rc::new(RefCell::new(Vec::new())),
+            view: Rc::new(RefCell::new(Arc::clone(&view))),
             content,
             empty,
             changes: Default::default(),
         };
-        projection.apply(sections);
+        projection.apply(view);
         let widget = route_scroller_widget(scroller);
         let apply = projection.clone();
         let states = projection.clone();
         let owner = self.products.source.clone();
         MountedRoute::new(widget, Rc::new(|| {}))
-            .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
+            .with_home_page_apply(Rc::new(move |view| apply.apply(view)))
             .with_states(Rc::new(move |changed, view| {
                 states.show_changes(&owner, changed, view)
             }))
@@ -454,8 +713,8 @@ impl CatalogUi {
     fn home_section_view(
         self: &Rc<Self>,
         title: &str,
-        items: Vec<HomeItem>,
-        refresh_kind: Option<HomeSectionKind>,
+        items: Vec<library::Row>,
+        rows: usize,
     ) -> HomeSectionView {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
@@ -463,55 +722,49 @@ impl CatalogUi {
         header.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         section.append(&header);
 
-        let content_width =
-            crate::library::route_layout::home_album_content_width_for(self.route_width());
-        let page_size = collection_grid_column_count(content_width);
-        let model = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let widget_shell = Rc::clone(self);
-        let activate_shell = Rc::clone(self);
-        let cells = Rc::new(RefCell::new(Vec::new()));
-        let bind_cells = Rc::clone(&cells);
-        let row = fixed_page_collection_row(
-            model.clone(),
-            page_size,
-            move |position, item: HomeItem| {
-                let (widget, bind) = home_item_widget(&widget_shell, item);
-                bind_cells.borrow_mut().push((position, bind));
-                widget
-            },
-            move |_, item: HomeItem| activate_home_item(&activate_shell, item),
-        );
+        let (width, gap) = if rows == 1 {
+            (CARD_WIDTH, CARD_GAP)
+        } else {
+            (ROW_COLUMN_WIDTH, ROW_COLUMN_GAP)
+        };
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, gap);
+        row.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
+        row.set_margin_end(COLLECTION_GRID_CARD_MARGIN);
+        let scroller = gtk::ScrolledWindow::new();
+        // Scrolls by wheel, touchpad, touch and ‹ ›, with no scrollbar over the cards' last line.
+        scroller.set_policy(gtk::PolicyType::External, gtk::PolicyType::Never);
+        scroller.set_propagate_natural_height(true);
+        scroller.set_hexpand(true);
+        scroller.set_child(Some(&row));
+        section.append(&scroller);
         let mounted = MountedHomeSection {
+            shell: Rc::downgrade(self),
             data: Rc::new(RefCell::new(items)),
-            model,
-            row: row.clone(),
-            previous: header.previous().downgrade(),
-            next: header.next().downgrade(),
-            page_start: Rc::new(Cell::new(0)),
-            page_size: Rc::new(Cell::new(page_size)),
-            cells,
+            row,
+            cells: Rc::new(RefCell::new(Vec::new())),
+            column_rows: rows,
         };
         mounted.render();
-        let fit = mounted.clone();
-        section.append(&width_allocation_owner(&row.widget(), move |width| {
-            fit.fit_width(width);
-        }));
-        let previous = mounted.clone();
-        header
-            .previous()
-            .connect_clicked(move |_| previous.shift(false));
-        let next = mounted.clone();
-        header.next().connect_clicked(move |_| next.shift(true));
-        if let Some(kind) = refresh_kind {
-            let shell = Rc::clone(self);
-            let refresh_section = mounted.clone();
-            header.refresh().connect_clicked(move |_| {
-                refresh_section.page_start.set(0);
-                refresh_section.render();
-                shell.refresh_home_section(kind);
+        // ‹ › scroll the row and rest at its ends.
+        let adjustment = scroller.hadjustment();
+        let ends = {
+            let previous = header.previous();
+            let next = header.next();
+            move |adjustment: &gtk::Adjustment| {
+                previous.set_sensitive(adjustment.value() > adjustment.lower());
+                next.set_sensitive(
+                    adjustment.value() + adjustment.page_size() < adjustment.upper() - 1.0,
+                );
+            }
+        };
+        ends(&adjustment);
+        adjustment.connect_changed(ends.clone());
+        adjustment.connect_value_changed(ends);
+        for (button, forward) in [(header.previous(), false), (header.next(), true)] {
+            let scroller = scroller.clone();
+            button.connect_clicked(move |_| {
+                scroll_page(&scroller, f64::from(width + gap), forward);
             });
-        } else {
-            header.refresh().set_visible(false);
         }
         HomeSectionView {
             root: section.upcast(),
@@ -519,280 +772,243 @@ impl CatalogUi {
             mounted,
         }
     }
+}
 
-    fn home_showcase(
-        self: &Rc<Self>,
-        item: &HomeAlbumRow,
-        showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
-        hearts: &RefCell<Vec<gtk::Button>>,
-    ) -> gtk::Widget {
-        let width = crate::library::route_layout::home_album_content_width_for(self.route_width());
-        let mut album = item.album.clone();
-        album.title.clone_from(&item.title);
-        let seed = stable_seed(&album.object_id);
-        let cover = home_album_cover_projection(
-            self,
-            &album,
-            crate::library::route_layout::detail_showcase_cover_size(width),
-        );
-        let title_text = album.title.clone();
-        let showcase_view =
-            DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
-        let radio = detail_radio_button();
-        let radio_controller = self.products.playback.clone();
-        let radio_seed = RadioSeed::Album(album.album_key);
-        radio.connect_clicked(move |_| {
-            radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
-        });
-        showcase_view.append_kind_control(&radio);
-        let drag_album = album.clone();
-        let drag_title = title_text.clone();
-        let drag_target: gtk::Widget = cover.button().upcast();
-        let drag_artwork = cover.drag_paintable_source();
-        let drag_shell = Rc::downgrade(self);
-        install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
-            let _shell = drag_shell.upgrade()?;
-            let source = MediaDragSource::capture_target(
-                crate::widgets::selection::PlayTarget::of_album(&drag_album),
-            );
-            Some((source, drag_title.clone()))
-        });
-
-        let actions = showcase_view.actions();
-        actions.set_halign(gtk::Align::Start);
-        let play_shell = Rc::clone(self);
-        let play_target = crate::widgets::selection::PlayTarget::of_album(&album);
-        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            crate::menus::media_menus::play_target(
-                &play_shell.products,
-                &play_target,
-                placement,
-                shuffled,
-            );
-        });
-        let controls = detail_playback_controls(
-            &actions,
-            msgid("Play album"),
-            Some(album.state.favorite),
-            play,
-        );
-        let favorite = favorite_icon_button("Favorite");
-        configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-        set_favorite_button_active(&favorite, album.state.favorite);
-        actions.append(&favorite);
-        let hover_favorite = controls
-            .favorite
-            .as_ref()
-            .expect("Home album has a Favorite cover control")
-            .clone();
-        hearts.replace(vec![favorite.clone(), hover_favorite.clone()]);
-        for button in [favorite, hover_favorite] {
-            let favorite_shell = Rc::clone(self);
-            let favorite_media_uri = album.media_uri.clone();
-            button.connect_clicked(move |button| {
-                favorite_shell.set_favorite(
-                    library::FavoriteTarget::Album(favorite_media_uri.clone()),
-                    !favorite_button_is_active(button),
-                );
-            });
-        }
-
-        let menu_shell = Rc::clone(self);
-        let context_menu = Rc::new(move |target: &gtk::Widget, position| {
-            let album = showcase.borrow().as_ref().map(|item| item.album.clone());
-            let Some(album) = album else {
+/// A header of Home's showcase for `item`; its ‹ › call `step`.
+fn home_showcase_page(
+    shell: &Rc<CatalogUi>,
+    item: &HomeAlbumRow,
+    step: Rc<dyn Fn(bool)>,
+) -> (gtk::Widget, DetailShowcaseView) {
+    let width = crate::library::route_layout::home_album_content_width_for(shell.route_width());
+    let mut album = item.album.clone();
+    album.title.clone_from(&item.title);
+    let view = DetailShowcaseView::new(&album.title);
+    let menu: ContextMenuOpen = {
+        let shell = Rc::downgrade(shell);
+        let view = view.downgrade();
+        Rc::new(move |target, position| {
+            let (Some(shell), Some(row)) =
+                (shell.upgrade(), view.upgrade().and_then(|view| view.row()))
+            else {
                 return;
             };
-            {
-                present_row_menu(
-                    target,
-                    menu_shell.shell(),
-                    library::Row::Album(album),
-                    None,
-                    position,
-                );
-            }
-        });
+            present_row_menu(target, shell.shell(), row, None, position);
+        })
+    };
+    let cover = home_album_cover_projection(shell, &album, ShowcaseShape::Home.cover_size(width));
+    let drag_album = album.clone();
+    let drag_target: gtk::Widget = cover.button().upcast();
+    let drag_artwork = cover.drag_paintable_source();
+    install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
+        let source = MediaDragSource::capture_target(
+            crate::widgets::selection::PlayTarget::of_album(&drag_album),
+        );
+        Some((source, drag_album.title.clone()))
+    });
 
-        let (artist_scroll, artist) = crate::widgets::text_slide::new_label();
-        artist.set_text(&album.artist);
-        artist.add_css_class("detail-artist");
-        artist.set_xalign(0.0);
-        artist.set_halign(gtk::Align::Start);
-        artist.set_width_request(1);
-        artist.set_width_chars(1);
-        DetailLinkBinding::new(&artist, self.route_navigation())
-            .bind(album_row_artist_links(&album));
-        showcase_view.append_detail(&artist_scroll);
-        showcase_view.replace_summary(&[
-            (
-                "rufin-x-office-calendar-symbolic",
-                album.year.map(|year| year.to_string()).unwrap_or_default(),
-            ),
-            (
-                "rufin-tracks-symbolic",
-                track_count_text(album.summary.track_count.max(0) as u64),
-            ),
-            (
-                "rufin-preferences-system-time-symbolic",
-                format_duration_units((album.summary.duration_millis.max(0) / 1_000) as u32),
-            ),
-        ]);
-        let track_count = album.summary.track_count.max(0) as u64;
-        showcase_view.bind_summary_text_with(1, move || track_count_text(track_count));
-
-        let showcase = media_showcase(MediaShowcase {
-            view: showcase_view,
-            initial_width: width,
-            cover,
-            cover_controls: controls,
-            context_menu: Some(context_menu),
-            actions_min_cover_size: Some(HOME_SHOWCASE_ACTION_MIN_COVER_SIZE),
-        });
-        showcase.upcast()
-    }
-
-    fn home_genres(self: &Rc<Self>, genres: &[TagRow]) -> gtk::Widget {
-        let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        section.set_hexpand(true);
-        let heading = localized_label(rufin_core::settings::presentation::home_block_title(
-            HomeBlockKind::Genres,
-        ));
-        heading.add_css_class("section-heading");
-        heading.set_xalign(0.0);
-        heading.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
-        section.append(&heading);
-        let flow = gtk::FlowBox::new();
-        flow.add_css_class("home-genre-flow");
-        flow.set_column_spacing(8);
-        flow.set_row_spacing(8);
-        flow.set_selection_mode(gtk::SelectionMode::None);
-        flow.set_max_children_per_line(6);
-        flow.set_min_children_per_line(2);
-        flow.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
-        for genre in genres {
-            flow.insert(&self.home_genre_chip(genre), -1);
-        }
-        section.append(&flow);
-        section.upcast()
-    }
-
-    fn home_genre_chip(self: &Rc<Self>, genre: &TagRow) -> gtk::Widget {
-        let button = gtk::Button::new();
-        button.add_css_class("flat");
-        button.add_css_class("home-genre-chip");
-        button.set_hexpand(true);
-        button.set_halign(gtk::Align::Fill);
-        let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        labels.set_margin_top(8);
-        labels.set_margin_bottom(8);
-        labels.set_margin_start(10);
-        labels.set_margin_end(10);
-        let name = gtk::Label::new(Some(&genre.name));
-        name.add_css_class("album-title");
-        name.set_xalign(0.0);
-        name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        labels.append(&name);
-        let counts = gtk::Label::new(None);
-        let album_count = genre.summary.album_count.max(0) as u64;
-        let track_count = genre.summary.track_count.max(0) as u64;
-        bind_label_text_with(&counts, move || {
-            format!(
-                "{} • {}",
-                album_count_text(album_count),
-                track_count_text(track_count)
-            )
-        });
-        counts.add_css_class("muted");
-        counts.set_xalign(0.0);
-        counts.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        labels.append(&counts);
-        button.set_child(Some(&labels));
-        let shell = Rc::clone(self);
-        let key = library::GenreKey::from_raw(genre.key);
-        button.connect_clicked(move |_| shell.open_route(Route::GenreDetail(key)));
-        button.upcast()
-    }
-}
-
-fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, HomeItemBinding) {
-    match item {
-        HomeItem::Track(item) => {
-            let mut track = item.track;
-            track.title = item.title;
-            let play_shell = Rc::clone(shell);
-            let play_target = crate::widgets::selection::PlayTarget::of_track(&track);
-            let play = Rc::new(move |_, placement| {
-                crate::menus::media_menus::play_target(
-                    &play_shell.products,
-                    &play_target,
-                    placement,
-                    false,
-                );
-            });
-            let field = Rc::new(move |_, track: &library::TrackRow, field| {
-                TrackPresentation::links(track, field)
-            });
-            let cell = TrackGridCell::new(
-                shell,
-                &rufin_core::settings::layout::HOME_TRACK_FIELDS,
-                play,
-                field,
-                None,
-            );
-            cell.bind(0, track);
-            (
-                cell.widget(),
-                Rc::new(move |item| {
-                    if let HomeItem::Track(item) = item {
-                        let mut track = item.track;
-                        track.title = item.title;
-                        cell.bind(0, track);
-                    }
-                }),
-            )
-        }
-        HomeItem::Album(item) => {
-            let mut album = item.album;
-            album.title = item.title;
-            let cell = AlbumGridCell::new(shell, &rufin_core::settings::layout::HOME_ALBUM_FIELDS);
-            cell.bind(0, album);
-            (
-                cell.widget(),
-                Rc::new(move |item| {
-                    if let HomeItem::Album(item) = item {
-                        let mut album = item.album;
-                        album.title = item.title;
-                        cell.bind(0, album);
-                    }
-                }),
-            )
-        }
-    }
-}
-
-fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
-    match item {
-        HomeItem::Track(item) => crate::menus::media_menus::play_target(
-            &shell.products,
-            &crate::widgets::selection::PlayTarget::of_track(&item.track),
-            rufin_core::playback::QueuePlacement::Now,
-            false,
+    let (artist_scroll, artist) = crate::widgets::text_slide::new_label();
+    artist.set_text(&album.artist);
+    artist.add_css_class("detail-artist");
+    artist.set_xalign(0.0);
+    artist.set_halign(gtk::Align::Start);
+    artist.set_width_request(1);
+    artist.set_width_chars(1);
+    DetailLinkBinding::new(&artist, shell.route_navigation()).bind(album_row_artist_links(&album));
+    view.append_detail(&artist_scroll);
+    view.replace_summary(&[
+        (
+            "rufin-x-office-calendar-symbolic",
+            album.year.map(|year| year.to_string()).unwrap_or_default(),
         ),
-        HomeItem::Album(item) => shell.open_route(Route::AlbumDetail(item.album.media_uri.clone())),
-    }
+        (
+            "rufin-tracks-symbolic",
+            track_count_text(album.summary.track_count.max(0) as u64),
+        ),
+        (
+            "rufin-preferences-system-time-symbolic",
+            format_duration_units((album.summary.duration_millis.max(0) / 1_000) as u32),
+        ),
+    ]);
+    let track_count = album.summary.track_count.max(0) as u64;
+    view.bind_summary_text_with(1, move || track_count_text(track_count));
+    view.enable_steps(step);
+
+    let play_shell = Rc::clone(shell);
+    let play_target = crate::widgets::selection::PlayTarget::of_album(&album);
+    let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+        crate::menus::media_menus::play_target(
+            &play_shell.products,
+            &play_target,
+            placement,
+            shuffled,
+        );
+    });
+    let widget = view.mount(
+        shell,
+        library::Row::Album(album),
+        ShowcaseMount {
+            shape: ShowcaseShape::Home,
+            initial_width: width,
+            cover: ShowcaseCover::Single(cover),
+            play_label: msgid("Play album"),
+            play,
+            menu,
+            download: false,
+        },
+    );
+    (widget, view)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn home_album_card(
+    shell: &Rc<CatalogUi>,
+    album: library::AlbumRow,
+) -> (gtk::Widget, HomeRowBinding) {
+    let cell = AlbumGridCell::new(shell, &rufin_core::settings::layout::HOME_ALBUM_FIELDS);
+    cell.enable_card_activation();
+    cell.bind(0, album);
+    let widget = cell.widget();
+    (
+        widget,
+        Rc::new(move |row| {
+            if let library::Row::Album(album) = row {
+                cell.bind(0, album);
+            }
+        }),
+    )
+}
 
-    #[test]
-    fn home_page_start_stays_on_a_complete_available_page() {
-        assert_eq!(clamped_page_start(12, 6, 14), 12);
-        assert_eq!(clamped_page_start(18, 6, 14), 12);
-        assert_eq!(clamped_page_start(10, 6, 0), 0);
-    }
+/// A row of a Home column: the cover, the title and, under it, Home's fields of the row or a
+/// genre's album count. A click opens its page and a double click plays it, as on the sidebar's
+/// Saved rows, whose play controls it shows on hover.
+fn home_row_widget(shell: &Rc<CatalogUi>, row: library::Row) -> (gtk::Widget, HomeRowBinding) {
+    let widget = gtk::Overlay::new();
+    widget.add_css_class("home-row");
+    widget.add_css_class(CONTEXT_MENU_HOVER_OWNER_CLASS);
+    widget.set_overflow(gtk::Overflow::Hidden);
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let cover = shell.artwork.cover_group_projection_for_artwork(
+        &[],
+        ROW_COVER_SIZE,
+        ROW_COVER_SIZE,
+        matches!(row, library::Row::Tag(_)),
+    );
+    content.append(&cover.widget());
+    let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    labels.set_valign(gtk::Align::Center);
+    labels.set_hexpand(true);
+    let [title, subtitle] = [
+        ["track-title", "home-row-title"],
+        ["muted", "home-row-subtitle"],
+    ]
+    .map(|classes| {
+        let label = gtk::Label::new(None);
+        for class in classes {
+            label.add_css_class(class);
+        }
+        label.set_xalign(0.0);
+        label.set_width_chars(1);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        labels.append(&label);
+        label
+    });
+    content.append(&labels);
+    widget.set_child(Some(&content));
+
+    let shown = Rc::new(RefCell::new(None::<library::Row>));
+    let play = {
+        let shell = Rc::downgrade(shell);
+        let shown = Rc::clone(&shown);
+        move |placement| {
+            let target = shown.borrow().as_ref().and_then(PlayTarget::of_row);
+            if let (Some(shell), Some(target)) = (shell.upgrade(), target) {
+                crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
+            }
+        }
+    };
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    let click_shell = Rc::downgrade(shell);
+    let click_row = Rc::clone(&shown);
+    let click_play = play.clone();
+    click.connect_pressed(move |gesture, presses, _, _| {
+        if presses == 2 {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            click_play(QueuePlacement::Now);
+        }
+    });
+    click.connect_released(move |_, presses, _, _| {
+        let route = click_row.borrow().as_ref().and_then(Route::of_row);
+        if let (1, Some(route), Some(shell)) = (presses, route, click_shell.upgrade()) {
+            shell.open_route(route);
+        }
+    });
+    widget.add_controller(click);
+    install_row_transport_controls(&widget, play);
+    let menu_shell = Rc::downgrade(shell);
+    let menu_row = Rc::clone(&shown);
+    install_context_menu_openers(
+        &widget,
+        Rc::new(move |target, position| {
+            if let (Some(shell), Some(row)) = (menu_shell.upgrade(), menu_row.borrow().clone()) {
+                present_row_menu(target, shell.shell(), row, None, position);
+            }
+        }),
+    );
+    let drag_row = Rc::clone(&shown);
+    let drag_title = title.clone();
+    install_compact_media_drag_source(&widget, &cover.widget(), move || {
+        let target = PlayTarget::of_row(drag_row.borrow().as_ref()?)?;
+        Some((
+            MediaDragSource::capture_target(target),
+            drag_title.text().into(),
+        ))
+    });
+
+    let playing = MediaPlayingBinding::new(shell, &title);
+    let shell = Rc::downgrade(shell);
+    let bind: HomeRowBinding = Rc::new(move |row| {
+        use rufin_core::settings::layout::{
+            HOME_ALBUM_FIELDS, HOME_GENRE_FIELDS, HOME_TRACK_FIELDS,
+        };
+        let Some(shell) = shell.upgrade() else {
+            return;
+        };
+        let (name, fields, artwork): (String, &[library::LibraryField], Vec<&[u8]>) = match &row {
+            library::Row::Track(track) => (
+                track.title.clone(),
+                &HOME_TRACK_FIELDS,
+                track.artwork_binding.as_deref().into_iter().collect(),
+            ),
+            row => {
+                let Some(shown) = row.collection() else {
+                    return;
+                };
+                let fields: &[library::LibraryField] = match row {
+                    library::Row::Tag(_) => &HOME_GENRE_FIELDS,
+                    _ => &HOME_ALBUM_FIELDS,
+                };
+                (shown.name.to_owned(), fields, shown.artwork)
+            }
+        };
+        let text = fields
+            .iter()
+            .map(|field| rufin_core::settings::presentation::row_field(&row, *field))
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        title.set_text(&name);
+        subtitle.set_text(&text);
+        let artwork = artwork
+            .into_iter()
+            .map(ArtworkBinding::opaque)
+            .collect::<Vec<_>>();
+        cover.replace(&shell.artwork, &artwork);
+        playing.bind(&shell, PlayTarget::of_row(&row));
+        shown.replace(Some(row));
+    });
+    bind(row);
+    (widget.upcast(), bind)
 }
 
 use crate::menus::media_menus::CollectionPlay;

@@ -181,3 +181,68 @@ pub fn connect_entry_reset(entry: &gtk::Entry, reset: impl Fn(&gtk::Entry) + 'st
         }
     });
 }
+
+/// Under a server address row, core's `https://` and `http://` completions while the row has
+/// focus and the address no scheme; a click fills it in.
+pub fn attach_address_suggestions(row: &adw::EntryRow) {
+    let list = gtk::ListBox::new();
+    list.set_selection_mode(gtk::SelectionMode::None);
+    list.add_css_class("navigation-sidebar");
+    let popover = gtk::Popover::builder()
+        .child(&list)
+        .autohide(false)
+        .has_arrow(false)
+        .position(gtk::PositionType::Bottom)
+        .halign(gtk::Align::Start)
+        // Typing stays in the row: neither the popover nor its rows take focus.
+        .can_focus(false)
+        .build();
+    popover.set_parent(row);
+    // The row owns the popover; it leaves with the row.
+    row.connect_destroy({
+        let popover = popover.clone();
+        move |_| popover.unparent()
+    });
+    let weak = row.downgrade();
+    list.connect_row_activated(move |_, choice| {
+        let (Some(row), Some(label)) =
+            (weak.upgrade(), choice.child().and_downcast::<gtk::Label>())
+        else {
+            return;
+        };
+        row.set_text(&label.text());
+        row.set_position(-1);
+    });
+    let show = {
+        let (list, popover) = (list.clone(), popover.clone());
+        move |row: &adw::EntryRow| {
+            let suggestions = if row.has_focus() || row.focus_child().is_some() {
+                rufin_core::source::authorization::address_suggestions(&row.text())
+            } else {
+                Vec::new()
+            };
+            list.remove_all();
+            for address in &suggestions {
+                let label = gtk::Label::builder().label(address).xalign(0.0).build();
+                list.append(&label);
+            }
+            if suggestions.is_empty() {
+                popover.popdown();
+            } else {
+                popover.popup();
+            }
+        }
+    };
+    row.connect_changed({
+        let show = show.clone();
+        move |row| show(row)
+    });
+    let focus = gtk::EventControllerFocus::new();
+    let weak = row.downgrade();
+    focus.connect_leave(move |_| {
+        if let Some(row) = weak.upgrade() {
+            show(&row);
+        }
+    });
+    row.add_controller(focus);
+}

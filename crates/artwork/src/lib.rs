@@ -15,6 +15,7 @@ use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 mod animation;
+mod band;
 mod cache;
 mod decode;
 mod fetch;
@@ -22,6 +23,7 @@ mod pipeline;
 mod selection;
 
 pub use animation::{Animation, AnimationFrame};
+pub use band::showcase_band;
 pub use cache::{ArtworkCacheEntries, ArtworkCacheEntry};
 pub use decode::{
     DecodedImage, RgbaImage, collage_png, decode_cover, decode_rgba, image_mime,

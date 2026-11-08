@@ -171,7 +171,9 @@ nav :is(button, a):hover,
 }
 
 .pin-row.controls-visible .pin-controls,
-.pin-row.menu-open .pin-controls {
+.pin-row.menu-open .pin-controls,
+.column-row.controls-visible .pin-controls,
+.column-row.menu-open .pin-controls {
   visibility: visible;
 }
 

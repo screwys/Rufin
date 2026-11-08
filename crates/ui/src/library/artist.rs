@@ -3,19 +3,12 @@ use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use library::{ArtistKey, ArtistView, RadioSeed};
+use library::ArtistView;
 use localization::{album_count_text, msgid, track_count_text};
-use rufin_core::playback::RadioPlayRequest;
 
-use crate::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
-};
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
 use crate::library::routes::PageReads;
-use crate::widgets::artwork::presentation::stable_seed;
-use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::layout::width_allocation_owner;
 use crate::widgets::localization::localized_label;
 use crate::widgets::mounted_route::MountedRoute;
 use crate::widgets::view_model::Rows;
@@ -23,8 +16,8 @@ use rufin_core::view::Opened;
 
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
-    DetailShowcaseView, MediaCoverProjection, MediaShowcase, detail_playback_controls,
-    detail_radio_button, detail_showcase_frame, media_cover_projection, media_showcase,
+    DetailShowcaseView, MediaCoverProjection, ShowcaseCover, ShowcaseMount, ShowcaseShape,
+    media_cover_projection,
 };
 use super::routes::SearchableTrackOptions;
 use crate::library::route_layout::PRIMARY_ROUTE_MARGIN_START;
@@ -72,10 +65,8 @@ impl CatalogUi {
                 msgid("No music from this artist yet"),
             ));
         };
-        let artist = summary.row.artist_key;
         let page = Rc::new(std::cell::OnceCell::new());
-        let header =
-            artist_detail_header_restored(self, &summary, artist, album_artist, Rc::clone(&page));
+        let header = artist_detail_header_restored(self, &summary, album_artist, Rc::clone(&page));
         let favorite_count = read.view.favorites_len().unwrap_or(0);
         let favorite_model =
             Rows::favorites(self.products.runtime.clone(), &read.view, favorite_rows);
@@ -366,14 +357,17 @@ impl CatalogUi {
         let (tracks_widget, tracks, toolbar) =
             self.scrolling_track_projection(rows.clone(), key, context);
         let root = crate::library::route_layout::detail_route_wrapper(18);
-        root.append(&artist_subroute_header(
-            self,
-            &summary,
-            if favorites_only {
-                msgid("Favorite tracks")
-            } else {
-                msgid("Tracks")
-            },
+        root.set_margin_top(crate::library::route_layout::ROUTE_TOP_MARGIN);
+        root.append(&super::collections::library_route_inset(
+            artist_subroute_header(
+                self,
+                &summary,
+                if favorites_only {
+                    msgid("Favorite tracks")
+                } else {
+                    msgid("Tracks")
+                },
+            ),
         ));
         root.append(&tracks_widget);
         let layout_cycle = toolbar.layout_cycle();
@@ -433,7 +427,6 @@ struct ArtistDetailHeaderProjection {
     album_artist: bool,
     root: gtk::Widget,
     current: Rc<RefCell<ArtistView>>,
-    hearts: Rc<[gtk::Button]>,
     showcase: DetailShowcaseView,
     album_count: gtk::Label,
     track_count: gtk::Label,
@@ -468,9 +461,8 @@ impl ArtistDetailHeaderProjection {
                 &artist,
                 self.album_artist,
             ));
-        for heart in self.hearts.iter() {
-            set_favorite_button_active(heart, artist.row.state.favorite);
-        }
+        self.showcase
+            .show_row(library::Row::Artist(artist.row.clone()));
         self.current.replace(artist);
     }
 
@@ -495,7 +487,6 @@ impl ArtistDetailHeaderProjection {
 fn artist_detail_header_restored(
     shell: &Rc<CatalogUi>,
     artist: &ArtistView,
-    artist_key: ArtistKey,
     album_artist: bool,
     page: Rc<std::cell::OnceCell<Rows<library::Row>>>,
 ) -> ArtistDetailHeaderProjection {
@@ -512,29 +503,10 @@ fn artist_detail_header_restored(
             .as_deref()
             .map(ArtworkBinding::opaque)
             .unwrap_or_default(),
-        crate::library::route_layout::detail_showcase_cover_size(width),
+        ShowcaseShape::Detail.cover_size(width),
         "artist-detail-cover",
     );
-    let showcase = DetailShowcaseView::new(
-        "artist-detail-showcase",
-        stable_seed(&artist.row.object_id),
-        "Artist",
-        true,
-        &artist.row.name,
-    );
-    let radio = detail_radio_button();
-    let radio_controller = shell.products.playback.clone();
-    radio.connect_clicked(move |_| {
-        radio_controller.play_radio(RadioPlayRequest::now(if album_artist {
-            RadioSeed::AlbumArtist(artist_key)
-        } else {
-            RadioSeed::Artist(artist_key)
-        }));
-    });
-    showcase.append_kind_control(&radio);
-    let counts = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    counts.add_css_class("artist-count-row");
-    counts.set_halign(gtk::Align::Start);
+    let showcase = DetailShowcaseView::new(&artist.row.name);
     let (albums, album_count) = artist_count_button(
         "rufin-albums-symbolic",
         &album_count_text(artist.row.summary.album_count.max(0) as u64),
@@ -544,7 +516,7 @@ fn artist_detail_header_restored(
     albums.connect_clicked(move |_| {
         album_shell.open_route(artist_discography_route(album_uri.clone(), album_artist))
     });
-    counts.append(&albums);
+    showcase.append_fact(&albums);
     let (tracks, track_count) = artist_count_button(
         "rufin-tracks-symbolic",
         &track_count_text(artist.row.summary.track_count.max(0) as u64),
@@ -554,12 +526,8 @@ fn artist_detail_header_restored(
     tracks.connect_clicked(move |_| {
         track_shell.open_route(artist_tracks_route(track_uri.clone(), album_artist))
     });
-    counts.append(&tracks);
-    showcase.append_detail(&counts);
+    showcase.append_fact(&tracks);
 
-    let actions = showcase.actions();
-    actions.add_css_class("artist-detail-actions");
-    actions.set_halign(gtk::Align::Start);
     // Header Play plays the artist's tracks on the releases the page shows.
     let playback = shell.products.playback.clone();
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
@@ -567,66 +535,41 @@ fn artist_detail_header_restored(
             rows.play_all(&playback, placement, shuffled);
         }
     });
-    let controls = detail_playback_controls(
-        &actions,
-        msgid("Play artist"),
-        Some(artist.row.state.favorite),
-        Rc::clone(&play),
-    );
-    let favorite = favorite_icon_button("Favorite");
-    configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-    set_favorite_button_active(&favorite, artist.row.state.favorite);
-    actions.append(&favorite);
-    let hover_favorite = controls
-        .favorite
-        .as_ref()
-        .expect("artist detail has a Favorite cover control")
-        .clone();
-    let favorite_media_uri = artist.row.media_uri.clone();
-    let hearts: Rc<[gtk::Button]> = Rc::new([favorite.clone(), hover_favorite.clone()]);
-    for button in [favorite, hover_favorite] {
-        let favorite_shell = Rc::clone(shell);
-        let favorite_media_uri = favorite_media_uri.clone();
-        button.connect_clicked(move |button| {
-            favorite_shell.set_favorite(
-                library::FavoriteTarget::Artist(favorite_media_uri.clone()),
-                !favorite_button_is_active(button),
-            );
-        });
-    }
     let menu_shell = Rc::clone(shell);
     let menu_artist = Rc::clone(&current);
     let menu_play = Rc::clone(&play);
-    let context_menu = Rc::new(move |target: &gtk::Widget, position| {
+    let menu = Rc::new(move |target: &gtk::Widget, position| {
         let artist = menu_artist.borrow().row.clone();
-        {
-            present_row_menu(
-                target,
-                menu_shell.shell(),
-                library::Row::Artist(artist),
-                Some(Rc::clone(&menu_play)),
-                position,
-            );
-        }
+        present_row_menu(
+            target,
+            menu_shell.shell(),
+            library::Row::Artist(artist),
+            Some(Rc::clone(&menu_play)),
+            position,
+        );
     });
     showcase.replace_external_links(super::detail_showcase::artist_external_links(
         shell,
         artist,
         album_artist,
     ));
-    let root = detail_showcase_frame(media_showcase(MediaShowcase {
-        view: showcase.clone(),
-        initial_width: width,
-        cover: cover.clone(),
-        cover_controls: controls,
-        context_menu: Some(context_menu),
-        actions_min_cover_size: None,
-    }));
+    let root = showcase.mount(
+        shell,
+        library::Row::Artist(artist.row.clone()),
+        ShowcaseMount {
+            shape: ShowcaseShape::Detail,
+            initial_width: width,
+            cover: ShowcaseCover::Single(cover.clone()),
+            play_label: msgid("Play artist"),
+            play,
+            menu,
+            download: true,
+        },
+    );
     ArtistDetailHeaderProjection {
         album_artist,
         root,
         current,
-        hearts,
         showcase,
         album_count,
         track_count,
@@ -634,61 +577,38 @@ fn artist_detail_header_restored(
     }
 }
 
+/// An artist sub-page's band: the artist and the page under the name.
 fn artist_subroute_header(
     shell: &Rc<CatalogUi>,
     artist: &ArtistView,
-    kind_text: &str,
+    kind_text: &'static str,
 ) -> gtk::Widget {
     let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
         shell.route_width(),
         PRIMARY_ROUTE_MARGIN_START,
     );
-    let header = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    header.add_css_class("detail-showcase");
-    header.add_css_class("artist-detail-showcase");
-    if width < 520 {
-        header.add_css_class("detail-showcase-tiny");
-    }
-    crate::widgets::artwork::presentation::add_album_seed_gradient_class(
-        &header,
-        stable_seed(&artist.row.object_id),
-    );
+    let header = DetailShowcaseView::new(&artist.row.name);
     let kind = localized_label(kind_text);
-    kind.add_css_class("eyebrow");
+    kind.add_css_class("detail-artist");
     kind.set_xalign(0.0);
-    let title = gtk::Label::new(Some(&artist.row.name));
-    title.add_css_class("detail-title");
-    title.set_xalign(0.0);
-    title.set_wrap(true);
-    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    super::detail_showcase::fit_detail_text(&title, &artist.row.name);
-    let summary = gtk::Label::new(Some(&format!(
-        "{} / {}",
-        album_count_text(artist.row.summary.album_count.max(0) as u64),
-        track_count_text(artist.row.summary.track_count.max(0) as u64)
-    )));
-    summary.add_css_class("muted");
-    summary.set_xalign(0.0);
-    header.append(&kind);
-    header.append(&title);
-    header.append(&summary);
-    let resize = header.clone();
-    let frame = super::detail_showcase::detail_showcase_frame(header.upcast());
-    width_allocation_owner(&frame, move |width| {
-        if width < 520 {
-            resize.add_css_class("detail-showcase-tiny");
-        } else {
-            resize.remove_css_class("detail-showcase-tiny");
-        }
-    })
-    .upcast()
+    header.append_detail(&kind);
+    header.take_band_colours_from(
+        shell,
+        artist
+            .row
+            .artwork_binding
+            .as_deref()
+            .map(ArtworkBinding::opaque)
+            .unwrap_or_default(),
+    );
+    header.mount_plain(width)
 }
 
 fn artist_count_button(icon_name: &str, text: &str) -> (gtk::Button, gtk::Label) {
     let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.add_css_class("artist-count-button");
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    // The counts are pills like Radio's: they open the albums and the tracks.
+    button.add_css_class("detail-pill");
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let icon = gtk::Image::from_icon_name(icon_name);
     icon.set_pixel_size(16);
     content.append(&icon);

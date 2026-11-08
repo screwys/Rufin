@@ -37,6 +37,56 @@
   </form>
 </article>
 {% endmacro %}
+{% macro column_row(row) %}
+<article class="album-card column-row" data-row="{{ row.data }}" data-kind="{{ row.kind() }}">
+  <form method="post" action="/api/queue" data-enhanced-form>
+    <input type="hidden" name="csrf" value="{{ row.form.csrf }}" />
+    <input type="hidden" name="return" value="{{ row.form.return_to }}" />
+    <input type="hidden" name="payload" value="{{ row.play }}" />
+    {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open">{% else %}<a href="{{ row.href }}" class="cover-open" data-action="open">{% endif %}<div class="cover{% if row.mosaic() %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork() }}" loading="lazy" alt="" /></noscript></div><span><b>{{ row.title }}</b><span>{% for (_, text) in row.labels() %}{% if !loop.first %} · {% endif %}{{ text }}{% endfor %}</span></span>{% if row.href.is_empty() %}</button>{% else %}</a>{% endif %}
+    {% if row.menu.play %}<div class="pin-controls">
+      <button type="submit" name="mode" value="replace" data-action="replace" class="icon-button" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="next" data-action="next" class="icon-button" title="{{ localization::tr("Play Next") }}" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="append" data-action="append" class="icon-button" title="{{ localization::tr("Play Later") }}" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
+    </div>{% endif %}
+  </form>
+</article>
+{% endmacro %}
+{% macro showcase(head) %}
+<section class="detail-showcase{% if head.home %} home-showcase{% endif %}" data-row="{{ head.row.data }}" data-kind="{{ head.row.kind() }}">
+  <form method="post" action="/api/queue" data-enhanced-form>
+    <input type="hidden" name="csrf" value="{{ head.row.form.csrf }}" />
+    <input type="hidden" name="return" value="{{ head.row.form.return_to }}" />
+    <input type="hidden" name="payload" value="{{ head.row.play }}" />
+  <div class="detail-band" style="{{ head.band }}"></div>
+  <div class="detail-body">
+    <div class="detail-cover">{% if head.home %}<button type="button" class="cover-open" data-action="menu" aria-label="{{ head.row.title }}">{% endif %}<div class="cover{% if head.row.mosaic() %} cover-mosaic{% endif %}">{% for preview in head.row.preview_tiles() %}{% if head.row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if head.row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ head.row.artwork() }}" loading="lazy" alt="" /></noscript></div>{% if head.home %}</button>{% endif %}</div>
+    <div class="detail-text">
+      <div class="detail-heading">
+        <h2 class="detail-title">{{ head.row.title }}</h2>
+        {% if head.artist %}<button type="button" class="metadata-link detail-artist" data-action="link" data-field="artist">{{ head.row.artist() }}</button>{% endif %}
+        {% if head.home %}<div class="detail-facts">{% for (icon, text) in head.facts %}<span>{% call icon(icon) %}{% endcall %}{{ text }}</span>{% endfor %}</div>{% endif %}
+      </div>
+      {% if !head.home %}<div class="detail-below">
+        <div class="detail-facts">{% for (icon, text) in head.facts %}<span>{% call icon(icon) %}{% endcall %}{{ text }}</span>{% endfor %}</div>
+        {% if !head.genres.is_empty() %}<div class="detail-genres">{% for (name, page) in head.genres %}<button type="button" class="detail-genre-chip" data-action="genre" data-page="{{ page }}" title="{{ name }}">{{ name }}</button>{% endfor %}<button type="button" class="detail-genre-chip detail-genre-more" data-action="genres" hidden></button></div>{% endif %}
+      </div>{% endif %}
+      <div class="detail-actions">
+        {% if head.row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>{% endif %}
+        {% if head.row.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}{{ localization::tr("Radio") }}</button>{% endif %}
+        {% if head.row.menu.favorite %}{% call favorite(head.row, "detail-round", true) %}{% endcall %}{% endif %}
+        {% call menu_button(head.row, "detail-round") %}{% endcall %}
+      </div>
+    </div>
+  </div>
+  {% if head.home %}
+  <button type="button" class="detail-step detail-step-previous" data-action="step-showcase" data-forward="false" title="{{ localization::tr("Previous album") }}" aria-label="{{ localization::tr("Previous album") }}">{% call icon("rufin-go-previous-symbolic") %}{% endcall %}</button>
+  <button type="button" class="detail-step detail-step-next" data-action="step-showcase" data-forward="true" title="{{ localization::tr("Next album") }}" aria-label="{{ localization::tr("Next album") }}">{% call icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+  {% endif %}
+  {% call media_menu(head.row) %}{% endcall %}
+  </form>
+</section>
+{% endmacro %}
 {% macro spin(id, min, max, value, disabled) %}
 <div class="spin" role="group" aria-labelledby="{{ id }}-label">
   <input id="{{ id }}" type="number" min="{{ min }}" max="{{ max }}" value="{{ value }}" required{% if disabled %} disabled{% endif %}>

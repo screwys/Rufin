@@ -10,8 +10,7 @@
     <link rel="stylesheet" href="/app.css" />
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
     <noscript><style>
-      [data-action="radio"], [data-action="refresh-home"], .home-paging, #random, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
-      .home-row .album-grid { grid-auto-rows: auto; row-gap: 24px; }
+      [data-action="radio"], [data-action="play-home"], [data-action="shuffle-home"], .home-paging, #random, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
     </style></noscript>
     <script src="/htmx.min.js" defer></script>
     <script type="module" src="/app.js"></script>
@@ -91,7 +90,7 @@
           {% endfor %}
         </nav>
         <section id="pins" aria-labelledby="pins-title" hidden>
-          <h2 id="pins-title">{{ localization::tr("Pins") }}</h2>
+          <h2 id="pins-title">{{ localization::tr("Saved") }}</h2>
           <div id="pin-list"></div>
         </section>
         <div class="nav-bottom">

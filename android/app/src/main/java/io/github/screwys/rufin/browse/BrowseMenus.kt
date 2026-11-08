@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
@@ -35,6 +37,7 @@ import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.foundation.clickable
@@ -96,34 +99,29 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
     val tabs = if (page?.supportsFavoriteFilter == true || page?.supportsDownloadedFilter == true)
         listOf("Filter", "Sort", "Display") else listOf("Sort", "Display")
     val pager = rememberPagerState { tabs.size }
-    var visited by remember(tabs) { mutableStateOf(setOf(0)) }
-    val settledPage by remember { derivedStateOf { pager.settledPage } }
     val selectedPage by remember { derivedStateOf { pager.targetPage } }
-    LaunchedEffect(settledPage) { visited = visited + settledPage }
     val scope = rememberCoroutineScope()
     val reduceMotion = LocalReduceMotion.current
     ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(.85f)) {
+        // As Mihon's: the sheet is as tall as the tab it shows, up to most of the screen.
+        Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .85f)) {
             PrimaryTabRow(selectedTabIndex = selectedPage, indicator = { PagerTabIndicator(pager) }) {
                 tabs.forEachIndexed { index, title ->
                     Tab(selectedPage == index, { scope.launch { if (reduceMotion) pager.scrollToPage(index) else pager.animateScrollToPage(index) } },
                         text = { Text(translate(title)) })
                 }
             }
-            HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.Top,
-                beyondViewportPageCount = tabs.size - 1) { tabIndex ->
-                Box(Modifier.fillMaxSize()) {
-                if (tabIndex in visited) {
+            HorizontalPager(pager, Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) { tabIndex ->
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
                     if (tabs[tabIndex] == "Filter") {
                         if (page?.supportsFavoriteFilter == true && options != null) {
-                            ListItem(headlineContent = { Text(translate("Favorites")) },
+                            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(translate("Favorites")) },
                                 leadingContent = { Checkbox(options.favoritesOnly, null) },
                                 modifier = Modifier.toggleable(options.favoritesOnly, role = Role.Checkbox) { options.favoritesOnly = it })
                         }
                         if (page?.supportsDownloadedFilter == true && options != null) {
-                            ListItem(headlineContent = { Text(translate("Downloaded")) },
+                            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(translate("Downloaded")) },
                                 leadingContent = { Checkbox(options.downloadedOnly, null) },
                                 modifier = Modifier.toggleable(options.downloadedOnly, role = Role.Checkbox) { options.downloadedOnly = it })
                         }
@@ -158,7 +156,7 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
                             if (display.fieldChoices.isNotEmpty()) {
                                 Text(display.fieldsTitle, Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall)
                                 display.fieldChoices.forEach { field ->
-                                    ListItem(headlineContent = { Text(field.title) },
+                                    ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(field.title) },
                                         leadingContent = { Checkbox(field.shown, null, enabled = field.canToggle) },
                                         trailingContent = { Row {
                                             PlayerIconButton("rufin-go-up-symbolic", "Move up", { page?.moveField(field.id, true) }, enabled = field.shown)
@@ -171,8 +169,6 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
                     }
                     Spacer(Modifier.height(12.dp))
                 }
-                }
-                }
             }
         }
     }
@@ -183,7 +179,7 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
 private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, title: (T) -> String, choose: (T) -> Unit) {
     Text(translate(label), Modifier.padding(top = 12.dp, bottom = 8.dp), style = MaterialTheme.typography.titleSmall)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        choices.forEach { option -> FilterChip(selected == option, { choose(option) }, label = { Text(title(option)) }) }
+        choices.forEach { option -> ChoiceChip(selected == option, { choose(option) }, label = { Text(title(option)) }) }
     }
 }
 
@@ -197,13 +193,8 @@ internal fun BrowseMenuSheet(
 ) {
     // The menu offers and labels what the row shows now, with the changes committed since.
     val item = favoriteItem(model, listed)
-    val playingUri by remember(player) { derivedStateOf { player.playback?.transport?.current?.id?.mediaUri } }
-    val playbackControls by remember(player) { derivedStateOf {
-        Triple(player.playback?.controls?.shuffleEnabled == true, player.playback?.controls?.autoDjEnabled == true, player.playback?.controls?.repeatMode)
-    } }
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
-    var random by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
     val playlistFolder = item.row.playlistFolder
     val smartPlaylist = item.row.smartPlaylist
@@ -220,28 +211,13 @@ internal fun BrowseMenuSheet(
     }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface, contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
-        dragHandle = null, sheetState = rememberModalBottomSheetState()) {
+        // Short screens (a phone on its side) open the menu at full height.
+        dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = LocalConfiguration.current.screenHeightDp < 600)) {
         MediaMenuBackdrop(item.row.artworkIdentity, player) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
-            if (item.row.isTrack && item.row.mediaUri == playingUri) {
-                val (shuffle, autoDj, repeat) = playbackControls
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    BrowsePrimaryAction("rufin-shuffle-symbolic",
-                        "Shuffle", Modifier.weight(1f), selected = shuffle, action = player::shuffle)
-                    BrowsePrimaryAction(if (repeat == io.github.screwys.rufin.shared.library.QueueRepeatMode.ONE) "rufin-repeat-one-symbolic" else "rufin-repeat-symbolic",
-                        when (repeat) { io.github.screwys.rufin.shared.library.QueueRepeatMode.ONE -> "Repeat one"; io.github.screwys.rufin.shared.library.QueueRepeatMode.ALL -> "Repeat all"; else -> "Repeat off" },
-                        Modifier.weight(1f), selected = repeat != null && repeat != io.github.screwys.rufin.shared.library.QueueRepeatMode.OFF, action = player::repeat)
-                    BrowsePrimaryAction("rufin-auto-dj-symbolic", "Auto DJ",
-                        Modifier.weight(1f), selected = autoDj, action = player::autoDj)
-                    BrowsePrimaryAction("rufin-random-symbolic", "Play random", Modifier.weight(1f), selected = false, action = { random = true })
-                }
-                MediaMenuDivider()
-            }
             val offered = menu
-            BrowseMenuHeader(item, player,
-                onFavorite = if (offered?.favorite == true) ({ browse.favorite(item) }) else null,
-                onDetails = if (item.row.target != null) ({ details = true }) else null)
+            BrowseMenuHeader(item, player)
             if (offered != null) {
                 val plays = listOfNotNull(
                     Triple("rufin-media-playback-start-symbolic", "Play", null as QueuePlacement?).takeIf { offered.play },
@@ -273,7 +249,7 @@ internal fun BrowseMenuSheet(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(Triple(QueuePlacement.Replace(0UL), "Play", "rufin-media-playback-start-symbolic"), Triple(QueuePlacement.AfterCurrent, "Play Next", "rufin-mail-forward-symbolic"),
                             Triple(QueuePlacement.End, "Play Later", "rufin-go-last-symbolic")).forEach { (placement, title, icon) ->
-                            OutlinedIconButton({ browse.radio(item, placement); onDismiss() }, Modifier.size(40.dp), shape = RoundedCornerShape(8.dp)) {
+                            FilledTonalIconButton({ browse.radio(item, placement); onDismiss() }, Modifier.size(40.dp), shape = RoundedCornerShape(8.dp)) {
                                 RufinIcon(icon, translate(title), Modifier.size(20.dp))
                             }
                         }
@@ -281,6 +257,8 @@ internal fun BrowseMenuSheet(
                     })
                 }
                 if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
+                if (offered.favorite) BrowseMenuAction(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
+                    if (item.row.favorite) "Remove from Favorites" else "Add to Favorites") { browse.favorite(item); onDismiss() }
                 offered.folder?.let { inFolder ->
                     BrowseMenuAction("rufin-folders-symbolic", "Add to folder") { folderPicker = true }
                     if (inFolder && folderMember != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
@@ -297,8 +275,6 @@ internal fun BrowseMenuSheet(
                 if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
                 if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
                 if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
-                if (offered.pin != null) BrowseMenuAction("rufin-bookmark-symbolic",
-                    if (offered.pinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !offered.pinned); onDismiss() }
                 onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
                 if (playlistFolder != null) {
                     if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
@@ -313,6 +289,10 @@ internal fun BrowseMenuSheet(
                     if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
                     if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
                 }
+                // Details and the pin close the menu, just above the rating.
+                if (item.row.target != null) BrowseMenuAction("rufin-info-symbolic", "Details") { details = true }
+                if (offered.pin != null) BrowseMenuAction("rufin-bookmark-symbolic",
+                    if (offered.pinned) "Remove from Saved" else "Add to Saved") { browse.pin(item, !offered.pinned); onDismiss() }
                 if (offered.rating) {
                     MediaMenuDivider()
                     MenuRating(rating, halfStars) { value -> model.runAction {
@@ -327,7 +307,6 @@ internal fun BrowseMenuSheet(
     if (navigation) MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri }, player, { route, title, source ->
         navigation = false; onDismiss(); onNavigate(route, title, source)
     }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
-    if (random) RandomPlaySheet(model, browse) { random = false; onDismiss() }
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
         folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
     if (rename) {
@@ -357,10 +336,10 @@ internal fun BrowseMenuSheet(
 }
 
 @Composable
-internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavorite: (() -> Unit)? = null, onDetails: (() -> Unit)? = null) {
+internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection) {
     val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.isTrack || it != item.row.title }.orEmpty())
         .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
-    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, item.row.favorite, player, onFavorite, onDetails) {
+    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, player) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface)
@@ -368,9 +347,7 @@ internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavo
 }
 
 @Composable
-internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, favorite: Boolean, player: PlayerConnection,
-    onFavorite: (() -> Unit)?, onDetails: (() -> Unit)? = null, title: @Composable () -> Unit,
-) {
+internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, player: PlayerConnection, title: @Composable () -> Unit) {
     val artwork = rememberArtwork(identity, player, with(LocalDensity.current) { 64.dp.roundToPx() })
     val shade = if (MaterialTheme.colorScheme.surface.luminance() < .5f) Color.Black else Color.White
     Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -383,13 +360,6 @@ internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, favo
             title()
             if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (onFavorite != null) IconButton(onFavorite, Modifier.size(40.dp)) {
-            RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(24.dp),
-                if (favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-        }
-        if (onDetails != null) IconButton(onDetails, Modifier.size(40.dp)) {
-            RufinIcon("rufin-go-next-symbolic", translate("Details"), Modifier.size(24.dp))
         }
     }
     }
@@ -485,7 +455,10 @@ internal fun BrowseMenuAction(icon: String, label: String, action: () -> Unit) {
 @Composable
 internal fun PlaylistPickerSheet(
     model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection,
-    folderKind: Boolean? = null, onDismiss: () -> Unit,
+    folderKind: Boolean? = null,
+    /** The tracks to add instead of `item`'s: a Select mode's picked rows. */
+    selectionOf: (() -> io.github.screwys.rufin.shared.library.MemberSelection?)? = null,
+    onDismiss: () -> Unit,
 ) {
     var filter by remember { mutableStateOf("") }
     var skipDuplicates by remember { mutableStateOf(true) }
@@ -528,7 +501,7 @@ internal fun PlaylistPickerSheet(
                                     playlist.playlistFolder!!.folderKey)
                             } else playlist.route?.let { destination ->
                                 browse.library?.let { library ->
-                                    playlistSelection(library, item).use { selection ->
+                                    (selectionOf?.invoke() ?: playlistSelection(library, item)).use { selection ->
                                         model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                                             addPlaylistTracks(source, (destination as Route.PlaylistDetail).v1, selection, skipDuplicates)
                                         }
@@ -554,7 +527,7 @@ internal fun PlaylistPickerSheet(
     })
     if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
         browse.library?.let { library ->
-            playlistSelection(library, item).use { selection ->
+            (selectionOf?.invoke() ?: playlistSelection(library, item)).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                     createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) }
                 }

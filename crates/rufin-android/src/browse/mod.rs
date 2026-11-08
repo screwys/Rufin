@@ -9,7 +9,7 @@ pub use records::{
     AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection, AndroidHomeSectionKind,
     AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened, AndroidPinPage,
     AndroidPlaylistImport, AndroidReading, AndroidRecentResult, AndroidRouteDescriptor,
-    AndroidRouteSetting, AndroidRows, AndroidScrollSection, AndroidSortField,
+    AndroidRouteSetting, AndroidRowRange, AndroidRows, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
@@ -214,19 +214,22 @@ impl AndroidView {
 
     /// Home's sections as rows, in core's order and with its titles.
     fn home_sections(&self) -> Vec<AndroidHomeSection> {
-        use library::HomeBlockKind;
-        use rufin_core::settings::layout::{HOME_ALBUM_FIELDS, HOME_TRACK_FIELDS};
+        use rufin_core::settings::layout::{HOME_GENRE_FIELDS, HOME_TRACK_FIELDS};
         use rufin_core::view::{HomeItem, HomeSection};
+        let album_card = home_album_card;
         // Home cards show GTK's Home labels.
-        let album_card = |album: library::HomeAlbumRow| AndroidBrowseRow {
-            display_title: Some(album.title),
-            ..shown_row(Row::Album(album.album), &HOME_ALBUM_FIELDS, 0)
-        };
         let track_card = |track: library::HomeTrackRow| AndroidBrowseRow {
             display_title: Some(track.title),
             ..shown_row(Row::Track(track.track), &HOME_TRACK_FIELDS, 0)
         };
-        let refreshable = |block: HomeBlockKind| block.section_kind().map(|_| block);
+        // Core decides which sections show as rows of tracks, for every client.
+        let rows_kind = |section: &HomeSection| {
+            if section.shows_rows() {
+                AndroidHomeSectionKind::Tracks
+            } else {
+                AndroidHomeSectionKind::Rows
+            }
+        };
         self.view
             .home_sections()
             .unwrap_or_default()
@@ -243,32 +246,29 @@ impl AndroidView {
                         })
                         .collect()
                 };
-                let (kind, refresh, rows) = match &section {
-                    HomeSection::Showcase(row) => (
+                let (kind, rows) = match &section {
+                    // The album before, the album shown and the album after, so a swipe can
+                    // show its next page before the step lands.
+                    HomeSection::Showcase(showcase) => (
                         AndroidHomeSectionKind::Showcase,
-                        refreshable(HomeBlockKind::Showcase),
-                        vec![album_card(row.as_ref().clone())],
+                        [&showcase.previous, &showcase.current, &showcase.next]
+                            .map(|album| album_card(album.clone()))
+                            .into(),
                     ),
-                    HomeSection::Rows { block, .. } => {
-                        (AndroidHomeSectionKind::Rows, refreshable(*block), items())
+                    HomeSection::Rows { .. } | HomeSection::Provider(_) => {
+                        (rows_kind(&section), items())
                     }
-                    HomeSection::Provider(_) => (AndroidHomeSectionKind::Rows, None, items()),
                     HomeSection::Genres(genres) => (
                         AndroidHomeSectionKind::Genres,
-                        refreshable(HomeBlockKind::Genres),
                         genres
                             .iter()
                             .cloned()
-                            .map(|row| Row::Tag(row).into())
+                            // Core's genre line: album and track counts.
+                            .map(|row| shown_row(Row::Tag(row), &HOME_GENRE_FIELDS, 0))
                             .collect(),
                     ),
                 };
-                AndroidHomeSection {
-                    title,
-                    kind,
-                    refresh,
-                    rows,
-                }
+                AndroidHomeSection { title, kind, rows }
             })
             .collect()
     }
@@ -284,6 +284,20 @@ impl AndroidView {
 impl AndroidView {
     pub fn route(&self) -> Route {
         self.view.route().clone()
+    }
+
+    /// The page's rows in `ranges`, as one selection of what it lists: what Select mode plays,
+    /// downloads, edits or removes. None when the page lists no members, as a list of albums.
+    pub fn rows_selection(&self, ranges: Vec<AndroidRowRange>) -> Option<Arc<MemberSelection>> {
+        let read = self.view.members()?.clone();
+        let ranges = ranges
+            .into_iter()
+            .map(|range| range.start as usize..range.end as usize)
+            .collect();
+        Some(Arc::new(MemberSelection::Members {
+            read,
+            ranges: Some(ranges),
+        }))
     }
 
     /// Rows `offset` onwards, at most `limit` and 256, an artist page's favorite tracks when
@@ -690,5 +704,17 @@ impl AndroidLibrary {
         self.playback
             .play_selection(request.with_context_title(caption(None, title)));
         Ok(())
+    }
+}
+
+/// A Home album card, with GTK's Home labels.
+fn home_album_card(album: library::HomeAlbumRow) -> AndroidBrowseRow {
+    AndroidBrowseRow {
+        display_title: Some(album.title),
+        ..shown_row(
+            Row::Album(album.album),
+            &rufin_core::settings::layout::HOME_ALBUM_FIELDS,
+            0,
+        )
     }
 }
