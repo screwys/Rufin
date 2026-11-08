@@ -287,7 +287,7 @@ fn create_tag(mut args: Vec<String>) -> Result<()> {
                 [
                     "commit",
                     "-m",
-                    &format!("chore(flatpak): update Flathub manifest for {version}"),
+                    &format!("flatpak: update Flathub manifest for {version}"),
                 ],
             )?;
         }
@@ -652,7 +652,6 @@ fn is_release_note_bot_author(author: &str) -> bool {
 
 fn is_release_publish_pr_title(title: &str) -> bool {
     title.starts_with("release: publish prep for v")
-        || title.starts_with("chore(release): publish v")
 }
 
 fn is_release_note_housekeeping_title(title: &str) -> bool {
@@ -661,17 +660,14 @@ fn is_release_note_housekeeping_title(title: &str) -> bool {
 
 fn is_release_notes_target_housekeeping_subject(subject: &str) -> bool {
     is_release_publish_pr_title(subject)
-        || subject.starts_with("chore(flatpak): update Flathub manifest for v")
-        || subject.starts_with("chore(aur): update stable package for v")
+        || subject.starts_with("flatpak: update Flathub manifest for v")
         || subject.starts_with("release: publish stable packages for v")
         || subject.starts_with("release: sync stable package metadata for v")
 }
 
 fn is_release_housekeeping_subject(subject: &str) -> bool {
-    subject.starts_with("chore(release): bump version to ")
-        || subject.starts_with("release: publish prep for v")
-        || subject.starts_with("chore(flatpak): update Flathub manifest for v")
-        || subject.starts_with("chore(aur): update stable package for v")
+    subject.starts_with("release: publish prep for v")
+        || subject.starts_with("flatpak: update Flathub manifest for v")
         || subject.starts_with("release: publish stable packages for v")
         || subject.starts_with("release: sync stable package metadata for v")
         || subject.starts_with("Merge pull request #")
