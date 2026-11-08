@@ -2,8 +2,8 @@ package io.github.screwys.rufin.player
 
 import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.ui.rememberArtwork
-import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.settings.LocalTranslationRevision
@@ -126,7 +126,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     // white content, boxes a shade darker than the background (as Navic's) and a pastel of the
     // cover for Play; off, the theme's, its boxes in the secondary container.
     val base = MaterialTheme.colorScheme
-    val stops = artwork?.band?.takeIf { application?.display?.fullscreenDynamicBackground != false }
+    val stops = artwork.image?.band?.takeIf { application?.display?.fullscreenDynamicBackground != false }
     val colourTime = tween<Color>(if (reduceMotion) 0 else 320)
     val top by animateColorAsState(stops?.get(0) ?: base.surface, colourTime, label = "playerTop")
     val bottom by animateColorAsState(stops?.get(2) ?: base.surface, colourTime, label = "playerBottom")
@@ -236,7 +236,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
-            if (tiny || application?.display?.fullscreenBackgroundImage == true) artwork?.let { artwork ->
+            if (tiny || application?.display?.fullscreenBackgroundImage == true) artwork.image?.let { artwork ->
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(if (tiny) .35f else .12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {
@@ -369,7 +369,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
 }
 
 @Composable
-private fun MainPlayerArtwork(player: PlayerConnection, artwork: PlayerArtwork?, showCurrentLine: Boolean, modifier: Modifier,
+private fun MainPlayerArtwork(player: PlayerConnection, artwork: Cover, showCurrentLine: Boolean, modifier: Modifier,
     offset: Float, neighbours: Pair<ByteArray?, ByteArray?>, onArtworkSize: (Int) -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     // The line keeps its place until the new track's lyrics are known, so a track change moves
@@ -467,7 +467,7 @@ private val PlayerShade = Color.Black.copy(alpha = .24f)
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun PlayerCover(player: PlayerConnection, artwork: PlayerArtwork?, modifier: Modifier) {
+private fun PlayerCover(player: PlayerConnection, artwork: Cover, modifier: Modifier) {
     val duration = if (LocalReduceMotion.current) 0 else 240
     val binding = player.currentItem?.artworkBinding?.toList()
     val identity = remember(player.bridge, binding, player.artworkGeneration) {

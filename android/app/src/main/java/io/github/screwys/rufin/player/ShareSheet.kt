@@ -62,8 +62,8 @@ import io.github.screwys.rufin.core.AndroidLyricsLine
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.CoverShape
-import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SegmentedPill
 import io.github.screwys.rufin.ui.rememberArtwork
@@ -242,13 +242,13 @@ private fun ColourPill(style: ShareCardStyle) {
 
 /** A card in the chosen colours, drawn into `layer` for sharing. */
 @Composable
-private fun ShareCard(layer: GraphicsLayer, artwork: PlayerArtwork?, fill: Color, content: Color, portrait: Boolean, modifier: Modifier,
+private fun ShareCard(layer: GraphicsLayer, artwork: Cover, fill: Color, content: Color, portrait: Boolean, modifier: Modifier,
     body: @Composable ColumnScope.() -> Unit) {
     // Lyrics take a 4:5 card; a song card is as tall as its full-width cover and text.
     Box(modifier.fillMaxWidth().then(if (portrait) Modifier.aspectRatio(4f / 5f) else Modifier).drawWithContent {
         layer.record { this@drawWithContent.drawContent() }
         drawLayer(layer)
-    }.clip(RoundedCornerShape(24.dp)).then(showcaseBand(artwork?.band)).background(fill)) {
+    }.clip(RoundedCornerShape(24.dp)).then(showcaseBand(artwork.image?.band)).background(fill)) {
         CompositionLocalProvider(LocalContentColor provides content) {
             Column(Modifier.fillMaxWidth().then(if (portrait) Modifier.fillMaxHeight() else Modifier).padding(24.dp), content = body)
         }
@@ -256,7 +256,7 @@ private fun ShareCard(layer: GraphicsLayer, artwork: PlayerArtwork?, fill: Color
 }
 
 @Composable
-private fun ColumnScope.SongCardContent(player: PlayerConnection, artwork: PlayerArtwork?, content: Color) {
+private fun ColumnScope.SongCardContent(player: PlayerConnection, artwork: Cover, content: Color) {
     val metadata = player.currentItem?.metadata
     Artwork(artwork, Modifier.fillMaxWidth().aspectRatio(1f).clip(CoverShape))
     Spacer(Modifier.height(16.dp))
@@ -267,7 +267,7 @@ private fun ColumnScope.SongCardContent(player: PlayerConnection, artwork: Playe
 }
 
 @Composable
-private fun ColumnScope.LyricsCardContent(player: PlayerConnection, artwork: PlayerArtwork?, lines: List<String>, content: Color) {
+private fun ColumnScope.LyricsCardContent(player: PlayerConnection, artwork: Cover, lines: List<String>, content: Color) {
     val metadata = player.currentItem?.metadata
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Artwork(artwork, Modifier.size(44.dp).clip(CoverShape))

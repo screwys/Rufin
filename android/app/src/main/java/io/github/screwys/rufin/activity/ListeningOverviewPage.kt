@@ -52,7 +52,7 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
     val limit = preferences?.resultCount?.toInt() ?: 3
     val dynamic = preferences?.dynamicBackground != false
     val background = rememberArtwork(report?.tracks?.firstOrNull()?.artworkBinding, player,
-        with(LocalDensity.current) { 256.dp.roundToPx() })
+        with(LocalDensity.current) { 256.dp.roundToPx() }).image
     val surface = if (dynamic && background != null) lerp(colors.surface, background.color, .12f) else colors.surface
     Surface(Modifier.fillMaxSize(), color = surface) {
         Box(Modifier.fillMaxSize()) {

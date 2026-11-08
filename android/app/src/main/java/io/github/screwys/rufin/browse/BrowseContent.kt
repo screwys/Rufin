@@ -9,6 +9,7 @@ import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.FallbackCover
 import io.github.screwys.rufin.ui.RufinIcon
@@ -450,23 +451,13 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         // Phones: a 120 dp cover; wider panes grow it to 196 dp, as GTK's Home does.
         val cover = ((maxWidth - 32.dp) * .3f).coerceIn(112.dp, 196.dp)
-        // The band reaches past the cover's middle, or further when the title, artist and facts need it
-        // (a large font), so they always end just above its edge.
-        val density = LocalDensity.current
-        var text by remember { mutableStateOf(0.dp) }
-        val band = maxOf(bar + cover * .9f + 16.dp, bar + 24.dp + text + 12.dp)
         val artwork = rememberBrowseArtwork(item, player, cover)
-        Box(Modifier.fillMaxWidth().height(band).then(showcaseBand(artwork?.band)))
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = bar + 24.dp, bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            BrowseCover(item, artwork, Modifier.size(cover).shadow(14.dp, CoverShape,
-                ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f)).clip(CoverShape)
-                .combinedClickable(onClick = { onMenu(projected) }, onLongClick = { onMenu(projected) }))
-            Column(Modifier.weight(1f)) {
-                // The title, artist and facts end just above the band's edge; the buttons start under it.
-                Column(Modifier.fillMaxWidth().height(band - bar - 24.dp - 12.dp), verticalArrangement = Arrangement.Bottom) {
-                    Column(Modifier.wrapContentHeight(Alignment.Bottom, unbounded = true)
-                        .onSizeChanged { text = with(density) { it.height.toDp() } }) {
+        Column(Modifier.fillMaxWidth()) {
+            // The band reaches past the cover's middle, or further when the title, artist and facts need it
+            // (a large font), so they always end just above its edge; one layout pass decides it.
+            Box(Modifier.fillMaxWidth().then(showcaseBand(artwork.image?.band))) {
+                Column(Modifier.fillMaxWidth().padding(start = 16.dp + cover + 16.dp, end = 16.dp, top = bar + 24.dp, bottom = 12.dp)
+                    .heightIn(min = cover * .9f - 20.dp), verticalArrangement = Arrangement.Bottom) {
                     CompositionLocalProvider(LocalContentColor provides OnBand) {
                     // Showcases carry no download badge; rows and cards do.
                     BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
@@ -478,17 +469,20 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
                         Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
                         Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)), Modifier.padding(top = 8.dp))
                     }
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, { onPlay(false) }, { onPlay(true) })
-                    ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) })
-                    ShowcaseRound(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
-                        { onFavorite(projected) }, if (projected.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
                 }
             }
+            // The buttons start under the band's edge, beside the cover.
+            FlowRow(Modifier.padding(start = 16.dp + cover + 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, { onPlay(false) }, { onPlay(true) })
+                ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) })
+                ShowcaseRound(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
+                    { onFavorite(projected) }, if (projected.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
+            }
         }
+        BrowseCover(item, artwork, Modifier.padding(start = 16.dp, top = bar + 24.dp, bottom = 16.dp).size(cover)
+            .shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f)).clip(CoverShape)
+            .combinedClickable(onClick = { onMenu(projected) }, onLongClick = { onMenu(projected) }))
     }
 }
 
@@ -641,17 +635,16 @@ internal fun showcasePaint(key: String): Modifier {
 }
 
 @Composable
-private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp): PlayerArtwork? {
+private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp): Cover {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
     return rememberArtwork(item.row.artworkIdentity, player, pixels)
 }
 
 @Composable
-private fun BrowseCover(item: BrowseItem, artwork: PlayerArtwork?, modifier: Modifier) {
+private fun BrowseCover(item: BrowseItem, artwork: Cover, modifier: Modifier) {
     Box(modifier.clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        if (artwork != null) Artwork(artwork, Modifier.fillMaxSize())
-        else if (item.row.isFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(24.dp))
-        else FallbackCover(Modifier.fillMaxSize())
+        if (artwork.missing && artwork.image == null && item.row.isFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(24.dp))
+        else Artwork(artwork, Modifier.fillMaxSize())
     }
 }
 
@@ -759,7 +752,7 @@ internal fun FactsPill(facts: List<Triple<String, String, String>>, modifier: Mo
 }
 
 @Composable
-private fun SummaryFact(icon: String, label: String, value: String) {
+internal fun SummaryFact(icon: String, label: String, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.semantics { contentDescription = "${translate(label)} $value" }) {
         RufinIcon(icon, null, Modifier.size(14.dp))

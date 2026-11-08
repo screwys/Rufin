@@ -125,8 +125,9 @@ private fun SavedRow(item: BrowseItem, player: PlayerConnection, open: () -> Uni
         Column(Modifier.weight(1f)) {
             Text(item.row.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium)
-            if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                io.github.screwys.rufin.browse.PinFacts(item, player.model)
+            }
         }
     }
 }
