@@ -62,6 +62,7 @@ private data class Picked(val all: Boolean = false, val rows: Set<ULong> = empty
  *  in Playlist order, and act on what is picked: Play, Add to…, Download, Remove, and under More
  *  Play next, Play later and Edit metadata. */
 @OptIn(ExperimentalMaterial3Api::class)
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection, page: BrowsePage,
     rows: LazyPagingItems<BrowseItem>, player: PlayerConnection, playlist: BrowseItem, onExit: () -> Unit,
