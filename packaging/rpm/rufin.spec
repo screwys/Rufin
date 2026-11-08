@@ -91,5 +91,5 @@ appstreamcli validate --no-net resources/io.github.screwys.Rufin.metainfo.xml
 %{_metainfodir}/io.github.screwys.Rufin.metainfo.xml
 
 %changelog
-* Fri Jul 17 2026 screwy <screwygit@proton.me> - 0.9.0-1
+* Fri Jul 17 2026 screwy <me@screwy.dev> - 0.9.0-1
 - Initial RPM package
