@@ -1588,6 +1588,9 @@ msgstr "時長"
 msgid "Dynamic background"
 msgstr ""
 
+msgid "Dynamic"
+msgstr ""
+
 msgid "EBU R128 analysis"
 msgstr ""
 
@@ -1918,9 +1921,6 @@ msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "尋找您的 ListenBrainz 使用者憑證"
-
-msgid "Find"
-msgstr ""
 
 #, fuzzy
 #| msgid "No lyrics"
@@ -4484,6 +4484,11 @@ msgstr "重新搜尋"
 #| msgid "Saving..."
 msgid "Starting..."
 msgstr "正在儲存..."
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "自動"
 
 msgid "Status display"
 msgstr ""

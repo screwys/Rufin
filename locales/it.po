@@ -1543,6 +1543,9 @@ msgstr "Durata"
 msgid "Dynamic background"
 msgstr "Sfondo dinamico"
 
+msgid "Dynamic"
+msgstr ""
+
 msgid "EBU R128 analysis"
 msgstr ""
 
@@ -1830,9 +1833,6 @@ msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
-msgstr ""
-
-msgid "Find"
 msgstr ""
 
 msgid "Finding lyrics..."
@@ -4130,6 +4130,11 @@ msgstr ""
 
 msgid "Starting..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "Automatico"
 
 msgid "Status display"
 msgstr ""

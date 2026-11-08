@@ -1555,6 +1555,9 @@ msgstr "Kesto"
 msgid "Dynamic background"
 msgstr "Dynaaminen tausta"
 
+msgid "Dynamic"
+msgstr ""
+
 #, fuzzy
 #| msgid "EBU R128"
 msgid "EBU R128 analysis"
@@ -1872,9 +1875,6 @@ msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
-msgstr ""
-
-msgid "Find"
 msgstr ""
 
 #, fuzzy
@@ -4375,6 +4375,11 @@ msgstr "Hae sivulta"
 #| msgid "Saving..."
 msgid "Starting..."
 msgstr "Tallennetaan..."
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "Automaattinen"
 
 msgid "Status display"
 msgstr ""

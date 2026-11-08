@@ -1527,6 +1527,9 @@ msgstr "Продолжительность"
 msgid "Dynamic background"
 msgstr "Динамический фон"
 
+msgid "Dynamic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Enable EBU R128 Analysis?"
 msgid "EBU R128 analysis"
@@ -1825,9 +1828,6 @@ msgstr "Найти общие папки"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Найдите свой токен пользователя ListenBrainz"
-
-msgid "Find"
-msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Поиск текста песни..."
@@ -4187,6 +4187,11 @@ msgstr "Поиск по странице"
 
 msgid "Starting..."
 msgstr "Запуск..."
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "Автоматически"
 
 msgid "Status display"
 msgstr "Отображение статуса"

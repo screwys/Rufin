@@ -1592,6 +1592,9 @@ msgstr "Ilgums"
 msgid "Dynamic background"
 msgstr "Dinamisks fons"
 
+msgid "Dynamic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Enable EBU R128 Analysis?"
 msgid "EBU R128 analysis"
@@ -1908,9 +1911,6 @@ msgstr "Atrodiet koplietotos resursus"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
-
-msgid "Find"
-msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Meklējam tekstus..."
@@ -4380,6 +4380,11 @@ msgstr "Meklēt lapā"
 
 msgid "Starting..."
 msgstr "Sākas..."
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "Automātisks"
 
 msgid "Status display"
 msgstr "Statuss"

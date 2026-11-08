@@ -1410,6 +1410,9 @@ msgstr "Kestus"
 msgid "Dynamic background"
 msgstr "Dünaamiline taust"
 
+msgid "Dynamic"
+msgstr ""
+
 msgid "EBU R128 analysis"
 msgstr "EBU R128 analüüs"
 
@@ -1678,9 +1681,6 @@ msgstr "Otsi jagatud võrgukaustu"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
-
-msgid "Find"
-msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Otsin laulusõnu…"
@@ -3909,6 +3909,11 @@ msgstr "Avaleht"
 
 msgid "Starting..."
 msgstr "Käivitan…"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Static"
+msgstr "Automaatne"
 
 msgid "Status display"
 msgstr "Oleku kuvamine"
