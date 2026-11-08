@@ -31,6 +31,20 @@ import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.BoundsTransform
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.IntSize
 import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.screwys.rufin.ui.CoverShape
@@ -62,6 +76,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -183,7 +203,7 @@ private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, tit
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun BrowseMenuSheet(
     model: RufinConnection, browse: BrowseConnection, listed: BrowseItem, player: PlayerConnection,
@@ -203,6 +223,10 @@ internal fun BrowseMenuSheet(
     val menu = remember(item.row, browse.library) { browse.library?.menu(item.row) }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
+    // While the radio has the big buttons, a tap anywhere else in the menu hands them back.
+    var radio by remember(item.row.key) { mutableStateOf(false) }
+    var menuLayout by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var buttonsLayout by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var rating by remember(item.row.row) { mutableStateOf(item.row.rating) }
     val halfStars = model.sources?.let { sourceHalfStarsEnabled(it, item.row.mediaUri, item.row.sourceId) } == true
     if (details) {
@@ -214,47 +238,65 @@ internal fun BrowseMenuSheet(
         // Short screens (a phone on its side) open the menu at full height.
         dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = LocalConfiguration.current.screenHeightDp < 600)) {
         MediaMenuBackdrop(item.row.artworkIdentity, player) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
+        Column(Modifier.fillMaxWidth().onPlaced { menuLayout = it }.pointerInput(radio) {
+            if (radio) awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val buttons = buttonsLayout?.let { menuLayout?.localBoundingBoxOf(it) }
+                if (buttons?.contains(down.position) != true) waitForUpOrCancellation(PointerEventPass.Initial)?.let {
+                    it.consume()
+                    radio = false
+                }
+            }
+        }.verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
             val offered = menu
             BrowseMenuHeader(item, player)
             if (offered != null) {
-                val plays = listOfNotNull(
-                    Triple("rufin-media-playback-start-symbolic", "Play", null as QueuePlacement?).takeIf { offered.play },
-                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent).takeIf { offered.playNext },
-                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End).takeIf { offered.playLater })
-                if (plays.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    plays.forEach { (icon, title, placement) ->
-                        if (placement == null) BrowsePrimaryAction(icon, title, Modifier.weight(1f),
-                            shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, QueuePlacement.Replace(0UL), true); onDismiss() }) {
-                                onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
-                            }
-                        else BrowsePrimaryAction(icon, title, Modifier.weight(1f),
-                            shuffle = { browse.play(item, placement, true); onDismiss() }) { browse.play(item, placement); onDismiss() }
-                    }
-                }
-                offered.radio?.let { seed ->
-                    val label = when (seed) {
+                val radioLabel = offered.radio?.let { seed ->
+                    when (seed) {
                         is RadioSeed.Track -> "Track radio"
                         is RadioSeed.Album -> "Album radio"
                         is RadioSeed.Artist, is RadioSeed.AlbumArtist -> "Artist radio"
                         is RadioSeed.Genre -> "Genre radio"
                         is RadioSeed.Playlist -> "Playlist radio"
                     }
-                    ListItem(headlineContent = { Text(translate(label)) },
-                        leadingContent = { RufinIcon("rufin-audio-only-symbolic", null, Modifier.size(24.dp)) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        trailingContent = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(Triple(QueuePlacement.Replace(0UL), "Play", "rufin-media-playback-start-symbolic"), Triple(QueuePlacement.AfterCurrent, "Play Next", "rufin-mail-forward-symbolic"),
-                            Triple(QueuePlacement.End, "Play Later", "rufin-go-last-symbolic")).forEach { (placement, title, icon) ->
-                            FilledTonalIconButton({ browse.radio(item, placement); onDismiss() }, Modifier.size(40.dp), shape = RoundedCornerShape(8.dp)) {
-                                RufinIcon(icon, translate(title), Modifier.size(20.dp))
+                }
+                // The radio row lifts above the big buttons and takes them over: while it is there, they start the radio.
+                val plays = listOfNotNull(
+                    Triple("rufin-media-playback-start-symbolic", "Play", QueuePlacement.Replace(0UL)).takeIf { radio || offered.play },
+                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent).takeIf { radio || offered.playNext },
+                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End).takeIf { radio || offered.playLater })
+                val duration = if (LocalReduceMotion.current) 0 else 380
+                val motion = tween<IntSize>(duration, easing = FastOutSlowInEasing)
+                SharedTransitionLayout {
+                    Column(Modifier.fillMaxWidth()) {
+                        radioLabel?.let { label ->
+                            AnimatedVisibility(radio, enter = expandVertically(motion) + fadeIn(tween(duration)),
+                                exit = shrinkVertically(motion) + fadeOut(tween(duration / 2))) {
+                                RadioRow(label, true, this) { radio = false }
                             }
                         }
+                        if (plays.isNotEmpty()) Row(Modifier.fillMaxWidth().onPlaced { buttonsLayout = it }.padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            plays.forEach { (icon, title, placement) ->
+                                val now = placement is QueuePlacement.Replace
+                                BrowsePrimaryAction(icon, title, Modifier.weight(1f), accent = radio,
+                                    shuffle = if (radio) null else { { if (now) onPlayNow?.invoke(true) ?: browse.play(item, placement, true)
+                                        else browse.play(item, placement, true); onDismiss() } }) {
+                                    if (radio) browse.radio(item, placement)
+                                    else if (now) onPlayNow?.invoke(false) ?: browse.play(item)
+                                    else browse.play(item, placement)
+                                    onDismiss()
+                                }
+                            }
                         }
-                    })
+                        radioLabel?.let { label ->
+                            AnimatedVisibility(!radio, enter = expandVertically(motion) + fadeIn(tween(duration)),
+                                exit = shrinkVertically(motion) + fadeOut(tween(duration / 2))) {
+                                RadioRow(label, false, this) { radio = true }
+                            }
+                        }
+                    }
                 }
                 if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
                 if (offered.favorite) BrowseMenuAction(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
@@ -426,19 +468,42 @@ private fun MenuRating(value: UByte?, halfStars: Boolean, commit: (UByte?) -> Un
     }
 }
 
+/** The radio row, below the big buttons or lifted above them; its icon and title glide between the two places. */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun SharedTransitionScope.RadioRow(label: String, lifted: Boolean, visibility: AnimatedVisibilityScope, toggle: () -> Unit) {
+    val tint = if (lifted) MaterialTheme.colorScheme.primary else LocalContentColor.current
+    val duration = if (LocalReduceMotion.current) 0 else 380
+    val bounds = BoundsTransform { _, _ -> tween(duration, easing = FastOutSlowInEasing) }
+    Row(Modifier.fillMaxWidth().semantics { selected = lifted }.clickable(onClick = toggle)
+        .padding(horizontal = 16.dp).heightIn(min = if (lifted) 40.dp else 56.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        RufinIcon("rufin-audio-only-symbolic", null, Modifier.sharedElement(rememberSharedContentState("radioIcon"), visibility,
+            boundsTransform = bounds).size(24.dp), tint)
+        Text(translate(label), Modifier.sharedBounds(rememberSharedContentState("radioTitle"), visibility,
+            boundsTransform = bounds), style = MaterialTheme.typography.bodyLarge, color = tint, maxLines = 1)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun BrowsePrimaryAction(icon: String, label: String, modifier: Modifier, shuffle: (() -> Unit)? = null,
-    selected: Boolean? = null, action: () -> Unit) {
-    Surface(modifier.heightIn(min = 76.dp).semantics { if (selected != null) this.selected = selected }
+    /** The icon takes the accent while the radio drives the button. */
+    accent: Boolean = false, action: () -> Unit) {
+    val duration = if (LocalReduceMotion.current) 0 else 380
+    val tint by animateColorAsState(if (accent) MaterialTheme.colorScheme.primary else LocalContentColor.current, tween(duration), label = "primaryActionTint")
+    Surface(modifier.heightIn(min = 76.dp)
         .combinedClickable(onClick = action, onLongClick = shuffle,
         onLongClickLabel = if (shuffle == null) null else translate("{action} (Shuffle)").replace("{action}", translate(label))),
-        shape = RoundedCornerShape(12.dp), color = androidx.compose.ui.graphics.Color.Transparent) {
+        shape = RoundedCornerShape(12.dp), color = Color.Transparent) {
         Column(Modifier.padding(horizontal = 4.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            RufinIcon(icon, null, Modifier.size(28.dp), if (selected == true) MaterialTheme.colorScheme.primary else LocalContentColor.current, glyph = true)
+            RufinIcon(icon, null, Modifier.size(28.dp), tint, glyph = true)
             Text(translate(label), style = MaterialTheme.typography.labelMedium, maxLines = 2)
-            if (shuffle != null) Text(translate("(hold to shuffle)"), style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            AnimatedVisibility(shuffle != null, enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
+                exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration / 2))) {
+                Text(translate("(hold to shuffle)"), style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
         }
     }
 }

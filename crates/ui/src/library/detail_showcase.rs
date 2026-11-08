@@ -834,6 +834,20 @@ impl DetailShowcaseView {
             imp.names.add_css_class("detail-on-band");
         }
         imp.title.set_xalign(if layout.stacked { 0.5 } else { 0.0 });
+        // Under it the facts, links, genres and buttons are centred too.
+        let along = if layout.stacked {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Start
+        };
+        imp.facts.set_halign(if layout.stacked {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Fill
+        });
+        imp.external_links.set_hexpand(!layout.stacked);
+        imp.genre_row.set_halign(along);
+        imp.actions.set_halign(along);
         imp.details.set_halign(if layout.stacked {
             gtk::Align::Center
         } else {

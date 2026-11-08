@@ -642,21 +642,32 @@
   margin-top: 4px;
 }
 
-/* On Home's band the facts sit in a dark pill, divided by |, readable on any cover and theme. */
-.home-showcase .detail-heading > .detail-facts {
+/* The facts sit in a pill, divided by |: on Home's band a dark one so they read on any cover, on the
+   page a light tint of its text. */
+.home-showcase .detail-heading > .detail-facts,
+.detail-below > .detail-facts {
   align-self: flex-start;
   max-width: 100%;
   min-width: 0;
   flex-wrap: nowrap;
   gap: 8px;
-  margin-top: 8px;
   padding: 3px 12px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.92);
 }
 
-.home-showcase .detail-heading > .detail-facts > span + span::before {
+.home-showcase .detail-heading > .detail-facts {
+  margin-top: 8px;
+}
+
+.detail-below > .detail-facts {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+
+.home-showcase .detail-heading > .detail-facts > span + span::before,
+.detail-below > .detail-facts > span + span::before {
   content: "|";
   margin-right: 3px;
   opacity: 0.45;
@@ -871,6 +882,16 @@
 
   .detail-showcase:not(.home-showcase) .detail-below {
     margin-top: 10px;
+  }
+
+  /* And so are the facts, genres and buttons under it. */
+  .detail-showcase:not(.home-showcase) .detail-below > .detail-facts {
+    align-self: center;
+  }
+
+  .detail-showcase:not(.home-showcase) .detail-genres,
+  .detail-showcase:not(.home-showcase) .detail-actions {
+    justify-content: center;
   }
 
   /* Never narrower than its hover controls, so it always reaches below the band. */

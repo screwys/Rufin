@@ -164,6 +164,17 @@ private fun SortOption(title: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** A Select mode's round mark in front of a row's artwork. */
+@Composable
+internal fun SelectionMark(picked: Boolean) {
+    Box(Modifier.size(24.dp).clip(CircleShape).then(
+        if (picked) Modifier.background(MaterialTheme.colorScheme.primary)
+        else Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), CircleShape)),
+        contentAlignment = Alignment.Center) {
+        if (picked) RufinIcon("rufin-object-select-symbolic", translate("Selected"), Modifier.size(14.dp), MaterialTheme.colorScheme.onPrimary)
+    }
+}
+
 @Composable
 private fun SelectRow(item: BrowseItem, player: PlayerConnection, picked: Boolean, reorder: Boolean,
     onToggle: () -> Unit, onMoved: (Int) -> Unit,
@@ -177,11 +188,7 @@ private fun SelectRow(item: BrowseItem, player: PlayerConnection, picked: Boolea
         .background(if (picked) accent.copy(alpha = .1f) else androidx.compose.ui.graphics.Color.Transparent)
         .clickable(onClick = onToggle).padding(start = 16.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Box(Modifier.size(24.dp).clip(CircleShape).then(
-            if (picked) Modifier.background(accent) else Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), CircleShape)),
-            contentAlignment = Alignment.Center) {
-            if (picked) RufinIcon("rufin-object-select-symbolic", translate("Selected"), Modifier.size(14.dp), MaterialTheme.colorScheme.onPrimary)
-        }
+        SelectionMark(picked)
         Artwork(artwork, Modifier.size(44.dp).clip(CoverShape))
         Column(Modifier.weight(1f)) {
             Text(item.row.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge,

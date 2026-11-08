@@ -8,3 +8,7 @@
 .eq-filter { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-block: 10px; }.eq-filter input[type=number] { width: 92px; }.eq-filter input[type=checkbox] { width: 18px; }.eq-preamp { margin-top: 16px; }.eq-preamp input[type=range] { flex: 1; min-width: 160px; }.eq-preamp input[type=number] { width: 80px; }.eq-extra { display: grid; gap: 12px; margin-block: 16px; }.eq-extra label { display: flex; gap: 12px; align-items: center; }.eq-extra input[type=range] { flex: 1; }#eq-clip { opacity: .4; }#eq-clip.clipped { color: #ed333b; opacity: 1; }#eq-status { font-size: .9em; color: var(--muted, #999); }
 
 #eq-name-dialog { width: min(380px, calc(100vw - 32px)); } #eq-name-form { display: grid; gap: 16px; } #eq-name-form .eq-toolbar { justify-content: end; margin-bottom: 0; }
+/* Graphic and parametric: two icon choices in one box, a line between them. */
+.eq-mode { margin: 0; flex: none; }
+.eq-mode label { position: relative; padding: 6px 10px; }
+.eq-mode label + label::before { content: ""; position: absolute; left: -2px; top: 7px; bottom: 7px; width: 1px; background: color-mix(in srgb, var(--text) 30%, transparent); }

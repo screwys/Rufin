@@ -128,9 +128,8 @@ internal fun MediaDetailsDialog(
                                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                             Text(field.label, Modifier.weight(.85f), style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                SelectionContainer(Modifier.weight(1f)) {
+                                            Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically) {
+                                                SelectionContainer(Modifier.weight(1f).padding(end = 4.dp)) {
                                                     val linkColor = MaterialTheme.colorScheme.primary
                                                     Text(buildAnnotatedString {
                                                         if (field.links.isEmpty()) append(field.value)
@@ -145,13 +144,14 @@ internal fun MediaDetailsDialog(
                                                         }
                                                     }, style = MaterialTheme.typography.bodyMedium)
                                                 }
-                                                if (field.copy) CopyIconButton("Copy", clipboardLabel = field.label) { copy -> copy(field.value) }
+                                                // Compact actions, so the value keeps the width.
+                                                if (field.copy) CopyIconButton("Copy", Modifier.size(36.dp), clipboardLabel = field.label, iconSize = 20.dp) { copy -> copy(field.value) }
                                                 field.musicbrainzUrl?.let { url ->
                                                     val openLabel = translate("Open on MusicBrainz")
                                                     IconButton({ model.runAction {
                                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                                    } }, Modifier.semantics { contentDescription = openLabel }) {
-                                                        DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
+                                                    } }, Modifier.size(36.dp).semantics { contentDescription = openLabel }) {
+                                                        DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(20.dp))
                                                     }
                                                 }
                                             }

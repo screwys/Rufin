@@ -9,6 +9,10 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -67,7 +71,8 @@ import io.github.screwys.rufin.settings.settingsTextFieldColors
 import kotlin.math.ceil
 
 @Composable
-internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
+/** `selection` is the lines picked to share while their selection is open, else null. */
+internal fun LyricsPanel(player: PlayerConnection, state: LazyListState, selection: List<Int>? = null, onSelect: (List<Int>) -> Unit = {}) {
     LaunchedEffect(player.currentId, player.bridge, player.lyrics?.mediaId) { player.requestLyrics() }
     val current = player.currentLyrics
     val document = current?.document
@@ -77,7 +82,7 @@ internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
             current?.loading == true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
             current?.instrumental == true -> Text(translate("Instrumental"), Modifier.align(Alignment.Center))
             document == null -> Text(translate("No lyrics available."), Modifier.align(Alignment.Center))
-            else -> LyricsDocumentView(player, current, document, preferences, state)
+            else -> LyricsDocumentView(player, current, document, preferences, state, selection, onSelect)
         }
     }
 }
@@ -254,9 +259,10 @@ private fun LyricsOffsetControls(value: Long, enabled: Boolean = true, onApply: 
 
 @Composable
 private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsState, document: AndroidLyricsDocument,
-    preferences: UserPreferences?, state: LazyListState,
+    preferences: UserPreferences?, state: LazyListState, selection: List<Int>?, onSelect: (List<Int>) -> Unit,
 ) {
     val snapshot = current.snapshot!!
+    val shareLines = remember(document) { document.lines.map(::lyricsShareText) }
     val scope = rememberCoroutineScope()
     val karaoke = preferences?.karaokeMode == true
     val timing by rememberLyricsFrame(player, snapshot, karaoke, state)
@@ -278,8 +284,10 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
     LaunchedEffect(current.mediaId) { hadDrag = false; pausedUntil = 0 }
     val active = timing?.activeLine?.toInt()
     val scroll = timing?.scrollLine?.toInt()
-    LaunchedEffect(scroll, followRevision) {
-        if (scroll != null && !dragged && SystemClock.elapsedRealtime() >= pausedUntil) {
+    // Following the song pauses while lines are picked.
+    val selecting = selection != null
+    LaunchedEffect(scroll, followRevision, selecting) {
+        if (scroll != null && !selecting && !dragged && SystemClock.elapsedRealtime() >= pausedUntil) {
             if (state.layoutInfo.visibleItemsInfo.none { it.index == scroll }) {
                 val center = (state.layoutInfo.viewportStartOffset + state.layoutInfo.viewportEndOffset) / 2
                 if (reduceMotion) state.scrollToItem(scroll, -center)
@@ -304,17 +312,22 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
         verticalArrangement = Arrangement.spacedBy(18.dp)) {
         items(document.lines.size) { index ->
             val line = document.lines[index]
-            val lineActive = index == active || timing?.highlightAll == true
+            val picked = selection?.contains(index) == true
+            val lineActive = if (selection != null) picked else index == active || timing?.highlightAll == true
             val color = MaterialTheme.colorScheme.onSurface
             val opacity by animateFloatAsState(if (lineActive) 1f else .34f,
                 tween(if (reduceMotion) 0 else 180), label = "lyricsOpacity")
-            val scale by animateFloatAsState(if (lineActive) 1.04f else .96f,
+            val scale by animateFloatAsState(if (selection != null) 1f else if (lineActive) 1.04f else .96f,
                 tween(if (reduceMotion) 0 else 180), label = "lyricsScale")
+            val pick by animateColorAsState(MaterialTheme.colorScheme.onSurface.copy(alpha = if (picked) .12f else 0f),
+                tween(if (reduceMotion) 0 else 180), label = "lyricsPick")
             Column(Modifier.fillMaxWidth().graphicsLayer {
                 alpha = opacity
                 scaleX = scale
                 scaleY = scale
-            }.then(if (line.startMillis == null) Modifier else Modifier.clickable {
+            }.clip(RoundedCornerShape(14.dp)).background(pick).then(if (selection != null) Modifier.clickable {
+                onSelect(lyricsSelectionAfterTap(shareLines, selection, index))
+            }.padding(vertical = 6.dp) else if (line.startMillis == null) Modifier else Modifier.clickable {
                 hadDrag = false
                 pausedUntil = 0L
                 scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {

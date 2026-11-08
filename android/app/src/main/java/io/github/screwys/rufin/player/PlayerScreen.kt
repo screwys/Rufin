@@ -49,6 +49,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -65,6 +66,7 @@ import io.github.screwys.rufin.core.trackCountText
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -81,6 +83,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.launch
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 
 private enum class PlayerSurface { LYRICS, VISUALIZER }
 
@@ -93,6 +99,19 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     var surface by remember { mutableStateOf<PlayerSurface?>(null) }
     var output by remember { mutableStateOf(false) }
     var queue by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
+    // Sharing: the card the share sheet shows (null while it is closed), the lines its lyrics card shows
+    // (null for those around the playing line), and the lines picked while their selection is open.
+    var sharing by remember { mutableStateOf<ShareKind?>(null) }
+    var shareLines by remember { mutableStateOf<List<Int>?>(null) }
+    var lyricsSelection by remember { mutableStateOf<List<Int>?>(null) }
+    val shareStyle = remember { ShareCardStyle() }
+    // Picking lines ends back in the share sheet, with the picked lines when they were kept.
+    fun finishSelection(keep: Boolean) {
+        if (keep) shareLines = lyricsSelection
+        lyricsSelection = null
+        sharing = ShareKind.LYRICS
+    }
     var navigation by remember { mutableStateOf<String?>(null) }
     val lyricsScroll = rememberLazyListState()
     val application = player.settings
@@ -104,8 +123,8 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
     val combined = lyricsEnabled && visualizerEnabled && application.rightPanel.combined
     // With the dynamic background on, the player takes its cover's colours (the band's dark stops),
-    // white content, translucent boxes and a pastel of the cover for Play; off, the theme's, its
-    // boxes in the secondary container so they stand out from the background.
+    // white content, boxes a shade darker than the background (as Navic's) and a pastel of the
+    // cover for Play; off, the theme's, its boxes in the secondary container.
     val base = MaterialTheme.colorScheme
     val stops = artwork?.band?.takeIf { application?.display?.fullscreenDynamicBackground != false }
     val colourTime = tween<Color>(if (reduceMotion) 0 else 320)
@@ -114,11 +133,13 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val accent by animateColorAsState(stops?.let { lerp(it[0], Color.White, .62f) } ?: base.primary, colourTime, label = "playerAccent")
     val onAccent by animateColorAsState(stops?.get(2) ?: base.onPrimary, colourTime, label = "playerOnAccent")
     val scheme = if (stops == null) base.copy(surfaceContainerHigh = base.secondaryContainer, primary = accent, onPrimary = onAccent)
+        // Its menus and sheets take a darker shade of the cover too, so their white text reads.
         else base.copy(surface = stops[1], onSurface = io.github.screwys.rufin.browse.OnBand,
+            background = stops[1], surfaceContainerLowest = stops[2], surfaceContainerLow = lerp(stops[1], Color.Black, .3f),
+            surfaceContainer = lerp(stops[1], Color.Black, .22f),
             onSurfaceVariant = io.github.screwys.rufin.browse.OnBand.copy(alpha = .72f),
-            // The player's boxes take the cover's pastel, not a neutral grey.
-            surfaceContainerHigh = accent.copy(alpha = .2f), surfaceContainerHighest = accent.copy(alpha = .26f),
-            secondaryContainer = accent.copy(alpha = .2f), onSecondaryContainer = io.github.screwys.rufin.browse.OnBand,
+            surfaceContainerHigh = PlayerShade, surfaceContainerHighest = PlayerShade,
+            secondaryContainer = PlayerShade, onSecondaryContainer = io.github.screwys.rufin.browse.OnBand,
             outlineVariant = Color.White.copy(alpha = .28f), primary = accent, onPrimary = onAccent)
     // The covers either side follow the finger while a swipe changes the track.
     val currentIndex by remember(player) { derivedStateOf { player.playback?.queue?.currentIndex } }
@@ -133,30 +154,68 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
         }.getOrDefault(null to null)
     }
     val verticalOffset = remember { Animatable(0f) }
-    val trackOffset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
+    // A pull down closes the lyrics or the visualizer back to the player as it closes the player.
+    val surfaceOffset = remember { Animatable(0f) }
+    fun releaseSurface(distance: Float) {
+        scope.launch {
+            if (distance > threshold) {
+                surface = null
+                // The view keeps its place while it fades out.
+                kotlinx.coroutines.delay(if (reduceMotion) 0L else 200L)
+                surfaceOffset.snapTo(0f)
+            } else surfaceOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180))
+        }
+    }
+    // Inside the lyrics a pull past their top does the same.
+    val surfacePull = remember(scope) { object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            val current = surfaceOffset.value
+            if (current <= 0f || available.y >= 0f || source != NestedScrollSource.UserInput) return Offset.Zero
+            val next = (current + available.y).coerceAtLeast(0f)
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { surfaceOffset.snapTo(next) }
+            return Offset(0f, next - current)
+        }
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            if (available.y <= 0f || source != NestedScrollSource.UserInput) return Offset.Zero
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { surfaceOffset.snapTo(surfaceOffset.value + available.y) }
+            return Offset(0f, available.y)
+        }
+        override suspend fun onPreFling(available: Velocity): Velocity {
+            if (surfaceOffset.value <= 0f) return Velocity.Zero
+            releaseSurface(surfaceOffset.value)
+            return available
+        }
+    } }
+    val trackOffset = remember { Animatable(0f) }
+    // Picking lines to share shows the lyrics even where the player hides them.
     LaunchedEffect(lyricsEnabled, visualizerEnabled) {
-        if (surface == PlayerSurface.LYRICS && !lyricsEnabled || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
+        if (surface == PlayerSurface.LYRICS && !lyricsEnabled && lyricsSelection == null || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
     }
     LaunchedEffect(surface, combined, player.playback?.controls?.playbackOutput) { player.visualizer(surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined) }
     DisposableEffect(player) { onDispose { player.visualizer(false) } }
-    BackHandler { if (surface != null) surface = null else onClose() }
+    LaunchedEffect(player.currentId) { shareLines = null; lyricsSelection = null }
+    LaunchedEffect(surface) { if (surface != PlayerSurface.LYRICS) lyricsSelection = null }
+    BackHandler { if (lyricsSelection != null) finishSelection(false) else if (surface != null) surface = null else onClose() }
     MaterialTheme(colorScheme = scheme) {
     Surface(Modifier.fillMaxSize().graphicsLayer { translationY = verticalOffset.value }
         .drawBehind { drawRect(Brush.verticalGradient(listOf(top, bottom))) }
         .pointerInput(surface, threshold, reduceMotion) {
-            if (surface != null) return@pointerInput
+            val open = surface != null
+            val offset = if (open) surfaceOffset else verticalOffset
             var distance = 0f
             detectVerticalDragGestures(onDragStart = { distance = 0f }, onVerticalDrag = { change, amount ->
-                if (surface != null) return@detectVerticalDragGestures
                 distance = (distance + amount).coerceAtLeast(0f)
                 change.consume()
-                scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { verticalOffset.snapTo(distance) }
+                scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { offset.snapTo(distance) }
             }, onDragEnd = {
-                if (distance > threshold) onClose()
+                if (open) releaseSurface(distance)
+                else if (distance > threshold) onClose()
                 else scope.launch { verticalOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) }
-            }, onDragCancel = { scope.launch { verticalOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
-        }.pointerInput(threshold, reduceMotion) {
+            }, onDragCancel = { scope.launch { offset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
+        }.pointerInput(surface, threshold, reduceMotion, lyricsEnabled, visualizerEnabled) {
+            // Over the player a swipe changes the track; over the lyrics and the visualizer it moves between them.
+            val shown = surface
             var distance = 0f
             detectHorizontalDragGestures(onDragStart = {
                 distance = 0f
@@ -166,8 +225,13 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                 distance += amount
                 scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { trackOffset.snapTo(distance) }
             }, onDragEnd = {
-                if (distance < -threshold && player.playback?.queue?.canNext == true) player.next()
-                else if (distance > threshold && player.currentId != null) player.previous()
+                when (shown) {
+                    null -> if (distance < -threshold && player.playback?.queue?.canNext == true) player.next()
+                        else if (distance > threshold && player.currentId != null) player.previous()
+                    PlayerSurface.LYRICS -> if (distance < -threshold && visualizerEnabled && lyricsSelection == null)
+                        surface = PlayerSurface.VISUALIZER
+                    PlayerSurface.VISUALIZER -> if (distance > threshold && lyricsEnabled) surface = PlayerSurface.LYRICS
+                }
                 scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) }
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
@@ -176,14 +240,26 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(if (tiny) .35f else .12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {
-                (if (targetState == null) fadeIn(tween(if (reduceMotion) 0 else 180))
+                val towardsVisualizer = targetState == PlayerSurface.VISUALIZER
+                // Between the lyrics and the visualizer the views slide sideways, as the swipe went.
+                if (initialState != null && targetState != null) (slideInHorizontally(tween(if (reduceMotion) 0 else 260)) { if (towardsVisualizer) it / 3 else -it / 3 } +
+                    fadeIn(tween(if (reduceMotion) 0 else 200))) togetherWith (slideOutHorizontally(tween(if (reduceMotion) 0 else 260)) {
+                        if (towardsVisualizer) -it / 3 else it / 3 } + fadeOut(tween(if (reduceMotion) 0 else 140)))
+                else (if (targetState == null) fadeIn(tween(if (reduceMotion) 0 else 180))
                 else slideInVertically(tween(if (reduceMotion) 0 else 240)) { it / 8 } + fadeIn(tween(if (reduceMotion) 0 else 180))) togetherWith
                     fadeOut(tween(if (reduceMotion) 0 else 120))
             }, label = "playerSurface") { visible ->
-                Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Column(Modifier.fillMaxSize().then(if (visible == null) Modifier else Modifier.nestedScroll(surfacePull).graphicsLayer {
+                    translationY = surfaceOffset.value
+                    alpha = 1f - (surfaceOffset.value / size.height * 1.5f).coerceIn(0f, .6f)
+                }).safeDrawingPadding()) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PlayerIconButton("rufin-go-down-symbolic", "Close", { if (visible == null) onClose() else surface = null })
-                        if (visible == null) PlayerContext(player, Modifier.weight(1f).padding(horizontal = 8.dp))
+                        val picked = lyricsSelection.takeIf { visible == PlayerSurface.LYRICS }
+                        if (picked != null) PlayerIconButton("rufin-window-close-symbolic", "Cancel", { finishSelection(false) })
+                        else PlayerIconButton("rufin-go-down-symbolic", "Close", { if (visible == null) onClose() else surface = null })
+                        if (picked != null) Text(translate("{count} selected").replace("{count}", picked.size.toString()),
+                            Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        else if (visible == null) PlayerContext(player, Modifier.weight(1f).padding(horizontal = 8.dp))
                         else Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(player.currentItem?.metadata?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -191,6 +267,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         }
                         // The track's menu: its details, favorite, playlists and the rest.
                         if (visible == null) PlayerIconButton("rufin-view-more-symbolic", "More actions", onMore)
+                        else if (picked != null) PlayerIconButton("rufin-object-select-symbolic", "Done", { finishSelection(true) }, enabled = picked.isNotEmpty())
                         else if (visible == PlayerSurface.LYRICS) LyricsActions(player)
                         else Spacer(Modifier.size(48.dp))
                     }
@@ -238,8 +315,10 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 controls()
                             }
                         }
-                        PlayerActions(player, { output = true }, { queue = true }, { surface = PlayerSurface.LYRICS },
-                            { surface = PlayerSurface.VISUALIZER }, lyricsEnabled, visualizerEnabled, combined)
+                        PlayerActions(player, { output = true }, { sharing = ShareKind.SONG },
+                            // Lyrics, or the visualizer while the lyrics are hidden.
+                            if (lyricsEnabled) PlayerSurface.LYRICS else PlayerSurface.VISUALIZER.takeIf { visualizerEnabled },
+                            { surface = it }, { settings = true }, { queue = true })
                     } else {
                         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp, bottom = 20.dp)
                             .clipToBounds().graphicsLayer { translationX = trackOffset.value }) {
@@ -247,13 +326,19 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 val opacity = player.settings?.visualizer?.appearance?.fullscreenLyricsOpacity?.toFloat() ?: 1f
                                 VisualizerView(player, Modifier.matchParentSize(), if (combined) opacity else 1f)
                             }
-                            if (visible == PlayerSurface.LYRICS) LyricsPanel(player, lyricsScroll)
+                            if (visible == PlayerSurface.LYRICS) LyricsPanel(player, lyricsScroll, lyricsSelection) { lyricsSelection = it }
                         }
                         Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp)) { PlayerProgress(player) }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                             PlayerFooterButton("rufin-speaker-front-symbolic", "Output", { output = true })
                             Spacer(Modifier.weight(1f))
+                            PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous,
+                                Modifier.size(48.dp), enabled = player.currentId != null, iconSize = 24.dp, glyph = true)
+                            Spacer(Modifier.width(12.dp))
                             PlayerPlayPause(player)
+                            Spacer(Modifier.width(12.dp))
+                            PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next,
+                                Modifier.size(48.dp), enabled = player.playback?.queue?.canNext == true, iconSize = 24.dp, glyph = true)
                             Spacer(Modifier.weight(1f))
                             PlayerFooterButton("rufin-queue-symbolic", "Queue", { queue = true })
                         }
@@ -267,6 +352,17 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
         onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) },
         onSettings = { queue = false; onSettings(it) })
     if (output) PlayerOutputSheet(player) { output = false }
+    AnimatedVisibility(settings, enter = slideInHorizontally(tween(if (reduceMotion) 0 else 240)) { it / 4 } + fadeIn(tween(if (reduceMotion) 0 else 180)),
+        exit = slideOutHorizontally(tween(if (reduceMotion) 0 else 200)) { it / 4 } + fadeOut(tween(if (reduceMotion) 0 else 140))) {
+        PlayerSettingsScreen(player) { settings = false }
+    }
+    sharing?.let { kind ->
+        PlayerShareSheet(player, kind, shareStyle, shareLines, onEditLyrics = { lines ->
+            sharing = null
+            lyricsSelection = lines
+            surface = PlayerSurface.LYRICS
+        }) { sharing = null }
+    }
     navigation?.let { uri -> MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == uri }, player,
         mediaUri = uri, onNavigate = { route, title, source -> navigation = null; onNavigate(route, title, source) },
         onDismiss = { navigation = null }) }
@@ -326,14 +422,16 @@ private fun PlayerContext(player: PlayerConnection, modifier: Modifier) {
     }
 }
 
-/** The output pill on the left; Lyrics, Visualizer (unless combined with the lyrics) and Queue on the right. */
+/** The output pill on the left; Share, Lyrics (or the visualizer), Settings and Queue on the right. */
 @Composable
-private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onQueue: () -> Unit,
-    onLyrics: () -> Unit, onVisualizer: () -> Unit, lyricsEnabled: Boolean, visualizerEnabled: Boolean, combined: Boolean) {
+private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onShare: () -> Unit, view: PlayerSurface?,
+    onView: (PlayerSurface) -> Unit, onSettings: () -> Unit, onQueue: () -> Unit) {
     val routes = player.service?.outputs?.routes?.collectAsState()?.value.orEmpty()
     val outputName = routes.firstOrNull { it.selected }?.name ?: translate("Audio output")
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Surface(onOutput, Modifier.height(40.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(20.dp),
+    // The pill gives way to the buttons when they leave it no room.
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Surface(onOutput, Modifier.weight(1f, fill = false).padding(end = 8.dp).height(36.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Row(Modifier.padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -341,21 +439,30 @@ private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onQueu
                 Text(outputName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
             }
         }
-        Spacer(Modifier.weight(1f))
-        if (lyricsEnabled) PlayerFooterButton("rufin-text-center-symbolic", "Lyrics", onLyrics)
-        if (visualizerEnabled && !combined) PlayerFooterButton("rufin-sound-symbolic", "Visualizer", onVisualizer)
-        PlayerFooterButton("rufin-queue-symbolic", "Queue", onQueue)
+        Row {
+            PlayerFooterButton("rufin-share-symbolic", "Share", onShare)
+            when (view) {
+                PlayerSurface.LYRICS -> PlayerFooterButton("rufin-text-center-symbolic", "Lyrics") { onView(view) }
+                PlayerSurface.VISUALIZER -> PlayerFooterButton("rufin-sound-symbolic", "Visualizer") { onView(view) }
+                null -> Unit
+            }
+            PlayerFooterButton("rufin-mixer-sliders-symbolic", "Settings", onSettings)
+            PlayerFooterButton("rufin-queue-symbolic", "Queue", onQueue)
+        }
     }
 }
 
 @Composable
 private fun PlayerFooterButton(icon: String, label: String, action: () -> Unit) {
-    FilledTonalIconButton(action, Modifier.padding(horizontal = 2.dp).size(40.dp), shape = RoundedCornerShape(10.dp),
+    FilledTonalIconButton(action, Modifier.padding(horizontal = 2.dp).size(36.dp), shape = RoundedCornerShape(10.dp),
         colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = MaterialTheme.colorScheme.onSurface)) {
-        RufinIcon(icon, translate(label), Modifier.size(20.dp), glyph = true)
+        RufinIcon(icon, translate(label), Modifier.size(18.dp), glyph = true)
     }
 }
+
+/** The player's boxes on the cover's colours: a shade darker than the background, not a lighter grey. */
+private val PlayerShade = Color.Black.copy(alpha = .24f)
 
 
 @OptIn(ExperimentalAnimationApi::class)
