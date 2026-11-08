@@ -117,13 +117,9 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { chooseFolder.launch(null) })
                 }
+                if (sourceId != null) SourceActions(model, sourceId, form.name, close)
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic", "peer")) item {
-                    SettingsGroup { SettingsRow(translate("Local File Mapping"),
-                        trailing = { RufinIcon("rufin-go-next-symbolic", null) },
-                        modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
-                }
                 item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
                 when (form.kind) {
                     "jellyfin", "emby" -> item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -167,6 +163,12 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     }
                     if (setup.working && setup.browserUrl != null) TextButton(setup::cancelAuthorization) { Text(translate("Cancel")) }
                 } }
+                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic", "peer")) item {
+                    SettingsGroup { SettingsRow(translate("Local File Mapping"),
+                        trailing = { RufinIcon("rufin-go-next-symbolic", null) },
+                        modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
+                }
+                if (sourceId != null && !form.integration && !connectionsOnly) item { SourceActions(model, sourceId, form.name, close) }
             }
         }
     }

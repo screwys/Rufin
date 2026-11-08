@@ -157,7 +157,7 @@ impl JellyfinEmbySource {
         source_id: &str,
         raw_item_id: &str,
     ) -> SourceResult<Option<Vec<library::FolderObservation>>> {
-        let mut url = endpoint(&self.base_url, &format!("Items/{raw_item_id}/Ancestors"))?;
+        let mut url = endpoint(&self.base_url(), &format!("Items/{raw_item_id}/Ancestors"))?;
         url.query_pairs_mut().append_pair("UserId", &self.user_id);
         let ancestors = match self.get_json::<Vec<Value>>(url).await {
             Ok(ancestors) => ancestors,
@@ -476,7 +476,7 @@ impl JellyfinEmbySource {
         types: &str,
         fields: &str,
     ) -> SourceResult<reqwest::Url> {
-        let mut url = endpoint(&self.base_url, "Items")?;
+        let mut url = endpoint(&self.base_url(), "Items")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Recursive", "true")
@@ -629,7 +629,7 @@ impl JellyfinEmbySource {
         let source_id = observation.source_id;
 
         check_cancelled(cancelled)?;
-        let mut url = endpoint(&self.base_url, &format!("Users/{}/Views", self.user_id))?;
+        let mut url = endpoint(&self.base_url(), &format!("Users/{}/Views", self.user_id))?;
         url.query_pairs_mut()
             .append_pair("IncludeExternalContent", "false");
         let response = self.get_json::<Value>(url).await?;
@@ -818,6 +818,7 @@ mod tests {
                     emby_connect: false,
                     kind,
                     base_url: server.uri(),
+                    local_url: None,
                     server_id: Some("server".into()),
                     user_id: "user".into(),
                     username: "listener".into(),
@@ -991,6 +992,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server".into()),
                 user_id: "user".into(),
                 username: "listener".into(),
@@ -1283,6 +1285,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server-one".to_string()),
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
@@ -1333,6 +1336,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server-one".to_string()),
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),

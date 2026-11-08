@@ -29,7 +29,7 @@ impl JellyfinEmbySource {
     ) -> SourceResult<()> {
         use base64::Engine;
         let raw = crate::policy::raw_item_id(object);
-        let url = endpoint(&self.base_url, &format!("Items/{raw}/Images/Primary"))?;
+        let url = endpoint(&self.base_url(), &format!("Items/{raw}/Images/Primary"))?;
         let request = match change {
             crate::ArtworkChange::Replace(image) => self
                 .client
@@ -171,7 +171,7 @@ impl JellyfinEmbySource {
     }
 
     async fn read_item_and_editor(&self, raw: &str) -> Result<(Value, Value), SourceMetadataError> {
-        let editor = endpoint(&self.base_url, &format!("Items/{raw}/MetadataEditor"))
+        let editor = endpoint(&self.base_url(), &format!("Items/{raw}/MetadataEditor"))
             .map_err(metadata_write)?;
         let editor = self
             .get_json::<Value>(editor)
@@ -206,7 +206,7 @@ impl JellyfinEmbySource {
         })?;
         preserve_complete_artist_items(object);
         apply_edit(self.kind, object, edit);
-        let url = endpoint(&self.base_url, &format!("Items/{raw}")).map_err(metadata_write)?;
+        let url = endpoint(&self.base_url(), &format!("Items/{raw}")).map_err(metadata_write)?;
         self.send_unit(self.client.post(url).json(&item))
             .await
             .map_err(metadata_write)?;
@@ -805,6 +805,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: None,
                 user_id: "user".to_string(),
                 username: "listener".to_string(),

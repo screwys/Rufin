@@ -95,6 +95,8 @@ enum Command {
         job_id: String,
     },
     SetPaused(bool),
+    /// Whether the device's network is metered, as mobile data is.
+    SetMetered(bool),
     Suspend {
         ready: Sender<()>,
         resume: Receiver<()>,
@@ -889,6 +891,7 @@ struct Actor {
     pending_rules: BTreeMap<SourceId, RuleIntent>,
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
     paused: bool,
+    metered: bool,
     next_job: u64,
 }
 
@@ -901,6 +904,12 @@ struct Rules(async_channel::WeakSender<Command>);
 impl Feature for Rules {
     fn wanted(&self, _: &StoredSettings, _: &Catalog) -> bool {
         true
+    }
+
+    /// Allowing mobile data wakes the rule downloads that waited for it.
+    fn restarts(&self, previous: &StoredSettings, current: &StoredSettings) -> bool {
+        previous.ui.application.download_on_mobile_data
+            != current.ui.application.download_on_mobile_data
     }
 
     fn hears(&self, scope: &Scope) -> bool {
@@ -969,6 +978,7 @@ impl Downloads {
                 pending_rules: BTreeMap::new(),
                 jobs: HashMap::new(),
                 paused: false,
+                metered: false,
                 next_job: 0,
             },
             receiver,
@@ -1046,6 +1056,12 @@ impl Downloads {
 impl Downloads {
     pub fn set_paused(&self, paused: bool) {
         self.send(Command::SetPaused(paused));
+    }
+
+    /// Rule downloads wait while the network is metered, unless the settings allow mobile
+    /// data.
+    pub fn set_metered(&self, metered: bool) {
+        self.send(Command::SetMetered(metered));
     }
 }
 
@@ -1287,6 +1303,7 @@ impl Actor {
                 }
                 self.publish_all().await;
             }
+            Command::SetMetered(metered) => self.metered = metered,
             Command::Move {
                 source_id,
                 job_id,
@@ -1941,7 +1958,7 @@ impl Actor {
                     subject,
                     preview_uris: media_uris.iter().take(4).cloned().collect(),
                     item_count: scheduled_tracks,
-                    kind: if self.paused {
+                    kind: if self.paused || self.holds_rules() {
                         DownloadFeedbackKind::Queued
                     } else {
                         DownloadFeedbackKind::Started
@@ -1951,23 +1968,37 @@ impl Actor {
         }
     }
 
+    /// Whether rule downloads wait for an unmetered network.
+    fn holds_rules(&self) -> bool {
+        self.metered && !self.settings.load().ui.application.download_on_mobile_data
+    }
+
     async fn fill_slots(&mut self, active: &mut Vec<ActiveDownload>) {
         if self.paused {
             return;
         }
+        let rule = |download: &ActiveDownload| matches!(download.subject, DownloadSubject::Rule(_));
+        let holds_rules = self.holds_rules();
+        if holds_rules && active.iter().any(rule) {
+            self.abort_matching(active, true, rule).await;
+        }
         while active.len() < MAX_ACTIVE_DOWNLOADS {
-            let Some(download) = self.start_next(active).await else {
+            let Some(download) = self.start_next(active, holds_rules).await else {
                 break;
             };
             active.push(download);
         }
     }
 
-    async fn start_next(&mut self, active: &[ActiveDownload]) -> Option<ActiveDownload> {
+    async fn start_next(
+        &mut self,
+        active: &[ActiveDownload],
+        holds_rules: bool,
+    ) -> Option<ActiveDownload> {
         let mut waiting = HashSet::new();
         loop {
             let (source_id, job_id, subject, quality, media_uri) =
-                self.next_candidate(active, &waiting)?;
+                self.next_candidate(active, &waiting, holds_rules)?;
             // A CUE track whose file another track copies now takes that copy once it lands.
             let backing = (self.catalog.cue_backing(&media_uri).await).ok().flatten();
             if backing.is_some()
@@ -2174,6 +2205,7 @@ impl Actor {
         &self,
         active: &[ActiveDownload],
         waiting: &HashSet<String>,
+        holds_rules: bool,
     ) -> Option<(
         Option<SourceId>,
         String,
@@ -2183,6 +2215,9 @@ impl Actor {
     )> {
         for (source_id, jobs) in &self.jobs {
             for job in jobs {
+                if holds_rules && matches!(job.subject, DownloadSubject::Rule(_)) {
+                    continue;
+                }
                 if !matches!(
                     job.state,
                     DownloadQueueState::Queued | DownloadQueueState::Downloading
@@ -3704,6 +3739,7 @@ mod tests {
             pending_rules: BTreeMap::new(),
             jobs: HashMap::new(),
             paused: false,
+            metered: false,
             next_job: 0,
         }
     }

@@ -443,6 +443,9 @@ impl Flow {
                             }
                             Ok(SourceAuthorizationEvent::Ready { .. }) => {
                                 let name = local.borrow().name.clone();
+                                let local_server_url = Some(local.borrow().local_url.trim())
+                                    .filter(|address| !address.is_empty())
+                                    .map(str::to_owned);
                                 let use_instant_mix = state.borrow().use_instant_mix;
                                 gtk::glib::spawn_future_local(async move {
                                     let _ = events
@@ -450,7 +453,10 @@ impl Flow {
                                             name,
                                             id,
                                             false,
-                                            SourceAuthorizationInput::Jellyfin { use_instant_mix },
+                                            SourceAuthorizationInput::Jellyfin {
+                                                use_instant_mix,
+                                                local_server_url,
+                                            },
                                         )
                                         .await;
                                 });
@@ -515,6 +521,7 @@ impl Flow {
                     CredentialInput {
                         source_name: optional_name(&draft.name),
                         server_url: saved.server_url.clone(),
+                        local_server_url: saved.local_server_url.clone(),
                         username: saved.username.clone(),
                         secret: String::new(),
                         trust_invalid_cert: saved.trust_invalid_cert,

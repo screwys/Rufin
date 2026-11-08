@@ -553,7 +553,10 @@ impl SourceOwner {
             () = catalog.loaded() => {}
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
-        self.complete_collection(route).await;
+        tokio::select! {
+            () = self.complete_collection(route) => {}
+            () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
+        }
         let (sort, descending, activity) = read_order(route, options, settings);
         let selected = Scope::of(route).apply(selected);
         let selected = selected.as_ref();

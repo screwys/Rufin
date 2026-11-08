@@ -138,6 +138,7 @@ async function openSource(item = null, integration = null) {
     $("source-label").value = preset.credentials.source_name;
     $("server-url").value =
       preset.plex_settings?.address_override || preset.credentials.server_url;
+    $("local-url").value = preset.credentials.local_server_url || "";
     $("username").value = preset.credentials.username;
     $("trust-certificate").checked = preset.credentials.trust_invalid_cert;
     $("authentication").value =
@@ -174,6 +175,9 @@ function sourceFields() {
     $(id).hidden = kind === "plex";
     document.querySelector(`label[for="${id}"]`).hidden = kind === "plex";
   }
+  const server = ["jellyfin", "emby", "navidrome", "open_subsonic"].includes(kind);
+  $("local-url").hidden = !server;
+  document.querySelector('label[for="local-url"]').hidden = !server;
   const files = kind === "web_dav" || kind === "smb";
   $("source-exclusions").hidden = !!integrationSaved || !(files || (local && editingSource));
   const choices = files
@@ -358,6 +362,7 @@ function sourceInput() {
     const credentials = {
       source_name: name || null,
       server_url: url,
+      local_server_url: $("local-url").value.trim() || null,
       username,
       secret,
       trust_invalid_cert: trust,

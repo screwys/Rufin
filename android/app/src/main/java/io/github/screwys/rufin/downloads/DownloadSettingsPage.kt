@@ -34,6 +34,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     val source = sources.find { it.source.id == selected } ?: sources.find { it.source.id == model.sources?.selectedSourceId } ?: sources.firstOrNull()
     var removingRule by remember { mutableStateOf<Pair<String, DownloadRule>?>(null) }
+    var confirmingLibrary by remember { mutableStateOf<String?>(null) }
     var removeAll by remember { mutableStateOf<DownloadSource?>(null) }
     val context = LocalContext.current
     var folderSource by rememberSaveable { mutableStateOf<String?>(null) }
@@ -61,6 +62,10 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
                 SettingsSwitch(translate("Show downloaded badge"), settings.showDownloadedBadges) {
                     preferences.changePreference { setShowDownloadedBadges(it) }
                 }
+                SettingsSwitch(translate("Download on Mobile Data"), settings.downloadOnMobileData,
+                    translate("Otherwise automatic downloads wait for Wi-Fi")) {
+                    preferences.changePreference { setDownloadOnMobileData(it) }
+                }
             }
         }
         if (sources.isEmpty()) Text(translate("Add a source to configure downloads."))
@@ -78,7 +83,11 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             }
             SettingsGroup {
             DownloadRule.entries.forEach { rule -> SettingsRow(downloadRuleTitle(rule), trailing = {
-                Switch(downloadRulesContain(source.settings.rules, rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
+                Switch(downloadRulesContain(source.settings.rules, rule), { enabled -> when {
+                    !enabled -> removingRule = source.source.id to rule
+                    rule == DownloadRule.ENTIRE_LIBRARY -> confirmingLibrary = source.source.id
+                    else -> downloads.rule(source.source.id, rule, true)
+                } })
             }) }
             }
             SettingsGroup(translate("Downloaded")) {
@@ -92,6 +101,10 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
         text = { Text(translate("Choose whether to keep the completed downloads.")) },
         confirmButton = { TextButton({ downloads.rule(sourceId, rule, false, true); removingRule = null }) { Text(translate("Remove Rule and Delete Downloads")) } },
         dismissButton = { TextButton({ downloads.rule(sourceId, rule, false); removingRule = null }) { Text(translate("Remove Rule, Keep Downloads")) } }) }
+    confirmingLibrary?.let { sourceId -> AlertDialog(onDismissRequest = { confirmingLibrary = null }, title = { Text(downloadRuleTitle(DownloadRule.ENTIRE_LIBRARY)) },
+        text = { Text(translate("You have set Rufin to automatically download your entire library. This can use a lot of data. Do you confirm?")) },
+        confirmButton = { TextButton({ downloads.rule(sourceId, DownloadRule.ENTIRE_LIBRARY, true); confirmingLibrary = null }) { Text(translate("Confirm")) } },
+        dismissButton = { TextButton({ confirmingLibrary = null }) { Text(translate("Cancel")) } }) }
     removeAll?.let { removing -> AlertDialog(onDismissRequest = { removeAll = null }, title = { Text(translate("Remove All Downloads")) },
         text = { Text(translate("Downloads from this source will be removed, and automatic rules will be turned off")) },
         confirmButton = { TextButton({ downloads.clear(removing.source.id); removeAll = null }) { Text(translate("Remove")) } },

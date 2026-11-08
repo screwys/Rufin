@@ -7,17 +7,13 @@ use adw::prelude::*;
 use gtk::gio;
 use rufin_core::downloads::{DownloadQueueState, DownloadRule};
 
-use localization::{msgid, tr, trn_with};
+use localization::{msgid, tr};
 use tracing::warn;
 
-use super::{
-    PreferencesNavigationControls,
-    source::{configured_source_kind_display_name, half_stars_row},
-};
+use super::{PreferencesNavigationControls, source::half_stars_row};
 use crate::shell::shell::Shell;
 use crate::widgets::source_labels::{configured_source_display_name, configured_source_icon_name};
-use localization::{album_count_text, track_count_text};
-use rufin_core::runtime::source::{LocalAccessStatus, SourceLocalAccessSummary, SourceSummary};
+use rufin_core::runtime::source::{SourceSummary, source_row_subtitle};
 
 const SERVER_PROVIDER_ICON_SIZE: i32 = 28;
 const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
@@ -90,16 +86,12 @@ fn library_sources_page(
                 .map(|saved| saved.credentials);
             let row = adw::ActionRow::builder()
                 .title(configured_source_display_name(server))
-                .subtitle(source_summary_subtitle(
-                    server,
-                    summary,
-                    credentials
-                        .as_ref()
-                        .map(|credentials| credentials.server_url.as_str()),
-                    credentials
-                        .as_ref()
-                        .map(|credentials| credentials.username.as_str()),
+                .subtitle(source_row_subtitle(
+                    server.clone(),
+                    summary.cloned(),
+                    credentials.clone(),
                     None,
+                    0,
                 ))
                 .subtitle_lines(4)
                 .build();
@@ -112,16 +104,12 @@ fn library_sources_page(
                     if let Ok(status) = source.local_access_status(server.id.clone()).await
                         && let Some(row) = row.upgrade()
                     {
-                        row.set_subtitle(&source_summary_subtitle(
-                            &server,
-                            summary.as_ref(),
-                            credentials
-                                .as_ref()
-                                .map(|credentials| credentials.server_url.as_str()),
-                            credentials
-                                .as_ref()
-                                .map(|credentials| credentials.username.as_str()),
-                            Some(&status),
+                        row.set_subtitle(&source_row_subtitle(
+                            server,
+                            summary,
+                            credentials,
+                            Some(status),
+                            0,
                         ));
                     }
                 });
@@ -167,19 +155,24 @@ fn library_sources_page(
     }
 
     if local_source.is_some() || !configured.local_folders.is_empty() {
-        let mut subtitle = localization::tr_with(
-            "Configured items: {count}",
-            &[("count", &configured.local_folders.len().to_string())],
-        );
-        if let Some(summary) = local_source.as_ref().and_then(|source| {
-            configured
-                .local_access
-                .iter()
-                .find(|summary| summary.source_id == source.id)
-        }) {
-            subtitle.push('\n');
-            subtitle.push_str(&source_cache_line(summary));
-        }
+        let count = configured.local_folders.len();
+        let subtitle = match &local_source {
+            Some(source) => source_row_subtitle(
+                source.clone(),
+                configured
+                    .local_access
+                    .iter()
+                    .find(|summary| summary.source_id == source.id)
+                    .cloned(),
+                None,
+                None,
+                count as u64,
+            ),
+            None => localization::tr_with(
+                "Configured items: {count}",
+                &[("count", &count.to_string())],
+            ),
+        };
         local_source_row.set_subtitle(&subtitle);
         let local_shell = Rc::downgrade(shell);
         let local_dialog = dialog.downgrade();
@@ -757,18 +750,15 @@ fn add_download_rules(
         let add_shell = Rc::clone(shell);
         let add_source_id = source_id.clone();
         let add_row = row.downgrade();
+        let add_dialog = preferences_dialog.downgrade();
         action.connect_activate(move |_, _| {
-            let Some(row) = add_row.upgrade() else {
+            let (Some(row), Some(dialog)) = (add_row.upgrade(), add_dialog.upgrade()) else {
                 return;
             };
-            match add_shell.products.source.set_download_rule(
-                add_source_id.clone(),
-                rule,
-                true,
-                false,
-            ) {
-                Ok(_) => row.set_visible(true),
-                Err(error) => warn!(%error, "failed to add download rule"),
+            if rule == DownloadRule::EntireLibrary {
+                confirm_entire_library(&add_shell, &dialog, add_source_id.clone(), row);
+            } else {
+                add_download_rule(&add_shell, add_source_id.clone(), rule, &row);
             }
         });
         actions.add_action(&action);
@@ -785,6 +775,53 @@ fn add_download_rules(
     add.insert_action_group("download-rules", Some(&actions));
     add.set_popover(Some(&gtk::PopoverMenu::from_model(Some(&menu))));
     add
+}
+
+fn add_download_rule(
+    shell: &Rc<Shell>,
+    source_id: sources::SourceId,
+    rule: DownloadRule,
+    row: &adw::ActionRow,
+) {
+    match shell
+        .products
+        .source
+        .set_download_rule(source_id, rule, true, false)
+    {
+        Ok(_) => row.set_visible(true),
+        Err(error) => warn!(%error, "failed to add download rule"),
+    }
+}
+
+fn confirm_entire_library(
+    shell: &Rc<Shell>,
+    preferences_dialog: &adw::Dialog,
+    source_id: sources::SourceId,
+    row: adw::ActionRow,
+) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(rufin_core::downloads::download_rule_title(
+            DownloadRule::EntireLibrary,
+        ))
+        .body(tr(
+            "You have set Rufin to automatically download your entire library. This can use a lot of data. Do you confirm?",
+        ))
+        .build();
+    dialog.add_response("cancel", &tr("Cancel"));
+    dialog.add_response("confirm", &tr("Confirm"));
+    dialog.set_default_response(Some("confirm"));
+    dialog.set_close_response("cancel");
+    dialog.set_response_appearance("confirm", adw::ResponseAppearance::Suggested);
+    let shell = Rc::clone(shell);
+    dialog.choose(
+        Some(preferences_dialog),
+        None::<&gio::Cancellable>,
+        move |response| {
+            if response.as_str() == "confirm" {
+                add_download_rule(&shell, source_id, DownloadRule::EntireLibrary, &row);
+            }
+        },
+    );
 }
 
 fn remove_download_rule(
@@ -1230,80 +1267,6 @@ pub fn locate_local_folder(shell: &Rc<Shell>, current: String) {
             .source
             .replace_local_folder(current, replacement);
     });
-}
-
-fn source_summary_subtitle(
-    server: &SourceSummary,
-    summary: Option<&SourceLocalAccessSummary>,
-    address: Option<&str>,
-    username: Option<&str>,
-    status: Option<&LocalAccessStatus>,
-) -> String {
-    let address = address
-        .filter(|address| !address.trim().is_empty())
-        .unwrap_or_default()
-        .to_string();
-    let folder = summary
-        .and_then(|summary| summary.selected_music_folder_name.as_deref())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| tr("All Music"));
-    let mapping = local_mapping_status(summary, status);
-    let account = username
-        .filter(|username| !username.trim().is_empty())
-        .map(|username| format!("{}: {}", tr("User"), username))
-        .unwrap_or_default();
-    let cache = summary.map(source_cache_line).unwrap_or_default();
-    let provider_line = metadata_line([configured_source_kind_display_name(&server.kind), address]);
-    let folder_line = metadata_line([account, format!("{}: {}", tr("Music Folder"), folder)]);
-    let cache_line = metadata_line([cache, mapping]);
-    [provider_line, folder_line, cache_line]
-        .into_iter()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn metadata_line(parts: impl IntoIterator<Item = String>) -> String {
-    parts
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" - ")
-}
-
-fn source_cache_line(summary: &SourceLocalAccessSummary) -> String {
-    format!(
-        "{}: {}, {}",
-        tr("Cached"),
-        album_count_text(summary.album_count as u64),
-        track_count_text(summary.track_count as u64)
-    )
-}
-
-fn local_mapping_status(
-    summary: Option<&SourceLocalAccessSummary>,
-    status: Option<&LocalAccessStatus>,
-) -> String {
-    let Some(summary) = summary else {
-        return tr("No local file mapping");
-    };
-    if summary.access.is_none() {
-        return tr("No local file mapping");
-    }
-    let Some(status) = status else {
-        return tr("Local playback saved");
-    };
-    if status.total_track_count == 0 {
-        return tr("Local playback saved");
-    }
-    let matched = status.matched_track_count.to_string();
-    let total = status.total_track_count.to_string();
-    trn_with(
-        "Local file mapping: {matched} of {total} server path matches",
-        "Local file mapping: {matched} of {total} server paths match",
-        status.total_track_count as u64,
-        &[("matched", matched.as_str()), ("total", total.as_str())],
-    )
 }
 
 fn local_folder_title(path: &str) -> String {

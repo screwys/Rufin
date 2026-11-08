@@ -34,7 +34,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     val state = model.sources
     var bridge by remember { mutableStateOf<SourceOwner?>(null) }
     var connections by remember { mutableStateOf<List<FileIntegration>>(emptyList()) }
-    var remove by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var subtitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
@@ -47,6 +47,19 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { model.runAction { throw error } }
     }
+    // Each source's lines as GTK shows them: address and account, then cache and file mapping.
+    LaunchedEffect(state, bridge) {
+        val setup = bridge ?: return@LaunchedEffect
+        val configured = state ?: return@LaunchedEffect
+        subtitles = configured.sources.associate { source ->
+            val access = configured.localAccess.find { it.sourceId == source.id }
+            val credentials = try { withContext(Dispatchers.IO) { setup.editable(source.id)?.credentials } }
+                catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            val status = if (access?.access == null) null else try { setup.localAccessStatus(source.id) }
+                catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            source.id to sourceRowSubtitle(source, access, credentials, status, configured.localFolders.size.toULong())
+        }
+    }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
     SettingsPage(embedded = embedded) {
         if (!connectionsOnly) {
@@ -54,17 +67,12 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         val sources = state?.sources.orEmpty()
         sources.forEachIndexed { index, source -> key(source.id) {
             val selected = state?.selectedSourceId == source.id
-            SettingsRow(source.name, summary = source.kind,
+            SettingsRow(source.name, summary = subtitles[source.id],
                 selected = selected,
                 leading = { SourceIcon(source.kind, Modifier.size(24.dp)) }, trailing = {
-                    Row {
-                        IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().source().use { it.refreshSource(source.id, false) } } }) {
-                            RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"), Modifier.size(20.dp))
-                        }
-                        IconButton({ remove = source.id to source.name }) {
-                            RufinIcon("rufin-window-close-symbolic", translate("Forget Source"), Modifier.size(20.dp))
-                        }
-                        IconButton({ onEdit(source.id) }) { RufinIcon("rufin-go-next-symbolic", translate("Edit Source"), Modifier.size(20.dp)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (selected) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(20.dp))
+                        RufinIcon("rufin-go-next-symbolic", translate("Edit Source"), Modifier.size(20.dp))
                     }
                 }, modifier = Modifier.semantics { this.selected = selected }.clickable { onEdit(source.id) })
         } }
@@ -92,12 +100,29 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
             model.runAction { bridge?.let { connections = it.fileIntegrations().filter { !it.musicSource } } }
         }, editingConnection, connectionsOnly = true)
     }
-    remove?.let { (id, name) ->
-        AlertDialog(onDismissRequest = { remove = null }, title = { Text(translate("Forget Source")) },
-            text = { Text(translate("Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?").replace("{name}", name)) },
-            confirmButton = { TextButton({
-                remove = null
-                model.runAction { (bridge ?: error(translate("Source setup is unavailable"))).forgetSource(id) }
-            }) { Text(translate("Forget Source")) } }, dismissButton = { TextButton({ remove = null }) { Text(translate("Cancel")) } })
+}
+
+/// What GTK's server actions do: use the source, read it again, or forget it after asking.
+@Composable
+internal fun SourceActions(model: RufinConnection, sourceId: String, name: String, close: () -> Unit) {
+    var forgetting by remember { mutableStateOf(false) }
+    fun withSource(work: suspend (SourceOwner) -> Unit) = model.runAction {
+        model.connectedService().runtime.value!!.getOrThrow().source().use { work(it) }
     }
+    SettingsGroup(translate("Server Actions")) {
+        if (model.sources?.selectedSourceId != sourceId) SettingsRow(translate("Use This Source"),
+            leading = { RufinIcon("rufin-object-select-symbolic", null) },
+            modifier = Modifier.clickable { model.selectSource(sourceId); close() })
+        SettingsRow(translate("Resync Library"), leading = { RufinIcon("rufin-view-refresh-symbolic", null) },
+            modifier = Modifier.clickable { withSource { it.refreshSource(sourceId, false) }; close() })
+        SettingsRow(translate("Forget Source"), leading = { RufinIcon("rufin-window-close-symbolic", null) },
+            modifier = Modifier.clickable { forgetting = true })
+    }
+    if (forgetting) AlertDialog(onDismissRequest = { forgetting = false }, title = { Text(translate("Forget Source")) },
+        text = { Text(translate("Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?").replace("{name}", name)) },
+        confirmButton = { TextButton({
+            forgetting = false
+            withSource { it.forgetSource(sourceId) }
+            close()
+        }) { Text(translate("Forget Source")) } }, dismissButton = { TextButton({ forgetting = false }) { Text(translate("Cancel")) } })
 }

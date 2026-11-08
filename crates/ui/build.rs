@@ -54,7 +54,10 @@ fn main() {
     manifest.push_str("  </gresource>\n</gresources>\n");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let manifest_path = out.join("rufin.gresource.xml");
-    fs::write(&manifest_path, manifest).expect("write the resource manifest");
+    // compile_resources makes Cargo watch this file, so rewriting it would rerun this script on every build.
+    if fs::read_to_string(&manifest_path).ok().as_deref() != Some(manifest.as_str()) {
+        fs::write(&manifest_path, manifest).expect("write the resource manifest");
+    }
     glib_build_tools::compile_resources(
         &[resources.as_path(), icons.as_path()],
         manifest_path.to_str().expect("UTF-8 OUT_DIR"),

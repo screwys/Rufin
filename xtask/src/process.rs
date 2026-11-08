@@ -115,6 +115,10 @@ pub(crate) fn read_to_string(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn write_string(path: &Path, contents: &str) -> Result<()> {
+    // Unchanged output keeps its mtime, so Cargo doesn't rebuild what watches it.
+    if fs::read_to_string(path).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
     fs::write(path, contents)
         .map_err(|err| format!("failed to write {}: {err}", path.display()).into())
 }

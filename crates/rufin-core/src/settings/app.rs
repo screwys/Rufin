@@ -225,6 +225,9 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     reduce_motion: bool = false => set_reduce_motion;
     #[serde(default = "default_true")]
     show_downloaded_badges: bool = true => set_show_downloaded_badges;
+    /// Android: whether rule downloads run on mobile data too.
+    #[serde(default)]
+    download_on_mobile_data: bool = false => set_download_on_mobile_data;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
     #[serde(default)]

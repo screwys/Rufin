@@ -10,7 +10,7 @@ impl JellyfinEmbySource {
     ) -> SourceResult<crate::ResolvedDownload> {
         let original = || {
             stream_descriptor(
-                &self.base_url,
+                &self.base_url(),
                 &self.user_id,
                 &self.device_id,
                 &self.access_token,
@@ -34,7 +34,7 @@ impl JellyfinEmbySource {
             return Ok(crate::ResolvedDownload::encode(original()?, quality));
         }
         let mut url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!("Audio/{}/Universal", raw_item_id(track)),
         )?;
         let container = match encoding.codec {
@@ -70,7 +70,7 @@ impl JellyfinEmbySource {
         track_ids: &[String],
         public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
-        let url = endpoint(&self.base_url, "Playlists")?;
+        let url = endpoint(&self.base_url(), "Playlists")?;
         let body = CreatePlaylistDto {
             name: name.to_string(),
             ids: raw_track_ids(track_ids),
@@ -91,7 +91,7 @@ impl JellyfinEmbySource {
         public: Option<bool>,
     ) -> SourceResult<()> {
         let url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!("Playlists/{}", raw_item_id(playlist_id)),
         )?;
         let body = UpdatePlaylistDto {
@@ -103,7 +103,7 @@ impl JellyfinEmbySource {
 
     pub(crate) async fn write_lyrics(&self, track_id: &str, lyrics: &str) -> SourceResult<()> {
         let raw_track_id = raw_item_id(track_id);
-        let mut url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Lyrics"))?;
+        let mut url = endpoint(&self.base_url(), &format!("Audio/{raw_track_id}/Lyrics"))?;
         url.query_pairs_mut().append_pair("fileName", "lyrics.lrc");
         self.send_unit(
             self.client
@@ -119,7 +119,7 @@ impl JellyfinEmbySource {
         track_id: &str,
     ) -> SourceResult<Option<LyricsBundle>> {
         let raw_track_id = raw_item_id(track_id);
-        let local_url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Lyrics"))?;
+        let local_url = endpoint(&self.base_url(), &format!("Audio/{raw_track_id}/Lyrics"))?;
         match self.send_json::<Value>(self.client.get(local_url)).await {
             Ok(item) => Ok(Some(lyrics_from_item(&item))),
             Err(SourceError::NotFound) => Ok(None),
@@ -243,6 +243,7 @@ mod tests {
                 emby_connect: false,
                 kind: ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server".into()),
                 user_id: "listener".into(),
                 username: "Listener".into(),

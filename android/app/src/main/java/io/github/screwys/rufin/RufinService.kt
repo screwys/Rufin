@@ -16,6 +16,9 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
@@ -52,6 +55,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.channels.awaitClose
 
 @UnstableApi
 class RufinService : MediaSessionService() {
@@ -198,6 +203,28 @@ class RufinService : MediaSessionService() {
                         catch (error: Exception) { Log.w("Rufin", "Could not release the old sync folder", error) }
                     }
                 } finally { status.destroy(); connect.destroy() }
+            }
+            launch {
+                // Each server checks its local address again on another network, and rule
+                // downloads wait while the network is metered, as mobile data is.
+                val source = started.source()
+                val downloads = started.downloads()
+                val connectivity = getSystemService(ConnectivityManager::class.java)
+                try {
+                    callbackFlow {
+                        val callback = object : ConnectivityManager.NetworkCallback() {
+                            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                                trySend(network to !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+                            }
+                            override fun onLost(network: Network) { trySend(null to true) }
+                        }
+                        connectivity.registerDefaultNetworkCallback(callback)
+                        awaitClose { connectivity.unregisterNetworkCallback(callback) }
+                    }.distinctUntilChanged().collect { (network, metered) ->
+                        downloads.setMetered(metered)
+                        if (network != null) source.networkChanged()
+                    }
+                } finally { source.destroy(); downloads.destroy() }
             }
             launch {
                 val source = started.source()

@@ -48,6 +48,8 @@ struct SubsonicSourcePayload {
     version: u32,
     base_url: String,
     #[serde(default)]
+    local_url: Option<String>,
+    #[serde(default)]
     user_id: String,
     #[serde(default)]
     username: String,
@@ -71,6 +73,7 @@ pub enum SubsonicAuthentication {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SubsonicSourceConfig {
     pub(crate) base_url: String,
+    pub(crate) local_url: Option<String>,
     pub(crate) username: String,
     pub(crate) trust_invalid_cert: bool,
     pub(crate) navidrome_library_version: u32,
@@ -99,6 +102,7 @@ impl SubsonicSourceConfig {
         }
         Ok(Self {
             base_url: payload.base_url,
+            local_url: payload.local_url,
             username,
             trust_invalid_cert: payload.trust_invalid_cert,
             navidrome_library_version: payload.navidrome_library_version,
@@ -107,14 +111,18 @@ impl SubsonicSourceConfig {
     }
 
     pub(crate) fn into_payload(self) -> serde_json::Value {
-        serde_json::json!({
+        let mut payload = serde_json::json!({
             "version": SOURCE_CONFIG_VERSION,
             "base_url": self.base_url,
             "username": self.username,
             "trust_invalid_cert": self.trust_invalid_cert,
             "navidrome_library_version": self.navidrome_library_version,
             "authentication": self.authentication,
-        })
+        });
+        if let Some(local) = self.local_url {
+            payload["local_url"] = local.into();
+        }
+        payload
     }
 }
 
@@ -169,8 +177,10 @@ pub(crate) async fn edit(
         credentials.source_name.as_deref().unwrap_or_default(),
         &current.name,
     );
+    let local_url = local_url(credentials.local_server_url.as_deref())?;
     let address_changed = crate::source::comparable_address(&credentials.server_url)
-        != crate::source::comparable_address(&saved.base_url);
+        != crate::source::comparable_address(&saved.base_url)
+        || local_url != saved.local_url;
     let username_changed = credentials.username.trim() != saved.username;
     let has_password = !credentials.secret.is_empty();
     let authentication_changed = authentication != saved.authentication;
@@ -201,6 +211,7 @@ pub(crate) async fn edit(
                 .as_str()
                 .trim_end_matches('/')
                 .to_owned(),
+            local_url,
             username: saved.username,
             trust_invalid_cert: credentials.trust_invalid_cert,
             navidrome_library_version: saved.navidrome_library_version,
@@ -218,6 +229,29 @@ pub(crate) async fn edit(
     Ok(SourceEditResult::Connected(Box::new(
         ConnectedSource::subsonic(configuration, source, None),
     )))
+}
+
+/// A saved local address in the same form as the public one.
+fn local_url(raw: Option<&str>) -> SourceResult<Option<String>> {
+    crate::address::optional_local(raw)
+        .map(|address| {
+            normalize_base_url(address).map(|url| url.as_str().trim_end_matches('/').to_owned())
+        })
+        .transpose()
+}
+
+impl SubsonicSource {
+    /// The address requests use now.
+    pub(super) fn base_url(&self) -> Url {
+        self.address.current()
+    }
+
+    /// Uses the local address while an OpenSubsonic server answers there.
+    pub(crate) async fn select_address(&self) {
+        self.address
+            .select(async |local| client::answers_subsonic(&self.client, local).await)
+            .await;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
@@ -257,7 +291,7 @@ impl SubsonicFlavor {
 pub struct SubsonicSource {
     client: Client,
     navidrome_client: Client,
-    base_url: Url,
+    address: crate::address::ServerAddress<Url>,
     username: String,
     credential: Arc<SubsonicCredential>,
     flavor: SubsonicFlavor,
@@ -272,7 +306,14 @@ impl SubsonicSource {
         config: SubsonicSourceConfig,
         credential: String,
     ) -> SourceResult<Self> {
-        let base_url = normalize_base_url(&config.base_url)?;
+        let address = crate::address::ServerAddress::new(
+            normalize_base_url(&config.base_url)?,
+            config
+                .local_url
+                .as_deref()
+                .map(normalize_base_url)
+                .transpose()?,
+        );
         let client = build_client(config.trust_invalid_cert)?;
         let navidrome_client = navidrome::build_client(config.trust_invalid_cert)?;
         let credential = SubsonicCredential::parse(&credential)?;
@@ -298,7 +339,7 @@ impl SubsonicSource {
         Ok(Self {
             client,
             navidrome_client,
-            base_url,
+            address,
             username: config.username,
             credential: Arc::new(credential),
             flavor,
@@ -319,10 +360,12 @@ impl SubsonicSource {
         let CredentialInput {
             source_name: submitted_name,
             server_url,
+            local_server_url,
             username,
             secret: password,
             trust_invalid_cert,
         } = credentials;
+        let local_url = local_url(local_server_url.as_deref())?;
         let base_url = normalize_base_url(&server_url)?;
         let client = build_client(trust_invalid_cert)?;
         let credential = match (flavor, authentication) {
@@ -402,6 +445,7 @@ impl SubsonicSource {
             crate::source::configured_source_name(submitted_name, provider_name),
             SubsonicSourceConfig {
                 base_url: base_url.as_str().trim_end_matches('/').to_string(),
+                local_url: local_url.clone(),
                 username: canonical_username.clone(),
                 trust_invalid_cert,
                 navidrome_library_version: if flavor == SubsonicFlavor::Navidrome {
@@ -416,7 +460,10 @@ impl SubsonicSource {
         let source = Self {
             navidrome_client: navidrome::build_client(trust_invalid_cert)?,
             client,
-            base_url,
+            address: crate::address::ServerAddress::new(
+                base_url,
+                local_url.as_deref().map(normalize_base_url).transpose()?,
+            ),
             username: canonical_username,
             credential: Arc::new(credential),
             flavor,

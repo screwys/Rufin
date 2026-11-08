@@ -60,7 +60,7 @@ impl JellyfinEmbySource {
 
     pub(super) fn item_url(&self, raw: &str) -> SourceResult<Url> {
         endpoint(
-            &self.base_url,
+            &self.base_url(),
             &match self.kind {
                 ServerKind::Jellyfin => format!("Items/{raw}"),
                 ServerKind::Emby => format!("Users/{}/Items/{raw}", self.user_id),
@@ -119,7 +119,7 @@ impl JellyfinEmbySource {
                 staged_albums.insert(raw_item_id(id).to_string());
             }
             let mut album_folders = std::collections::HashMap::new();
-            let mut url = endpoint(&self.base_url, "Items")?;
+            let mut url = endpoint(&self.base_url(), "Items")?;
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
                 .append_pair("Recursive", "true")
@@ -253,7 +253,7 @@ impl JellyfinEmbySource {
             }
             _ => format!("Items/{raw}/InstantMix"),
         };
-        let mut url = endpoint(&self.base_url, &path)?;
+        let mut url = endpoint(&self.base_url(), &path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Limit", &limit.clamp(1, 500).to_string());
@@ -265,7 +265,7 @@ impl JellyfinEmbySource {
             && matches!(seed, crate::SourceRadioSeed::Track(_))
             && !self.use_instant_mix
         {
-            let mut url = endpoint(&self.base_url, &format!("Items/{raw}/InstantMix"))?;
+            let mut url = endpoint(&self.base_url(), &format!("Items/{raw}/InstantMix"))?;
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
                 .append_pair("Limit", &limit.clamp(1, 500).to_string());
@@ -289,7 +289,7 @@ impl JellyfinEmbySource {
         let path = parent
             .map(|_| "Items".to_string())
             .unwrap_or_else(|| format!("Users/{}/Views", self.user_id));
-        let mut url = endpoint(&self.base_url, &path)?;
+        let mut url = endpoint(&self.base_url(), &path)?;
         if let Some(folder) = parent {
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
@@ -373,7 +373,7 @@ impl JellyfinEmbySource {
         limit: usize,
         parent: Option<&str>,
     ) -> SourceResult<Vec<Value>> {
-        let mut url = endpoint(&self.base_url, "Items")?;
+        let mut url = endpoint(&self.base_url(), "Items")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Recursive", "true")
@@ -400,7 +400,7 @@ impl JellyfinEmbySource {
         limit: usize,
         parent: Option<&str>,
     ) -> SourceResult<Vec<Value>> {
-        let mut url = endpoint(&self.base_url, "Artists")?;
+        let mut url = endpoint(&self.base_url(), "Artists")?;
         url.query_pairs_mut().append_pair("UserId",&self.user_id).append_pair("SearchTerm",query).append_pair("StartIndex","0").append_pair("Limit",&limit.to_string()).append_pair("Fields","ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ImageBlurHashes,ProviderIds,SortName");
         if let Some(parent) = parent {
             url.query_pairs_mut().append_pair("ParentId", parent);
@@ -427,7 +427,7 @@ impl JellyfinEmbySource {
         let mut pages = PageState::default();
         loop {
             let mut url = endpoint(
-                &self.base_url,
+                &self.base_url(),
                 &format!("Playlists/{raw_playlist_id}/Items"),
             )?;
             {
@@ -477,7 +477,7 @@ impl JellyfinEmbySource {
                 .await;
         }
         let stream = stream_descriptor(
-            &self.base_url,
+            &self.base_url(),
             &self.user_id,
             &self.device_id,
             &self.access_token,
@@ -520,7 +520,7 @@ impl JellyfinEmbySource {
             Url::parse(stream.uri()).map_err(|error| SourceError::Other(error.to_string()))?;
         url.set_path(&format!(
             "{}/Audio/{}/stream.{container}",
-            self.base_url.path().trim_end_matches('/'),
+            self.base_url().path().trim_end_matches('/'),
             raw_item_id(track)
         ));
         let session = url
@@ -584,10 +584,10 @@ impl JellyfinEmbySource {
                 if let Some(public) = public {
                     let raw = raw_item_id(playlist);
                     let action = if public { "MakePublic" } else { "MakePrivate" };
-                    self.send_unit(
-                        self.client
-                            .post(endpoint(&self.base_url, &format!("Items/{raw}/{action}"))?),
-                    )
+                    self.send_unit(self.client.post(endpoint(
+                        &self.base_url(),
+                        &format!("Items/{raw}/{action}"),
+                    )?))
                     .await?;
                 }
                 Ok(())
@@ -600,7 +600,7 @@ impl JellyfinEmbySource {
         match self.kind {
             ServerKind::Jellyfin => {
                 let item: Value = match self
-                    .get_json(endpoint(&self.base_url, &format!("Playlists/{raw}"))?)
+                    .get_json(endpoint(&self.base_url(), &format!("Playlists/{raw}"))?)
                     .await
                 {
                     Ok(item) => item,
@@ -628,7 +628,7 @@ impl JellyfinEmbySource {
 impl JellyfinEmbySource {
     pub(crate) async fn set_favorite(&self, object_id: &str, favorite: bool) -> SourceResult<()> {
         let mut url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &match self.kind {
                 ServerKind::Jellyfin => format!("UserFavoriteItems/{}", raw_item_id(object_id)),
                 ServerKind::Emby => format!(
@@ -659,7 +659,7 @@ impl JellyfinEmbySource {
         }
         tracing::info!("Sending Jellyfin user rating request");
         let mut url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!("UserItems/{}/UserData", raw_item_id(object_id)),
         )?;
         url.query_pairs_mut().append_pair("userId", &self.user_id);
@@ -685,7 +685,7 @@ impl JellyfinEmbySource {
             "Primary"
         };
         let mut url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!(
                 "Items/{}/Images/{}",
                 raw_item_id(&image_ref.item_id),
@@ -730,7 +730,7 @@ impl JellyfinEmbySource {
 impl JellyfinEmbySource {
     pub async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         let url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!("Items/{}", raw_item_id(playlist_id)),
         )?;
         self.send_unit(self.client.delete(url)).await
@@ -742,7 +742,7 @@ impl JellyfinEmbySource {
     ) -> SourceResult<()> {
         for track_ids in track_ids.chunks(50) {
             let mut url = endpoint(
-                &self.base_url,
+                &self.base_url(),
                 &format!("Playlists/{}/Items", raw_item_id(playlist_id)),
             )?;
             url.query_pairs_mut()
@@ -759,7 +759,7 @@ impl JellyfinEmbySource {
     ) -> SourceResult<()> {
         for entry_ids in entry_ids.chunks(50) {
             let mut url = endpoint(
-                &self.base_url,
+                &self.base_url(),
                 &format!("Playlists/{}/Items", raw_item_id(playlist_id)),
             )?;
             url.query_pairs_mut()
@@ -775,7 +775,7 @@ impl JellyfinEmbySource {
         new_index: usize,
     ) -> SourceResult<()> {
         let url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!(
                 "Playlists/{}/Items/{}/Move/{}",
                 raw_item_id(playlist_id),
@@ -812,7 +812,7 @@ impl JellyfinEmbySource {
             tracing::info!(service = self.kind.source_kind(), run = report.run.get(),
                 phase = ?report.phase, "Sending playback report");
         }
-        let url = endpoint(&self.base_url, path)?;
+        let url = endpoint(&self.base_url(), path)?;
         let mut body =
             serde_json::to_value(PlaybackReportDto::from_report(track_object_id, report))?;
         if self.kind == ServerKind::Emby {
@@ -1014,7 +1014,7 @@ impl JellyfinEmbySource {
             "Playlist" => PLAYLIST_FIELDS,
             _ => MIXED_ITEM_FIELDS,
         };
-        let mut url = endpoint(&self.base_url, "Items")?;
+        let mut url = endpoint(&self.base_url(), "Items")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Recursive", "true")
@@ -1034,7 +1034,7 @@ impl JellyfinEmbySource {
         offset: usize,
         limit: usize,
     ) -> SourceResult<(Value, Option<i64>)> {
-        let mut url = endpoint(&self.base_url, path)?;
+        let mut url = endpoint(&self.base_url(), path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("StartIndex", &offset.to_string())
@@ -1052,7 +1052,7 @@ impl JellyfinEmbySource {
         offset: usize,
         limit: usize,
     ) -> SourceResult<Value> {
-        let mut url = endpoint(&self.base_url, "MusicGenres")?;
+        let mut url = endpoint(&self.base_url(), "MusicGenres")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("StartIndex", &offset.to_string())
@@ -1224,6 +1224,7 @@ mod tests {
                 crate::CredentialInput {
                     source_name: None,
                     server_url: server.uri(),
+                    local_server_url: None,
                     username: "listener".into(),
                     secret: "password".into(),
                     trust_invalid_cert: false,
@@ -1275,6 +1276,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: None,
                 user_id: "user".into(),
                 username: "listener".into(),
@@ -1422,6 +1424,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server".into()),
                 user_id: "user".into(),
                 username: "listener".into(),
@@ -1529,6 +1532,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server-one".to_string()),
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
@@ -1585,6 +1589,7 @@ mod tests {
                             kind,
                             emby_connect: false,
                             base_url: server.uri(),
+                            local_url: None,
                             server_id: Some("server-one".into()),
                             user_id: "user-one".into(),
                             username: "listener".into(),
@@ -1642,6 +1647,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: None,
                 user_id: "user".into(),
                 username: "listener".into(),
@@ -1733,6 +1739,7 @@ mod tests {
                     emby_connect: false,
                     kind,
                     base_url: server.uri(),
+                    local_url: None,
                     server_id: None,
                     user_id: "user".into(),
                     username: "listener".into(),
@@ -1864,7 +1871,7 @@ mod tests {
                         album.clone(),
                     ),
                     (
-                        super::endpoint(&source.base_url, "Items/track/Ancestors")
+                        super::endpoint(&source.base_url(), "Items/track/Ancestors")
                             .unwrap()
                             .path()
                             .to_string(),
@@ -1964,6 +1971,7 @@ mod tests {
                 emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server-one".to_string()),
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),

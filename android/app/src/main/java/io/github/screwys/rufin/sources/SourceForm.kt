@@ -12,6 +12,7 @@ internal class SourceForm {
     var kind by mutableStateOf<String?>(null)
     var name by mutableStateOf("")
     var url by mutableStateOf("")
+    var localUrl by mutableStateOf("")
     var username by mutableStateOf("")
     var secret by mutableStateOf("")
     var verification by mutableStateOf("")
@@ -39,6 +40,7 @@ internal class SourceForm {
         halfStars = saved.source.halfStarsEnabled
         offersHalfStarSetting = saved.source.offersHalfStarSetting
         url = saved.credentials.serverUrl
+        localUrl = saved.credentials.localServerUrl.orEmpty()
         username = saved.credentials.username
         trustInvalidCertificate = saved.credentials.trustInvalidCert
         subsonicAuth = saved.credentials.openSubsonicAuthentication?.name?.lowercase() ?: "password"
@@ -63,7 +65,7 @@ internal class SourceForm {
     }
 
     private fun lines(value: String) = value.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
-    private fun optional(value: String) = value.trim().takeIf(String::isNotEmpty)
+    fun optional(value: String) = value.trim().takeIf(String::isNotEmpty)
 
     fun fileSettings() = FileSourceSettings(url.trim(), lines(alternates), lines(folders), lines(exclusions),
         username.trim(), domain.trim(), FileAuthentication.valueOf(fileAuth.uppercase()),
@@ -80,7 +82,7 @@ internal class SourceForm {
         secret.takeUnless { editing && it.isEmpty() }, if (!editing || replaceHeaders) fileHeaders() else null)
 
     suspend fun submit(setup: SourceOwner, sourceId: String?) {
-        val credentials = CredentialInput(optional(name), url.trim(), username.trim(), secret, trustInvalidCertificate)
+        val credentials = CredentialInput(optional(name), url.trim(), optional(localUrl), username.trim(), secret, trustInvalidCertificate)
         when (kind) {
             "jellyfin", "emby" -> setup.saveJellyfinEmby(sourceId,
                 if (kind == "emby") ServerKind.EMBY else ServerKind.JELLYFIN,

@@ -325,6 +325,81 @@ mod tests {
     }
 }
 
+/// The lines under a source's name in the source list: its provider and address, account and
+/// music folder, then its cache and local file mapping. A Local source counts its folders.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn source_row_subtitle(
+    source: SourceSummary,
+    access: Option<SourceLocalAccessSummary>,
+    credentials: Option<CredentialPreset>,
+    status: Option<LocalAccessStatus>,
+    local_folder_count: u64,
+) -> String {
+    use localization::{tr, tr_with, trn_with};
+    let line = |parts: [String; 2]| {
+        parts
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" - ")
+    };
+    let cache = access.as_ref().map_or_else(String::new, |access| {
+        format!(
+            "{}: {}, {}",
+            tr("Cached"),
+            localization::album_count_text(access.album_count as u64),
+            localization::track_count_text(access.track_count as u64)
+        )
+    });
+    let lines = if source.kind == "local" {
+        let count = local_folder_count.to_string();
+        [
+            tr_with("Configured items: {count}", &[("count", &count)]),
+            String::new(),
+            cache,
+        ]
+    } else {
+        let mapping = match (
+            access.as_ref().and_then(|access| access.access.as_ref()),
+            status,
+        ) {
+            (None, _) => tr("No local file mapping"),
+            (Some(_), Some(status)) if status.total_track_count > 0 => {
+                let matched = status.matched_track_count.to_string();
+                let total = status.total_track_count.to_string();
+                trn_with(
+                    "Local file mapping: {matched} of {total} server path matches",
+                    "Local file mapping: {matched} of {total} server paths match",
+                    status.total_track_count as u64,
+                    &[("matched", &matched), ("total", &total)],
+                )
+            }
+            (Some(_), _) => tr("Local playback saved"),
+        };
+        let provider = source_kind_title(&source.kind).map_or_else(|| source.kind.clone(), tr);
+        let (address, user) = credentials.map_or_else(Default::default, |credentials| {
+            let user = Some(credentials.username)
+                .filter(|username| !username.trim().is_empty())
+                .map(|username| format!("{}: {username}", tr("User")))
+                .unwrap_or_default();
+            (credentials.server_url, user)
+        });
+        let folder = access
+            .and_then(|access| access.selected_music_folder_name)
+            .unwrap_or_else(|| tr("All Music"));
+        [
+            line([provider, address]),
+            line([user, format!("{}: {folder}", tr("Music Folder"))]),
+            line([cache, mapping]),
+        ]
+    };
+    lines
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn source_kind_title(kind: &str) -> Option<&'static str> {
     use library::SourceKind;
     Some(match SourceKind::parse(kind)? {

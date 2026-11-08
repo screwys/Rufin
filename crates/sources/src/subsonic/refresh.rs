@@ -728,6 +728,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".into(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,
@@ -865,6 +866,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".into(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,
@@ -1101,6 +1103,7 @@ mod tests {
                 SubsonicFlavor::Subsonic,
                 SubsonicSourceConfig {
                     base_url: server.uri(),
+                    local_url: None,
                     username: "listener".into(),
                     trust_invalid_cert: false,
                     navidrome_library_version: 0,
@@ -1415,6 +1418,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,

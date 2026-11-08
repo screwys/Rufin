@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 
 use super::*;
 use crate::remote_json::{id, items};
-use crate::source::LIVE_CHANGE_LIMIT;
+use crate::source::{FEED_SILENCE_LIMIT, LIVE_CHANGE_LIMIT};
 use crate::{RemoteItemChange, RemoteItemUpdate};
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -30,14 +30,14 @@ impl JellyfinEmbySource {
     async fn connect_library_socket(&self) -> SourceResult<WebSocketStream<reqwest::Upgraded>> {
         let key = websocket_key()?;
         let mut url = endpoint(
-            &self.socket_base_url,
+            &self.socket_base_url(),
             match self.kind {
                 ServerKind::Jellyfin => "socket",
                 ServerKind::Emby => "embywebsocket",
             },
         )?;
         if self.kind == ServerKind::Emby {
-            self.send_unit(self.client.post(endpoint(&self.base_url, "Sessions/Capabilities/Full")?).json(&serde_json::json!({
+            self.send_unit(self.client.post(endpoint(&self.base_url(), "Sessions/Capabilities/Full")?).json(&serde_json::json!({
                 "PlayableMediaTypes": ["Audio"], "SupportedCommands": [], "SupportsMediaControl": false, "SupportsSync": false
             }))).await?;
             let token = self.session_access_token().await?;
@@ -90,18 +90,17 @@ impl JellyfinEmbySource {
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
         loop {
-            let keep_listening = match self.listen_library_changes_once(on_ready, on_change).await {
-                Ok(keep_listening) => keep_listening,
+            match self.listen_library_changes_once(on_ready, on_change).await {
+                Ok(false) => return Ok(()),
+                Ok(true) => delay = FEED_RETRY_MIN,
                 Err(error) => {
                     warn!(%error, "Library change feed disconnected");
-                    true
+                    sleep(delay).await;
+                    delay = delay.saturating_mul(2).min(FEED_RETRY_MAX);
+                    continue;
                 }
-            };
-            if !keep_listening {
-                return Ok(());
             }
             sleep(delay).await;
-            delay = delay.saturating_mul(2).min(FEED_RETRY_MAX);
         }
     }
 
@@ -115,15 +114,20 @@ impl JellyfinEmbySource {
             return Ok(false);
         }
         let mut keep_alive = interval(KEEP_ALIVE_INTERVAL);
+        let mut heard = Instant::now();
         loop {
             tokio::select! {
                 _ = keep_alive.tick() => {
                     send_keep_alive(&mut socket).await?;
                 }
+                () = tokio::time::sleep_until((heard + FEED_SILENCE_LIMIT).into()) => {
+                    return Err(SourceError::Network("The library change feed went silent".into()));
+                }
                 message = socket.next() => {
                     let Some(message) = message else {
                         return Ok(true);
                     };
+                    heard = Instant::now();
                     match message.map_err(websocket_error)? {
                         Message::Text(text) => match library_socket_message(&text, &self.user_id)? {
                             JellyfinSocketMessage::Change(change) => {
@@ -231,11 +235,16 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
     }
 }
 
+/// Jellyfin's keep-alive, and a ping whose pong shows the connection still stands.
 async fn send_keep_alive(socket: &mut WebSocketStream<reqwest::Upgraded>) -> SourceResult<()> {
     socket
         .send(Message::Text(
             r#"{"MessageType":"KeepAlive"}"#.to_string().into(),
         ))
+        .await
+        .map_err(websocket_error)?;
+    socket
+        .send(Message::Ping(Vec::new().into()))
         .await
         .map_err(websocket_error)
 }
@@ -318,6 +327,7 @@ mod tests {
                     kind,
                     emby_connect: false,
                     base_url: server.uri(),
+                    local_url: None,
                     server_id: None,
                     user_id: "user".into(),
                     username: "listener".into(),

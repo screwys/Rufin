@@ -176,6 +176,7 @@ impl SetupViewContext {
 struct CredentialHostDraft {
     name: String,
     url: String,
+    local_url: String,
     username: String,
     password: String,
     cert_verify: bool,
@@ -210,6 +211,7 @@ struct CredentialHost {
     rows: adw::PreferencesGroup,
     name: adw::EntryRow,
     url: adw::EntryRow,
+    local_url: adw::EntryRow,
     username: adw::EntryRow,
     password: adw::PasswordEntryRow,
     cert_verify: adw::SwitchRow,
@@ -223,6 +225,7 @@ impl CredentialHost {
         CredentialInput {
             source_name: trimmed_optional_text(&self.name),
             server_url: self.url.text().to_string(),
+            local_server_url: trimmed_optional_text(&self.local_url),
             username: self.username.text().to_string(),
             secret: self.password.text().to_string(),
             trust_invalid_cert: !self.cert_verify.is_active(),
@@ -549,6 +552,7 @@ fn subsonic_settings_group_for(
     let source = shell.products.source.clone();
     let name = host.name.clone();
     let url = host.url.clone();
+    let local_url = host.local_url.clone();
     let username = host.username.clone();
     let password = host.password.clone();
     let cert_verify = host.cert_verify.clone();
@@ -563,6 +567,7 @@ fn subsonic_settings_group_for(
         let credentials = CredentialInput {
             source_name: Some(name.text().trim().to_string()),
             server_url: url.text().trim().to_string(),
+            local_server_url: trimmed_optional_text(&local_url),
             username: username.text().trim().to_string(),
             secret: password.text().to_string(),
             trust_invalid_cert: !cert_verify.is_active(),
@@ -1015,6 +1020,7 @@ fn credential_draft(preset: Option<CredentialPreset>) -> CredentialHostDraft {
         || CredentialHostDraft {
             name: String::new(),
             url: "http://".to_string(),
+            local_url: String::new(),
             username: String::new(),
             password: String::new(),
             cert_verify: true,
@@ -1022,6 +1028,7 @@ fn credential_draft(preset: Option<CredentialPreset>) -> CredentialHostDraft {
         |preset| CredentialHostDraft {
             name: preset.source_name,
             url: preset.server_url,
+            local_url: preset.local_server_url.unwrap_or_default(),
             username: preset.username,
             password: String::new(),
             cert_verify: !preset.trust_invalid_cert,
@@ -1040,6 +1047,7 @@ fn credential_host(
         draft,
         &host.name,
         &host.url,
+        &host.local_url,
         &host.username,
         &host.password,
         &host.cert_verify,
@@ -1060,6 +1068,7 @@ fn credential_host_view(
         rows: adw::PreferencesGroup,
         name: adw::EntryRow,
         url: adw::EntryRow,
+        local_url: adw::EntryRow,
         username: adw::EntryRow,
         password: adw::PasswordEntryRow,
         cert_verify: adw::SwitchRow,
@@ -1071,16 +1080,15 @@ fn credential_host_view(
     style_compact_field_row(&name);
     url.set_text(&snapshot.url);
     style_compact_field_row(&url);
-    let fields = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    fields.set_homogeneous(true);
-    fields.set_hexpand(true);
-    fields.append(&compact_field_row_group(&name));
-    fields.append(&compact_field_row_group(&url));
-    let fields = install_compact_field_row_responsiveness_at(&fields, 440);
+    crate::widgets::forms::attach_address_suggestions(&local_url);
+    local_url.set_text(&snapshot.local_url);
+    style_compact_field_row(&local_url);
     if !compact {
         fields_group.set_title(&tr("Server"));
     }
-    fields_group.add(&fields);
+    fields_group.add(&name);
+    fields_group.add(&url);
+    fields_group.add(&local_url);
 
     username.set_text(&snapshot.username);
     style_compact_field_row(&username);
@@ -1109,6 +1117,7 @@ fn credential_host_view(
         rows,
         name,
         url,
+        local_url,
         username,
         password,
         cert_verify,
@@ -1183,6 +1192,7 @@ fn bind_credential_draft(
     draft: &Rc<RefCell<CredentialHostDraft>>,
     name: &adw::EntryRow,
     url: &adw::EntryRow,
+    local_url: &adw::EntryRow,
     username: &adw::EntryRow,
     password: &adw::PasswordEntryRow,
     cert_verify: &adw::SwitchRow,
@@ -1191,6 +1201,8 @@ fn bind_credential_draft(
     name.connect_text_notify(move |row| value.borrow_mut().name = row.text().to_string());
     let value = Rc::clone(draft);
     url.connect_text_notify(move |row| value.borrow_mut().url = row.text().to_string());
+    let value = Rc::clone(draft);
+    local_url.connect_text_notify(move |row| value.borrow_mut().local_url = row.text().to_string());
     let value = Rc::clone(draft);
     username.connect_text_notify(move |row| value.borrow_mut().username = row.text().to_string());
     let value = Rc::clone(draft);
@@ -1624,5 +1636,5 @@ fn replace_add_server_content(content: &gtk::Box, child: gtk::Widget) {
 }
 
 use crate::widgets::field_layout::{
-    compact_field_row_group, install_compact_field_row_responsiveness_at, style_compact_field_row,
+    install_compact_field_row_responsiveness_at, style_compact_field_row,
 };

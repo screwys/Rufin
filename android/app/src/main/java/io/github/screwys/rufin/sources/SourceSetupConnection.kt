@@ -174,10 +174,12 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         choices = bridge?.smbShares(form.fileSettings(), form.fileCredentials()).orEmpty()
     }
     fun submit(onSuccess: () -> Unit) = run {
+        if (form.kind in setOf("jellyfin", "emby", "navidrome", "subsonic") && form.localUrl.isNotBlank()
+            && !model.connectedService().requestLocalNetworkAccess()) error(translate("Local network permission was denied"))
         val session = auth
         if (authorized && session != null) {
             val input = when (form.kind) {
-                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.instantMix)
+                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.instantMix, form.optional(form.localUrl))
                 "emby" -> SourceAuthorizationInput.Emby(selectedServer, form.instantMix)
                 "plex" -> SourceAuthorizationInput.Plex(selectedServer, form.url.trim().takeIf(String::isNotEmpty), form.trustInvalidCertificate)
                 "webdav" -> SourceAuthorizationInput.Files(form.fileSettings(), form.fileCredentialsEdit())

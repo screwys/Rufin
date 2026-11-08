@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::RemoteItemChange;
+use crate::source::{FEED_PING_INTERVAL, FEED_SILENCE_LIMIT, RemoteItemChange};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{
@@ -42,8 +42,26 @@ impl PlexSource {
         if !ready() {
             return Ok(false);
         }
-        while let Some(message) = socket.next().await {
-            match message.map_err(|error| SourceError::Network(error.to_string()))? {
+        let network =
+            |error: tokio_tungstenite::tungstenite::Error| SourceError::Network(error.to_string());
+        let mut ping = tokio::time::interval(FEED_PING_INTERVAL);
+        let mut heard = std::time::Instant::now();
+        loop {
+            let message = tokio::select! {
+                _ = ping.tick() => {
+                    socket.send(Message::Ping(Vec::new().into())).await.map_err(network)?;
+                    continue;
+                }
+                () = tokio::time::sleep_until((heard + FEED_SILENCE_LIMIT).into()) => {
+                    return Err(SourceError::Network("Plex notifications went silent".into()));
+                }
+                message = socket.next() => message,
+            };
+            let Some(message) = message else {
+                return Ok(true);
+            };
+            heard = std::time::Instant::now();
+            match message.map_err(network)? {
                 Message::Text(text) => {
                     if let Some(change) = notification(&text)
                         && !changed(change)
@@ -51,15 +69,13 @@ impl PlexSource {
                         return Ok(false);
                     }
                 }
-                Message::Ping(payload) => socket
-                    .send(Message::Pong(payload))
-                    .await
-                    .map_err(|error| SourceError::Network(error.to_string()))?,
-                Message::Close(_) => break,
+                Message::Ping(payload) => {
+                    socket.send(Message::Pong(payload)).await.map_err(network)?
+                }
+                Message::Close(_) => return Ok(true),
                 _ => {}
             }
         }
-        Ok(true)
     }
     /// Listens until `ready` or `changed` returns false. `ready` runs on each connect; the
     /// changes missed while disconnected are caught up from there.

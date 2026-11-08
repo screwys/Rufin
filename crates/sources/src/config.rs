@@ -41,6 +41,9 @@ pub struct PlexSettingsInput {
 pub struct CredentialInput {
     pub source_name: Option<String>,
     pub server_url: String,
+    /// The address the server answers at on its own network, used while it answers there.
+    #[serde(default)]
+    pub local_server_url: Option<String>,
     pub username: String,
     pub secret: String,
     pub trust_invalid_cert: bool,
@@ -58,6 +61,8 @@ pub enum SourceSetup {
         login: crate::JellyfinQuickConnectLogin,
         source_name: Option<String>,
         use_instant_mix: bool,
+        #[serde(default)]
+        local_server_url: Option<String>,
     },
     Plex(crate::PlexSetupInput),
     WebDav {
@@ -90,6 +95,7 @@ pub enum SourceSetup {
 pub struct CredentialPreset {
     pub source_name: String,
     pub server_url: String,
+    pub local_server_url: Option<String>,
     pub username: String,
     pub trust_invalid_cert: bool,
     pub open_subsonic_authentication: Option<crate::SubsonicAuthentication>,
@@ -120,6 +126,8 @@ pub enum SourceSettingsChange {
         login: crate::JellyfinQuickConnectLogin,
         source_name: Option<String>,
         use_instant_mix: bool,
+        #[serde(default)]
+        local_server_url: Option<String>,
     },
     Plex {
         source_id: SourceId,
@@ -364,6 +372,7 @@ impl SourceConfiguration {
                     credentials: CredentialPreset {
                         source_name: self.name.clone(),
                         server_url: config.base_url,
+                        local_server_url: config.local_url,
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
                         open_subsonic_authentication: None,
@@ -380,6 +389,7 @@ impl SourceConfiguration {
                     credentials: CredentialPreset {
                         source_name: self.name.clone(),
                         server_url: config.base_url,
+                        local_server_url: config.local_url,
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
                         open_subsonic_authentication: Some(config.authentication),
@@ -605,12 +615,13 @@ impl SourceConfiguration {
     pub fn recognize_media_locator(&self, locator: &str) -> Option<String> {
         let uri = url::Url::parse(locator).ok()?;
         let payload: serde_json::Value = serde_json::from_str(&self.provider_payload).ok()?;
-        let base = url::Url::parse(payload.get("base_url")?.as_str()?).ok()?;
-        if uri.origin() != base.origin()
-            || !uri.path().starts_with(base.path().trim_end_matches('/'))
-        {
-            return None;
-        }
+        let base = ["base_url", "local_url"]
+            .into_iter()
+            .filter_map(|key| url::Url::parse(payload.get(key)?.as_str()?).ok())
+            .find(|base| {
+                uri.origin() == base.origin()
+                    && uri.path().starts_with(base.path().trim_end_matches('/'))
+            })?;
         let path = uri.path().strip_prefix(base.path().trim_end_matches('/'))?;
         let object = if matches!(self.kind.as_str(), "jellyfin" | "emby") {
             let path = path.trim_start_matches('/');

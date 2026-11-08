@@ -55,10 +55,6 @@ pub(super) fn preference_source_choices(
     (sources, selection)
 }
 
-pub fn configured_source_kind_display_name(kind: &str) -> String {
-    rufin_core::runtime::source::source_kind_title(kind).map_or_else(|| kind.to_string(), tr)
-}
-
 pub fn half_stars_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::SwitchRow> {
     if !source.offers_half_star_setting {
         return None;

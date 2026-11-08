@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use gtk::gio::prelude::NetworkMonitorExt;
 use gtk::glib;
 use gtk::prelude::WidgetExt;
 use localization::{tr, tr_with};
@@ -62,6 +63,11 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
             apply_source_configuration(&event_shell);
         }
     });
+
+    // Joining or leaving a network lets each server check its local address again.
+    let source = shell.products.source.clone();
+    gtk::gio::NetworkMonitor::default()
+        .connect_network_changed(move |_, _| source.network_changed());
 
     let event_shell = Rc::clone(shell);
     let mut operation = shell.products.source.operation();
