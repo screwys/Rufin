@@ -207,6 +207,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 
@@ -1499,6 +1504,11 @@ msgstr "Latauslaatu"
 msgid "Download Queue"
 msgstr "Latausjono"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Latauskansio"
+
 msgid "Download queued"
 msgstr "Lataus asetettu jonoon"
 
@@ -2351,6 +2361,11 @@ msgstr "Vain toistetut kappaleet"
 msgid "Loading..."
 msgstr "Tallennetaan..."
 
+#, fuzzy
+#| msgid "Verification Code (optional)"
+msgid "Local Address (optional)"
+msgstr "Vahvistuskoodi (valinnainen)"
+
 msgid "Local File Access"
 msgstr ""
 
@@ -3088,6 +3103,9 @@ msgstr "Alkuperäinen"
 
 msgid "Other releases"
 msgstr "Muut julkaisut"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr ""

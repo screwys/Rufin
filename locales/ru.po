@@ -267,6 +267,11 @@ msgstr ""
 "задуманные различия между треками в каждом альбоме"
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 "Вам потребуется повторно подключиться через используемые вами приложения, "
@@ -1471,6 +1476,11 @@ msgstr "Качество скачивания"
 msgid "Download Queue"
 msgstr "Очередь загрузок"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Локальная папка"
+
 msgid "Download queued"
 msgstr "Загрузка добавлена в очередь"
 
@@ -2282,6 +2292,11 @@ msgstr "Загрузка похожих треков..."
 msgid "Loading..."
 msgstr "Загрузка..."
 
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Local Address (optional)"
+msgstr "Адрес сервера (необязательно)"
+
 msgid "Local File Access"
 msgstr "Доступ к локальным файлам"
 
@@ -2983,6 +2998,9 @@ msgstr "Оригинал"
 
 msgid "Other releases"
 msgstr "Другие выпуски"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr "Обводка полос"

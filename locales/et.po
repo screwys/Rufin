@@ -268,6 +268,11 @@ msgstr ""
 "puhul säilivad iga albumi sisemised erinevused"
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 "Pead looma uue API-võtmega uuesti ühenduse klientide kaudu, mida kasutad."
@@ -1362,6 +1367,11 @@ msgstr "Laadi rahulikult alla"
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Allalaadimiste kaust"
+
 msgid "Download queued"
 msgstr "Allalaadimine on lisatud järjekorda"
 
@@ -2117,6 +2127,11 @@ msgstr "Laadin seotud lugusid…"
 msgid "Loading..."
 msgstr "Laadin…"
 
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Local Address (optional)"
+msgstr "Serveri aadressi asendus (kui soovid)"
+
 msgid "Local File Access"
 msgstr "Ligipääs kohalikele failidele"
 
@@ -2782,6 +2797,9 @@ msgstr "Algne: {value}"
 
 msgid "Other releases"
 msgstr "Muud versioonid"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr "Kontuuriga ribad"

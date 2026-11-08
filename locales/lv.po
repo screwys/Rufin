@@ -247,6 +247,11 @@ msgstr ""
 "paredzētās atšķirības katrā albumā"
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 "Jums būs jāatjauno savienojums, izmantojot jaunās API atslēgas, klientu "
@@ -1536,6 +1541,11 @@ msgstr "Lejupielādes kvalitāte"
 msgid "Download Queue"
 msgstr "Lejupielādes rinda"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Lejupielādes mape"
+
 msgid "Download queued"
 msgstr "Lejupielādēt no rindas"
 
@@ -2392,6 +2402,11 @@ msgstr "Ielādē saistītās dziesmas..."
 msgid "Loading..."
 msgstr "Ielādē..."
 
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Local Address (optional)"
+msgstr "Servera adreses pārrakstīšana (pēc izvēles)"
+
 msgid "Local File Access"
 msgstr "Lokāla failu piekļuve"
 
@@ -3126,6 +3141,9 @@ msgstr "Oriģināls"
 
 msgid "Other releases"
 msgstr "Citi izdevumi"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr "Kontūru joslas"
