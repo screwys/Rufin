@@ -387,11 +387,13 @@ msgstr "Mana mūzika"
 msgid "Add to Favorites"
 msgstr "Pievienot izlasei"
 
-msgid "Add to Pins"
-msgstr "Pievienot izlasei"
-
 msgid "Add to Playlist"
 msgstr "Pievienot atskaņošanas sarakstam"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Pievienot izlasei"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -411,6 +413,9 @@ msgstr "Pievienot"
 
 msgid "Added to"
 msgstr "Pievienots"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Albumu izpildītāji"
@@ -1900,11 +1905,17 @@ msgstr "Aizpildīts spektrs"
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Atrodiet koplietotos resursus"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
+
+msgid "Find"
+msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Meklējam tekstus..."
@@ -2114,6 +2125,11 @@ msgstr "Vēsture"
 
 msgid "Hold and drag to resize"
 msgstr "Turiet un velciet, lai mainītu izmēru"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Pārvelciet, lai mainītu secību"
 
 msgid "Home Blocks"
 msgstr "Sākuma bloki"
@@ -2788,6 +2804,11 @@ msgstr "Nesen pievienotie"
 msgid "Next Track"
 msgstr "Nākamā dziesma"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Next album"
+msgstr "Atskaņot albumu"
+
 msgid "Next audio device"
 msgstr "Nākamā skaņas ierīce"
 
@@ -3369,6 +3390,11 @@ msgstr "Neļaut automātiskajai metadatu atjaunināšanai aizstāt šīs vērtī
 msgid "Previous Track"
 msgstr "Iepriekšēja dziesma"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Iepriekšējā lapa"
+
 msgid "Previous audio device"
 msgstr "Iepriekšējā skaņas ierīce"
 
@@ -3506,9 +3532,6 @@ msgstr "Noteikumu darbības"
 msgid "Refresh automatically"
 msgstr "Atjaunot automātiski"
 
-msgid "Refresh section"
-msgstr "Atsvaidzināt sadaļu"
-
 msgid "Refresh source"
 msgstr "Atsvaidzināt avotu"
 
@@ -3624,14 +3647,16 @@ msgstr "Dzēst mapi"
 msgid "Remove from Favorites"
 msgstr "Noņemt no izlases"
 
-msgid "Remove from Pins"
-msgstr "Noņemt no izlases"
-
 msgid "Remove from Playlist"
 msgstr "Noņemt no atskaņošanas saraksta"
 
 msgid "Remove from Queue"
 msgstr "Noņemt no rindas"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Noņemt no izlases"
 
 #, fuzzy
 #| msgid "Remove folder"
@@ -3674,9 +3699,6 @@ msgstr "Ielīmēt iepriekš iestatīto"
 #| msgid "Filename"
 msgid "Rename"
 msgstr "Faila nosaukums"
-
-msgid "Reorder"
-msgstr ""
 
 msgid "Repeat all"
 msgstr "Atkārtot visus"
@@ -3752,6 +3774,9 @@ msgstr "Pārsinhronizēt bibliotēku"
 
 msgid "Retry"
 msgstr "Mēģināt vēlreiz"
+
+msgid "Reverse order"
+msgstr ""
 
 msgid "Ribbon"
 msgstr ""
@@ -4029,11 +4054,21 @@ msgstr "Atlasīt visu"
 msgid "Select {title}"
 msgstr "Atlasiet {title}"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Atlasīšana"
+
 msgid "Selected folders"
 msgstr "Atlasītās mapes"
 
 msgid "Selected items: {count}"
 msgstr ""
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Atlasīšana"
 
 msgid "Selection"
 msgstr "Atlasīšana"
@@ -5034,6 +5069,12 @@ msgstr[0] "{count} rezultāti"
 msgstr[1] "{count} rezultāts"
 msgstr[2] "{count} rezultāti"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "izvēlētas {count} mapes"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} dziesmas"
@@ -5160,6 +5201,15 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Pievienot izlasei"
+
+#~ msgid "Refresh section"
+#~ msgstr "Atsvaidzināt sadaļu"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Noņemt no izlases"
 
 #~ msgid ""
 #~ "This removes the server, cached library metadata, queue snapshot, and "

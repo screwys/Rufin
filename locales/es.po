@@ -400,11 +400,13 @@ msgstr "Agregar música"
 msgid "Add to Favorites"
 msgstr "Añadir a Favoritos"
 
-msgid "Add to Pins"
-msgstr "Añadir a Fijados"
-
 msgid "Add to Playlist"
 msgstr "Añadir a la lista de reproducción"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Añadir a Favoritos"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -422,6 +424,9 @@ msgstr "Añadir"
 
 msgid "Added to"
 msgstr "Añadido a"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Artistas de álbum"
@@ -1803,11 +1808,17 @@ msgstr "Espectro relleno"
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Encontrar elementos compartidos"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Encuentra tu token de usuario de ListenBrainz"
+
+msgid "Find"
+msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Encontrando letras..."
@@ -2006,6 +2017,11 @@ msgstr "Historial"
 
 msgid "Hold and drag to resize"
 msgstr "Sostén y arrastra para redimensionar"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Arrastra para ordenar"
 
 msgid "Home Blocks"
 msgstr "Bloques de inicio"
@@ -2643,6 +2659,11 @@ msgstr "Recientemente añadidos"
 msgid "Next Track"
 msgstr "Siguiente pista"
 
+#, fuzzy
+#| msgid "Clear album"
+msgid "Next album"
+msgstr "Limpiar álbum"
+
 msgid "Next audio device"
 msgstr "Siguiente dispositivo de audio"
 
@@ -3193,6 +3214,11 @@ msgstr "Evitar que el refresco automático de metadatos reemplacen esos valores"
 msgid "Previous Track"
 msgstr "Pista anterior"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Página anterior"
+
 msgid "Previous audio device"
 msgstr "Dispositivo de audio anterior"
 
@@ -3322,9 +3348,6 @@ msgstr "Reducir animaciones"
 msgid "Refresh automatically"
 msgstr "Recargar automaticamente"
 
-msgid "Refresh section"
-msgstr "Refrescar sección"
-
 msgid "Refresh source"
 msgstr "Refrescar fuente"
 
@@ -3430,14 +3453,16 @@ msgstr "Remover carpeta"
 msgid "Remove from Favorites"
 msgstr "Quitar de Favoritos"
 
-msgid "Remove from Pins"
-msgstr "Quitar de Anclados"
-
 msgid "Remove from Playlist"
 msgstr "Quitar de la Lista de reproducción"
 
 msgid "Remove from Queue"
 msgstr "Quitar de la Cola"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Quitar de Favoritos"
 
 #, fuzzy
 #| msgid "Remove folder"
@@ -3476,9 +3501,6 @@ msgstr "Pegar preajuste"
 #| msgid "Filename"
 msgid "Rename"
 msgstr "Nombre del archivo"
-
-msgid "Reorder"
-msgstr "Ordenar de nuevo"
 
 msgid "Repeat all"
 msgstr "Repetir todo"
@@ -3550,6 +3572,11 @@ msgstr "Sincronizar biblioteca nuevamente"
 
 msgid "Retry"
 msgstr "Intentar de nuevo"
+
+#, fuzzy
+#| msgid "Reorder"
+msgid "Reverse order"
+msgstr "Ordenar de nuevo"
 
 msgid "Ribbon"
 msgstr ""
@@ -3820,11 +3847,21 @@ msgstr "Seleccionar todo"
 msgid "Select {title}"
 msgstr "Seleccionar {title}"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Selección"
+
 msgid "Selected folders"
 msgstr "Carpetas seleccionadas"
 
 msgid "Selected items: {count}"
 msgstr "Elementos seleccionados: {count}"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Selección"
 
 msgid "Selection"
 msgstr "Selección"
@@ -4750,6 +4787,12 @@ msgid_plural "{count} results"
 msgstr[0] "{count} resultado"
 msgstr[1] "{count} resultados"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "{count} carpeta seleccionada"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} pista"
@@ -4875,6 +4918,15 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Añadir a Fijados"
+
+#~ msgid "Refresh section"
+#~ msgstr "Refrescar sección"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Quitar de Anclados"
 
 #~ msgid ""
 #~ "Choose where this device stores local music received through Connect. "

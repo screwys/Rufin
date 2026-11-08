@@ -395,11 +395,13 @@ msgstr "Lisa muusikat"
 msgid "Add to Favorites"
 msgstr "Lisa lemmikuks"
 
-msgid "Add to Pins"
-msgstr "Lisa esiletõstetuks"
-
 msgid "Add to Playlist"
 msgstr "Lisa esitusloendisse"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Lisa lemmikuks"
 
 msgid "Add to folder"
 msgstr "Lisa kausta"
@@ -415,6 +417,9 @@ msgstr "Lisa"
 
 msgid "Added to"
 msgstr "Lisatud asukohta"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Albumi esitajad"
@@ -1668,11 +1673,17 @@ msgstr "Täidetud spekter"
 msgid "Filter type"
 msgstr "Filtri tüüp"
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Otsi jagatud võrgukaustu"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
+
+msgid "Find"
+msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Otsin laulusõnu…"
@@ -1867,6 +1878,11 @@ msgstr "Ajalugu"
 
 msgid "Hold and drag to resize"
 msgstr "Suuruse muutmiseks hoia all ja lohista"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Järjekorra muutmiseks lohista"
 
 msgid "Home Blocks"
 msgstr "Avalehe plokid"
@@ -2470,6 +2486,11 @@ msgstr "Äsjalisatud"
 msgid "Next Track"
 msgstr "Järgmine lugu"
 
+#, fuzzy
+#| msgid "Clear album"
+msgid "Next album"
+msgstr "Eemalda album"
+
 msgid "Next audio device"
 msgstr "Järgmine heliseade"
 
@@ -3005,6 +3026,11 @@ msgstr "Takista, et automaatne metaandmete uuendamine neid väärtusi asendaks"
 msgid "Previous Track"
 msgstr "Eelmine lugu"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Eelmine leht"
+
 msgid "Previous audio device"
 msgstr "Eelmine heliseade"
 
@@ -3128,9 +3154,6 @@ msgstr "Vähenda liikumist"
 msgid "Refresh automatically"
 msgstr "Laadi automaatselt uuesti"
 
-msgid "Refresh section"
-msgstr "Uuenda ploki andmeid"
-
 msgid "Refresh source"
 msgstr "Uuenda allikat"
 
@@ -3230,14 +3253,16 @@ msgstr "Eemalda kaust"
 msgid "Remove from Favorites"
 msgstr "Eemalda lemmikute hulgast"
 
-msgid "Remove from Pins"
-msgstr "Eemalda esiletõstmiste seast"
-
 msgid "Remove from Playlist"
 msgstr "Eemalda esitusloendist"
 
 msgid "Remove from Queue"
 msgstr "Eemalda esitusjärjekorrast"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Eemalda lemmikute hulgast"
 
 msgid "Remove from folder"
 msgstr "Eemalda kaustast"
@@ -3268,9 +3293,6 @@ msgstr "Muuda eelseadistuse nime"
 
 msgid "Rename"
 msgstr "Muuda nime"
-
-msgid "Reorder"
-msgstr "Muuda järjestust"
 
 msgid "Repeat all"
 msgstr "Korda kõiki"
@@ -3340,6 +3362,11 @@ msgstr "Sünkrooni meediumikogu uuesti"
 
 msgid "Retry"
 msgstr "Proovi uuesti"
+
+#, fuzzy
+#| msgid "Reorder"
+msgid "Reverse order"
+msgstr "Muuda järjestust"
 
 msgid "Ribbon"
 msgstr "Riba"
@@ -3586,11 +3613,21 @@ msgstr "Vali kõik"
 msgid "Select {title}"
 msgstr "Vali {title}"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Valik"
+
 msgid "Selected folders"
 msgstr "Valitud muusikakaustad"
 
 msgid "Selected items: {count}"
 msgstr "Valitud objekte: {count}"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Valik"
 
 msgid "Selection"
 msgstr "Valik"
@@ -4482,6 +4519,12 @@ msgid_plural "{count} results"
 msgstr[0] "{count} tulemus"
 msgstr[1] "{count} tulemust"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "Oled valinud {count} kausta"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} lugu"
@@ -4597,6 +4640,15 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Lisa esiletõstetuks"
+
+#~ msgid "Refresh section"
+#~ msgstr "Uuenda ploki andmeid"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Eemalda esiletõstmiste seast"
 
 #~ msgid ""
 #~ "Choose where this device stores local music received through Connect. "

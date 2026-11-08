@@ -403,11 +403,13 @@ msgstr "Добавить музыку"
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
 
-msgid "Add to Pins"
-msgstr "Добавить в закрепленные"
-
 msgid "Add to Playlist"
 msgstr "Добавить в плейлист"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Добавить в избранное"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -426,6 +428,9 @@ msgstr "Добавить"
 
 msgid "Added to"
 msgstr "Добавлено в"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Авторы альбома"
@@ -1817,11 +1822,17 @@ msgstr "Заполненный спектр"
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Найти общие папки"
 
 msgid "Find your ListenBrainz user token"
 msgstr "Найдите свой токен пользователя ListenBrainz"
+
+msgid "Find"
+msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Поиск текста песни..."
@@ -2020,6 +2031,11 @@ msgstr "История"
 
 msgid "Hold and drag to resize"
 msgstr "Удерживайте и перетаскивайте для изменения размера"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Перетащите, чтобы изменить порядок"
 
 msgid "Home Blocks"
 msgstr "Основные блоки"
@@ -2665,6 +2681,11 @@ msgstr "Недавно добавленные"
 msgid "Next Track"
 msgstr "Следующий трек"
 
+#, fuzzy
+#| msgid "Clear album"
+msgid "Next album"
+msgstr "Очистить альбом"
+
 msgid "Next audio device"
 msgstr "Следующее аудиоустройство"
 
@@ -3220,6 +3241,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Предыдущий трек"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Предыдущая страница"
+
 msgid "Previous audio device"
 msgstr "Предыдущее аудиоустройство"
 
@@ -3349,9 +3375,6 @@ msgstr "Уменьшить движение"
 msgid "Refresh automatically"
 msgstr "Автоматическое обновление"
 
-msgid "Refresh section"
-msgstr "Обновить раздел"
-
 msgid "Refresh source"
 msgstr "Обновить источник"
 
@@ -3457,14 +3480,16 @@ msgstr "Удалить папку"
 msgid "Remove from Favorites"
 msgstr "Удалить из Избранных"
 
-msgid "Remove from Pins"
-msgstr "Удалить из закрепленных"
-
 msgid "Remove from Playlist"
 msgstr "Удалить из плейлиста"
 
 msgid "Remove from Queue"
 msgstr "Удалить из Очереди"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Удалить из Избранных"
 
 #, fuzzy
 #| msgid "Remove folder"
@@ -3501,9 +3526,6 @@ msgstr "Вставить предустановку"
 
 msgid "Rename"
 msgstr "Переименовать"
-
-msgid "Reorder"
-msgstr "Изменить порядок"
 
 msgid "Repeat all"
 msgstr "Повторять все"
@@ -3576,6 +3598,11 @@ msgstr "Синхронизировать библиотеку"
 
 msgid "Retry"
 msgstr "Повторить"
+
+#, fuzzy
+#| msgid "Reorder"
+msgid "Reverse order"
+msgstr "Изменить порядок"
 
 msgid "Ribbon"
 msgstr ""
@@ -3849,11 +3876,21 @@ msgstr "Выбрать всё"
 msgid "Select {title}"
 msgstr "Выбрать {title}"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Выбор"
+
 msgid "Selected folders"
 msgstr "Выбранные папки"
 
 msgid "Selected items: {count}"
 msgstr "Выбранные элементы: {count}"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Выбор"
 
 msgid "Selection"
 msgstr "Выбор"
@@ -4795,6 +4832,12 @@ msgstr[0] "{count} результат"
 msgstr[1] "{count} результата"
 msgstr[2] "{count} результатов"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "{count} папка выбрана"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} трек"
@@ -4922,6 +4965,15 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Добавить в закрепленные"
+
+#~ msgid "Refresh section"
+#~ msgstr "Обновить раздел"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Удалить из закрепленных"
 
 #~ msgid ""
 #~ "Choose where this device stores local music received through Connect. "

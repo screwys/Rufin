@@ -345,11 +345,13 @@ msgstr "Oma musiikki"
 msgid "Add to Favorites"
 msgstr "Lisää suosikkeihin"
 
-msgid "Add to Pins"
-msgstr "Lisää kiinnityksiin"
-
 msgid "Add to Playlist"
 msgstr "Lisää soittolistaan"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Lisää suosikkeihin"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -368,6 +370,9 @@ msgid "Add"
 msgstr "Lisää"
 
 msgid "Added to"
+msgstr ""
+
+msgid "Adds similar tracks when the queue runs low"
 msgstr ""
 
 msgid "Album Artists"
@@ -1870,10 +1875,16 @@ msgstr ""
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
+msgstr ""
+
+msgid "Find"
 msgstr ""
 
 #, fuzzy
@@ -2079,6 +2090,11 @@ msgstr "Historia"
 
 msgid "Hold and drag to resize"
 msgstr ""
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Vedä järjestääksesi uudelleen"
 
 msgid "Home Blocks"
 msgstr "Kotilohkot"
@@ -2742,6 +2758,11 @@ msgstr "Äskettäin lisätty"
 msgid "Next Track"
 msgstr "Seuraava kappale"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Next album"
+msgstr "Toista albumi"
+
 msgid "Next audio device"
 msgstr "Seuraava äänilaite"
 
@@ -3346,6 +3367,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Edellinen kappale"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Edellinen sivu"
+
 msgid "Previous audio device"
 msgstr "Edellinen äänilaite"
 
@@ -3487,9 +3513,6 @@ msgstr "Säännön toiminnot"
 msgid "Refresh automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
 
-msgid "Refresh section"
-msgstr ""
-
 #, fuzzy
 #| msgid "Next source"
 msgid "Refresh source"
@@ -3613,14 +3636,16 @@ msgstr ""
 msgid "Remove from Favorites"
 msgstr "Poista suosikeista"
 
-msgid "Remove from Pins"
-msgstr "Poista kiinnityksistä"
-
 msgid "Remove from Playlist"
 msgstr "Poisto soittolistalta"
 
 msgid "Remove from Queue"
 msgstr "Poista jonosta"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Poista suosikeista"
 
 #, fuzzy
 #| msgid "Remove Local Folder"
@@ -3665,9 +3690,6 @@ msgstr "Liitä esiasetus"
 #| msgid "Rename"
 msgid "Rename"
 msgstr "Nimeä uudelleen"
-
-msgid "Reorder"
-msgstr ""
 
 msgid "Repeat all"
 msgstr "Kertaa kaikki"
@@ -3743,6 +3765,9 @@ msgstr "Synkronoi kirjasto uudelleen"
 
 msgid "Retry"
 msgstr "Yritä uudelleen"
+
+msgid "Reverse order"
+msgstr ""
 
 msgid "Ribbon"
 msgstr ""
@@ -4027,11 +4052,21 @@ msgstr "Valitse kaikki"
 msgid "Select {title}"
 msgstr "Valitse kaikki"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Valinta"
+
 msgid "Selected folders"
 msgstr "Valitut kansiot"
 
 msgid "Selected items: {count}"
 msgstr ""
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Valinta"
 
 msgid "Selection"
 msgstr "Valinta"
@@ -5033,6 +5068,12 @@ msgid_plural "{count} results"
 msgstr[0] "{count} tulos"
 msgstr[1] "{count} tulosta"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "{count} kansio valittu"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} kappale"
@@ -5149,6 +5190,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Lisää kiinnityksiin"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Poista kiinnityksistä"
 
 #, fuzzy
 #~| msgid "On this device"

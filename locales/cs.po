@@ -356,11 +356,13 @@ msgstr "Místní hudební složka"
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
 
-msgid "Add to Pins"
-msgstr "Připnout"
-
 msgid "Add to Playlist"
 msgstr "Přidat do playlistu"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Přidat do oblíbených"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -380,6 +382,9 @@ msgstr "Přidat"
 
 msgid "Added to"
 msgstr "Přidáno do"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Interpreti alba"
@@ -1963,11 +1968,17 @@ msgstr ""
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Najděte svůj uživatelský token ListenBrainz"
+
+msgid "Find"
+msgstr ""
 
 #, fuzzy
 #| msgid "Hide lyrics"
@@ -2180,6 +2191,11 @@ msgstr "Historie"
 
 msgid "Hold and drag to resize"
 msgstr "Podržte a přetáhněte pro změnu velikosti"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Přetažením změňte pořadí"
 
 msgid "Home Blocks"
 msgstr "Bloky domovské stránky"
@@ -2874,6 +2890,11 @@ msgstr "Nově přidané"
 msgid "Next Track"
 msgstr "Další skladba"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Next album"
+msgstr "Přehrát album"
+
 msgid "Next audio device"
 msgstr "Další zvukové zařízení"
 
@@ -3519,6 +3540,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Předchozí skladba"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Předchozí stránka"
+
 msgid "Previous audio device"
 msgstr "Předchozí zvukové zařízení"
 
@@ -3664,9 +3690,6 @@ msgstr "Akce založené na pravidlech"
 msgid "Refresh automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
-msgid "Refresh section"
-msgstr "Obnovit sekci"
-
 #, fuzzy
 #| msgid "Refresh section"
 msgid "Refresh source"
@@ -3792,14 +3815,16 @@ msgstr "Odebrat složku"
 msgid "Remove from Favorites"
 msgstr "Odebrat z oblíbených"
 
-msgid "Remove from Pins"
-msgstr "Odepnout"
-
 msgid "Remove from Playlist"
 msgstr "Odebrat z playlistu"
 
 msgid "Remove from Queue"
 msgstr "Odebrat z fronty"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Odebrat z oblíbených"
 
 #, fuzzy
 #| msgid "Remove folder"
@@ -3846,9 +3871,6 @@ msgstr "Předvolba"
 #| msgid "Rename"
 msgid "Rename"
 msgstr "Přejmenovat"
-
-msgid "Reorder"
-msgstr ""
 
 msgid "Repeat all"
 msgstr "Opakovat vše"
@@ -3923,6 +3945,9 @@ msgid "Resync Library"
 msgstr "Znovu synchronizovat knihovnu"
 
 msgid "Retry"
+msgstr ""
+
+msgid "Reverse order"
 msgstr ""
 
 msgid "Ribbon"
@@ -4234,12 +4259,22 @@ msgid "Select {title}"
 msgstr "Vybrat vše"
 
 #, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Výběr"
+
+#, fuzzy
 #| msgid "Select Music Folder"
 msgid "Selected folders"
 msgstr "Vybrat složku s hudbou"
 
 msgid "Selected items: {count}"
 msgstr ""
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Výběr"
 
 msgid "Selection"
 msgstr "Výběr"
@@ -5268,6 +5303,12 @@ msgstr[0] "{count} výsledek"
 msgstr[1] "{count} výsledky"
 msgstr[2] "{count} výsledků"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "{count} složka vybrána"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} skladba"
@@ -5376,6 +5417,15 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Add to Pins"
+#~ msgstr "Připnout"
+
+#~ msgid "Refresh section"
+#~ msgstr "Obnovit sekci"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Odepnout"
 
 #~ msgid ""
 #~ "This removes the server, cached library metadata, queue snapshot, and "

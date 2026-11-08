@@ -343,11 +343,13 @@ msgstr "本地音樂資料夾"
 msgid "Add to Favorites"
 msgstr "加入最愛"
 
-msgid "Add to Pins"
-msgstr "加入釘選"
-
 msgid "Add to Playlist"
 msgstr "加入播放清單"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "加入最愛"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -367,6 +369,9 @@ msgstr "新增"
 
 msgid "Added to"
 msgstr "已加入"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "專輯藝人"
@@ -1912,11 +1917,17 @@ msgstr ""
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "尋找您的 ListenBrainz 使用者憑證"
+
+msgid "Find"
+msgstr ""
 
 #, fuzzy
 #| msgid "No lyrics"
@@ -2127,6 +2138,11 @@ msgstr "歷史"
 
 msgid "Hold and drag to resize"
 msgstr "按住並拖曳以縮放"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "拖曳以重新排序"
 
 msgid "Home Blocks"
 msgstr ""
@@ -2805,6 +2821,11 @@ msgstr "最新加入"
 msgid "Next Track"
 msgstr "下一首"
 
+#, fuzzy
+#| msgid "Play album"
+msgid "Next album"
+msgstr "播放專輯"
+
 msgid "Next audio device"
 msgstr "下一個音訊裝置"
 
@@ -3439,6 +3460,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr "上一首"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "上一頁"
+
 msgid "Previous audio device"
 msgstr "上一個音訊裝置"
 
@@ -3580,9 +3606,6 @@ msgstr "選擇"
 msgid "Refresh automatically"
 msgstr ""
 
-msgid "Refresh section"
-msgstr "重新整理區塊"
-
 #, fuzzy
 #| msgid "Refresh section"
 msgid "Refresh source"
@@ -3702,14 +3725,16 @@ msgstr "移除資料夾"
 msgid "Remove from Favorites"
 msgstr "從最愛中移除"
 
-msgid "Remove from Pins"
-msgstr "從釘選中移除"
-
 msgid "Remove from Playlist"
 msgstr "從播放清單中移除"
 
 msgid "Remove from Queue"
 msgstr "從佇列中移除"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "從最愛中移除"
 
 #, fuzzy
 #| msgid "Remove folder"
@@ -3756,9 +3781,6 @@ msgstr "預設集"
 #| msgid "Rename"
 msgid "Rename"
 msgstr "重新命名"
-
-msgid "Reorder"
-msgstr ""
 
 msgid "Repeat all"
 msgstr "重複播放全部"
@@ -3833,6 +3855,9 @@ msgid "Resync Library"
 msgstr ""
 
 msgid "Retry"
+msgstr ""
+
+msgid "Reverse order"
 msgstr ""
 
 msgid "Ribbon"
@@ -4132,12 +4157,22 @@ msgid "Select {title}"
 msgstr "全選"
 
 #, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "選擇"
+
+#, fuzzy
 #| msgid "Select Music Folder"
 msgid "Selected folders"
 msgstr "選擇音樂資料夾"
 
 msgid "Selected items: {count}"
 msgstr ""
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "選擇"
 
 msgid "Selection"
 msgstr "選擇"
@@ -5126,6 +5161,12 @@ msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] "{count} 個結果"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "已選擇 {count} 個資料夾"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} 首曲目"
@@ -5226,6 +5267,15 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Add to Pins"
+#~ msgstr "加入釘選"
+
+#~ msgid "Refresh section"
+#~ msgstr "重新整理區塊"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "從釘選中移除"
 
 #~ msgid ""
 #~ "This removes the server, cached library metadata, queue snapshot, and "

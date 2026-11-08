@@ -316,10 +316,10 @@ msgstr ""
 msgid "Add to Favorites"
 msgstr ""
 
-msgid "Add to Pins"
+msgid "Add to Playlist"
 msgstr ""
 
-msgid "Add to Playlist"
+msgid "Add to Saved"
 msgstr ""
 
 msgid "Add to folder"
@@ -335,6 +335,9 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to"
+msgstr ""
+
+msgid "Adds similar tracks when the queue runs low"
 msgstr ""
 
 msgid "Album Artists"
@@ -1583,10 +1586,16 @@ msgstr ""
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
+msgstr ""
+
+msgid "Find"
 msgstr ""
 
 msgid "Finding lyrics..."
@@ -1779,6 +1788,9 @@ msgid "History"
 msgstr ""
 
 msgid "Hold and drag to resize"
+msgstr ""
+
+msgid "Hold to reorder"
 msgstr ""
 
 msgid "Home Blocks"
@@ -2371,6 +2383,9 @@ msgstr ""
 msgid "Next Track"
 msgstr ""
 
+msgid "Next album"
+msgstr ""
+
 msgid "Next audio device"
 msgstr ""
 
@@ -2902,6 +2917,9 @@ msgstr ""
 msgid "Previous Track"
 msgstr ""
 
+msgid "Previous album"
+msgstr ""
+
 msgid "Previous audio device"
 msgstr ""
 
@@ -3025,9 +3043,6 @@ msgstr ""
 msgid "Refresh automatically"
 msgstr ""
 
-msgid "Refresh section"
-msgstr ""
-
 msgid "Refresh source"
 msgstr ""
 
@@ -3127,13 +3142,13 @@ msgstr ""
 msgid "Remove from Favorites"
 msgstr ""
 
-msgid "Remove from Pins"
-msgstr ""
-
 msgid "Remove from Playlist"
 msgstr ""
 
 msgid "Remove from Queue"
+msgstr ""
+
+msgid "Remove from Saved"
 msgstr ""
 
 msgid "Remove from folder"
@@ -3164,9 +3179,6 @@ msgid "Rename preset"
 msgstr ""
 
 msgid "Rename"
-msgstr ""
-
-msgid "Reorder"
 msgstr ""
 
 msgid "Repeat all"
@@ -3236,6 +3248,9 @@ msgid "Resync Library"
 msgstr ""
 
 msgid "Retry"
+msgstr ""
+
+msgid "Reverse order"
 msgstr ""
 
 msgid "Ribbon"
@@ -3483,10 +3498,16 @@ msgstr ""
 msgid "Select {title}"
 msgstr ""
 
+msgid "Select"
+msgstr ""
+
 msgid "Selected folders"
 msgstr ""
 
 msgid "Selected items: {count}"
+msgstr ""
+
+msgid "Selected"
 msgstr ""
 
 msgid "Selection"
@@ -4360,6 +4381,9 @@ msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "{count} selected"
+msgstr ""
 
 msgid "{count} track"
 msgid_plural "{count} tracks"

@@ -374,11 +374,13 @@ msgstr "Aggiungi una cartella con la musica"
 msgid "Add to Favorites"
 msgstr "Aggiungi ai Preferiti"
 
-msgid "Add to Pins"
-msgstr "Aggiungi agli elementi fissati"
-
 msgid "Add to Playlist"
 msgstr "Aggiungi alla Playlist"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Aggiungi ai Preferiti"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -399,6 +401,9 @@ msgstr "Aggiungi"
 
 msgid "Added to"
 msgstr "Aggiunto a"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Artisti dell'Album"
@@ -1823,10 +1828,16 @@ msgstr ""
 msgid "Filter type"
 msgstr ""
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
+msgstr ""
+
+msgid "Find"
 msgstr ""
 
 msgid "Finding lyrics..."
@@ -2026,6 +2037,11 @@ msgstr ""
 
 msgid "Hold and drag to resize"
 msgstr ""
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Trascina per riordinare"
 
 msgid "Home Blocks"
 msgstr ""
@@ -2657,6 +2673,11 @@ msgstr ""
 msgid "Next Track"
 msgstr ""
 
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Next album"
+msgstr "Rimuovi coda"
+
 msgid "Next audio device"
 msgstr ""
 
@@ -3200,6 +3221,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr ""
 
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Previous album"
+msgstr "Album dell'artista"
+
 msgid "Previous audio device"
 msgstr ""
 
@@ -3327,9 +3353,6 @@ msgstr "Collezione"
 msgid "Refresh automatically"
 msgstr ""
 
-msgid "Refresh section"
-msgstr ""
-
 msgid "Refresh source"
 msgstr ""
 
@@ -3431,14 +3454,16 @@ msgstr ""
 msgid "Remove from Favorites"
 msgstr ""
 
-msgid "Remove from Pins"
-msgstr ""
-
 msgid "Remove from Playlist"
 msgstr ""
 
 msgid "Remove from Queue"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Remove from Saved"
+msgstr "Aggiungi cartella"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -3476,9 +3501,6 @@ msgid "Rename preset"
 msgstr "Cancella Playlist"
 
 msgid "Rename"
-msgstr ""
-
-msgid "Reorder"
 msgstr ""
 
 msgid "Repeat all"
@@ -3550,6 +3572,9 @@ msgid "Resync Library"
 msgstr ""
 
 msgid "Retry"
+msgstr ""
+
+msgid "Reverse order"
 msgstr ""
 
 msgid "Ribbon"
@@ -3803,10 +3828,16 @@ msgstr ""
 msgid "Select {title}"
 msgstr ""
 
+msgid "Select"
+msgstr ""
+
 msgid "Selected folders"
 msgstr ""
 
 msgid "Selected items: {count}"
+msgstr ""
+
+msgid "Selected"
 msgstr ""
 
 msgid "Selection"
@@ -4731,6 +4762,11 @@ msgid_plural "{count} results"
 msgstr[0] ""
 msgstr[1] ""
 
+#, fuzzy
+#| msgid "Artwork"
+msgid "{count} selected"
+msgstr "Copertina"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] ""
@@ -4833,6 +4869,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Add to Pins"
+#~ msgstr "Aggiungi agli elementi fissati"
 
 #~ msgid ""
 #~ "This removes the server, cached library metadata, queue snapshot, and "

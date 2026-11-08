@@ -401,11 +401,13 @@ msgstr "Ajouter de la musique"
 msgid "Add to Favorites"
 msgstr "Ajouter aux favoris"
 
-msgid "Add to Pins"
-msgstr "Ajouter aux éléments épinglés"
-
 msgid "Add to Playlist"
 msgstr "Ajouter à une playlist"
+
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to Saved"
+msgstr "Ajouter aux favoris"
 
 msgid "Add to folder"
 msgstr "Ajouter au dossier"
@@ -421,6 +423,9 @@ msgstr "Ajouter"
 
 msgid "Added to"
 msgstr "Ajouté à"
+
+msgid "Adds similar tracks when the queue runs low"
+msgstr ""
 
 msgid "Album Artists"
 msgstr "Artistes de l’album"
@@ -1678,11 +1683,17 @@ msgstr "Spectre rempli"
 msgid "Filter type"
 msgstr "Type de filtre"
 
+msgid "Find in {name}"
+msgstr ""
+
 msgid "Find shares"
 msgstr "Rechercher des partages"
 
 msgid "Find your ListenBrainz user token"
 msgstr "retrouvez votre jeton d'utilisateur ListenBrainz"
+
+msgid "Find"
+msgstr ""
 
 msgid "Finding lyrics..."
 msgstr "Trouver les paroles..."
@@ -1878,6 +1889,11 @@ msgstr "Historique"
 
 msgid "Hold and drag to resize"
 msgstr "Maintenez et faites glisser pour redimensionner"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Hold to reorder"
+msgstr "Glisser pour réorganiser"
 
 msgid "Home Blocks"
 msgstr "Blocs d’accueil"
@@ -2485,6 +2501,11 @@ msgstr "Nouvellement ajouté"
 msgid "Next Track"
 msgstr "Piste suivante"
 
+#, fuzzy
+#| msgid "Clear album"
+msgid "Next album"
+msgstr "Effacer l’album"
+
 msgid "Next audio device"
 msgstr "Appareil audio suivant"
 
@@ -3024,6 +3045,11 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Morceau précédent"
 
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous album"
+msgstr "Page précédente"
+
 msgid "Previous audio device"
 msgstr "Appareil audio précédent"
 
@@ -3147,9 +3173,6 @@ msgstr "Réduire les animations"
 msgid "Refresh automatically"
 msgstr "Rafraîchir automatiquement"
 
-msgid "Refresh section"
-msgstr "Actualiser la section"
-
 msgid "Refresh source"
 msgstr "Actualiser la source"
 
@@ -3249,14 +3272,16 @@ msgstr "Retirer le dossier"
 msgid "Remove from Favorites"
 msgstr "Retirer des Favoris"
 
-msgid "Remove from Pins"
-msgstr "Retirer des épingles"
-
 msgid "Remove from Playlist"
 msgstr "Supprimer de la playlist"
 
 msgid "Remove from Queue"
 msgstr "Supprimer de la file d'attente"
+
+#, fuzzy
+#| msgid "Remove from Favorites"
+msgid "Remove from Saved"
+msgstr "Retirer des Favoris"
 
 msgid "Remove from folder"
 msgstr "Retirer du dossier"
@@ -3287,9 +3312,6 @@ msgstr "Coller le préréglage"
 
 msgid "Rename"
 msgstr "Fichiers"
-
-msgid "Reorder"
-msgstr "Réordonner"
 
 msgid "Repeat all"
 msgstr "Répétez tout"
@@ -3360,6 +3382,11 @@ msgstr "Resynchroniser la bibliothèque"
 
 msgid "Retry"
 msgstr "Réessayer"
+
+#, fuzzy
+#| msgid "Reorder"
+msgid "Reverse order"
+msgstr "Réordonner"
 
 msgid "Ribbon"
 msgstr "Ruban"
@@ -3609,11 +3636,21 @@ msgstr "Tout sélectionner"
 msgid "Select {title}"
 msgstr "Sélectionnez {title}"
 
+#, fuzzy
+#| msgid "Selection"
+msgid "Select"
+msgstr "Sélection"
+
 msgid "Selected folders"
 msgstr "Sélectionner les dossiers"
 
 msgid "Selected items: {count}"
 msgstr "Éléments sélectionnés : {count}"
+
+#, fuzzy
+#| msgid "Selection"
+msgid "Selected"
+msgstr "Sélection"
 
 msgid "Selection"
 msgstr "Sélection"
@@ -4502,6 +4539,12 @@ msgid_plural "{count} results"
 msgstr[0] "{count} résultat"
 msgstr[1] "{count} résultats"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} selected"
+msgstr "{count} dossier sélectionné"
+
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} morceau"
@@ -4618,6 +4661,15 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Add to Pins"
+#~ msgstr "Ajouter aux éléments épinglés"
+
+#~ msgid "Refresh section"
+#~ msgstr "Actualiser la section"
+
+#~ msgid "Remove from Pins"
+#~ msgstr "Retirer des épingles"
 
 #~ msgid ""
 #~ "Choose where this device stores local music received through Connect. "
