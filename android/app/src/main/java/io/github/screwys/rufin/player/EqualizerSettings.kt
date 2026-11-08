@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -24,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -194,26 +198,23 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
 
                     }
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Row(Modifier.width(IntrinsicSize.Max).toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(view.assigned, null, modifier = Modifier.size(40.dp))
-                            Text(translate("Use for this output"), Modifier.weight(1f), maxLines = 2,
-                                style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
-                        }
-                        FilledTonalButton({ outputOpen = true }, Modifier.weight(1f), colors = equalizerButtonColors()) {
-                            Text(remote?.name ?: routes.firstOrNull { it.selected }?.name ?: translate("This device"),
-                                Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(18.dp))
-                        }
+                // The output and the graphic/parametric switch share a line; whether this output keeps
+                // the equalizer sits under them.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton({ outputOpen = true }, Modifier.weight(1f), colors = equalizerButtonColors()) {
+                        io.github.screwys.rufin.ui.RufinIcon("rufin-speaker-front-symbolic", null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(remote?.name ?: routes.firstOrNull { it.selected }?.name ?: translate("This device"),
+                            Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(18.dp))
                     }
-                    Spacer(Modifier.width(12.dp))
-                    FilledTonalIconToggleButton(checked = editingParametric, onCheckedChange = { parametric = it },
-                        modifier = Modifier.size(48.dp).semantics { stateDescription = translate(if (editingParametric) "Parametric" else "Graphic") }) {
-                        io.github.screwys.rufin.ui.RufinIcon(if (editingParametric) "rufin-sliders-vertical-symbolic" else "rufin-spring-graph-symbolic",
-                            translate(if (editingParametric) "Graphic" else "Parametric"), Modifier.size(24.dp))
-                    }
+                    EqualizerModeSwitch(editingParametric) { parametric = it }
+                }
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } }
+                    .padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(view.assigned, null)
+                    Text(translate("Use for this output"), style = MaterialTheme.typography.bodyMedium)
                 }
             }
             EqualizerEditor(view, editingParametric, frequencies, curve, response, spectrum && !view.cast,
@@ -288,6 +289,27 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
 @Composable
 private fun equalizerControlColor() = MaterialTheme.colorScheme.onSurface.copy(alpha = .16f)
     .compositeOver(MaterialTheme.colorScheme.surfaceContainer)
+
+/** Graphic and parametric editing: two icon choices in one box, a line between them. */
+@Composable
+private fun EqualizerModeSwitch(parametric: Boolean, select: (Boolean) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(shape = RoundedCornerShape(20.dp), color = equalizerControlColor()) {
+        Row(Modifier.height(40.dp).padding(3.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
+            listOf(Triple(false, "rufin-sliders-vertical-symbolic", "Graphic"), Triple(true, "rufin-spring-graph-symbolic", "Parametric"))
+                .forEachIndexed { index, (value, icon, label) ->
+                    if (index > 0) Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(18.dp).background(colors.onSurface.copy(alpha = .2f)))
+                    val selected = parametric == value
+                    Box(Modifier.fillMaxHeight().width(44.dp).clip(RoundedCornerShape(17.dp))
+                        .background(if (selected) colors.secondaryContainer else Color.Transparent)
+                        .selectable(selected, role = Role.RadioButton) { select(value) }, contentAlignment = Alignment.Center) {
+                        io.github.screwys.rufin.ui.RufinIcon(icon, translate(label), Modifier.size(20.dp),
+                            if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant)
+                    }
+                }
+        }
+    }
+}
 
 @Composable
 private fun equalizerButtonColors() = ButtonDefaults.filledTonalButtonColors(

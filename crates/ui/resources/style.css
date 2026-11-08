@@ -2193,26 +2193,23 @@ button.download-queue-pause image {
   color: rgba(255, 255, 255, 0.92);
 }
 
-/* The facts sit in a pill, divided by |: a tonal one on the page, a dark one on Home's band so
-   they read on any cover and theme. */
+/* The facts sit in a pill, divided by |: on the page a light tint of its text, on Home's band a dark
+   one so they read on any cover. */
 .detail-summary-row.detail-facts-boxed {
   padding: 3px 12px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--window-fg-color) 8%, transparent);
+  background: color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+  color: var(--window-fg-color);
 }
 
 .detail-facts-boxed .detail-fact-follows {
   padding-left: 12px;
-  border-left: 1px solid color-mix(in srgb, var(--window-fg-color) 25%, transparent);
+  border-left: 1px solid color-mix(in srgb, currentColor 40%, transparent);
 }
 
 .detail-summary-row.detail-facts-boxed.detail-facts-pill {
   background: rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.92);
-}
-
-.detail-facts-pill .detail-fact-follows {
-  border-left-color: rgba(255, 255, 255, 0.4);
 }
 
 .detail-showcase-cover,
@@ -2684,8 +2681,8 @@ entry.lyrics-offset-value.flat:focus-within {
 .equalizer-surface { padding: 0; }
 .equalizer-surface flowboxchild { padding: 0; background: none; }
 .equalizer-editor { padding: 12px; }
-.preset-actions > button, button.equalizer-mode { min-width: 32px; min-height: 32px; padding: 0; }
-.preset-actions image, button.equalizer-mode image { -gtk-icon-size: 20px; }
+.preset-actions > button, .equalizer-mode > button { min-width: 32px; min-height: 32px; padding: 0; }
+.preset-actions image, .equalizer-mode image { -gtk-icon-size: 20px; }
 .equalizer-filter { padding: 6px 8px; }
 .equalizer-filter entry, entry.equalizer-number {
   min-width: 0;

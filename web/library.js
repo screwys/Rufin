@@ -704,7 +704,7 @@ function fitActions(actions) {
 }
 
 function bindCard(card) {
-  for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts")) slideText(node);
+  for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts, .detail-below > .detail-facts")) slideText(node);
   // The header's width, not the row's, which the fitting itself changes.
   for (const actions of card.querySelectorAll(".detail-actions")) {
     new ResizeObserver(() => fitActions(actions)).observe(card);

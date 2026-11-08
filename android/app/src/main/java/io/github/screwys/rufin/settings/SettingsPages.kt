@@ -28,8 +28,6 @@ import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
-import io.github.screwys.rufin.player.PlayerSettingsContent
-import io.github.screwys.rufin.player.PlayerSettingsPage
 import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.sources.SourcesPage
 import kotlin.math.round
@@ -139,13 +137,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
             }
-            MoreDestination.Playback -> {
-                PlaybackPreferences(player, preferences, output, includeDisplaySettings = false)
-                Text(translate("Lyrics"), style = MaterialTheme.typography.titleMedium)
-                PlayerSettingsContent(player, PlayerSettingsPage.LYRICS, embedded = true)
-                Text(translate("Visualizer"), style = MaterialTheme.typography.titleMedium)
-                PlayerSettingsContent(player, PlayerSettingsPage.VISUALIZER, embedded = true)
-            }
+            MoreDestination.Playback -> PlaybackPreferences(player, preferences, output)
             MoreDestination.Integrations -> {
                 ScrobblingPage(preferences, embedded = true)
                 val links = state.externalSiteLinks

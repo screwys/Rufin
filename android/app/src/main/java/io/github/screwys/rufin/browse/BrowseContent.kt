@@ -474,19 +474,9 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
                         marquee = true)
                     if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, Modifier.rufinMarquee().padding(top = 2.dp),
                         style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    // On the band the facts sit in a dark pill, divided by |, readable on any cover and theme.
-                    Surface(Modifier.padding(top = 8.dp), shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = .28f), contentColor = OnBand) {
-                        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val facts = listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
-                                Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
-                                Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText))
-                            facts.forEachIndexed { index, (icon, label, value) ->
-                                if (index > 0) Text("|", style = MaterialTheme.typography.labelSmall, color = OnBand.copy(alpha = .45f))
-                                SummaryFact(icon, label, value)
-                            }
-                        }
-                    }
+                    FactsPill(listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                        Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
+                        Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)), Modifier.padding(top = 8.dp))
                     }
                     }
                 }
@@ -747,6 +737,24 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
             }
         }
     }
+    }
+}
+
+/** Year, tracks, duration and the like in a pill, divided by |: the showcase's and the detail headers' one
+ *  look. On the band it is dark so it reads on any cover; on the page it is a light tint of the page's text.
+ *  Each fact is (icon, label, value). */
+@Composable
+internal fun FactsPill(facts: List<Triple<String, String, String>>, modifier: Modifier = Modifier, onBand: Boolean = true) {
+    val text = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface
+    Surface(modifier, shape = RoundedCornerShape(50), color = if (onBand) Color.Black.copy(alpha = .28f) else text.copy(alpha = .1f), contentColor = text) {
+        // The facts slide inside the pill when they are wider than the room.
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            facts.forEachIndexed { index, (icon, label, value) ->
+                if (index > 0) Text("|", style = MaterialTheme.typography.labelSmall, color = text.copy(alpha = .45f))
+                SummaryFact(icon, label, value)
+            }
+        }
     }
 }
 

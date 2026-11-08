@@ -41,14 +41,13 @@ internal enum class MoreDestination(val title: String) {
     General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"),
     Playback("Playback"), Equalizer("Equalizer"), Library("Library"), Downloads("Downloads"),
     Connect("Connect"), Controller("Controller"), Storage("Storage"), Privacy("Privacy & Security"),
-    Routes("Library"), Lyrics("Lyrics"), Visualizer("Visualizer"), DownloadSettings("Downloads"),
+    Routes("Library"), DownloadSettings("Downloads"),
     BackupSettings("Backup Settings"), HomeSettings("Home Blocks");
 
     // The sidebar's ☰ menu opens Settings and these three pages directly.
     val parent get() = when (this) {
         Root, Overview, Versions, Troubleshooting -> null
         Routes, HomeSettings -> Customization
-        Lyrics, Visualizer -> Playback
         BackupSettings -> Privacy
         OverviewSettings -> General
         DownloadSettings -> Downloads
@@ -106,8 +105,6 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
         MoreDestination.Storage -> StorageSettingsPage(model, preferences)
         MoreDestination.Routes -> RouteSettingsPage(browse)
         MoreDestination.Equalizer -> PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER)
-        MoreDestination.Lyrics -> PlayerSettingsContent(player, PlayerSettingsPage.LYRICS)
-        MoreDestination.Visualizer -> PlayerSettingsContent(player, PlayerSettingsPage.VISUALIZER)
         MoreDestination.Controller -> ControllerPage(model)
         MoreDestination.Connect -> ConnectPage(model)
         MoreDestination.Overview -> ListeningOverviewPage(model, more, player)

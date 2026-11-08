@@ -303,8 +303,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
                                     },
                                         supportingContent = { Text(listOf(metadata.artist, metadata.album).filter(String::isNotBlank).joinToString(" · "),
                                             maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                        leadingContent = { Row(verticalAlignment = Alignment.CenterVertically) {
-                                            if (selecting) Checkbox(position in picked, null)
+                                        leadingContent = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                            if (selecting) io.github.screwys.rufin.browse.SelectionMark(position in picked)
                                             QueueSheetCover(row, player)
                                         } },
                                         // The handle drags at once; a hold anywhere on the row does too.

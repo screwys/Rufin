@@ -759,7 +759,6 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
         // Finding, the bar is the search view's own: the page's colour, the field, and back closes it.
         val color by animateColorAsState(if (state.finding) MaterialTheme.colorScheme.surface else if (past) band else Color.Transparent,
             label = "detailBar")
-        var options by remember { mutableStateOf(false) }
         val closeFind = { browse.filter = ""; state.finding = false }
         if (state.finding) BackHandler(onBack = closeFind)
         OverlayBar(color, inset = barHeight > 56.dp, onBand = bandColor.value != null && !state.finding) {
@@ -782,15 +781,10 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
             if (state.finding) { if (browse.filter.isNotEmpty()) PlayerIconButton("rufin-window-close-symbolic", "Clear", { browse.filter = "" }) }
             else if (past && page != null) PlayerIconButton("rufin-media-playback-start-symbolic", "Play",
                 { page.play(QueuePlacement.Replace(0UL), false, summary?.row?.title ?: location.title) })
-            if (!state.finding) Box {
-                PlayerIconButton("rufin-view-more-symbolic", "More actions", { options = true })
-                DropdownMenu(options, { options = false }) {
-                    summary?.let { shown -> DropdownMenuItem(text = { Text(translate("More actions")) }, onClick = {
-                        options = false; onMenu(BrowseItem(shown.row, 0UL, null))
-                    }) }
-                    DropdownMenuItem(text = { Text(translate("Find")) }, onClick = { options = false; state.finding = true })
-                    if (page != null) DropdownMenuItem(text = { Text(translate("Customize")) }, onClick = { options = false; onCustomize(page) })
-                }
+            // Customize as on other routes, and ⋯ opens the page's item menu; Find opens on a pull down.
+            if (!state.finding) {
+                if (page != null) PlayerIconButton("rufin-filter-symbolic", "Customize", { onCustomize(page) })
+                summary?.let { shown -> PlayerIconButton("rufin-view-more-symbolic", "More actions", { onMenu(BrowseItem(shown.row, 0UL, null)) }) }
             }
         }
     }

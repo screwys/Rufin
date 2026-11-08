@@ -3,6 +3,7 @@ package io.github.screwys.rufin.player
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.PagerTabIndicator
+import androidx.activity.compose.BackHandler
 import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
@@ -52,32 +53,38 @@ import kotlinx.coroutines.CancellationException
 import java.util.Locale
 
 internal enum class PlayerSettingsPage(val title: String) {
-    PREFERENCES("Preferences"), EQUALIZER("Equalizer"), LYRICS("Lyrics"), VISUALIZER("Visualizer")
+    PLAYBACK("Playback"), EQUALIZER("Equalizer"), LYRICS("Lyrics"), VISUALIZER("Visualizer")
 }
 
+/** The player's settings page: GTK's player settings, equalizer and lyrics/visualizer settings as tabs. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PlayerSettingsSheet(player: PlayerConnection, preferences: PreferencesConnection, initial: PlayerSettingsPage, onDismiss: () -> Unit) {
-    val pager = rememberPagerState(initial.ordinal) { PlayerSettingsPage.entries.size }
-    var visited by remember { mutableStateOf(setOf(initial.ordinal)) }
+internal fun PlayerSettingsScreen(player: PlayerConnection, onClose: () -> Unit) {
+    val pager = rememberPagerState { PlayerSettingsPage.entries.size }
+    var visited by remember { mutableStateOf(setOf(0)) }
     val settledPage by remember { derivedStateOf { pager.settledPage } }
     val selectedPage by remember { derivedStateOf { pager.targetPage } }
     LaunchedEffect(settledPage) { visited = visited + settledPage }
     val scope = rememberCoroutineScope()
     val reduceMotion = LocalReduceMotion.current
-    ModalBottomSheet(onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(.72f)) {
-            PrimaryScrollableTabRow(selectedPage, indicator = { PagerTabIndicator(pager) }) {
+    BackHandler(onBack = onClose)
+    Surface(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClose) { RufinIcon("rufin-go-previous-symbolic", translate("Back")) }
+                Text(translate("Settings"), Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleLarge)
+            }
+            PrimaryTabRow(selectedPage, containerColor = Color.Transparent, indicator = { PagerTabIndicator(pager) }) {
                 PlayerSettingsPage.entries.forEachIndexed { index, page ->
-                    Tab(selectedPage == index, { scope.launch { if (reduceMotion) pager.scrollToPage(index) else pager.animateScrollToPage(index) } }, text = { Text(translate(page.title)) })
+                    Tab(selectedPage == index, { scope.launch { if (reduceMotion) pager.scrollToPage(index) else pager.animateScrollToPage(index) } },
+                        text = { Text(translate(page.title), maxLines = 1) })
                 }
             }
             HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.Top,
                 beyondViewportPageCount = PlayerSettingsPage.entries.size - 1) { index ->
                 Box(Modifier.fillMaxSize()) {
                     if (index in visited) CompositionLocalProvider(LocalPlayerBottomPadding provides 0.dp) {
-                        PlayerSettingsContent(player, PlayerSettingsPage.entries[index], preferences = preferences, active = index == settledPage)
+                        PlayerSettingsContent(player, PlayerSettingsPage.entries[index], active = index == settledPage)
                     }
                 }
             }
@@ -86,58 +93,78 @@ internal fun PlayerSettingsSheet(player: PlayerConnection, preferences: Preferen
 }
 
 @Composable
-internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSettingsPage, embedded: Boolean = false, preferences: PreferencesConnection? = null, active: Boolean = true) {
-    SettingsPage(embedded = embedded) {
+internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSettingsPage, active: Boolean = true) {
+    SettingsPage {
         if (player.settings == null) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else when (page) {
+            PlayerSettingsPage.PLAYBACK -> PlayerPlaybackSettings(player)
             PlayerSettingsPage.EQUALIZER -> EqualizerSettings(player, active)
             PlayerSettingsPage.LYRICS -> LyricsSettings(player)
             PlayerSettingsPage.VISUALIZER -> VisualizerSettings(player)
-            PlayerSettingsPage.PREFERENCES -> PlaybackPreferences(player, preferences)
         }
     }
 }
 
+/** As GTK's player settings popover and fullscreen display settings. */
 @Composable
-internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection?, output: (() -> Unit)? = null, includeDisplaySettings: Boolean = true) {
+private fun PlayerPlaybackSettings(player: PlayerConnection) {
+    val state = player.settings ?: return
+    SettingsGroup {
+        TransitionAndSpeed(player)
+        PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { player.editPreferences { setSeekbarWaveformEnabled(it) } }
+    }
+    PlayerLayoutPreferences(player)
+}
+
+/** Transition, crossfade, speed and pitch: the first rows of both GTK's playback page and its player settings. */
+@Composable
+private fun TransitionAndSpeed(player: PlayerConnection) {
+    val playback = player.settings?.playback ?: return
+    val options = player.preferenceOptions ?: return
+    val transitionDuration = if (LocalReduceMotion.current) 0 else 180
+    fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
+    PreferenceChoice(translate("Transition mode"), playback.transitionMode.name,
+        listOf(PlaybackTransitionMode.GAPLESS.name to translate("Gapless"), PlaybackTransitionMode.CROSSFADE.name to translate("Crossfade")),
+        select = { change { setTransitionMode(PlaybackTransitionMode.valueOf(it)) } })
+    AnimatedVisibility(playback.transitionMode == PlaybackTransitionMode.CROSSFADE,
+        enter = expandVertically(tween(transitionDuration)) + fadeIn(tween(transitionDuration)),
+        exit = shrinkVertically(tween(transitionDuration)) + fadeOut(tween(transitionDuration))) {
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(),
+                options.minCrossfadeSeconds.toDouble()..options.maxCrossfadeSeconds.toDouble(), 1.0, integer = true, unit = "s") {
+                change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
+            }
+            PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
+        }
+    }
+    SettingsSliderNumber(translate("Playback speed"), playback.playbackRate,
+        options.minPlaybackRate..options.maxPlaybackRate, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
+    PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
+}
+
+@Composable
+internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection, output: () -> Unit) {
     val state = player.settings ?: return
     val options = player.preferenceOptions ?: return
     val playback = state.playback
-    val transitionDuration = if (LocalReduceMotion.current) 0 else 180
     var confirmEbu by remember { mutableStateOf(false) }
     fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
     SettingsGroup {
-        PreferenceChoice(translate("Transition mode"), playback.transitionMode.name,
-            listOf(PlaybackTransitionMode.GAPLESS.name to translate("Gapless"), PlaybackTransitionMode.CROSSFADE.name to translate("Crossfade")),
-            select = { change { setTransitionMode(PlaybackTransitionMode.valueOf(it)) } })
-        AnimatedVisibility(playback.transitionMode == PlaybackTransitionMode.CROSSFADE,
-            enter = expandVertically(tween(transitionDuration)) + fadeIn(tween(transitionDuration)),
-            exit = shrinkVertically(tween(transitionDuration)) + fadeOut(tween(transitionDuration))) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(),
-                    options.minCrossfadeSeconds.toDouble()..options.maxCrossfadeSeconds.toDouble(), 1.0, integer = true, unit = "s") {
-                    change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
-                }
-                PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
-            }
-        }
+        TransitionAndSpeed(player)
         PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
         PreferenceSwitch("Skip unplayable tracks", playback.skipUnplayableTracks) { change { setSkipUnplayableTracks(it) } }
-        SettingsSliderNumber(translate("Playback speed"), playback.playbackRate,
-            options.minPlaybackRate..options.maxPlaybackRate, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
-        PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
-        PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
-            listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
-            select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
-        PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
-        if (output != null) preferences?.applicationSettings?.let { application ->
+        preferences.applicationSettings?.let { application ->
             SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(),
                 options.minAutoDjRefillThreshold.toDouble()..options.maxAutoDjRefillThreshold.toDouble()) {
                 preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) }
             }
         }
+        PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
+        PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
+            listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
+            select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
     }
-    if (output != null) SettingsGroup(translate("Audio")) {
+    SettingsGroup(translate("Audio")) {
         SettingsRow(translate("Audio output"), modifier = Modifier.clickable(onClick = output))
         PreferenceChoice(translate("Loudness normalization"), playback.loudnessNormalization.name,
             listOf(LoudnessNormalization.OFF.name to translate("Off"), LoudnessNormalization.REPLAY_GAIN.name to "ReplayGain", LoudnessNormalization.EBU_R128.name to "EBU R128"), select = {
@@ -155,12 +182,6 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
         PreferenceChoice(translate("Stream quality"), bitrate,
             listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
             select = { change { setStreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt())) } })
-    }
-    if (includeDisplaySettings) {
-        PlayerLayoutPreferences(player)
-        SettingsGroup {
-            PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { change { setSeekbarWaveformEnabled(it) } }
-        }
     }
     if (confirmEbu) AlertDialog(onDismissRequest = { confirmEbu = false },
         title = { Text(translate("Enable EBU R128 Analysis?")) },

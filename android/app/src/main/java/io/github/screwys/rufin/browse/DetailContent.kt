@@ -303,19 +303,19 @@ private fun DetailHeader(
                 FindRow(summary.row.title, LocalFindHeight.current)
                 BrowseTitle(item, maxLines = 1, style = title, marquee = true, showDownloadBadge = false)
                 Text(translate(sectionTitle), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailFact("rufin-albums-symbolic", albumCountText(albumCount), "Albums")
-                    DetailFact("rufin-tracks-symbolic", trackCountText(item.row.trackCount), "Tracks")
-                }
+                FactsPill(listOf(Triple("rufin-albums-symbolic", "Albums", albumCountText(albumCount)),
+                    Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount))), Modifier.padding(top = 6.dp))
             }
         }
         return
     }
-    val facts: @Composable () -> Unit = {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                // An artist's counts are chips that open the albums and tracks; other pages' facts sit in a
-                // tonal pill, divided by |, as on GTK.
+    // Under a cover on its own row (small screens) the facts, links, genres and buttons are centred like the title.
+    val facts: @Composable (Boolean) -> Unit = { centred ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (centred) Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally) else Arrangement.Start) {
+            Box(if (centred) Modifier.weight(1f, fill = false) else Modifier.weight(1f)) {
+                // An artist's counts are chips that open the albums and tracks; other pages' facts sit in the
+                // showcase's pill.
                 if (route is Route.ArtistDetail || route is Route.AlbumArtistDetail) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ChoiceChip(false, { onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistDiscography(route.v1)
                             else Route.ArtistDiscography((route as Route.ArtistDetail).v1), translate("Albums")) },
@@ -325,21 +325,10 @@ private fun DetailHeader(
                             else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks")) },
                         label = { Text(trackCountText(item.row.trackCount)) },
                         leadingIcon = { RufinIcon("rufin-tracks-symbolic", null, Modifier.size(16.dp)) })
-                } else Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-                    // The facts slide inside the pill when they are wider than the room.
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val shown = listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", it.toString(), "Year") },
-                            Triple("rufin-tracks-symbolic", trackCountText(item.row.trackCount), "Tracks"),
-                            Triple("rufin-preferences-system-time-symbolic", item.row.durationText, "Duration")
-                                .takeIf { item.row.durationMillis > 0UL || playlist })
-                        shown.forEachIndexed { index, (icon, text, label) ->
-                            if (index > 0) Text("|", style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .5f))
-                            DetailFact(icon, text, label)
-                        }
-                    }
-                }
+                } else FactsPill(listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                    Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
+                    Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
+                        .takeIf { item.row.durationMillis > 0UL || playlist }), onBand = false)
             }
             // The external links end the facts row; a playlist's is its source.
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
@@ -374,8 +363,9 @@ private fun DetailHeader(
                 fontWeight = FontWeight.SemiBold, color = linkColor)
         }
     }
-    val buttons: @Composable () -> Unit = {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val buttons: @Composable (Boolean) -> Unit = { centred ->
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, if (centred) Alignment.CenterHorizontally else Alignment.Start),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ShowcasePill("rufin-media-playback-start-symbolic", "Play", true,
                 { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) })
             if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null || item.row.playlist != null)
@@ -416,11 +406,11 @@ private fun DetailHeader(
                     CompositionLocalProvider(LocalContentColor provides OnBand) { heading() }
                 }
                 Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    facts()
-                    if (summary.genres.isNotEmpty()) GenreChips(summary.genres, onOpenRoute)
+                    facts(false)
+                    if (summary.genres.isNotEmpty()) GenreChips(summary.genres, false, onOpenRoute)
                 }
                 Spacer(Modifier.height(18.dp))
-                buttons()
+                buttons(false)
             }
         } else Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { coverBox() }
@@ -428,13 +418,13 @@ private fun DetailHeader(
                 // Under the cover, the title and its line are centred on it.
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { heading() }
                 Spacer(Modifier.height(10.dp))
-                facts()
+                facts(true)
                 if (summary.genres.isNotEmpty()) {
                     Spacer(Modifier.height(14.dp))
-                    GenreChips(summary.genres, onOpenRoute)
+                    GenreChips(summary.genres, true, onOpenRoute)
                 }
                 Spacer(Modifier.height(20.dp))
-                buttons()
+                buttons(true)
             }
         }
     }
@@ -442,7 +432,7 @@ private fun DetailHeader(
 
 /** The genres as chips filling one line; those that do not fit open from the last chip's +n. */
 @Composable
-private fun GenreChips(genres: List<io.github.screwys.rufin.core.AndroidGenreLink>, onOpen: (Route, String) -> Unit) {
+private fun GenreChips(genres: List<io.github.screwys.rufin.core.AndroidGenreLink>, centred: Boolean, onOpen: (Route, String) -> Unit) {
     var overflow by remember { mutableStateOf(false) }
     androidx.compose.ui.layout.SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
         val gap = 6.dp.roundToPx()
@@ -467,8 +457,9 @@ private fun GenreChips(genres: List<io.github.screwys.rufin.core.AndroidGenreLin
             }.first().measure(free)
         }
         val placed = chips.take(shown)
+        val used = (placed + listOfNotNull(more)).let { all -> all.sumOf { it.width } + gap * (all.size - 1).coerceAtLeast(0) }
         layout(constraints.maxWidth, (placed + listOfNotNull(more)).maxOfOrNull { it.height } ?: 0) {
-            var x = 0
+            var x = if (centred) ((constraints.maxWidth - used) / 2).coerceAtLeast(0) else 0
             placed.forEach { it.placeRelative(x, 0); x += it.width + gap }
             more?.placeRelative(x, 0)
         }
@@ -499,16 +490,6 @@ private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConne
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun DetailFact(icon: String, text: String, label: String) {
-    val modifier = Modifier.semantics { contentDescription = "${translate(label)} $text" }
-    Row(modifier, verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        RufinIcon(icon, null, Modifier.size(14.dp))
-        Text(text, style = MaterialTheme.typography.labelMedium)
     }
 }
 

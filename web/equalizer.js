@@ -6,6 +6,7 @@ const pending = new Map();
 let writes = Promise.resolve();
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 function element(tag, text) { const el = document.createElement(tag); if (text) el.textContent = text; return el; }
+function mode() { return document.querySelector("#eq-mode input:checked").value; }
 function checked(id, value) { $(id).checked = value; }
 function value(id, next) { if (document.activeElement !== $(id)) $(id).value = next; }
 function request(operation, extra = {}) {
@@ -54,8 +55,8 @@ function render(next) {
   $("clip").textContent = view.cast ? tr("Encoding peak") : tr("Clipping");
   $("peak").textContent = view.cast && view.peak_db.length ? `${number.format(Math.max(...view.peak_db))} dBFS` : "";
   $("status").textContent = !view.available ? tr("Equalizer is controlled by the receiver") : view.error || (view.modified ? tr("Unsaved") : "");
-  if (view.profile.layout === "Parametric") $("mode").value = "parametric";
-  const nextSignature = `${$("mode").value}:${JSON.stringify(view.profile.bands.map(b => [$("mode").value === "graphic" ? b.frequency_hz : null, b.kind, Object.keys(b.width)[0]]))}`;
+  if (view.profile.layout === "Parametric") document.querySelector('#eq-mode input[value="parametric"]').checked = true;
+  const nextSignature = `${mode()}:${JSON.stringify(view.profile.bands.map(b => [mode() === "graphic" ? b.frequency_hz : null, b.kind, Object.keys(b.width)[0]]))}`;
   if (signature !== nextSignature) { signature = nextSignature; buildBands(); }
   for (const input of document.querySelectorAll("[data-eq-band]")) {
     const b = view.profile.bands[Number(input.dataset.eqBand)]; if (document.activeElement === input && input.type === "number") continue;
@@ -86,7 +87,7 @@ function bindNumber(input, type, payload, reflect = () => {}) {
   input.addEventListener("keydown", event => { if (event.key === "Enter") { preview(); void commit().catch(report); } });
 }
 function buildBands() {
-  const parametric = $("mode").value === "parametric";
+  const parametric = mode() === "parametric";
   $("bands").replaceChildren(); $("filters").replaceChildren(); $("bands").hidden = parametric; $("add").hidden = !parametric; $("layout").hidden = parametric;
   $("graph").style.minWidth = `${parametric ? 350 : Math.max(350, view.profile.bands.length * 62 + 48)}px`;
   view.profile.bands.forEach((band, index) => {
@@ -146,7 +147,7 @@ function draw() {
   }
   for (const db of [...new Set([Math.ceil(high), 12, 0, -12, -24, Math.floor(low)])]) { node("line", { x1: 40, x2: width - 20, y1: y(db), y2: y(db), class: "eq-grid" }); node("text", { x: 2, y: y(db) + 4, class: "eq-axis" }).textContent = `${db > 0 ? "+" : ""}${number.format(db)}`; }
   node("text", { x: 2, y: 28, class: "eq-axis" }).textContent = "dB";
-  const bands = view.profile.bands, parametric = $("mode").value === "parametric";
+  const bands = view.profile.bands, parametric = mode() === "parametric";
   const x = i => 48 + (width - 48) * (i + .5) / Math.max(1, bands.length);
   function freqX(f) {
     if (parametric || !bands.length) return 48 + (width - 68) * Math.log(f / 20) / Math.log(1000);

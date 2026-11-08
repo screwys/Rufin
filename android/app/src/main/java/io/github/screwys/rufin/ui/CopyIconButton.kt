@@ -9,6 +9,9 @@ import android.os.PersistableBundle
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalContext
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.delay
@@ -20,6 +23,7 @@ internal fun CopyIconButton(
     enabled: Boolean = true,
     sensitive: Boolean = false,
     clipboardLabel: String? = null,
+    iconSize: Dp = 24.dp,
     onCopy: ((String) -> Unit) -> Unit,
 ) {
     val context = LocalContext.current
@@ -35,6 +39,6 @@ internal fun CopyIconButton(
             copied++
         }
     }, modifier, enabled = enabled) {
-        RufinIcon(if (copied > 0) "rufin-object-select-symbolic" else "rufin-edit-copy-symbolic", translate(label))
+        RufinIcon(if (copied > 0) "rufin-object-select-symbolic" else "rufin-edit-copy-symbolic", translate(label), Modifier.size(iconSize))
     }
 }

@@ -212,8 +212,9 @@ struct Editor {
     output_name: gtk::Label,
     graphic: gtk::Box,
     parametric: gtk::Box,
-    mode: gtk::ToggleButton,
-    mode_titles: gtk::StringList,
+    mode: gtk::Box,
+    graphic_mode: gtk::ToggleButton,
+    parametric_mode: gtk::ToggleButton,
     bands: gtk::Box,
     filters: gtk::Box,
     graphic_plot: EqualizerPlot,
@@ -292,7 +293,7 @@ impl EqualizerSurface {
             import: gtk::Button, export: gtk::Button,
             custom_title: gtk::Label, preset_names: gtk::StringList,
             output_host: gtk::Box, graphic: gtk::Box, parametric: gtk::Box,
-            mode: gtk::ToggleButton, mode_titles: gtk::StringList,
+            mode: gtk::Box, graphic_mode: gtk::ToggleButton, parametric_mode: gtk::ToggleButton,
             bands: gtk::Box, filters: gtk::Box, graphic_plot: EqualizerPlot,
             parametric_plot: EqualizerPlot, response: gtk::CheckButton,
             spectrum: gtk::CheckButton, spectrum_unit: gtk::Label, layout: gtk::DropDown,
@@ -353,7 +354,8 @@ impl EqualizerSurface {
             graphic,
             parametric,
             mode,
-            mode_titles,
+            graphic_mode,
+            parametric_mode,
             bands,
             filters,
             graphic_plot,
@@ -629,9 +631,11 @@ impl Editor {
             editor.run(async move { owner.assign_equalizer(output, assigned).await });
         });
         let weak = Rc::downgrade(self);
-        self.mode.connect_clicked(move |_| {
-            if let Some(editor) = weak.upgrade() {
-                editor.show_parametric(!editor.parametric.get_visible());
+        self.parametric_mode.connect_toggled(move |toggle| {
+            if let Some(editor) = weak.upgrade()
+                && editor.parametric.get_visible() != toggle.is_active()
+            {
+                editor.show_parametric(toggle.is_active());
             }
         });
         for toggle in [&self.response, &self.spectrum] {
@@ -1321,19 +1325,11 @@ impl Editor {
     fn show_parametric(self: &Rc<Self>, parametric: bool) {
         self.graphic.set_visible(!parametric);
         self.parametric.set_visible(parametric);
-        self.mode.set_active(parametric);
-        self.mode.set_icon_name(if parametric {
-            "rufin-sliders-vertical-symbolic"
+        if parametric {
+            self.parametric_mode.set_active(true);
         } else {
-            "rufin-spring-graph-symbolic"
-        });
-        let title = self
-            .mode_titles
-            .string(u32::from(!parametric))
-            .expect("equalizer mode title");
-        self.mode.set_tooltip_text(Some(&title));
-        self.mode
-            .update_property(&[gtk::accessible::Property::Label(&title)]);
+            self.graphic_mode.set_active(true);
+        }
         self.update_graphic_range();
         self.request_response();
         self.queue_draw();

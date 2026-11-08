@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.player.PlayerIconButton
-import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
@@ -41,10 +40,8 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
     SettingsPage(embedded = embedded) {
         SettingsGroup {
         SettingsRow(translate("Enable Controller"),
-            leading = { RufinIcon("rufin-phonelink-symbolic", null) },
             trailing = { Switch(state?.settings?.enabled == true, connection::enable, enabled = state != null) })
         SettingsRow(translate("Allow remote connections"),
-            leading = { RufinIcon("rufin-network-workgroup-symbolic", null) },
             trailing = { Switch(state?.settings?.remote == true, connection::remote, enabled = state != null) })
         SettingsRow(translate("Port"), summary = state?.settings?.port?.toString().orEmpty(),
             trailing = { TextButton({ port = state?.settings?.port?.toString().orEmpty(); changePort = true }, enabled = state != null) { Text(translate("Change")) } })
@@ -74,10 +71,6 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
                         })
                         PlayerIconButton(if (copied > 0) "rufin-object-select-symbolic" else "rufin-edit-copy-symbolic", "Copy link", {
                             connection.action { copy(link, "Copy link"); copied++ }
-                        })
-                        PlayerIconButton("rufin-document-send-symbolic", "Share", {
-                            connection.action("Share") { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                                .putExtra(Intent.EXTRA_TEXT, link), translate("Controller"))) }
                         })
                     }
                 })

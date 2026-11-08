@@ -124,14 +124,27 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkToggleButton" id="mode">
+                  <object class="GtkBox" id="mode">
                     <property name="halign">end</property>
                     <property name="margin-start">12</property>
                     <property name="valign">center</property>
-                    <property name="icon-name">rufin-spring-graph-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Parametric</property>
-                    <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
-                    <style><class name="equalizer-mode" /></style>
+                    <style><class name="linked" /><class name="equalizer-mode" /></style>
+                    <child>
+                      <object class="GtkToggleButton" id="graphic_mode">
+                        <property name="icon-name">rufin-sliders-vertical-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Graphic</property>
+                        <property name="active">true</property>
+                        <accessibility><property name="label" translatable="yes">Graphic</property></accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="parametric_mode">
+                        <property name="icon-name">rufin-spring-graph-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Parametric</property>
+                        <property name="group">graphic_mode</property>
+                        <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
@@ -711,12 +724,6 @@
     <items>
       <item translatable="yes">Sample peak</item>
       <item translatable="yes">Encoding peak</item>
-    </items>
-  </object>
-  <object class="GtkStringList" id="mode_titles">
-    <items>
-      <item translatable="yes">Graphic</item>
-      <item translatable="yes">Parametric</item>
     </items>
   </object>
 </interface>
