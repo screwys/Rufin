@@ -1,0 +1,321 @@
+/* Preferences, as AdwPreferencesDialog: the pages beside boxed groups of rows. */
+#preferences-dialog {
+  width: min(920px, calc(100vw - 32px));
+  height: min(720px, calc(100dvh - 32px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+.preferences {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100%;
+}
+.pref-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  overflow-y: auto;
+  background: var(--sidebar);
+}
+.pref-pages h2 {
+  margin: 4px 12px 12px;
+  font-size: 15px;
+}
+.pref-tab {
+  justify-content: flex-start;
+  background: transparent;
+  padding: 9px 12px;
+  color: var(--text);
+}
+.pref-tab .icon {
+  width: 16px;
+  height: 16px;
+}
+.pref-tab[aria-selected="true"],
+.pref-tab:hover {
+  background: var(--hover);
+}
+.pref-content {
+  overflow-y: auto;
+  padding: 0 32px 32px;
+  background: var(--bg);
+}
+.pref-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -32px 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+.pref-header h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  text-align: center;
+}
+#preferences-back {
+  visibility: hidden;
+}
+.pref-content h4 {
+  margin: 24px 0 8px;
+  font-size: 14px;
+}
+.pref-group {
+  border-radius: 12px;
+  background: var(--card-bg-color, var(--surface));
+  box-shadow: 0 0 0 1px var(--border-color, var(--line));
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.pref-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 14px;
+}
+.pref-row + .pref-row {
+  box-shadow: inset 0 1px var(--border-color, var(--line));
+}
+label.pref-row {
+  cursor: pointer;
+}
+.pref-label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+.pref-label small,
+.pref-summary small,
+.pref-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pref-row select {
+  max-width: 50%;
+}
+.pref-row input[type="number"] {
+  width: 90px;
+}
+.pref-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(240px, 45%);
+}
+.pref-range input {
+  flex: 1;
+  min-width: 0;
+}
+.pref-range output {
+  min-width: 3ch;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.pref-list-row {
+  min-height: 44px;
+}
+.pref-list-row .icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+/* Theme tiles, as GTK's Theme page flow box. */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+.theme-tile {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.theme-select {
+  padding: 3px;
+  border-radius: 9px;
+  background: transparent;
+}
+.theme-select svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 124 / 96;
+  border-radius: 6px;
+}
+.theme-select[aria-checked="true"] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.theme-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+}
+.theme-name {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.theme-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 2px 4px;
+  background: transparent;
+}
+.theme-accent .icon {
+  width: 12px;
+  height: 12px;
+}
+.theme-swatch {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+}
+.theme-errors {
+  margin: 0;
+  padding: 0 12px 12px;
+  color: var(--favorite);
+  font-size: 12px;
+  white-space: pre-wrap;
+  user-select: text;
+}
+#theme-accent-menu {
+  max-height: min(420px, calc(100dvh - 16px));
+  overflow-y: auto;
+}
+.pref-summary {
+  display: grid;
+  gap: 4px;
+  margin: 16px 0 8px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--card-bg-color, var(--surface));
+  box-shadow: 0 0 0 1px var(--border-color, var(--line));
+}
+.pref-summary strong {
+  font-size: 22px;
+}
+#right-panel.without-queue :is(#queue, #queue-lyrics-divider),
+#right-panel.without-lyrics :is(#lyrics-panel, #queue-lyrics-divider) {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .preferences {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #preferences-dialog .pref-content {
+    display: none;
+  }
+  #preferences-dialog.showing-page .pref-pages {
+    display: none;
+  }
+  #preferences-dialog.showing-page .pref-content {
+    display: block;
+    padding: 0 12px 24px;
+  }
+  .pref-header {
+    margin: 0 -12px 8px;
+  }
+  #preferences-back {
+    visibility: visible;
+  }
+}
+.pref-row,
+.pref-label > span:first-child {
+  color: var(--text);
+  font-size: 14px;
+  margin: 0;
+}
+/* A group's title with its buttons, as GTK's group header suffix. */
+.pref-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 24px 0 8px;
+}
+.pref-group-header h4 {
+  margin: 0;
+}
+.pref-group-header button,
+.pref-group-header span {
+  display: inline-flex;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.pref-group-header span {
+  padding: 0;
+}
+.pref-group-header .icon {
+  width: 16px;
+  height: 16px;
+}
+button.pref-row {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 0;
+  background: transparent;
+  text-align: start;
+  white-space: normal;
+}
+button.pref-row:hover {
+  background: var(--hover);
+}
+.pref-link > .icon,
+.pref-link > .source-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.pref-link > .pref-label + .icon {
+  opacity: 0.6;
+}
+.pref-action {
+  justify-content: center !important;
+  font-weight: 600;
+}
+.pref-action.destructive {
+  color: var(--destructive, #e01b24);
+}
+.pref-quality {
+  display: block;
+}
+.pref-quality .download-quality-controls {
+  display: grid;
+  gap: 4px;
+}
+.pref-quality label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+.pref-quality label input[type="range"] {
+  flex: 0 1 220px;
+}
+#preferences-dialog.in-subpage #preferences-back {
+  visibility: visible;
+}

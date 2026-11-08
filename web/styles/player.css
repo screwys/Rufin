@@ -233,32 +233,22 @@
   transform: scale(1.04);
 }
 
-.right-hidden #right-panel {
+#right-panel {
+  grid-area: right;
+}
+#app[data-right="hidden"] #right-panel {
   display: none;
 }
-
-@media (max-width: 860px) {
-  #right-panel {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 310px;
-    z-index: 5;
-    box-shadow: -15px 0 40px #0005;
-
-    grid-area: 1 / 1 / 2 / -1;
-  }
-  #right-panel .mobile {
-    display: inline-flex;
-  }
-}
-
-@media (max-width: 580px) {
-  #right-panel {
-    bottom: 0;
-    width: min(340px, 100%);
-  }
+/* Without room for it, the queue opens over the page from the bar. */
+#app[data-right="hidden"] #right-panel.open {
+  display: flex;
+  position: absolute;
+  z-index: 6;
+  top: 46px;
+  bottom: var(--player-height, 90px);
+  right: 8px;
+  width: min(340px, calc(100% - 16px));
+  box-shadow: 0 8px 40px #0005;
 }
 
 :root[data-theme="light"] .queue-row:hover {
@@ -284,39 +274,32 @@
 }
 
 .player {
-  height: 97px;
-  grid-column: 1/-1;
-  grid-row: 2;
+  grid-area: player;
+  margin: 0 -8px;
+  height: 90px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, min(50%, 650px)) minmax(
-      0,
-      1fr
-    );
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 14px 24px;
-  padding: 8px;
+  column-gap: 0;
+  padding: 0 8px;
   color: var(--window-fg-color, var(--text));
   background: var(--player);
-  border-top: 1px solid var(--border-color, var(--line));
   z-index: 3;
 }
 
 .player-track {
-  margin-left: 2px;
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 190px;
   min-width: 0;
-  justify-content: center;
-  height: 58px;
-  min-height: 58px;
+  padding-left: 6px;
+  height: 60px;
 }
 
 .player-track > .cover {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
+  width: 60px;
+  height: 60px;
+  flex: 0 0 60px;
 }
 
 .player-track > div:last-child {
@@ -325,47 +308,41 @@
   display: grid;
   grid-template-rows: 20px 18px 18px;
   gap: 1px;
-  height: 58px;
 }
 
 .transport {
-  width: 100%;
-  flex: 2 1 275px;
-  min-width: 0;
-  max-width: 650px;
+  min-width: 308px;
+  display: grid;
+  justify-items: center;
 }
 
-/* One gap between button edges, so the larger play button does not crowd its neighbors. */
+/* GTK's 36px side buttons and 44px play button, 8px apart. */
 .transport-buttons {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
   justify-content: center;
+  height: 58px;
+  padding-top: 3px;
 }
 
 .transport-buttons .icon-button {
   display: grid;
   place-items: center;
+  width: 36px;
+  height: 36px;
   padding: 0;
 }
 
-.transport-buttons .icon {
-  width: 23px;
-  height: 23px;
-}
-
-#previous .icon,
-#next .icon,
-#shuffle .icon,
-#repeat .icon,
-.volume .icon {
+.transport-buttons .icon,
+.player-actions .icon {
   width: 16px;
   height: 16px;
 }
 
 .play-button {
-  width: 45px;
-  height: 45px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   padding: 0;
   display: grid;
@@ -408,7 +385,8 @@
   display: flex;
   gap: 6px;
   align-items: center;
-  margin-top: 9px;
+  width: calc(var(--progress-width, 320px) + 72px);
+  height: 24px;
 }
 
 .seek-row time {
@@ -424,20 +402,125 @@
   height: 13px;
 }
 
-.volume {
+.player-actions {
   justify-self: end;
-  width: min(195px, 100%);
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 1px;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 6px;
+}
+
+.player-actions .icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   min-width: 0;
 }
 
 .volume input {
-  flex: 0 1 95px;
-  width: 95px;
+  width: 90px;
   min-width: 34px;
+}
+
+#app[data-actions="volume"] :is(#current-favorite, #toggle-right),
+#app[data-actions="favorite"] #toggle-right {
+  display: none;
+}
+
+/* Below 642px and in the mini player the bar is only playback: the transport over the seek bar,
+   with volume and the heart at its ends. The tall mini player shows the cover above them; the
+   short one is GTK's strip. */
+#app:is([data-bar="controls"], [data-mini]) .player {
+  height: auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: end;
+  padding: 6px 8px 8px;
+  row-gap: 4px;
+}
+#app:is([data-bar="controls"], [data-mini]) :is(.transport, .player-actions, .volume) {
+  display: contents;
+}
+#app:is([data-bar="controls"], [data-mini]) :is(.player-track, #playback-settings-button, #toggle-right, #volume) {
+  display: none;
+}
+#app:is([data-bar="controls"], [data-mini="tall"]) #current-favorite {
+  display: grid;
+  grid-area: -2 / 3;
+}
+#app[data-transport="five"] :is(#auto-dj, .random-buttons) {
+  display: none;
+}
+#app:is([data-bar="controls"], [data-mini]) .transport-buttons {
+  grid-area: -3 / 1 / -2 / -1;
+  padding-top: 0;
+  height: 44px;
+}
+#app:is([data-bar="controls"], [data-mini]) .seek-row {
+  grid-area: -2 / 2;
+  width: auto;
+}
+#app:is([data-bar="controls"], [data-mini]) #mute {
+  grid-area: -2 / 1;
+}
+#app[data-mini] .player {
+  grid-row: 2 / -1;
+  padding: 8px 8px 10px;
+}
+#app[data-mini="tall"] .player {
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+#app[data-mini="tall"] .player-track {
+  display: flex;
+  grid-area: 1 / 1 / 2 / -1;
+  justify-content: center;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+#app[data-mini="tall"] .player-track > div:last-child {
+  display: none;
+}
+#app[data-mini="tall"] .player-track > .cover {
+  height: min(100%, calc(100vw - 16px));
+  width: auto;
+  flex: 0 1 auto;
+  aspect-ratio: 1;
+}
+#app[data-mini="short"] .player {
+  padding: 0 8px 4px;
+}
+#app[data-mini="short"] :is(#current-favorite, #shuffle) {
+  display: none;
+}
+#app[data-mini="short"] .seek-row {
+  grid-area: 1 / 1 / 2 / -1;
+}
+#app[data-mini="short"] .transport-buttons {
+  grid-area: 2 / 2;
+}
+#app[data-mini="short"] #mute {
+  grid-area: 2 / 1;
+}
+
+#playback-settings {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  min-width: 240px;
+  background: var(--popover, var(--sidebar));
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 8px 30px #0004;
 }
 
 .lyric-line {
@@ -483,68 +566,6 @@ button.lyric-line:hover {
 
 #right-panel {
   background: var(--right-sidebar, var(--sidebar));
-}
-
-@media (max-width: 680px) {
-  .player {
-    --volume-width: min(195px, 45%);
-    grid-template-columns: minmax(0, 1fr) minmax(184px, 1fr);
-    grid-template-rows: 58px 22px;
-    gap: 0 8px;
-    padding: 8px;
-  }
-  .player-track {
-    grid-column: 1;
-    grid-row: 1;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-  .player-track > div:last-child {
-    flex: 1;
-    text-align: left;
-  }
-  .transport {
-    display: contents;
-  }
-  .transport-buttons {
-    display: flex;
-    grid-column: 2;
-    grid-row: 1;
-    gap: 0;
-  }
-  .transport-buttons .icon-button { width: 24px; }
-  .transport-buttons .play-button { width: 40px; height: 40px; }
-  .transport-buttons .play-button .loading { inset: -3px; }
-  .volume .icon-button { width: 24px; flex-shrink: 0; }
-  .player .without-js { padding: 3px 4px; font-size: 12px; }
-  html:not(.enhanced) .volume input { min-width: 18px; }
-  .seek-row {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    margin: 0;
-    gap: 4px;
-    padding-right: calc(var(--volume-width) + 8px);
-  }
-  .volume {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    width: var(--volume-width);
-    max-width: 100%;
-    justify-self: end;
-    justify-content: flex-end;
-  }
-}
-
-@media (max-width: 480px) {
-  .player {
-    --volume-width: min(160px, 45%);
-  }
-}
-
-@media (max-width: 380px) {
-  .player {
-    --volume-width: min(151px, 45%);
-  }
 }
 
 .player-title-row {

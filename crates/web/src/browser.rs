@@ -898,6 +898,24 @@ struct QueueRow {
     pub artist: String,
 }
 
+/// The sidebar entries GTK shows, in its order, that the web has pages for.
+fn navigation_routes(
+    sidebar: &rufin_core::settings::SidebarSettings,
+) -> Vec<(rufin_core::settings::SidebarRouteItem, bool)> {
+    use rufin_core::settings::SidebarRouteItem::*;
+    sidebar
+        .route_items
+        .iter()
+        .map(|entry| (entry.item, entry.visible))
+        .filter(|(item, _)| {
+            matches!(
+                item,
+                Home | Favorites | Albums | Tracks | Artists | Playlists | SmartPlaylists
+            )
+        })
+        .collect()
+}
+
 /// The whole page, for browsers without scripts and the first paint.
 struct Page {
     pub connected: bool,
@@ -936,6 +954,11 @@ struct Page {
     pub folders: Vec<(String, String)>,
     /// The address of this page.
     pub here: String,
+    /// The layout settings GTK resolves its sidebars from, as JSON.
+    pub layout: String,
+    pub private_mode: bool,
+    /// The sidebar entries GTK lists, in its order, and whether they show.
+    pub routes: Vec<(rufin_core::settings::SidebarRouteItem, bool)>,
 }
 
 fn link(parameters: &HashMap<String, String>) -> String {
@@ -1003,29 +1026,21 @@ impl Page {
     }
     /// The navigation entries: their routes, titles, icons, links and whether this page is in
     /// them.
-    pub fn navigation(&self) -> Vec<(&'static str, String, &'static str, String, bool)> {
-        use rufin_core::settings::SidebarRouteItem;
-        [
-            SidebarRouteItem::Home,
-            SidebarRouteItem::Favorites,
-            SidebarRouteItem::Albums,
-            SidebarRouteItem::Artists,
-            SidebarRouteItem::Tracks,
-            SidebarRouteItem::Playlists,
-            SidebarRouteItem::SmartPlaylists,
-        ]
-        .into_iter()
-        .map(rufin_core::route::sidebar_route_descriptor)
-        .map(|entry| {
-            (
-                entry.stable_id,
-                localization::tr(entry.title),
-                entry.icon_name,
-                self.nav(entry.stable_id),
-                self.section == entry.stable_id,
-            )
-        })
-        .collect()
+    pub fn navigation(&self) -> Vec<(&'static str, String, &'static str, String, bool, bool)> {
+        self.routes
+            .iter()
+            .map(|(item, visible)| {
+                let entry = rufin_core::route::sidebar_route_descriptor(*item);
+                (
+                    entry.stable_id,
+                    localization::tr(entry.title),
+                    entry.icon_name,
+                    self.nav(entry.stable_id),
+                    self.section == entry.stable_id,
+                    *visible,
+                )
+            })
+            .collect()
     }
 
     /// A link to the navigation entry `route`, in this page's source and music folder.
@@ -1038,13 +1053,6 @@ impl Page {
             |token| token.at(route.clone()),
         );
         link(&HashMap::from([("page".to_owned(), token.json())]))
-    }
-    pub fn source_name(&self) -> &str {
-        self.sources
-            .iter()
-            .find(|(id, _)| id == &self.source)
-            .map(|(_, name)| name.as_str())
-            .unwrap_or("")
     }
     pub fn enabled(&self, name: &str) -> bool {
         self.controls[name].as_bool().unwrap_or(false)
@@ -1107,8 +1115,16 @@ async fn index(
         folder: String::new(),
         folders: vec![],
         here: link(&parameters),
+        layout: String::new(),
+        private_mode: false,
+        routes: Vec::new(),
     };
     if page.connected {
+        let settings = products.settings.load();
+        page.layout = serde_json::to_string(&settings.layout).map_err(internal)?;
+        page.private_mode = settings.application.private_mode;
+        page.routes = navigation_routes(&settings.sidebar);
+        drop(settings);
         let configured = products.source.list_sources();
         page.sources = configured
             .sources

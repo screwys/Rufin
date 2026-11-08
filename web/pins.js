@@ -192,7 +192,7 @@ function markPins() {
   for (const [index, row] of [...$("pin-list").children].entries()) {
     const item = items[index];
     const selected =
-      opened && opened !== "sources" && JSON.stringify(item.page?.route) === JSON.stringify(opened.route);
+      opened && JSON.stringify(item.page?.route) === JSON.stringify(opened.route);
     if (selected)
       row.querySelector(".pin-open").setAttribute("aria-current", "page");
     else row.querySelector(".pin-open").removeAttribute("aria-current");

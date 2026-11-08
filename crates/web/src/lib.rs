@@ -9,9 +9,11 @@ mod connect;
 mod controller;
 mod equalizer;
 mod media;
+mod metadata;
 mod page;
 mod pins;
 mod playlists;
+mod preferences;
 mod source;
 pub use controller::{Controller, ControllerStatus, controller_addresses};
 
@@ -176,6 +178,8 @@ fn routes() -> Router<ProductHandles> {
         .merge(catalog::routes())
         .merge(connect::routes())
         .merge(equalizer::routes())
+        .merge(preferences::routes())
+        .merge(metadata::routes())
 }
 
 async fn help() -> Result<Response<Body>, Error> {

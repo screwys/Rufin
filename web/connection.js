@@ -155,7 +155,7 @@ async function connect() {
   stream(
     // The stream follows the page shown when it connects, then the pages it reads; it starts
     // before the page loads, so it hears what commits meanwhile.
-    () => `/events${opened && opened !== "sources" ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
+    () => `/events${opened ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
     (value) => {
       if (value.stream) state.stream = value.stream;
       if (Object.hasOwn(value, "playback")) showPlayback(value.playback);

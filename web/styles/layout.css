@@ -1,68 +1,191 @@
+/* The GTK shell: a top bar over panes with 8px gaps, over the bottom bar. ui.js resolves the
+   sidebars as GTK does and sets data-left (full, compact, hidden), data-right (visible, hidden),
+   data-bar and data-mini; the widths come from the same settings. */
 #app {
-  --pane-header-top: 25px;
+  --pane: var(--sidebar);
+  --pane-header-top: 12px;
+  --left-w: 230px;
+  --right-w: 300px;
   position: relative;
   display: grid;
-  grid-template-columns: 218px minmax(320px, 1fr) 304px;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top top top"
+    "left main right"
+    "player player player";
+  column-gap: 8px;
+  padding: 0 8px;
   height: 100dvh;
   overflow: hidden;
+  background: var(--bg);
+}
+#app[data-left="hidden"] {
+  grid-template-columns: minmax(0, 1fr) var(--right-w);
+  grid-template-areas: "top top" "main right" "player player";
+}
+#app[data-right="hidden"] {
+  grid-template-columns: var(--left-w) minmax(0, 1fr);
+  grid-template-areas: "top top" "left main" "player player";
+}
+#app[data-left="hidden"][data-right="hidden"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "top" "main" "player";
 }
 
-#navigation {
-  background: var(--sidebar);
-  border-right: 1px solid var(--line);
+/* The forms the controls submit hold only hidden inputs; they take no cell. */
+#app > form {
+  display: contents;
+}
+
+#topbar {
+  grid-area: top;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 320px) minmax(max-content, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 6px;
+}
+.topbar-start,
+.topbar-end {
   display: flex;
-  flex-direction: column;
-  padding: 0 12px 14px;
-  min-height: 0;
-  overflow-y: auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 }
-
-.app-title {
+.topbar-end {
+  justify-content: flex-end;
+}
+#topbar .icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+#topbar .icon-button .icon {
+  width: 16px;
+  height: 16px;
+}
+#back[aria-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+#topbar-search {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: var(--pane-header-top) 13px 11px;
-  margin-bottom: 5px;
-  font-size: inherit;
+  width: 100%;
+  min-width: 0;
+}
+#topbar-search > .icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+#search {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 12px 6px 36px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+#search:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 28%, transparent);
+}
+#search:focus-visible {
+  outline: 0;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+#mini-title {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+#app[data-bar="controls"] #forward {
+  display: none;
+}
+
+#main-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  min-width: 220px;
+  background: var(--popover, var(--sidebar));
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 8px 30px #0004;
+}
+#main-menu hr,
+#playback-settings hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 5px 0;
+}
+#logout-form {
+  display: none;
+}
+
+#navigation,
+main,
+#right-panel {
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+}
+
+#navigation {
+  grid-area: left;
+  background: var(--sidebar);
+  display: flex;
+  flex-direction: column;
+  padding: 8px 8px 14px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 nav {
   display: grid;
-  gap: 5px;
+  gap: 2px;
 }
 
-nav :is(button, a),
-.nav-bottom button {
+nav :is(button, a) {
   justify-content: flex-start;
   background: transparent;
-  padding: 11px 13px;
+  padding: 9px 12px;
   width: 100%;
-  color: var(--muted);
+  color: var(--text);
 }
 
 nav :is(button, a)[aria-current="page"] {
-  color: var(--text);
-  background: #ffffff10;
-}
-
-nav :is(button, a):hover,
-.nav-bottom button:hover {
   background: var(--hover);
-  color: var(--text);
 }
 
-.nav-bottom {
-  margin-top: auto;
-  display: grid;
-  gap: 3px;
+nav :is(button, a):hover {
+  background: var(--hover);
+}
+
+nav .icon {
+  width: 16px;
+  height: 16px;
 }
 
 #pins h2 {
   font-size: 12px;
   color: var(--muted);
-  margin: 20px 13px 8px;
+  margin: 20px 12px 8px;
 }
 
 #pins {
@@ -181,56 +304,77 @@ nav :is(button, a):hover,
   outline: 2px solid var(--accent);
 }
 
-.version {
-  font-size: 11px;
-  color: var(--muted);
-  padding: 14px 13px 0;
-  opacity: 0.6;
+/* The compact rail: GTK's 72px column of icons over their names, and pinned covers. */
+#app[data-left="compact"] #navigation {
+  padding: 8px 4px;
+  align-items: stretch;
+}
+#app[data-left="compact"] nav :is(button, a) {
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 2px;
+  font-size: 10px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+}
+#app[data-left="compact"] nav .icon {
+  width: 18px;
+  height: 18px;
+}
+#app[data-left="compact"] #pins h2,
+#app[data-left="compact"] .pin-label,
+#app[data-left="compact"] .pin-controls {
+  display: none;
+}
+#app[data-left="compact"] .pin-row .pin-open {
+  justify-content: center;
+}
+
+/* A hidden sidebar opens over the page from the top bar's sidebar button. */
+#app[data-left="hidden"] #navigation {
+  display: none;
+}
+#app[data-left="hidden"] #navigation.open {
+  display: flex;
+  position: absolute;
+  z-index: 6;
+  top: 46px;
+  bottom: var(--player-height, 90px);
+  left: 8px;
+  width: min(var(--left-w), calc(100% - 16px));
+  box-shadow: 0 8px 40px #0005;
 }
 
 main {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  background: var(--pane);
   scrollbar-width: thin;
   scrollbar-color: #666 transparent;
 }
 
-.content-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: var(--pane-header-top) 28px 17px;
-  flex-shrink: 0;
-}
-
-.heading {
-  min-width: 0;
-  flex: 1;
-}
-
-.heading h1 {
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
-.eyebrow {
-  display: block;
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: 1.6px;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-
 .toolbar {
-  padding: 0 28px 18px;
+  padding: 12px 20px 14px;
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .toolbar input {
@@ -250,9 +394,36 @@ main {
   flex: 1 0 auto;
   padding: 0 20px 20px;
 }
+#library-toolbar[hidden] + * + #content,
+#library-toolbar[hidden] ~ #content {
+  padding-top: 8px;
+}
 
-.right-hidden {
-  grid-template-columns: 218px minmax(320px, 1fr) !important;
+#app[data-bar="controls"] .toolbar {
+  padding: 10px 10px 12px;
+  gap: 5px;
+}
+#app[data-bar="controls"] .toolbar select {
+  max-width: 100px;
+  font-size: 12px;
+}
+#app[data-bar="controls"] .toolbar .primary .icon {
+  display: none;
+}
+#app[data-bar="controls"] #content {
+  padding: 0 7px 12px;
+}
+
+/* The mini player: only what plays, in a window too small for pages. */
+#app[data-mini] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "top" "main" "player";
+}
+#app[data-mini] :is(#navigation, main, #right-panel, .topbar-start, .topbar-end, #topbar-search) {
+  display: none !important;
+}
+#app[data-mini="short"] {
+  grid-template-rows: auto 0 minmax(0, 1fr);
 }
 
 .login-heading {
@@ -273,127 +444,25 @@ main {
   color: var(--accent);
 }
 
-@media (min-width: 1450px) {
-  #app {
-    grid-template-columns: 238px minmax(320px, 1fr) 340px;
-  }
-}
-
-@media (max-width: 1100px) {
-  #app {
-    grid-template-columns: 184px minmax(280px, 1fr) 260px;
-  }
-  .toolbar,
-  .content-header {
-    padding-left: 18px;
-    padding-right: 18px;
-  }
-  .toolbar select {
-    max-width: 100px;
-  }
-  .right-hidden {
-    grid-template-columns: 184px minmax(280px, 1fr) !important;
-  }
-}
-
-@media (max-width: 860px) {
-  #app {
-    grid-template-columns: 180px minmax(0, 1fr);
-  }
-  .right-hidden {
-    grid-template-columns: 180px minmax(0, 1fr) !important;
-  }
-}
-
-@media (max-width: 580px) {
-  #app { --pane-header-top: 17px; }
-  #app,
-  .right-hidden {
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  #navigation {
-    display: none;
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 240px;
-    z-index: 6;
-    box-shadow: 15px 0 40px #0005;
-
-    grid-area: 1 / 1 / 2 / -1;
-  }
-  #navigation.open {
-    display: flex;
-  }
-  .app-title .mobile {
-    margin-left: auto;
-  }
-  .content-header {
-    padding: var(--pane-header-top) 13px 14px;
-    gap: 8px;
-  }
-  .eyebrow {
-    font-size: 9px;
-  }
-  .toolbar {
-    padding: 0 13px 14px;
-    gap: 5px;
-  }
-  .toolbar select {
-    max-width: 87px;
-    font-size: 12px;
-  }
-  .toolbar .primary {
-    padding: 9px;
-  }
-  .toolbar .primary .icon {
-    display: none;
-  }
-  #content {
-    padding: 0 7px 12px;
-  }
-}
-
 .rufin-icon {
   width: 30px;
   height: 30px;
 }
 
-.app-title > .rufin-icon {
-  width: 18px;
-  height: 18px;
+.about {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 260px;
 }
-
-.app-title #source-menu-button,
-.app-title #close-navigation {
-  position: absolute;
-  right: 5px;
-  top: calc(50% + (var(--pane-header-top) - 11px) / 2);
-  transform: translateY(-50%);
+.about .rufin-icon {
+  width: 96px;
+  height: 96px;
 }
-@media (max-width: 580px) {
-  .app-title #source-menu-button {
-    right: 39px;
-  }
+.about h2 {
+  margin: 8px 0 0;
 }
-
-.app-title .mobile {
-  margin-left: 0;
-}
-
-.nav-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.nav-bottom .version {
-  padding: 8px 10px;
-}
-
-.nav-bottom #disconnect {
-  width: 34px;
-  padding: 7px;
-  justify-content: center;
+.about .version {
+  margin: 0;
+  color: var(--muted);
 }

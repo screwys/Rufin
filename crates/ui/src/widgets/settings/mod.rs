@@ -27,9 +27,9 @@ impl SettingsState {
         }
     }
 
-    /// Keeps `current` on what every writer commits, and runs `committed` after each commit,
-    /// told whether it changed the sidebar before a local write took it in.
-    pub fn follow(self: &Rc<Self>, committed: impl Fn(bool) + 'static) {
+    /// Keeps `current` on what every writer commits, and runs `committed` after each commit with
+    /// the preferences it replaced when another writer (the controller, Connect) made it.
+    pub fn follow(self: &Rc<Self>, committed: impl Fn(Option<&Settings>) + 'static) {
         let mut changes = self.changes.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -37,10 +37,7 @@ impl SettingsState {
                 changes.borrow_and_update();
                 let Some(state) = weak.upgrade() else { break };
                 let previous = state.sync();
-                committed(
-                    previous
-                        .is_some_and(|previous| previous.sidebar != state.current.borrow().sidebar),
-                );
+                committed(previous.as_ref());
             }
         });
     }

@@ -108,6 +108,8 @@ mod showcase_imp {
         #[template_child]
         pub radio: TemplateChild<gtk::Button>,
         #[template_child]
+        pub radio_text: TemplateChild<gtk::Label>,
+        #[template_child]
         pub favorite: TemplateChild<gtk::Button>,
         #[template_child]
         pub download: TemplateChild<gtk::Button>,
@@ -123,8 +125,9 @@ mod showcase_imp {
         pub offers_download: Cell<bool>,
         /// The favorite in the cover's corner on hover; it toggles the same favorite as ♡.
         pub cover_favorite: RefCell<Option<gtk::Button>>,
-        /// Play's width with its label, to tell whether the label fits again.
+        /// Play's and Radio's widths with their labels, to tell whether the labels fit again.
         pub labelled_play: Cell<i32>,
+        pub labelled_radio: Cell<i32>,
         /// The band's gradient stops, from the cover once it shows.
         pub band_stops: Cell<[[u8; 3]; 3]>,
         /// The shape and width last laid out, to fit the text again when it changes.
@@ -646,7 +649,12 @@ impl DetailShowcaseView {
     /// edge.
     fn fit_text(&self, layout: &ShowcaseLayout, width: i32) {
         let imp = self.imp();
-        let text_width = (width - 2 * layout.inset - layout.cover - layout.gap).max(1);
+        let text_width = (width
+            - imp.body.margin_start()
+            - imp.body.margin_end()
+            - layout.cover
+            - imp.body.spacing())
+        .max(1);
         let text = imp.names.measure(gtk::Orientation::Vertical, text_width).1;
         let band = layout.band.max(text + 12 + 16);
         imp.band.set_height_request(band);
@@ -836,9 +844,6 @@ impl DetailShowcaseView {
         } else {
             gtk::Orientation::Horizontal
         });
-        imp.body.set_spacing(layout.gap);
-        imp.body.set_margin_start(layout.inset);
-        imp.body.set_margin_end(layout.inset);
         imp.cover_host.set_margin_top(layout.cover_top);
         imp.cover_host.set_halign(if layout.stacked {
             gtk::Align::Center
@@ -863,28 +868,57 @@ impl DetailShowcaseView {
             } else {
                 28
             });
-        // Play gives up its label when the buttons do not fit their room, so ⋯ stays in view.
+        // Play, then Radio, give up their labels while the buttons do not fit their room, so the
+        // row stays one row with ⋯ in view.
         let room = if layout.stacked {
             width - 2 * layout.inset
         } else {
             width - 2 * layout.inset - layout.cover - layout.gap
         };
-        let play = imp.play.measure(gtk::Orientation::Horizontal, -1).1;
-        if imp.play_text.is_visible() {
-            imp.labelled_play.set(play);
+        let pills = [
+            (&*imp.play, &*imp.play_text, &imp.labelled_play),
+            (&*imp.radio, &*imp.radio_text, &imp.labelled_radio),
+        ];
+        // The row's width with both labels, and what each pill saves as a circle.
+        let mut labelled_width = imp.actions.measure(gtk::Orientation::Horizontal, -1).1;
+        let mut savings = [0; 2];
+        for (index, (button, text, labelled)) in pills.iter().enumerate() {
+            if !button.is_visible() {
+                continue;
+            }
+            let current = button.measure(gtk::Orientation::Horizontal, -1).1;
+            if text.is_visible() {
+                labelled.set(current);
+            }
+            labelled_width += labelled.get() - current;
+            savings[index] = labelled.get() - button.measure(gtk::Orientation::Vertical, -1).1;
         }
-        let labelled = imp.actions.measure(gtk::Orientation::Horizontal, -1).1 - play
-            + imp.labelled_play.get()
-            <= room;
-        imp.play_text.set_visible(labelled);
-        if labelled {
-            imp.play.remove_css_class("detail-pill-icon");
+        let play_labelled = labelled_width <= room;
+        let radio_labelled = play_labelled || labelled_width - savings[0] <= room;
+        // Where even the circles do not fit, the insets and the gap beside the cover give way
+        // together, so the row stays one row beside a cover no narrower than its hover controls.
+        let overflow = (labelled_width - savings[0] - savings[1] - room).max(0);
+        let (inset, gap) = if overflow == 0 {
+            (layout.inset, layout.gap)
         } else {
-            imp.play.add_css_class("detail-pill-icon");
+            let spacing = (2 * layout.inset + layout.gap - overflow).max(0) / 3;
+            (spacing, spacing)
+        };
+        imp.body.set_spacing(gap);
+        imp.body.set_margin_start(inset);
+        imp.body.set_margin_end(inset);
+        for ((button, text, _), labelled) in pills.into_iter().zip([play_labelled, radio_labelled])
+        {
+            text.set_visible(labelled);
+            if labelled {
+                button.remove_css_class("detail-pill-icon");
+            } else {
+                button.add_css_class("detail-pill-icon");
+            }
         }
         let tooltip = tr("Play");
         imp.play
-            .set_tooltip_text((!labelled).then_some(tooltip.as_str()));
+            .set_tooltip_text((!play_labelled).then_some(tooltip.as_str()));
         imp.fitted.set(Some((shape, width)));
         if !layout.stacked {
             self.fit_text(layout, width);

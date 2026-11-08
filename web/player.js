@@ -9,6 +9,7 @@ import {
   run,
   setIcon,
   showFavorite,
+  slideText,
   time,
 } from "./ui.js";
 
@@ -44,9 +45,14 @@ function showPlayback(value) {
   receivedAt = performance.now();
   const track = value?.current?.track;
   $("player-menu").disabled = !track;
-  $("player-title").textContent = track?.title || tr("Nothing playing");
-  $("player-artist").textContent = track?.artist || "";
-  $("player-album").textContent = track?.album || "";
+  for (const [id, text] of [["player-title", track?.title || tr("Nothing playing")], ["player-artist", track?.artist || ""], ["player-album", track?.album || ""]])
+    if ($(id).textContent !== text || !$(id).classList.contains("text-slide")) {
+      $(id).textContent = text;
+      $(id).title = text;
+      slideText($(id));
+    }
+  // The mini player's top bar names what plays, as GTK's window title does.
+  $("mini-title").textContent = track ? [track.title, track.artist].filter(Boolean).join(" · ") : "";
   const playing = ["playing", "resolving", "buffering"].includes(value?.state);
   $("play-pause").setAttribute(
     "aria-label",

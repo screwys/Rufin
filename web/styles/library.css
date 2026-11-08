@@ -645,6 +645,8 @@
 /* On Home's band the facts sit in a dark pill, divided by |, readable on any cover and theme. */
 .home-showcase .detail-heading > .detail-facts {
   align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
   flex-wrap: nowrap;
   gap: 8px;
   margin-top: 8px;
@@ -676,6 +678,7 @@
 }
 
 .detail-facts > span {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -708,9 +711,10 @@
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+/* One row at every width: Play gives up its label when the row does not fit (library.js). */
 .detail-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin-top: 18px;
 }
@@ -737,9 +741,18 @@
   font-weight: 650;
 }
 
-.detail-round {
+.detail-round,
+.detail-pill.detail-pill-icon {
   width: 36px;
+  flex: none;
   padding: 0;
+}
+.detail-pill-icon .pill-label {
+  display: none;
+}
+.detail-pill,
+.detail-round {
+  flex: none;
 }
 
 .detail-pill:hover,
@@ -860,9 +873,10 @@
     margin-top: 10px;
   }
 
+  /* Never narrower than its hover controls, so it always reaches below the band. */
   .home-showcase > form {
     --band: 150px;
-    --cover: clamp(96px, 30cqw - 10px, 128px);
+    --cover: clamp(136px, (100cqw - 32px) * 0.3, 150px);
     --cover-top: 38px;
     --gap: 16px;
   }

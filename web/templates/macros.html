@@ -72,8 +72,8 @@
         {% if !head.genres.is_empty() %}<div class="detail-genres">{% for (name, page) in head.genres %}<button type="button" class="detail-genre-chip" data-action="genre" data-page="{{ page }}" title="{{ name }}">{{ name }}</button>{% endfor %}<button type="button" class="detail-genre-chip detail-genre-more" data-action="genres" hidden></button></div>{% endif %}
       </div>{% endif %}
       <div class="detail-actions">
-        {% if head.row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>{% endif %}
-        {% if head.row.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}{{ localization::tr("Radio") }}</button>{% endif %}
+        {% if head.row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary" title="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Play") }}</span></button>{% endif %}
+        {% if head.row.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Radio") }}</span></button>{% endif %}
         {% if head.row.menu.favorite %}{% call favorite(head.row, "detail-round", true) %}{% endcall %}{% endif %}
         {% call menu_button(head.row, "detail-round") %}{% endcall %}
       </div>
@@ -94,3 +94,5 @@
   <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}"{% if disabled %} disabled{% endif %}>{% call icon("rufin-list-add-symbolic") %}{% endcall %}</button>
 </div>
 {% endmacro %}
+{% macro switch(path, label, subtitle) %}<label class="pref-row"><span class="pref-label"><span>{{ label }}</span>{% if subtitle != "" %}<small>{{ subtitle }}</small>{% endif %}</span><input type="checkbox" role="switch" data-setting="{{ path }}" /></label>{% endmacro %}
+{% macro pref_page(id, label, icon_name) %}<button type="button" role="tab" class="pref-tab" data-page="{{ id }}" aria-controls="pref-{{ id }}">{% call icon(icon_name) %}{% endcall %}<span>{{ label }}</span></button>{% endmacro %}
