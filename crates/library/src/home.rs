@@ -8,8 +8,8 @@ use crate::catalog::snapshot::Packed;
 use crate::catalog::snapshot::{AlbumRec, TrackRec};
 use crate::catalog::views::Context;
 use crate::{
-    AlbumKey, AlbumRow, Catalog, FolderKey, Item, LibraryResult, ReadCancellation, Row, SourceKey,
-    TagRow, TrackKey, TrackRow,
+    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Catalog, FolderKey, Item, LibraryResult,
+    ReadCancellation, Row, SourceKey, TagRow, TrackKey, TrackRow,
 };
 
 const HOME_LIMIT: i64 = 24;
@@ -92,6 +92,14 @@ impl HomeSectionKind {
     }
 }
 
+/// Whether `section` holds one of Rufin's blocks as the server reads it, rather than a section
+/// of the server's own.
+fn rufin_section(section: &str) -> bool {
+    HomeSectionKind::SOURCE_SECTIONS
+        .iter()
+        .any(|kind| kind.source_section() == Some(section))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HomeEntryKind {
     Track,
@@ -136,6 +144,13 @@ pub struct HomeAlbumRow {
 pub struct HomeSectionRows {
     pub tracks: Vec<HomeTrackRow>,
     pub albums: Vec<HomeAlbumRow>,
+    pub artists: Vec<ArtistRow>,
+}
+
+impl HomeSectionRows {
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty() && self.albums.is_empty() && self.artists.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -189,10 +204,15 @@ impl Catalog {
     ) -> LibraryResult<HomePage> {
         let mut connection = self.acquire_loaded(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        // Provider sections by id: title, then track and album entries in position order.
+        // Provider sections by id: title, then track, album and artist entries in position order.
         let mut provider = std::collections::BTreeMap::<
             String,
-            (Option<String>, Vec<(i64, String)>, Vec<(i64, String)>),
+            (
+                Option<String>,
+                Vec<(i64, String)>,
+                Vec<(i64, String)>,
+                Vec<i64>,
+            ),
         >::new();
         for (section, section_title, kind, key, title) in sqlx::query_as::<_, (String, Option<String>, String, i64, String)>(
             "SELECT section_id,section_title,entity_kind,entity_key,title FROM home_entries WHERE source_key=?1 ORDER BY section_id,position",
@@ -206,9 +226,18 @@ impl Catalog {
             match kind.as_str() {
                 "track" => entry.1.push((key, title)),
                 "album" => entry.2.push((key, title)),
+                "artist" => entry.3.push(key),
                 _ => {}
             }
         }
+        // A server that lists its own sections, as Plex does, leads Home with them: of Rufin's
+        // blocks only the showcase stays.
+        let showcase_only = [HomeBlockKind::Showcase];
+        let blocks = if provider.keys().any(|section| !rufin_section(section)) {
+            &showcase_only[..usize::from(blocks.contains(&HomeBlockKind::Showcase))]
+        } else {
+            blocks
+        };
         let (chosen, sections, genres) = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
@@ -245,9 +274,18 @@ impl Catalog {
                     .slot(key)
                     .is_some_and(|slot| derived.albums[slot as usize].tracks > 0)
             };
+            // An artist counts as an album artist when it has album-artist tracks.
+            let visible_artist = |key: i64| {
+                let slot = snapshot.artists.slot(key)? as usize;
+                let album_artist = derived.artists[1][slot].tracks > 0;
+                (album_artist || derived.artists[0][slot].tracks > 0).then_some(Item::Artist {
+                    key: ArtistKey::from_raw(key),
+                    album_artist,
+                })
+            };
             let sections = provider
                 .into_iter()
-                .map(|(section, (title, tracks, albums))| {
+                .map(|(section, (title, tracks, albums, artists))| {
                     let tracks = tracks
                         .into_iter()
                         .filter(|(key, _)| visible_track(*key))
@@ -260,7 +298,12 @@ impl Catalog {
                         .take(HOME_LIMIT as usize)
                         .map(|(key, title)| (AlbumKey::from_raw(key), title))
                         .collect::<Vec<_>>();
-                    (section, (title, tracks, albums))
+                    let artists = artists
+                        .into_iter()
+                        .filter_map(visible_artist)
+                        .take(HOME_LIMIT as usize)
+                        .collect::<Vec<_>>();
+                    (section, (title, tracks, albums, artists))
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
             let mut chosen = Chosen::default();
@@ -376,10 +419,10 @@ impl Catalog {
                 .filter(|_| folder.is_none())
                 .and_then(HomeSectionKind::source_section)
                 .and_then(|section| sections.remove(section))
-                .filter(|(_, tracks, albums)| {
+                .filter(|(_, tracks, albums, _)| {
                     blocks.contains(&kind) && (!tracks.is_empty() || !albums.is_empty())
                 })
-                .map(|(_, tracks, albums)| (tracks, albums))
+                .map(|(_, tracks, albums, _)| (tracks, albums))
         };
         let most_played =
             provided(HomeBlockKind::MostPlayed).unwrap_or((chosen.most_played, Vec::new()));
@@ -407,12 +450,7 @@ impl Catalog {
         };
         let others = sections
             .into_iter()
-            .filter(|(section, _)| {
-                !matches!(
-                    section.as_str(),
-                    "most-played" | "newly-added" | "recently-played" | "recently-released"
-                )
-            })
+            .filter(|(section, _)| !rufin_section(section))
             .take(12)
             .collect::<Vec<_>>();
         // Every block's rows in one statement.
@@ -442,9 +480,10 @@ impl Catalog {
             items.extend(tracks(tracked));
             items.extend(albums(albumed));
         }
-        for (_, (_, tracked, albumed)) in &others {
+        for (_, (_, tracked, albumed, artists)) in &others {
             items.extend(tracks(tracked));
             items.extend(albums(albumed));
+            items.extend(artists.iter().copied());
         }
         items.extend(genres.iter().copied());
         let mut seen = std::collections::HashSet::new();
@@ -459,6 +498,7 @@ impl Catalog {
             .await?;
         let mut track_rows = std::collections::HashMap::new();
         let mut album_rows = std::collections::HashMap::new();
+        let mut artist_rows = std::collections::HashMap::new();
         let mut tag_rows = std::collections::HashMap::new();
         for row in rows {
             match row {
@@ -467,6 +507,9 @@ impl Catalog {
                 }
                 Row::Album(row) => {
                     album_rows.insert(row.album_key, row);
+                }
+                Row::Artist(row) => {
+                    artist_rows.insert(row.artist_key, row);
                 }
                 Row::Tag(row) => {
                     tag_rows.insert(row.key, row);
@@ -504,6 +547,7 @@ impl Catalog {
                 HomeSectionRows {
                     tracks: home_tracks(tracks),
                     albums: home_albums(albums),
+                    artists: Vec::new(),
                 }
             };
         let showcase = showcase_rows(chosen.showcase, &album_rows);
@@ -524,10 +568,19 @@ impl Catalog {
             provider_sections: others
                 .into_iter()
                 .map(
-                    |(section_id, (title, tracks, albums))| HomeProviderSection {
+                    |(section_id, (title, tracks, albums, artists))| HomeProviderSection {
                         section_id,
                         title,
-                        rows: section_rows((tracks, albums)),
+                        rows: HomeSectionRows {
+                            artists: artists
+                                .iter()
+                                .filter_map(|item| match item {
+                                    Item::Artist { key, .. } => artist_rows.get(key).cloned(),
+                                    _ => None,
+                                })
+                                .collect(),
+                            ..section_rows((tracks, albums))
+                        },
                     },
                 )
                 .collect(),

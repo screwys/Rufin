@@ -2340,10 +2340,11 @@ impl Source {
         section: library::HomeSectionKind,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         match &self.implementation {
-            Implementation::Plex(source) => source.home_section(section).await,
-            Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => {
-                Ok(Vec::new())
-            }
+            // Plex's Home is its own sections, which its catalog reads.
+            Implementation::Plex(_)
+            | Implementation::Local(_)
+            | Implementation::Files(_)
+            | Implementation::Peer(_) => Ok(Vec::new()),
             Implementation::JellyfinEmby(source) => source.home_section(section).await,
             Implementation::OpenSubsonic(source) => source.home_section(section).await,
         }

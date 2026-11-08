@@ -638,24 +638,9 @@ impl AlbumGridCell {
     }
 
     pub fn enable_card_activation(&self) {
-        let click = gtk::GestureClick::new();
-        click.set_button(1);
-        let shell = self.shell.clone();
-        let current = Rc::clone(&self.current);
-        click.connect_pressed(move |gesture, presses, _, _| {
-            let uri = current
-                .borrow()
-                .as_ref()
-                .map(|album| album.media_uri.clone());
-            if presses == 2
-                && let Some(shell) = shell.upgrade()
-                && let Some(uri) = uri
-            {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                shell.open_route(rufin_core::route::Route::AlbumDetail(uri));
-            }
+        install_card_activation(&self.shell, &self.body.card, &self.current, |album| {
+            rufin_core::route::Route::AlbumDetail(album.media_uri.clone())
         });
-        self.body.card.add_controller(click);
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
@@ -716,6 +701,30 @@ impl AlbumGridCell {
     }
 }
 
+/// Opens the page of `current`'s row on a double click of `card`, as a grid's activation does.
+fn install_card_activation<T: 'static>(
+    shell: &std::rc::Weak<CatalogUi>,
+    card: &impl IsA<gtk::Widget>,
+    current: &Rc<RefCell<Option<T>>>,
+    route: fn(&T) -> rufin_core::route::Route,
+) {
+    let click = gtk::GestureClick::new();
+    click.set_button(1);
+    let shell = shell.clone();
+    let current = Rc::clone(current);
+    click.connect_pressed(move |gesture, presses, _, _| {
+        let route = current.borrow().as_ref().map(route);
+        if presses == 2
+            && let Some(shell) = shell.upgrade()
+            && let Some(route) = route
+        {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            shell.open_route(route);
+        }
+    });
+    card.add_controller(click);
+}
+
 pub struct ArtistGridCell {
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
@@ -725,6 +734,15 @@ pub struct ArtistGridCell {
 }
 
 impl ArtistGridCell {
+    pub fn enable_card_activation(&self) {
+        install_card_activation(
+            &self.shell,
+            &self.body.card,
+            &self.current,
+            rufin_core::route::Route::of_artist,
+        );
+    }
+
     pub(crate) fn set_play_count_caption(&self, count: i64) {
         self.body.set_play_count_caption(count);
     }

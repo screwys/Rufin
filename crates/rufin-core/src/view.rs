@@ -1368,6 +1368,15 @@ impl View {
                         keys: vec![row.track.track_key].into(),
                     },
                     HomeItem::Album(row) => album(&row.album),
+                    HomeItem::Artist(row) => self
+                        .page_members(
+                            &Route::of_artist(&row),
+                            Collection::Artist {
+                                key: row.artist_key,
+                                album_artist: row.album_artist,
+                            },
+                        )
+                        .selection(),
                 })
                 .collect(),
         };
@@ -1959,6 +1968,7 @@ pub enum HomeSection {
 pub enum HomeItem {
     Track(Box<HomeTrackRow>),
     Album(Box<HomeAlbumRow>),
+    Artist(Box<library::ArtistRow>),
 }
 
 impl library::ShowsState for HomeItem {
@@ -1966,24 +1976,28 @@ impl library::ShowsState for HomeItem {
         match self {
             Self::Track(row) => row.track.state(change),
             Self::Album(row) => row.album.state(change),
+            Self::Artist(row) => row.state(change),
         }
     }
     fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
         match self {
             Self::Track(row) => row.track.state_mut(change),
             Self::Album(row) => row.album.state_mut(change),
+            Self::Artist(row) => row.state_mut(change),
         }
     }
     fn downloads(&self) -> Option<library::Downloads> {
         match self {
             Self::Track(row) => row.track.downloads(),
             Self::Album(row) => row.album.downloads(),
+            Self::Artist(row) => row.downloads(),
         }
     }
     fn show_downloads(&mut self, read: library::Downloads) -> bool {
         match self {
             Self::Track(row) => row.track.show_downloads(read),
             Self::Album(row) => row.album.show_downloads(read),
+            Self::Artist(row) => row.show_downloads(read),
         }
     }
 }
@@ -2012,7 +2026,7 @@ impl HomeSection {
         }
     }
 
-    /// Its rows in the order the page shows them: tracks, then albums.
+    /// Its rows in the order the page shows them: tracks, albums, then artists.
     pub fn items(&self) -> Vec<HomeItem> {
         let rows = match self {
             Self::Rows { rows, .. } => rows,
@@ -2026,6 +2040,11 @@ impl HomeSection {
                 rows.albums
                     .iter()
                     .map(|row| HomeItem::Album(Box::new(row.clone()))),
+            )
+            .chain(
+                rows.artists
+                    .iter()
+                    .map(|row| HomeItem::Artist(Box::new(row.clone()))),
             )
             .collect()
     }
@@ -2052,7 +2071,9 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
     let album = |row: &HomeAlbumRow| {
         filter.is_empty() || shown(format!("{} {}", row.title, row.album.artist))
     };
-    let rows = |tracks: &[HomeTrackRow], albums: &[HomeAlbumRow]| HomeSectionRows {
+    let rows = |tracks: &[HomeTrackRow],
+                albums: &[HomeAlbumRow],
+                artists: &[library::ArtistRow]| HomeSectionRows {
         tracks: tracks
             .iter()
             .filter(|row| {
@@ -2065,8 +2086,14 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
             .cloned()
             .collect(),
         albums: albums.iter().filter(|row| album(row)).cloned().collect(),
+        artists: artists
+            .iter()
+            .filter(|row| filter.is_empty() || shown(row.name.clone()))
+            .cloned()
+            .collect(),
     };
-    let section_rows = |section: &HomeSectionRows| rows(&section.tracks, &section.albums);
+    let section_rows =
+        |section: &HomeSectionRows| rows(&section.tracks, &section.albums, &section.artists);
     let block = |block: HomeBlockKind| {
         let section = match block {
             HomeBlockKind::Showcase => {
@@ -2079,13 +2106,13 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
             HomeBlockKind::Genres => {
                 return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));
             }
-            HomeBlockKind::Explore => rows(&[], &home.explore),
+            HomeBlockKind::Explore => rows(&[], &home.explore, &[]),
             HomeBlockKind::MostPlayed => section_rows(&home.most_played),
             HomeBlockKind::NewlyAdded => section_rows(&home.newly_added),
             HomeBlockKind::RecentlyPlayed => section_rows(&home.recently_played),
             HomeBlockKind::RecentlyReleased => section_rows(&home.recently_released),
         };
-        (!section.tracks.is_empty() || !section.albums.is_empty()).then_some(HomeSection::Rows {
+        (!section.is_empty()).then_some(HomeSection::Rows {
             block,
             rows: section,
         })
@@ -2098,7 +2125,7 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
             title: section.title.clone(),
             rows: section_rows(&section.rows),
         })
-        .filter(|section| !section.rows.tracks.is_empty() || !section.rows.albums.is_empty())
+        .filter(|section| !section.rows.is_empty())
         .map(HomeSection::Provider)
         .collect::<Vec<_>>();
     let mut sections = Vec::new();

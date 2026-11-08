@@ -833,7 +833,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
 }
 
 #[tokio::test]
-async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
+async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showcase() {
     use library::{HomeBlockKind, HomePage};
 
     let mut fixture = fixture().await;
@@ -855,7 +855,6 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
         .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
         .await
         .unwrap();
-    assert!(!all.provider_sections.is_empty());
     assert!(all.showcase.is_some());
     assert!(!all.explore.is_empty());
     assert!(!all.most_played.tracks.is_empty());
@@ -870,10 +869,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
             .home_page(fixture.source, None, 0, 0, &[block], &cancel)
             .await
             .unwrap();
-        let mut expected = HomePage {
-            provider_sections: all.provider_sections.clone(),
-            ..HomePage::default()
-        };
+        let mut expected = HomePage::default();
         match block {
             HomeBlockKind::Showcase => expected.showcase = all.showcase.clone(),
             HomeBlockKind::Explore => expected.explore = all.explore.clone(),
@@ -885,32 +881,44 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
             }
             HomeBlockKind::Genres => expected.genres = all.genres.clone(),
         }
-        assert_eq!(
-            selected, expected,
-            "only {block:?} and provider sections are read"
-        );
+        assert_eq!(selected, expected, "only {block:?} is read");
     }
-    let disabled = fixture
-        .catalog
-        .home_page(fixture.source, None, 0, 0, &[], &cancel)
+    assert_eq!(
+        fixture
+            .catalog
+            .home_page(fixture.source, None, 0, 0, &[], &cancel)
+            .await
+            .unwrap(),
+        HomePage::default()
+    );
+
+    // A section of the server's own leaves Rufin's blocks only the showcase.
+    sqlx::query("INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,section_title) VALUES(?1,'plex:1:featured',0,'track',?2,'Featured Track','Featured','Featured')")
+        .bind(fixture.source)
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
         .await
         .unwrap();
-    assert_eq!(
-        disabled,
-        HomePage {
-            provider_sections: all.provider_sections.clone(),
-            ..HomePage::default()
-        }
-    );
-    let enabled_again = fixture
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let served = fixture
         .catalog
         .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
         .await
         .unwrap();
+    assert_eq!(served.showcase, all.showcase);
     assert_eq!(
-        enabled_again, all,
-        "disabling presentation keeps stored Home facts"
+        HomePage {
+            showcase: None,
+            provider_sections: Vec::new(),
+            ..served.clone()
+        },
+        HomePage::default()
     );
+    let [section] = served.provider_sections.as_slice() else {
+        panic!("one server section");
+    };
+    assert_eq!(section.title.as_deref(), Some("Featured"));
+    assert_eq!(section.rows.tracks[0].title, "Featured Track");
 }
 
 #[tokio::test]
@@ -3342,17 +3350,6 @@ async fn home_search_and_radio_results_stay_bounded() {
         .await
         .expect("initial bounded Home page");
     assert!(initial_home.most_played.tracks.is_empty());
-    assert_eq!(
-        initial_home
-            .provider_sections
-            .iter()
-            .find(|section| section.section_id == "featured")
-            .expect("provider Home section")
-            .rows
-            .tracks
-            .len(),
-        1
-    );
     // A step forward shows what the showcase offered as next, with the old album before it,
     // and a step back from where it landed returns to the old album.
     let initial_showcase = initial_home.showcase.as_ref().expect("initial Showcase");
