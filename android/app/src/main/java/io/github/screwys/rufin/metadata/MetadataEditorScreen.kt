@@ -165,7 +165,7 @@ private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEdito
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Artwork(connection.artwork, Modifier.size(220.dp).clip(CoverShape))
+                Artwork(io.github.screwys.rufin.ui.Cover(connection.artwork, !connection.loadingArtwork && connection.artwork == null), Modifier.size(220.dp).clip(CoverShape))
                 if (connection.loadingArtwork) CircularProgressIndicator()
             }
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -208,7 +208,7 @@ private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEdito
                 }
                 ListItem(headlineContent = { Text(result.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(result.detail, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Artwork(image, Modifier.size(64.dp).clip(CoverShape)) },
+                    leadingContent = { Artwork(io.github.screwys.rufin.ui.Cover(image), Modifier.size(64.dp).clip(CoverShape)) },
                     trailingContent = { IconButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.sourceUrl))) }) {
                         RufinIcon("rufin-external-link-symbolic", translate("Open"), Modifier.size(20.dp)) } },
                     modifier = Modifier.clickable(enabled = editable) { connection.chooseArtwork(result.imageUrl) })

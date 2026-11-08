@@ -85,7 +85,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
     val reduceMotion = LocalReduceMotion.current
     val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
     val background by animateColorAsState(
-        artwork?.color?.let { lerp(MaterialTheme.colorScheme.surfaceContainer, it, .24f) }
+        artwork.image?.color?.let { lerp(MaterialTheme.colorScheme.surfaceContainer, it, .24f) }
             ?: MaterialTheme.colorScheme.surfaceContainer,
         animationSpec = tween(if (reduceMotion) 0 else 320), label = "miniPlayerColor")
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
@@ -147,7 +147,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
 
 /** A player bar's cover, cross-fading to the next track's. */
 @Composable
-private fun CoverCrossfade(artwork: io.github.screwys.rufin.ui.PlayerArtwork?, modifier: Modifier) {
+private fun CoverCrossfade(artwork: io.github.screwys.rufin.ui.Cover, modifier: Modifier) {
     Crossfade(artwork, modifier.clip(CoverShape), animationSpec = tween(if (LocalReduceMotion.current) 0 else 220),
         label = "playerBarCover") { shown -> Artwork(shown, Modifier.fillMaxSize()) }
 }

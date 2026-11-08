@@ -34,6 +34,7 @@ import io.github.screwys.rufin.shared.rufin_core.updatePlaylist
 import io.github.screwys.rufin.shared.sources.ArtworkChange
 import io.github.screwys.rufin.shared.sources.ImageBytes
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.RufinIcon
@@ -267,7 +268,7 @@ internal fun PlaylistEditor(
                     state.artwork?.let { artwork ->
                         val bindings = listOfNotNull(if (state.removed || artwork.binding == null) artwork.automaticBinding else artwork.binding)
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            if (state.preview != null) Artwork(state.preview, Modifier.size(220.dp).clip(CoverShape))
+                            if (state.preview != null) Artwork(Cover(state.preview), Modifier.size(220.dp).clip(CoverShape))
                             else PlaylistCover(bindings, player)
                         }
                         if (artwork.writable) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

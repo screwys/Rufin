@@ -223,6 +223,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
+    var selectingPins by remember { mutableStateOf(false) }
+    LaunchedEffect(browse.section) { if (browse.section != AppSection.Pins) selectingPins = false }
     var createFolder by rememberSaveable { mutableStateOf(false) }
     var createSmartPlaylist by rememberSaveable { mutableStateOf(false) }
     val playlistFolder = browse.current?.route as? Route.PlaylistFolder
@@ -443,6 +445,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     })
                 }
                 if (browse.section == AppSection.Browse) PlayerIconButton("rufin-filter-symbolic", "Customize", { sortPage = browse.visiblePage; sort = true })
+                if (browse.section == AppSection.Pins) PlayerIconButton("rufin-document-edit-symbolic", "Select", { selectingPins = !selectingPins },
+                    selected = selectingPins)
             }
             val refreshState = rememberPullToRefreshState()
             val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
@@ -509,7 +513,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                 onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
                         }
                         AppSection.Search -> SearchContent(model, preferences, browse, player, { menu = it }, { playlist = it }, {})
-                        AppSection.Pins -> routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
+                        AppSection.Pins -> routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage, selectingPins) { selectingPins = false } }
                         AppSection.Browse -> {}
                     }
                 }
@@ -541,7 +545,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     }
                 }
             } }
-            model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading }?.let { status -> toast {
+            // Pages that list the library wait for a switch, and the launch reopening it, with their own spinner.
+            model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading || model.sourceOperation is SourceOperation.Switching }?.let { status -> toast {
                 Text(status, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
                 val progress = model.sourceProgress
                 val total = progress?.total

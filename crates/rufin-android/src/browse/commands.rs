@@ -407,6 +407,11 @@ impl AndroidLibrary {
         self.settings.set_pinned(pin, pinned).map_err(error)
     }
 
+    /// Moves a pin next to `target`: after it from above, before it from below, as GTK's drop does.
+    pub fn reorder_pin(&self, moved: SidebarPin, target: SidebarPin) -> Result<bool, AndroidError> {
+        self.settings.reorder_pin(&moved, &target).map_err(error)
+    }
+
     /// Whether a committed change can change the pins.
     pub fn pins_refresh(&self, changed: Changed) -> bool {
         rufin_core::view::pins_refresh(&self.source, &changed)

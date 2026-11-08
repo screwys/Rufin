@@ -420,7 +420,7 @@ internal fun MediaMenuBackdrop(identity: ByteArray?, player: PlayerConnection, c
     val surface = MaterialTheme.colorScheme.surface
     val overlay = if (surface.luminance() < .5f) Color.Black.copy(alpha = .675f) else Color.White.copy(alpha = .75f)
     Box(Modifier.fillMaxWidth().background(surface)) {
-        artwork?.let { cover ->
+        artwork.image?.let { cover ->
             Image(cover.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(85.dp),
                 contentScale = ContentScale.Crop, colorFilter = ColorFilter.tint(overlay, BlendMode.SrcOver))
         }

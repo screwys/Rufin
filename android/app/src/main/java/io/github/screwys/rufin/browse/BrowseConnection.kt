@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.library.SidebarPin
 import io.github.screwys.rufin.shared.rufin_core.Refresh
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
@@ -317,6 +318,14 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { item.row.pin?.let { library?.setPin(it, pinned) } }
+    }
+    fun unpin(pins: Collection<SidebarPin>) = connection.runAction {
+        withContext(Dispatchers.IO) { pins.forEach { library?.setPin(it, false) } }
+    }
+    /** Moves pins one at a time next to `target`, so a block keeps its order: top first when
+     *  moving up, bottom first when moving down. */
+    fun movePins(pins: List<SidebarPin>, target: SidebarPin) = connection.runAction {
+        withContext(Dispatchers.IO) { pins.forEach { library?.reorderPin(it, target) } }
     }
     fun download(item: BrowseItem, remove: Boolean = false) = connection.runAction {
         library?.downloadTarget(item.row.route, item.row.mediaUri, remove)

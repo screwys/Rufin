@@ -8,12 +8,11 @@ import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
 import io.github.screwys.rufin.shared.rufin_core.Route
-import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
+import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.DetailLinkIcon
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
-import io.github.screwys.rufin.ui.FallbackCover
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.ui.rufinMarquee
@@ -297,7 +296,7 @@ private fun DetailHeader(
     }
     if (sectionTitle != null) {
         Box(Modifier.fillMaxWidth()) {
-            Box(Modifier.matchParentSize().then(showcaseBand(detailArtwork(item.row.artworkIdentity, player, 128.dp)?.band)))
+            Box(Modifier.matchParentSize().then(showcaseBand(detailArtwork(item.row.artworkIdentity, player, 128.dp).image?.band)))
             Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = bar + 4.dp, bottom = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 FindRow(summary.row.title, LocalFindHeight.current)
@@ -391,7 +390,7 @@ private fun DetailHeader(
         // The band takes the colours of the cover the header shows (its first quadrant for a mosaic).
         val single = summary.artworkBindings.size <= 1
         val stops = detailArtwork(summary.artworkBindings.firstOrNull() ?: summary.row.artworkIdentity, player,
-            if (single) cover else cover / 2f)?.band
+            if (single) cover else cover / 2f).image?.band
         val bandSlot = LocalDetailBand.current
         SideEffect { bandSlot?.value = stops?.get(1) }
         // Above the cover, on the band, the Find field's row, as far as a pull has opened it.
@@ -500,16 +499,16 @@ private fun DetailSectionHeading(title: String) {
 }
 
 @Composable
-private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: Dp): PlayerArtwork? {
+private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: Dp): Cover {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
     return rememberArtwork(identity, player, pixels)
 }
 
 @Composable
-private fun DetailCover(artwork: PlayerArtwork?, modifier: Modifier,
+private fun DetailCover(artwork: Cover, modifier: Modifier,
 ) {
     Box(modifier.clip(CoverShape)) {
-        if (artwork == null) FallbackCover(Modifier.fillMaxSize()) else Artwork(artwork, Modifier.fillMaxSize())
+        Artwork(artwork, Modifier.fillMaxSize())
     }
 }
 

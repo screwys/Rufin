@@ -36,26 +36,39 @@ import io.github.screwys.rufin.settings.LocalReduceMotion
 import java.util.TreeMap
 
 @Composable
-internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int): PlayerArtwork? {
-    val binding = remember(identityBytes) { identityBytes?.toList() } ?: return null
+internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int): Cover {
+    val binding = remember(identityBytes) { identityBytes?.toList() } ?: return Cover.Missing
     val bridge = player.bridge
-    val identity = remember(bridge, binding, player.artworkGeneration) { bridge?.artworkIdentity(binding.toByteArray()) } ?: return null
+    val identity = remember(bridge, binding, player.artworkGeneration) { bridge?.artworkIdentity(binding.toByteArray()) }
+        ?: return Cover.Pending
     return key(identity) {
         val cached = remember(bridge, pixels) { player.artworkCache.peek(identity, pixels) }
-        val loaded by produceState(cached, bridge, pixels, binding) {
-            value = cached ?: value
+        val loaded by produceState(cached?.let { Cover(it, false) } ?: Cover.Pending, bridge, pixels, binding) {
+            if (cached != null) value = Cover(cached, false)
             if (bridge != null && pixels > 0) {
                 try {
-                    if (value == null) value = withContext(Dispatchers.Default) {
+                    if (value.image == null) withContext(Dispatchers.Default) {
                         bridge.artworkPreview(binding.toByteArray())?.let(::playerArtwork)
-                    }
-                    value = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels) ?: value
+                    }?.let { value = Cover(it, false) }
+                    val image = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels)
+                    value = Cover(image ?: value.image, image == null)
                 }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { Log.d("Rufin", "Could not load artwork") }
+                catch (_: Exception) { value = Cover(value.image, true); Log.d("Rufin", "Could not load artwork") }
             }
         }
         loaded
+    }
+}
+
+/** A cover as a tile shows it: its image or preview once read, and whether it has none. Until one of
+ *  them is known the tile stays plain, as GTK's pending tile does, so the fallback never precedes a cover. */
+internal data class Cover(val image: PlayerArtwork?, val missing: Boolean) {
+    /** A decoded image, where none means the item has no cover. */
+    constructor(image: PlayerArtwork?) : this(image, image == null)
+    companion object {
+        val Pending = Cover(null, false)
+        val Missing = Cover(null, true)
     }
 }
 
@@ -138,11 +151,12 @@ internal fun playerArtwork(image: AndroidArtwork): PlayerArtwork {
 internal val CoverShape = RoundedCornerShape(8.dp)
 
 @Composable
-internal fun Artwork(artwork: PlayerArtwork?, modifier: Modifier = Modifier, description: String? = null) {
+internal fun Artwork(cover: Cover, modifier: Modifier = Modifier, description: String? = null) {
+    val artwork = cover.image
     val opacity = animateFloatAsState(if (artwork == null) 0f else 1f,
         tween(if (LocalReduceMotion.current) 0 else 160), label = "artworkOpacity").value
     Box(modifier.background(artwork?.color ?: MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        if (artwork == null) FallbackCover(Modifier.fillMaxSize())
+        if (artwork == null && cover.missing) FallbackCover(Modifier.fillMaxSize())
         if (artwork != null) {
             Image(artwork.bitmap.asImageBitmap(), description, Modifier.fillMaxSize().graphicsLayer { alpha = opacity }, contentScale = ContentScale.Crop)
         }
