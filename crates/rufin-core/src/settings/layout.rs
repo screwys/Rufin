@@ -657,6 +657,9 @@ pub const HOME_TRACK_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryF
 /// The labels under the name of a Home genre row.
 pub const HOME_GENRE_FIELDS: [LibraryField; 2] =
     [LibraryField::AlbumCount, LibraryField::SongCount];
+/// The labels under the name of a Home artist card.
+pub const HOME_ARTIST_FIELDS: [LibraryField; 2] =
+    [LibraryField::AlbumCount, LibraryField::SongCount];
 /// The fields `layout` can show for `key`.
 pub fn available_fields(key: LibraryListKey, layout: LibraryLayout) -> &'static [LibraryField] {
     match layout {

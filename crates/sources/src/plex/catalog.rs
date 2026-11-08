@@ -4,7 +4,6 @@ use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
 use crate::source::{SourceProgress, SourceProgressStage};
 use crate::{SourceError, SourceResult};
-use library::HomeSectionKind;
 use library::{FolderObservation, HomeEntryInput, HomeEntryKind};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -133,12 +132,11 @@ impl PlexSource {
             .iter()
             .map(|(section_id, _)| format!("plex:{section_id}:"))
             .collect::<Vec<_>>();
+        // Home shows the server's own sections only, so nothing else stays.
         observation
-            .complete_source_home_sections(&"plex:", &Vec::new(), &home_prefixes)
+            .complete_source_home_sections("", &Vec::new(), &home_prefixes)
             .await?;
         self.acquire_playlists(observation, cancelled).await?;
-        crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
-            .await?;
 
         progress(SourceProgress {
             stage: SourceProgressStage::Finalizing,
@@ -529,36 +527,6 @@ impl PlexSource {
         Ok(())
     }
 
-    pub(crate) async fn home_section(
-        &self,
-        section: HomeSectionKind,
-    ) -> SourceResult<Vec<HomeEntryInput>> {
-        let (kind, sort) = match section {
-            HomeSectionKind::Explore => return Ok(Vec::new()),
-            HomeSectionKind::MostPlayed => ("10", "viewCount:desc"),
-            HomeSectionKind::RecentlyPlayed => ("10", "lastViewedAt:desc"),
-            HomeSectionKind::NewlyAdded => ("9", "addedAt:desc"),
-            HomeSectionKind::RecentlyReleased => ("9", "originallyAvailableAt:desc"),
-        };
-        let page = self
-            .get(
-                "/library/all",
-                &[
-                    ("type", kind.into()),
-                    ("sort", sort.into()),
-                    ("X-Plex-Container-Start", "0".into()),
-                    ("X-Plex-Container-Size", "24".into()),
-                ],
-            )
-            .await?;
-        Ok(items(&page["MediaContainer"]["Metadata"])
-            .iter()
-            .take(24)
-            .enumerate()
-            .filter_map(|(position, item)| home_entry(position, item))
-            .collect())
-    }
-
     async fn acquire_hubs(
         &self,
         observation: &mut library::Observation<'_>,
@@ -731,6 +699,7 @@ fn home_entry(position: usize, item: &Value) -> Option<HomeEntryInput> {
     let kind = match item["type"].as_str()? {
         "track" => HomeEntryKind::Track,
         "album" => HomeEntryKind::Album,
+        "artist" => HomeEntryKind::Artist,
         _ => return None,
     };
     Some(HomeEntryInput {
@@ -795,116 +764,6 @@ pub(super) mod tests {
         "year":{},"parentYear":2010,"index":[],"skipCount":-4,"Guid":[null,{"id":"mbid://recording"}],"Genre":[{"tag":"Rock"},{"tag":[]}],"Mood":[{"tag":"Calm"}],
         "Media":[{"container":"flac","Part":[{"file":"/music/song.flac","Stream":[{"streamType":2,"gain":-4.25,"peak":0.8,"albumGain":-3.5,"loudness":-18.0}]}]}],
         "thumb":"/library/metadata/album/thumb/1"})
-    }
-
-    #[tokio::test]
-    async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
-        let server = MockServer::start().await;
-        let source = crate::Source::new(
-            crate::SourceId::new("source"),
-            crate::source::Implementation::Plex(source(&server)),
-        );
-        let directory = tempfile::tempdir().unwrap();
-        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
-            .await
-            .unwrap();
-        let mut updates = catalog.changes();
-        catalog
-            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
-            .await
-            .unwrap();
-
-        let cancellation = library::ReadCancellation::new();
-        for (id, status, empty, identical, expected) in [
-            ("old", 200, false, false, vec!["old"]),
-            ("new", 200, false, false, vec!["new"]),
-            ("new", 200, false, true, vec!["new"]),
-            ("third", 503, false, false, vec!["new"]),
-            ("third", 200, true, false, vec!["new", "old", "third"]),
-        ] {
-            server.reset().await;
-            let item = serde_json::json!({"ratingKey":id,"title":id,"type":"album"});
-            Mock::given(method("GET"))
-                .and(path(format!("/library/metadata/{id}")))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!({"MediaContainer":{"Metadata":[item.clone()]}}),
-                ))
-                .expect(1)
-                .mount(&server)
-                .await;
-            Mock::given(method("GET")).and(path(format!("/library/metadata/{id}/children")))
-                .respond_with(move |request: &wiremock::Request| {
-                    let offset = request.url.query_pairs().find(|(key, _)| key == "X-Plex-Container-Start").unwrap().1;
-                    ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"totalSize":2,"Metadata":[{"ratingKey":format!("{id}-track-{offset}"),"title":"Track","type":"track","parentRatingKey":id,"parentTitle":id}]}}))
-                }).expect(2)
-                .mount(&server).await;
-            for offset in 0..2 {
-                let raw = format!("{id}-track-{offset}");
-                Mock::given(method("GET"))
-                    .and(path(format!("/library/metadata/{raw}")))
-                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                        "MediaContainer":{"Metadata":[{"ratingKey":raw,"title":"Track",
-                            "type":"track","parentRatingKey":id,"parentTitle":id}]}
-                    })))
-                    .expect(1)
-                    .mount(&server)
-                    .await;
-            }
-            let entries = if empty { vec![] } else { vec![item] };
-            Mock::given(method("GET"))
-                .and(path("/library/all"))
-                .and(query_param("sort", "addedAt:desc"))
-                .and(query_param("X-Plex-Container-Size", "24"))
-                .respond_with(
-                    ResponseTemplate::new(status)
-                        .set_body_json(serde_json::json!({"MediaContainer":{"Metadata":entries}})),
-                )
-                .expect(1)
-                .mount(&server)
-                .await;
-            source
-                .apply_items(&catalog, vec![id.into()], vec![])
-                .await
-                .unwrap();
-            if identical {
-                assert!(
-                    crate::published(&mut updates).is_none(),
-                    "unchanged native data stays quiet"
-                );
-            } else {
-                assert!(crate::published(&mut updates).is_some());
-            }
-            let home = catalog
-                .home_page(
-                    {
-                        catalog.loaded().await;
-                        catalog.source_key(&crate::SourceId::new("source"))
-                    }
-                    .unwrap(),
-                    None,
-                    0,
-                    0,
-                    &[library::HomeBlockKind::NewlyAdded],
-                    &cancellation,
-                )
-                .await
-                .unwrap();
-            assert!(
-                home.newly_added
-                    .albums
-                    .iter()
-                    .all(|album| album.album.summary.track_count == 2)
-            );
-            let mut titles = home
-                .newly_added
-                .albums
-                .iter()
-                .map(|row| row.title.as_str())
-                .collect::<Vec<_>>();
-            titles.sort_unstable();
-            assert_eq!(titles, expected);
-            server.verify().await;
-        }
     }
 
     #[tokio::test]

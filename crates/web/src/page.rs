@@ -560,7 +560,9 @@ pub(super) fn home_sections(
 
 /// A Home section's rows, each with the title Home gives it.
 pub(super) fn home_rows(section: &HomeSection) -> Vec<(Row, String, &'static [LibraryField])> {
-    use rufin_core::settings::layout::{HOME_ALBUM_FIELDS, HOME_GENRE_FIELDS, HOME_TRACK_FIELDS};
+    use rufin_core::settings::layout::{
+        HOME_ALBUM_FIELDS, HOME_ARTIST_FIELDS, HOME_GENRE_FIELDS, HOME_TRACK_FIELDS,
+    };
     use rufin_core::view::HomeItem;
     match section {
         // The album before the one shown, the one shown, and the one after.
@@ -592,6 +594,10 @@ pub(super) fn home_rows(section: &HomeSection) -> Vec<(Row, String, &'static [Li
                 }
                 HomeItem::Album(album) => {
                     (Row::Album(album.album), album.title, &HOME_ALBUM_FIELDS[..])
+                }
+                HomeItem::Artist(artist) => {
+                    let name = artist.name.clone();
+                    (Row::Artist(*artist), name, &HOME_ARTIST_FIELDS[..])
                 }
             })
             .collect(),
