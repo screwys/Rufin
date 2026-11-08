@@ -82,6 +82,7 @@ impl SourceSetupFlow for PlexFlow {
             change_profile: gtk::Button, connect: gtk::Button, save: gtk::Button
             , saved_login: adw::ComboRow, saved_options: gtk::StringList, reuse_login: gtk::Button
         });
+        crate::widgets::forms::attach_address_suggestions(&address);
         let draft = self.draft.borrow();
         let signed_in = draft.authorization.is_some();
         let choosing_server = draft.servers.is_some();
@@ -492,6 +493,7 @@ pub(super) fn settings_group(
     let resource = "preferences/source/plex_host.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { section: gtk::Box, account: adw::PreferencesGroup, profiles: adw::PreferencesGroup, login_actions: gtk::Box, choose_server: gtk::Button, change_profile: gtk::Button, connect: gtk::Button, save: gtk::Button, server: adw::ComboRow, name: adw::EntryRow, address: adw::EntryRow, cert_verify: adw::SwitchRow });
+    crate::widgets::forms::attach_address_suggestions(&address);
     for widget in [
         account.upcast::<gtk::Widget>(),
         profiles.upcast(),

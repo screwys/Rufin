@@ -498,7 +498,6 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             },
         );
         let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
-        body.set_download_badge(shell.downloads.download_badge(true));
         let drag_current = Rc::clone(&current);
         install_compact_media_drag_source(&body.card, &cover.widget(), move || {
             let item = drag_current.borrow();
@@ -544,14 +543,12 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
         self.cover.replace(&self.shell.artwork, &artwork);
         self.body
             .bind(item.name(), |field| DetailLinks::text(&item.field(field)));
-        self.body
-            .set_download_target(&self.shell, item.downloaded());
         self.current.replace(Some(item));
     }
 
     fn clear(&self) {
         self.cover.clear(&self.shell.artwork);
-        self.body.clear(&self.shell);
+        self.body.clear();
         self.current.take();
     }
 

@@ -27,8 +27,7 @@ function bindDrag(node, read, pinnable = true) {
     preview.style.top = `${event.clientY - 18}px`;
     const cover = el("span", "drag-preview-cover");
     const artwork =
-      node.querySelector(".cover, .pin-cover") ||
-      node.closest(".home-showcase")?.querySelector(".cover");
+      node.querySelector(".cover, .pin-cover, .detail-cover img");
     cover.append(artwork ? artwork.cloneNode(true) : icon("rufin-tracks-symbolic"));
     const row = media.row || JSON.parse(node.dataset.row);
     preview.append(

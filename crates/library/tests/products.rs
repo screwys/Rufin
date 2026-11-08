@@ -3353,32 +3353,24 @@ async fn home_search_and_radio_results_stay_bounded() {
             .len(),
         1
     );
-    let alternate_showcase_home = fixture
+    // A step forward shows what the showcase offered as next, with the old album before it,
+    // and a step back from where it landed returns to the old album.
+    let initial_showcase = initial_home.showcase.as_ref().expect("initial Showcase");
+    let (landed, stepped) = fixture
         .catalog
-        .home_page(
-            fixture.source,
-            None,
-            1,
-            0,
-            &library::HomeBlockKind::all(),
-            &cancel,
-        )
+        .step_home_showcase(fixture.source, None, 0, true, &cancel)
         .await
-        .expect("alternate Showcase Home page");
-    assert_eq!(initial_home.explore, alternate_showcase_home.explore);
-    let alternate_showcase = alternate_showcase_home
-        .showcase
-        .expect("alternate Showcase");
-    assert_eq!(
-        initial_home
-            .showcase
-            .as_ref()
-            .expect("initial Showcase")
-            .album
-            .album_key,
-        fixture.albums[0]
-    );
-    assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
+        .expect("Showcase step");
+    let stepped = stepped.expect("stepped Showcase");
+    assert_ne!(initial_showcase.current, stepped.current);
+    assert_eq!(stepped.current, initial_showcase.next);
+    assert_eq!(stepped.previous, initial_showcase.current);
+    let (_, back) = fixture
+        .catalog
+        .step_home_showcase(fixture.source, None, landed, false, &cancel)
+        .await
+        .expect("Showcase step back");
+    assert_eq!(back.as_ref(), Some(initial_showcase));
     let alternate_explore_home = fixture
         .catalog
         .home_page(

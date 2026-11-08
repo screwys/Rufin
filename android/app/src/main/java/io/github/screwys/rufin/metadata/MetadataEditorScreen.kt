@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.metadata
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import android.content.Intent
 import android.net.Uri
@@ -42,10 +44,12 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MetadataEditorScreen(model: RufinConnection, item: MetadataItemId, onDismiss: () -> Unit) {
+internal fun MetadataEditorScreen(model: RufinConnection, item: MetadataItemId?,
+    selection: (() -> io.github.screwys.rufin.shared.library.MemberSelection)? = null, onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val connection = remember(model, item) { MetadataConnection(model, context, item, scope, onDismiss) }
+    val connection = remember(model, item) { MetadataConnection(model, context, item, scope, onDismiss, selection) }
     LaunchedEffect(connection) { connection.open() }
     DisposableEffect(connection) { onDispose { connection.close() } }
     var page by remember { mutableIntStateOf(0) }
@@ -174,10 +178,10 @@ private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEdito
             if (state.artworkStorage != ArtworkStorage.SERVER && state.canEmbedArtwork) {
                 Text(translate("Artwork storage"), style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(state.artworkStorage == ArtworkStorage.EMBEDDED,
+                    ChoiceChip(state.artworkStorage == ArtworkStorage.EMBEDDED,
                         { connection.setStorage(ArtworkStorage.EMBEDDED) }, enabled = editable,
                         label = { Text(translate("Embed in track")) })
-                    FilterChip(state.artworkStorage == ArtworkStorage.FOLDER,
+                    ChoiceChip(state.artworkStorage == ArtworkStorage.FOLDER,
                         { connection.setStorage(ArtworkStorage.FOLDER) }, enabled = editable,
                         label = { Text(translate("Save in folder")) })
                 }

@@ -78,6 +78,39 @@ pub(super) async fn refresh_home(
     Ok(accepted())
 }
 
+/// Moves Home's showcase one album forward or back, and answers the showcase it lands on:
+/// its rows before, shown and after, or the web page's showcase.
+pub(super) async fn step_showcase(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        source: sources::SourceId,
+        forward: bool,
+    }
+    let headers = request.headers().clone();
+    let input: Input = body(request).await?;
+    let selected = source::ensure_selected(&products, input.source).await?;
+    let showcase = completion(products.source.step_showcase(selected, input.forward)).await?;
+    let scope = page::PageToken::selected(&products);
+    browser::page(
+        &headers,
+        || {
+            let rows = showcase.iter().flat_map(|showcase| {
+                [&showcase.previous, &showcase.current, &showcase.next].map(|album| {
+                    let mut value =
+                        page::row_json(&products, &Row::Album(album.album.clone()), true, &scope);
+                    value["title"] = json!(album.title);
+                    value
+                })
+            });
+            json!({"rows": rows.collect::<Vec<_>>()})
+        },
+        |form| browser::showcase(&products, &scope, showcase.as_ref(), form),
+    )
+}
+
 async fn folders(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,

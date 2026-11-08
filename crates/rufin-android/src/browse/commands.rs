@@ -35,6 +35,16 @@ impl AndroidLibrary {
             Some(route) => self.selection(route, SelectionScope::Downloads).await?,
             None => MemberSelection::Uris(vec![media_uri].into()),
         };
+        self.download_selection(Arc::new(selection), remove).await
+    }
+
+    /// Downloads the tracks of `selection`, or with `remove` deletes their downloads.
+    pub async fn download_selection(
+        &self,
+        selection: Arc<MemberSelection>,
+        remove: bool,
+    ) -> Result<(), AndroidError> {
+        let selection = Arc::unwrap_or_clone(selection);
         let source = self.source.clone();
         self.runtime
             .spawn(async move {
@@ -177,20 +187,43 @@ impl AndroidLibrary {
         Ok(())
     }
 
-    pub async fn refresh_home(&self, block: library::HomeBlockKind) -> Result<(), AndroidError> {
-        let kind = block
-            .section_kind()
-            .ok_or_else(|| error("This section has no refresh"))?;
+    /// Plays the tracks of `selection` at `placement`, shuffled when `shuffled`.
+    pub fn play_selection(
+        &self,
+        selection: Arc<MemberSelection>,
+        placement: rufin_core::playback::QueuePlacement,
+        shuffled: bool,
+    ) {
+        self.playback.play_selection(
+            rufin_core::playback::PlayRequest::tracks(Arc::unwrap_or_clone(selection), placement)
+                .shuffled(shuffled),
+        );
+    }
+
+    /// Moves Home's showcase one album forward or back, and answers its new rows: the album
+    /// before, the album shown and the album after. Empty when there is no showcase.
+    pub async fn step_showcase(
+        &self,
+        forward: bool,
+    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let selected = self
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        self.source
-            .refresh_home(selected.source_id, kind)
+        let showcase = self
+            .source
+            .step_showcase(selected.source_id, forward)
             .recv()
             .await
             .map_err(error)?
-            .map_err(error)
+            .map_err(error)?;
+        Ok(showcase
+            .map(|showcase| {
+                [showcase.previous, showcase.current, showcase.next]
+                    .map(super::home_album_card)
+                    .into()
+            })
+            .unwrap_or_default())
     }
 
     pub fn configured_routes(&self) -> Vec<AndroidRouteDescriptor> {

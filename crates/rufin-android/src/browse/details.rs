@@ -1,4 +1,4 @@
-use super::records::AndroidDetailLink;
+use super::records::{AndroidDetailLink, AndroidGenreLink};
 use super::*;
 
 impl AndroidLibrary {
@@ -16,6 +16,16 @@ impl AndroidLibrary {
             artist_links: Vec::new(),
             label: label.into(),
             links,
+            genres: Vec::new(),
+        };
+        let genres = |genres: Vec<(library::GenreKey, String)>| {
+            genres
+                .into_iter()
+                .map(|(key, title)| AndroidGenreLink {
+                    title,
+                    route: Route::GenreDetail(key),
+                })
+                .collect()
         };
         let (uri, _) = detail_identity(view.view.route()).unwrap_or_default();
         let link_settings = self.settings.load().application.external_site_links.clone();
@@ -49,12 +59,20 @@ impl AndroidLibrary {
                     .into_iter()
                     .collect();
                 let artwork = playlist.artwork_binding.iter().cloned().collect();
-                summary(
-                    Row::Playlist(PlaylistListRow::Playlist(*playlist)),
-                    artwork,
-                    "Playlist",
-                    links,
-                )
+                let listed = playlist
+                    .genres
+                    .iter()
+                    .map(|genre| (genre.genre_key, genre.name.clone()))
+                    .collect();
+                AndroidDetailSummary {
+                    genres: genres(listed),
+                    ..summary(
+                        Row::Playlist(PlaylistListRow::Playlist(*playlist)),
+                        artwork,
+                        "Playlist",
+                        links,
+                    )
+                }
             }
             Header::Smart(smart) => {
                 let artwork = smart.artwork_binding.iter().cloned().collect();
@@ -83,9 +101,17 @@ impl AndroidLibrary {
                 let label = rufin_core::settings::presentation::album_release_title(
                     album.row.release_class,
                 );
+                let listed = album
+                    .row
+                    .links
+                    .genres
+                    .iter()
+                    .map(|genre| (genre.genre_key, genre.name.clone()))
+                    .collect();
                 AndroidDetailSummary {
                     artist_text: credited.display_text().to_string(),
                     artist_links: AndroidArtistLink::from_detail_links(&credited)?,
+                    genres: genres(listed),
                     ..summary(
                         Row::Album(album.row.clone()),
                         album.row.artwork_binding.iter().cloned().collect(),

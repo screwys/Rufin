@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
@@ -85,26 +86,52 @@ private enum class PlayerSurface { LYRICS, VISUALIZER }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConnection, onNavigate: (io.github.screwys.rufin.shared.rufin_core.Route, String, String?) -> Unit, onMore: () -> Unit, onClose: () -> Unit) {
+internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConnection, onNavigate: (io.github.screwys.rufin.shared.rufin_core.Route, String, String?) -> Unit, onMore: () -> Unit,
+    onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit, tiny: Boolean, onClose: () -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     val scope = rememberCoroutineScope()
     var surface by remember { mutableStateOf<PlayerSurface?>(null) }
     var output by remember { mutableStateOf(false) }
     var queue by remember { mutableStateOf(false) }
-    var configuration by remember { mutableStateOf<PlayerSettingsPage?>(null) }
     var navigation by remember { mutableStateOf<String?>(null) }
     val lyricsScroll = rememberLazyListState()
     val application = player.settings
     var artworkPixels by remember { mutableIntStateOf(0) }
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, artworkPixels)
+    // Flip covers have no room for the cover: it becomes the player's blurred background.
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, if (tiny) 256 else artworkPixels)
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
     val combined = lyricsEnabled && visualizerEnabled && application.rightPanel.combined
-    val background = animateColorAsState(
-        if (application?.display?.fullscreenDynamicBackground == true)
-            lerp(MaterialTheme.colorScheme.surface, artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
-        else MaterialTheme.colorScheme.surface, tween(if (reduceMotion) 0 else 320), label = "fullPlayerColor")
+    // With the dynamic background on, the player takes its cover's colours (the band's dark stops),
+    // white content, translucent boxes and a pastel of the cover for Play; off, the theme's, its
+    // boxes in the secondary container so they stand out from the background.
+    val base = MaterialTheme.colorScheme
+    val stops = artwork?.band?.takeIf { application?.display?.fullscreenDynamicBackground != false }
+    val colourTime = tween<Color>(if (reduceMotion) 0 else 320)
+    val top by animateColorAsState(stops?.get(0) ?: base.surface, colourTime, label = "playerTop")
+    val bottom by animateColorAsState(stops?.get(2) ?: base.surface, colourTime, label = "playerBottom")
+    val accent by animateColorAsState(stops?.let { lerp(it[0], Color.White, .62f) } ?: base.primary, colourTime, label = "playerAccent")
+    val onAccent by animateColorAsState(stops?.get(2) ?: base.onPrimary, colourTime, label = "playerOnAccent")
+    val scheme = if (stops == null) base.copy(surfaceContainerHigh = base.secondaryContainer, primary = accent, onPrimary = onAccent)
+        else base.copy(surface = stops[1], onSurface = io.github.screwys.rufin.browse.OnBand,
+            onSurfaceVariant = io.github.screwys.rufin.browse.OnBand.copy(alpha = .72f),
+            // The player's boxes take the cover's pastel, not a neutral grey.
+            surfaceContainerHigh = accent.copy(alpha = .2f), surfaceContainerHighest = accent.copy(alpha = .26f),
+            secondaryContainer = accent.copy(alpha = .2f), onSecondaryContainer = io.github.screwys.rufin.browse.OnBand,
+            outlineVariant = Color.White.copy(alpha = .28f), primary = accent, onPrimary = onAccent)
+    // The covers either side follow the finger while a swipe changes the track.
+    val currentIndex by remember(player) { derivedStateOf { player.playback?.queue?.currentIndex } }
+    val queueRevision by remember(player) { derivedStateOf { player.playback?.queue?.revision } }
+    var neighbours by remember { mutableStateOf<Pair<ByteArray?, ByteArray?>>(null to null) }
+    LaunchedEffect(currentIndex, queueRevision) {
+        val index = currentIndex ?: return@LaunchedEffect
+        neighbours = runCatching {
+            val before = if (index > 0UL) player.queuePage(index - 1UL)?.rows?.firstOrNull()?.track()?.artworkBinding else null
+            val after = player.queuePage(index + 1UL)?.rows?.firstOrNull()?.track()?.artworkBinding
+            before to after
+        }.getOrDefault(null to null)
+    }
     val verticalOffset = remember { Animatable(0f) }
     val trackOffset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
@@ -114,8 +141,9 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     LaunchedEffect(surface, combined, player.playback?.controls?.playbackOutput) { player.visualizer(surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined) }
     DisposableEffect(player) { onDispose { player.visualizer(false) } }
     BackHandler { if (surface != null) surface = null else onClose() }
+    MaterialTheme(colorScheme = scheme) {
     Surface(Modifier.fillMaxSize().graphicsLayer { translationY = verticalOffset.value }
-        .drawBehind { drawRect(background.value) }
+        .drawBehind { drawRect(Brush.verticalGradient(listOf(top, bottom))) }
         .pointerInput(surface, threshold, reduceMotion) {
             if (surface != null) return@pointerInput
             var distance = 0f
@@ -144,8 +172,8 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
-            if (application?.display?.fullscreenBackgroundImage == true) artwork?.let { artwork ->
-                Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(.12f), contentScale = ContentScale.Crop)
+            if (tiny || application?.display?.fullscreenBackgroundImage == true) artwork?.let { artwork ->
+                Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(if (tiny) .35f else .12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {
                 (if (targetState == null) fadeIn(tween(if (reduceMotion) 0 else 180))
@@ -161,6 +189,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(player.currentItem?.metadata?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                         }
+                        // The track's menu: its details, favorite, playlists and the rest.
                         if (visible == null) PlayerIconButton("rufin-view-more-symbolic", "More actions", onMore)
                         else if (visible == PlayerSurface.LYRICS) LyricsActions(player)
                         else Spacer(Modifier.size(48.dp))
@@ -168,15 +197,37 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                     if (visible == null) {
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                             val viewportHeight = maxHeight
-                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled, it.clipToBounds().graphicsLayer { translationX = trackOffset.value }) { artworkPixels = it } }
+                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled, it.clipToBounds(),
+                                trackOffset.value, neighbours) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
                                 PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp)) { navigation = it }
                                 PlayerControls(player, Modifier.fillMaxWidth())
                             }
-                            if (maxWidth > maxHeight) Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (tiny) Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+                                .graphicsLayer { translationX = trackOffset.value }, verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally) {
+                                // Title, seekbar and transport only; the format chips would push the transport off screen.
+                                PlayerMetadata(player, Modifier.fillMaxWidth()) { navigation = it }
+                                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
+                                PlayerTransport(player)
+                            }
+                            // Wide panes keep the lyrics, or the visualizer, beside the player.
+                            else if (maxWidth >= 600.dp && maxWidth <= maxHeight * 1.6f && (lyricsEnabled || visualizerEnabled)) Row(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                                Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    content(Modifier.weight(1f).fillMaxWidth())
+                                    controls()
+                                }
+                                Spacer(Modifier.width(24.dp))
+                                Box(Modifier.weight(1f).fillMaxHeight().padding(vertical = 8.dp)) {
+                                    if (visualizerEnabled && (!lyricsEnabled || combined)) VisualizerView(player, Modifier.matchParentSize(),
+                                        if (combined) player.settings?.visualizer?.appearance?.fullscreenLyricsOpacity?.toFloat() ?: 1f else 1f)
+                                    if (lyricsEnabled) LyricsPanel(player, lyricsScroll)
+                                }
+                            // Cover beside the controls only when each half has room for the transport.
+                            } else if (maxWidth > maxHeight && maxWidth >= 600.dp) Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 content(Modifier.weight(1f).fillMaxHeight())
                                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) { controls() }
-                            } else if (maxHeight >= 440.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)) {
+                            } else if (maxHeight >= 360.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)) {
                                 Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                     content(Modifier.weight(1f).fillMaxWidth())
                                     controls()
@@ -187,9 +238,8 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 controls()
                             }
                         }
-                        PlayerActions({ output = true }, { configuration = PlayerSettingsPage.PREFERENCES },
-                            { queue = true }, { surface = PlayerSurface.LYRICS }, { surface = PlayerSurface.VISUALIZER },
-                            lyricsEnabled, visualizerEnabled, combined)
+                        PlayerActions(player, { output = true }, { queue = true }, { surface = PlayerSurface.LYRICS },
+                            { surface = PlayerSurface.VISUALIZER }, lyricsEnabled, visualizerEnabled, combined)
                     } else {
                         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp, bottom = 20.dp)
                             .clipToBounds().graphicsLayer { translationX = trackOffset.value }) {
@@ -205,30 +255,49 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                             Spacer(Modifier.weight(1f))
                             PlayerPlayPause(player)
                             Spacer(Modifier.weight(1f))
-                            PlayerFooterButton("rufin-mixer-sliders-symbolic", "Preferences", { configuration = PlayerSettingsPage.PREFERENCES })
+                            PlayerFooterButton("rufin-queue-symbolic", "Queue", { queue = true })
                         }
                     }
                 }
             }
         }
     }
+    }
     if (queue) PlayerQueueSheet(player, onDismiss = { queue = false },
-        onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) })
+        onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) },
+        onSettings = { queue = false; onSettings(it) })
     if (output) PlayerOutputSheet(player) { output = false }
     navigation?.let { uri -> MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == uri }, player,
         mediaUri = uri, onNavigate = { route, title, source -> navigation = null; onNavigate(route, title, source) },
         onDismiss = { navigation = null }) }
-    configuration?.let { PlayerSettingsSheet(player, preferences, it) { configuration = null } }
 }
 
 @Composable
-private fun MainPlayerArtwork(player: PlayerConnection, artwork: PlayerArtwork?, showCurrentLine: Boolean, modifier: Modifier, onArtworkSize: (Int) -> Unit) {
+private fun MainPlayerArtwork(player: PlayerConnection, artwork: PlayerArtwork?, showCurrentLine: Boolean, modifier: Modifier,
+    offset: Float, neighbours: Pair<ByteArray?, ByteArray?>, onArtworkSize: (Int) -> Unit) {
     val reduceMotion = LocalReduceMotion.current
-    val hasLyrics = showCurrentLine && player.currentLyrics?.document?.lines?.isNotEmpty() == true
+    // The line keeps its place until the new track's lyrics are known, so a track change moves
+    // the cover once, not away and back.
+    val lyrics = player.currentLyrics
+    val known = if (lyrics == null || lyrics.loading) null else lyrics.document?.lines?.isNotEmpty() == true
+    var held by remember { mutableStateOf(false) }
+    LaunchedEffect(known) { if (known != null) held = known }
+    val hasLyrics = showCurrentLine && (known ?: held)
     val space by animateDpAsState(if (hasLyrics) 52.dp else 0.dp, tween(if (reduceMotion) 0 else 260), label = "lyricsPreviewSpace")
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            PlayerCover(player, artwork, Modifier.size(minOf(maxWidth, maxHeight)).onSizeChanged { onArtworkSize(maxOf(it.width, it.height)) })
+            val side = minOf(maxWidth, maxHeight)
+            val step = with(LocalDensity.current) { (side + 24.dp).toPx() }
+            val pixels = with(LocalDensity.current) { side.roundToPx() }
+            // The previous and next covers sit a cover's width away and slide in with the drag.
+            if (offset > 0f) neighbours.first?.let { binding ->
+                Artwork(rememberArtwork(binding, player, pixels), Modifier.size(side).graphicsLayer { translationX = offset - step }.clip(CoverShape))
+            }
+            if (offset < 0f) neighbours.second?.let { binding ->
+                Artwork(rememberArtwork(binding, player, pixels), Modifier.size(side).graphicsLayer { translationX = offset + step }.clip(CoverShape))
+            }
+            PlayerCover(player, artwork, Modifier.size(side).graphicsLayer { translationX = offset }
+                .onSizeChanged { onArtworkSize(maxOf(it.width, it.height)) })
         }
         Box(Modifier.fillMaxWidth().height(space), contentAlignment = Alignment.CenterStart) {
             if (showCurrentLine) CurrentLyricsPreview(player)
@@ -257,15 +326,24 @@ private fun PlayerContext(player: PlayerConnection, modifier: Modifier) {
     }
 }
 
+/** The output pill on the left; Lyrics, Visualizer (unless combined with the lyrics) and Queue on the right. */
 @Composable
-private fun PlayerActions(onOutput: () -> Unit, onPreferences: () -> Unit, onQueue: () -> Unit,
+private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onQueue: () -> Unit,
     onLyrics: () -> Unit, onVisualizer: () -> Unit, lyricsEnabled: Boolean, visualizerEnabled: Boolean, combined: Boolean) {
+    val routes = player.service?.outputs?.routes?.collectAsState()?.value.orEmpty()
+    val outputName = routes.firstOrNull { it.selected }?.name ?: translate("Audio output")
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        PlayerFooterButton("rufin-speaker-front-symbolic", "Output", onOutput)
-        PlayerFooterButton("rufin-mixer-sliders-symbolic", "Preferences", onPreferences)
+        Surface(onOutput, Modifier.height(40.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Row(Modifier.padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RufinIcon("rufin-speaker-front-symbolic", translate("Audio output"), Modifier.size(18.dp), glyph = true)
+                Text(outputName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+            }
+        }
         Spacer(Modifier.weight(1f))
-        if (visualizerEnabled && !combined) PlayerFooterButton("rufin-sound-symbolic", "Visualizer", onVisualizer)
         if (lyricsEnabled) PlayerFooterButton("rufin-text-center-symbolic", "Lyrics", onLyrics)
+        if (visualizerEnabled && !combined) PlayerFooterButton("rufin-sound-symbolic", "Visualizer", onVisualizer)
         PlayerFooterButton("rufin-queue-symbolic", "Queue", onQueue)
     }
 }
@@ -353,9 +431,10 @@ private fun PlayerSourceInfo(player: PlayerConnection) {
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         labels.forEach { label ->
-            Surface(shape = CircleShape, color = Color.Transparent, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            // Filled like the player's other boxes, so a chip reads as one against any background.
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Text(label, Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             }
         }
     }
@@ -482,12 +561,13 @@ private fun PlayerTransport(player: PlayerConnection) {
 @Composable
 private fun PlayerPlayPause(player: PlayerConnection) {
     val playing by remember(player) { derivedStateOf { player.playback?.transport?.desiredPlaying == true } }
-    Box(contentAlignment = Alignment.Center) {
-        // A thin ring just outside the button, on the background; it does not move the layout.
-        if (player.refilling) RefillSpinner(72.dp, MaterialTheme.colorScheme.onBackground)
+    // The box is the button's size, so the ring just outside it does not move the layout.
+    Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+        if (player.refilling) RefillSpinner(72.dp, MaterialTheme.colorScheme.primary)
+        // Play takes the accent, at the size of the transport, not oversized.
         FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .92f),
-                contentColor = MaterialTheme.colorScheme.background)) {
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary)) {
             Crossfade(playing, animationSpec = tween(if (LocalReduceMotion.current) 0 else 140), label = "fullPlayerTransport") { active ->
                 RufinIcon(if (active) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
                     translate(if (active) "Pause" else "Play"), Modifier.size(28.dp), glyph = true)

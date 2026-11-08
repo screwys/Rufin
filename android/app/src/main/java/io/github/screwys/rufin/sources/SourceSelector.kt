@@ -22,7 +22,9 @@ import kotlinx.coroutines.CancellationException
 
 @Composable
 internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: BrowseConnection,
-    dismiss: () -> Unit, manage: () -> Unit, add: () -> Unit) {
+    dismiss: () -> Unit, manage: () -> Unit, add: () -> Unit,
+    /** The width of the row it opens from, which the menu spans. */
+    width: androidx.compose.ui.unit.Dp? = null) {
     val sources = model.sources
     val selectedId = sources?.selectedSourceId
     var folders by remember(selectedId) { mutableStateOf<AndroidMusicFolderState?>(null) }
@@ -33,7 +35,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { model.runAction { throw failure } }
     }
-    DropdownMenu(expanded, dismiss, Modifier.widthIn(min = 220.dp, max = 280.dp).heightIn(max = 480.dp)) {
+    DropdownMenu(expanded, dismiss, (width?.let { Modifier.width(it) } ?: Modifier.widthIn(min = 220.dp, max = 280.dp)).heightIn(max = 480.dp)) {
         Text(translate("Select Source"), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (sources == null) CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp))
@@ -53,8 +55,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
             leadingIcon = { RufinIcon("rufin-list-add-symbolic", null, Modifier.size(20.dp)) },
             modifier = Modifier.padding(horizontal = 4.dp))
         folders?.takeIf { it.choices.any { choice -> choice.id != null } }?.let { state ->
-            HorizontalDivider(Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            Text(translate("Server Library"), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            Text(translate("Server Library"), Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             state.choices.forEach { folder ->
                 val selected = folder.id == state.selectedId

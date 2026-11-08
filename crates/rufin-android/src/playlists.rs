@@ -115,6 +115,36 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
+    /// Removes the entries of `selection` from `playlist`.
+    pub async fn remove_playlist_entries(
+        &self,
+        playlist: PlaylistKey,
+        selection: Arc<library::MemberSelection>,
+    ) -> Result<(), AndroidError> {
+        playlists::remove_playlist_entries(&self.source, playlist, Arc::unwrap_or_clone(selection))
+            .recv()
+            .await
+            .map_err(error)?
+            .map(|_| ())
+            .map_err(error)
+    }
+
+    /// Moves `entry` to `position` in `playlist`.
+    pub async fn move_playlist_entry(
+        &self,
+        playlist: PlaylistKey,
+        entry: library::PlaylistEntryKey,
+        position: u64,
+    ) -> Result<(), AndroidError> {
+        let position = usize::try_from(position).map_err(error)?;
+        playlists::move_playlist_entry(&self.source, playlist, entry, position)
+            .recv()
+            .await
+            .map_err(error)?
+            .map(|_| ())
+            .map_err(error)
+    }
+
     pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
         self.catalog
             .playlist_name(playlist)

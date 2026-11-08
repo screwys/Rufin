@@ -2,9 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Icons only Android draws, and the notes beside the icons.
-const NOT_DESKTOP_ICONS: [&str; 3] = [
+const NOT_DESKTOP_ICONS: [&str; 2] = [
     "source-icons.md",
-    "hicolor/scalable/actions/rufin-bookmark-symbolic.svg",
     "hicolor/scalable/actions/rufin-dots-horizontal-symbolic.svg",
 ];
 
@@ -13,8 +12,7 @@ fn main() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let resources = manifest_dir.join("resources");
     let icons = manifest_dir.join("../../resources/icons");
-    let showcase = manifest_dir.join("../../resources/showcase.css");
-    for path in [&resources, &icons, &showcase] {
+    for path in [&resources, &icons] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
@@ -53,11 +51,7 @@ fn main() {
             "    <file compressed=\"true\">{interface}</file>\n"
         ));
     }
-    // The showcase style is shared with the web client, beside the repository resources.
-    manifest.push_str(
-        "    <file alias=\"showcase.css\" compressed=\"true\">../../../resources/showcase.css</file>\n  \
-         </gresource>\n</gresources>\n",
-    );
+    manifest.push_str("  </gresource>\n</gresources>\n");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let manifest_path = out.join("rufin.gresource.xml");
     fs::write(&manifest_path, manifest).expect("write the resource manifest");

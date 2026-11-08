@@ -162,16 +162,19 @@ impl AndroidReading {
 #[derive(uniffi::Enum)]
 pub enum AndroidHomeSectionKind {
     Showcase,
+    /// Album cards.
     Rows,
+    /// Tracks, which Home shows as rows in columns of three.
+    Tracks,
     Genres,
 }
 
-/// One Home section: its title, its rows and the block a refresh reads again.
+/// One Home section: its title and its rows. A showcase's rows are the album before it, the
+/// album it shows and the album after it.
 #[derive(uniffi::Record)]
 pub struct AndroidHomeSection {
     pub title: String,
     pub kind: AndroidHomeSectionKind,
-    pub refresh: Option<library::HomeBlockKind>,
     pub rows: Vec<AndroidBrowseRow>,
 }
 
@@ -186,6 +189,14 @@ pub struct AndroidDetailSummary {
     /// What the collection is, untranslated: an album's release class, Artist, Playlist.
     pub label: String,
     pub links: Vec<AndroidDetailLink>,
+    /// The genres an album or playlist header lists, each opening its genre page.
+    pub genres: Vec<AndroidGenreLink>,
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidGenreLink {
+    pub title: String,
+    pub route: Route,
 }
 
 #[derive(uniffi::Record)]
@@ -218,6 +229,13 @@ pub struct AndroidBreadcrumb {
 pub struct AndroidScrollSection {
     pub title: String,
     pub index: u64,
+}
+
+/// The page's rows from `start` up to, not including, `end`.
+#[derive(uniffi::Record)]
+pub struct AndroidRowRange {
+    pub start: u64,
+    pub end: u64,
 }
 
 #[derive(uniffi::Record)]

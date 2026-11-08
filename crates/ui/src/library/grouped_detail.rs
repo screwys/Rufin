@@ -10,28 +10,23 @@ use crate::widgets::view_model::Rows;
 use library::Row;
 
 use super::collections::library_route_inset;
-use super::detail_showcase::{
-    CollectionDetailShowcase, DetailShowcaseView, collection_detail_showcase,
-    detail_playback_controls,
-};
-use super::playlist_detail::playlist_cover_size;
+use super::detail_showcase::{DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape};
 use super::route_shell::LibraryToolbarProjection;
 use super::routes::{SearchableTrackOptions, TrackListProjection};
 use crate::library::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
+    detail_showcase_cover_size,
 };
 use crate::menus::media_menus::CollectionPlay;
 
 pub struct GroupedDetailData {
     pub key: LibraryListKey,
-    pub kind: &'static str,
-    pub genre_kind: bool,
-    pub kind_controls: Vec<gtk::Widget>,
+    /// The row the header's buttons act on.
+    pub row: Row,
     pub title: String,
     pub artwork: Vec<ArtworkBinding>,
-    pub seed: u32,
     pub summary_items: Vec<(&'static str, String)>,
-    pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
+    pub context_menu: Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>,
     pub rows: Rows<Row>,
     pub table_context: &'static str,
     pub play_label: &'static str,
@@ -68,16 +63,18 @@ impl GroupedDetailView {
         self.toolbar.layout_cycle()
     }
 
-    /// Shows a header read again: its title, artwork and counts.
+    /// Shows a header read again: its title, artwork, counts and the row its buttons act on.
     pub fn show(
         &self,
         shell: &CatalogUi,
+        row: Row,
         title: &str,
         artwork: Vec<ArtworkBinding>,
         summary_items: &[(&str, String)],
     ) {
         self.showcase.set_title(title);
         self.showcase.replace_summary(summary_items);
+        self.showcase.show_row(row);
         self.cover.replace(&shell.artwork, &artwork);
         self.artwork.replace(artwork);
     }
@@ -87,12 +84,9 @@ impl CatalogUi {
     pub fn grouped_detail_view(self: &Rc<Self>, data: GroupedDetailData) -> GroupedDetailView {
         let GroupedDetailData {
             key,
-            kind,
-            genre_kind,
-            kind_controls,
+            row,
             title,
             artwork,
-            seed,
             summary_items,
             context_menu,
             rows,
@@ -103,7 +97,6 @@ impl CatalogUi {
             self.route_width(),
             PRIMARY_ROUTE_MARGIN_START,
         );
-        let cover_size = playlist_cover_size(content_width);
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 18);
         wrapper.add_css_class("route-content");
         wrapper.set_margin_top(ROUTE_TOP_MARGIN);
@@ -114,15 +107,11 @@ impl CatalogUi {
 
         let cover = self.artwork.cover_group_projection_for_artwork(
             &artwork,
-            cover_size,
-            playlist_cover_size(i32::MAX),
+            ShowcaseShape::Detail.cover_size(content_width),
+            detail_showcase_cover_size(i32::MAX),
             true,
         );
-        let showcase_view =
-            DetailShowcaseView::new("playlist-detail-showcase", seed, kind, genre_kind, &title);
-        for control in kind_controls {
-            showcase_view.append_kind_control(&control);
-        }
+        let showcase_view = DetailShowcaseView::new(&title);
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.track_projection(
             rows.clone(),
@@ -137,33 +126,34 @@ impl CatalogUi {
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             rows.play_all(&playback, placement, shuffled);
         });
-        let actions = showcase_view.actions();
-        actions.set_halign(gtk::Align::Start);
-        let cover_controls = detail_playback_controls(&actions, play_label, None, Rc::clone(&play));
-        let context_menu = context_menu.map(|present| {
+        let menu = {
             let play = Rc::clone(&play);
             Rc::new(move |target: &gtk::Widget, position| {
-                present(target, position, Rc::clone(&play));
+                context_menu(target, position, Rc::clone(&play));
             }) as crate::widgets::interactions::ContextMenuOpen
-        });
+        };
         let artwork = Rc::new(RefCell::new(artwork));
-        let showcase = collection_detail_showcase(CollectionDetailShowcase {
-            view: showcase_view.clone(),
-            initial_width: content_width,
-            compact_spacing: 22,
-            wide_spacing: 22,
-            cover: cover.clone(),
-            cover_controls,
-            context_menu,
-            open_cover: {
-                let shell = Rc::clone(self);
-                let artwork = Rc::clone(&artwork);
-                Rc::new(move || {
-                    let bindings = artwork.borrow().clone();
-                    shell.present_full_artwork_group(bindings);
-                })
+        let open_cover = {
+            let shell = Rc::clone(self);
+            let artwork = Rc::clone(&artwork);
+            Rc::new(move || {
+                let bindings = artwork.borrow().clone();
+                shell.present_full_artwork_group(bindings);
+            })
+        };
+        let showcase = showcase_view.mount(
+            self,
+            row,
+            ShowcaseMount {
+                shape: ShowcaseShape::Detail,
+                initial_width: content_width,
+                cover: ShowcaseCover::Group(cover.clone(), open_cover),
+                play_label,
+                play,
+                menu,
+                download: true,
             },
-        });
+        );
         wrapper.append(&library_route_inset(showcase));
 
         let track_section = gtk::Box::new(gtk::Orientation::Vertical, 10);

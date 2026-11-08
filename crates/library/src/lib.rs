@@ -108,7 +108,7 @@ pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, Use
 pub use fingerprint::FingerprintRow;
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
-    HomeSectionKind, HomeSectionRows, HomeTrackRow,
+    HomeSectionKind, HomeSectionRows, HomeShowcase, HomeTrackRow,
 };
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,

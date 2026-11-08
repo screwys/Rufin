@@ -508,13 +508,6 @@
   padding: 8px;
 }
 
-.home-genres {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px;
-}
-
 .album-card.selected .cover {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -542,75 +535,345 @@
   margin-left: auto;
 }
 
-.home-row .album-grid {
-  padding: 0;
-  gap: 10px;
+/* The showcase of Home and the detail pages: a gradient band with the cover over its
+   edge. Under 560 px a detail page's cover takes its own row. */
+.detail-showcase {
+  position: relative;
+  container-type: inline-size;
+  margin-bottom: 22px;
 }
 
 .home-showcase {
+  margin-bottom: 4px;
+}
+
+/* The sizes live under the container, where its width can be queried. */
+.detail-showcase > form {
+  --band: 196px;
+  --cover: clamp(164px, calc(164px + (100cqw - 560px) * 0.3), 224px);
+  --cover-top: 68px;
+  --inset: 24px;
+  --gap: 28px;
+  display: contents;
+}
+
+.home-showcase > form {
+  --cover: clamp(150px, calc(150px + (100cqw - 560px) * 0.23), 196px);
+  --cover-top: 52px;
+  --inset: 48px;
+}
+
+.detail-band {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--band);
+  border-radius: 8px;
+  background-image:
+    linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.3)),
+    linear-gradient(135deg, var(--band-start), var(--band-middle) 58%, var(--band-end));
+}
+
+/* The band is always dark (the cover's colours over near-black), so text on it is white. */
+.detail-heading {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.detail-body {
+  position: relative;
   display: grid;
-  grid-template-columns: min(35%, 200px) minmax(0, 1fr);
-  gap: 20px;
-  padding: 14px;
-  align-items: center;
+  grid-template-columns: var(--cover) minmax(0, 1fr);
+  column-gap: var(--gap);
+  padding: 0 var(--inset);
 }
 
-.showcase-cover .album-grid {
+.detail-cover {
+  width: var(--cover);
+  aspect-ratio: 1;
+  margin-top: var(--cover-top);
+}
+
+.detail-cover > button {
   display: block;
+  width: 100%;
+  height: 100%;
   padding: 0;
-}
-
-.showcase-cover .collection-title,
-.showcase-cover .metadata-link,
-.showcase-cover article p {
-  display: none;
-}
-
-.showcase-heading {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.showcase-heading .eyebrow {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.showcase-title {
-  display: block;
-  padding: 0;
-  margin: 6px 0;
   background: none;
-  font-size: clamp(22px, 3vw, 36px);
-  font-weight: 700;
-  text-align: left;
-  white-space: normal;
 }
 
-.showcase-content > .metadata-link {
-  font-size: 15px;
+.detail-cover .cover {
+  width: 100%;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
+}
+
+.detail-text {
+  min-width: 0;
+}
+
+/* Beside the cover the title ends just above the band's edge, and the rest starts under it. */
+.detail-heading {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  min-height: calc(var(--band) - 12px);
+}
+
+.detail-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detail-heading > .detail-artist {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
   color: inherit;
+  text-overflow: ellipsis;
 }
 
-.showcase-summary {
+.detail-heading > .detail-facts {
+  margin-top: 4px;
+}
+
+/* On Home's band the facts sit in a dark pill, divided by |, readable on any cover and theme. */
+.home-showcase .detail-heading > .detail-facts {
+  align-self: flex-start;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.home-showcase .detail-heading > .detail-facts > span + span::before {
+  content: "|";
+  margin-right: 3px;
+  opacity: 0.45;
+}
+
+.detail-below {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.detail-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 4px 12px;
   font-size: 13px;
+  color: color-mix(in srgb, var(--text) 78%, transparent);
 }
 
-.showcase-summary > span {
+.detail-facts > span {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
-.showcase-summary .icon {
+.detail-facts .icon {
   width: 14px;
   height: 14px;
+}
+
+.detail-genres {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.detail-genre-chip {
+  flex: none;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--text) 88%, transparent);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 20%, transparent);
+}
+
+.detail-genre-chip:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.home-showcase .detail-actions {
+  margin-top: 24px;
+}
+
+.detail-pill,
+.detail-round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 11%, transparent);
+}
+
+.detail-pill {
+  gap: 7px;
+  padding: 0 16px 0 12px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.detail-round {
+  width: 36px;
+  padding: 0;
+}
+
+.detail-pill:hover,
+.detail-round:hover {
+  background: color-mix(in srgb, var(--text) 17%, transparent);
+}
+
+.detail-pill.detail-pill-primary {
+  font-weight: 700;
+  color: white;
+  background: var(--blue);
+}
+
+.detail-pill.detail-pill-primary:hover {
+  background: #4993ec;
+}
+
+.detail-round[aria-pressed="true"] {
+  color: #e01b24;
+  background: color-mix(in srgb, var(--text) 11%, transparent);
+}
+
+.detail-pill .icon,
+.detail-round .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Home's ‹ › over the band's sides while the pointer is on the showcase. */
+.detail-step {
+  position: absolute;
+  top: calc(var(--band) / 2 - 17px);
+  display: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  color: white;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.detail-step:hover {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.detail-step-previous {
+  left: 7px;
+}
+
+.detail-step-next {
+  right: 7px;
+}
+
+.home-showcase:hover .detail-step {
+  display: grid;
+}
+
+.slide-next {
+  animation: showcase-from-right 260ms ease-out;
+}
+
+.slide-previous {
+  animation: showcase-from-left 260ms ease-out;
+}
+
+@keyframes showcase-from-right {
+  from { opacity: 0; transform: translateX(32px); }
+}
+
+@keyframes showcase-from-left {
+  from { opacity: 0; transform: translateX(-32px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-next,
+  .slide-previous {
+    animation: none;
+  }
+}
+
+@container (min-width: 840px) {
+  .detail-title {
+    font-size: 40px;
+  }
+
+  .detail-heading > .detail-artist {
+    font-size: 17px;
+  }
+}
+
+@container (max-width: 559px) {
+  .detail-showcase > form {
+    --band: 136px;
+    --cover: min(196px, 100cqw - 32px);
+    --cover-top: 24px;
+    --inset: 16px;
+  }
+
+  .detail-showcase:not(.home-showcase) .detail-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-showcase:not(.home-showcase) .detail-cover {
+    justify-self: center;
+  }
+
+  /* Under the cover, the title and its line are centred on it. */
+  .detail-showcase:not(.home-showcase) .detail-heading {
+    min-height: 0;
+    margin-top: 22px;
+    color: inherit;
+    align-items: center;
+    text-align: center;
+  }
+
+  .detail-showcase:not(.home-showcase) .detail-below {
+    margin-top: 10px;
+  }
+
+  .home-showcase > form {
+    --band: 150px;
+    --cover: clamp(96px, 30cqw - 10px, 128px);
+    --cover-top: 38px;
+    --gap: 16px;
+  }
+
+  .detail-title {
+    font-size: 26px;
+  }
+
+  .detail-heading > .detail-artist {
+    font-size: 15px;
+  }
 }
 
 .library-page thead {
@@ -634,11 +897,84 @@
   transition: transform 120ms ease-out;
 }
 
-.home-row { padding-bottom: 8px; }
+/* A Home section's entries scroll sideways in one row, the next ones peeking in at the edge.
+   The padding leaves room for the rows' hover, which reaches past their covers and text. */
+.home-row {
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 6px;
+  scrollbar-width: none;
+  margin: 0 -6px;
+  padding: 0 6px 8px;
+}
+.home-row::-webkit-scrollbar {
+  display: none;
+}
+.home-row .album-grid,
+.home-row .row-columns {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  padding: 0;
+}
 .home-row .album-grid {
-  grid-template-rows: max-content;
-  grid-auto-rows: 0;
-  row-gap: 0;
-  padding-bottom: 0;
+  grid-auto-columns: 160px;
+  gap: 10px;
+}
+.home-row .row-columns {
+  grid-auto-columns: 300px;
+  column-gap: 20px;
+}
+.home-row .album-grid > *,
+.home-row .row-columns > * {
+  scroll-snap-align: start;
+}
+.column-row form {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 -6px;
+  border-radius: var(--radius);
+}
+.column-row form:hover,
+.column-row.menu-open form {
+  background: var(--hover);
+}
+.column-row .cover-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  height: 64px;
+  padding: 6px;
+  background: none;
+  text-align: left;
+}
+.column-row .cover {
+  width: 52px;
+  flex: none;
+}
+.column-row .cover-open > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.column-row b,
+.column-row b + span {
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.column-row b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.column-row b + span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.column-row .pin-controls {
+  background: var(--hover);
 }

@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -276,8 +278,8 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { transferError = error.message }
             } }, { transfer = null }) {
-            FilterChip(transferFormat == EqPresetFormat.JSON, { transferFormat = EqPresetFormat.JSON }, label = { Text("JSON") }, colors = equalizerChipColors())
-            FilterChip(transferFormat == EqPresetFormat.APO, { transferFormat = EqPresetFormat.APO }, label = { Text("AutoEQ / APO") }, colors = equalizerChipColors())
+            ChoiceChip(transferFormat == EqPresetFormat.JSON, { transferFormat = EqPresetFormat.JSON }, label = { Text("JSON") })
+            ChoiceChip(transferFormat == EqPresetFormat.APO, { transferFormat = EqPresetFormat.APO }, label = { Text("AutoEQ / APO") })
         }
     }
 
@@ -294,16 +296,6 @@ private fun equalizerButtonColors() = ButtonDefaults.filledTonalButtonColors(
 )
 
 @Composable
-private fun equalizerChipColors() = FilterChipDefaults.filterChipColors(
-    containerColor = equalizerControlColor(),
-    labelColor = MaterialTheme.colorScheme.onSurface,
-    selectedContainerColor = MaterialTheme.colorScheme.primary,
-    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-    disabledContainerColor = equalizerControlColor(),
-    disabledSelectedContainerColor = equalizerControlColor(),
-)
-
-@Composable
 internal fun EqualizerEditor(view: EqView, parametric: Boolean, frequencies: List<Double>, responseCurve: List<Double>,
     response: Boolean, spectrum: Boolean, onResponse: () -> Unit, onSpectrum: () -> Unit,
     preview: (EqEdit) -> Unit, commit: () -> Unit) {
@@ -314,8 +306,8 @@ internal fun EqualizerEditor(view: EqView, parametric: Boolean, frequencies: Lis
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(response, onResponse, label = { Text(translate("Response")) }, colors = equalizerChipColors())
-                FilterChip(spectrum, onSpectrum, label = { Text(translate("Spectrum")) }, enabled = !view.cast, colors = equalizerChipColors())
+                ChoiceChip(response, onResponse, label = { Text(translate("Response")) })
+                ChoiceChip(spectrum, onSpectrum, label = { Text(translate("Spectrum")) }, enabled = !view.cast)
                 Spacer(Modifier.weight(1f))
                 Box {
                     var layouts by remember { mutableStateOf(false) }

@@ -444,6 +444,15 @@ impl ArtworkTile {
         generation
     }
 
+    /// Calls `shown` with each texture the tile shows: its preview, then the cover.
+    pub fn connect_texture(&self, shown: std::rc::Rc<dyn Fn(&gtk::gdk::Texture)>) {
+        self.image.connect_paintable_notify(move |picture| {
+            if let Some(texture) = picture.paintable().and_downcast::<gtk::gdk::Texture>() {
+                shown(&texture);
+            }
+        });
+    }
+
     pub fn set_texture_if_current(&self, generation: u64, texture: gtk::gdk::Texture) -> bool {
         self.set_cover_texture(generation, texture, true)
     }

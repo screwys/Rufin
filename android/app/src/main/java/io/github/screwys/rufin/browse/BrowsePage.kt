@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.*
 
 /** A Home section: its title, rows, and the block its refresh reads again. */
 internal data class HomeSectionItems(val index: ULong, val title: String, val kind: AndroidHomeSectionKind,
-    val refresh: io.github.screwys.rufin.shared.library.HomeBlockKind?, val items: List<BrowseItem>)
+    val items: List<BrowseItem>)
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class BrowsePage(
@@ -176,7 +176,7 @@ internal class BrowsePage(
     private fun homeSections(view: AndroidView, sections: List<AndroidHomeSection>, display: AndroidBrowseDisplay?,
         revision: Int) =
         sections.mapIndexed { section, home ->
-            HomeSectionItems(section.toULong(), home.title, home.kind, home.refresh, home.rows.mapIndexed { index, row ->
+            HomeSectionItems(section.toULong(), home.title, home.kind, home.rows.mapIndexed { index, row ->
                 BrowseItem(row, index.toULong(), view, display, contextTitle = home.title,
                     downloads = revision)
             })

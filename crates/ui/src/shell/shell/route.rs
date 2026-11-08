@@ -268,7 +268,7 @@ impl Shell {
                 return;
             }
             match (read.view.home_sections(), apply_home) {
-                (Some(sections), Some(apply)) => apply(sections),
+                (Some(_), Some(apply)) => apply(std::sync::Arc::clone(&read.view)),
                 _ => shell.replace_mounted_route(route, selected, render_started, move |catalog| {
                     catalog.opened_collection_view(read)
                 }),

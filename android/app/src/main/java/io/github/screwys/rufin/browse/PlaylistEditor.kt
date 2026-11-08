@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -362,6 +364,6 @@ private fun PlaylistCover(bindings: List<ByteArray>, player: PlayerConnection) {
 private fun <T> PlaylistChoice(title: String, values: List<T>, selected: T, label: (T) -> String, enabled: Boolean, choose: (T) -> Unit) {
     Text(title, style = MaterialTheme.typography.titleSmall)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        values.forEach { value -> FilterChip(selected == value, { choose(value) }, enabled = enabled, label = { Text(label(value)) }) }
+        values.forEach { value -> ChoiceChip(selected == value, { choose(value) }, enabled = enabled, label = { Text(label(value)) }) }
     }
 }

@@ -1216,10 +1216,15 @@ impl Context<'_> {
     }
 }
 
-/// The letter-index bucket of a text: A-Z, kana rows, 漢 for ideographs, 한 for Hangul, # for
-/// digits and other ASCII, and … for the rest.
+/// The letter-index bucket of a text: A-Z, kana rows, 漢 for ideographs, Hangul by its initial
+/// consonant (a doubled one under its single), # for digits and other ASCII, and … for the rest.
 pub(crate) fn bucket(text: &str) -> &'static str {
     const KANA: [&str; 10] = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"];
+    // The 19 initial consonants in Unicode's order, each doubled one under its single.
+    const INITIALS: [&str; 19] = [
+        "ㄱ", "ㄱ", "ㄴ", "ㄷ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅂ", "ㅅ", "ㅅ", "ㅇ", "ㅈ", "ㅈ", "ㅊ",
+        "ㅋ", "ㅌ", "ㅍ", "ㅎ",
+    ];
     let Some(first) = text.chars().next() else {
         return "#";
     };
@@ -1263,7 +1268,25 @@ pub(crate) fn bucket(text: &str) -> &'static str {
             KANA[row]
         }
         13312..=19903 | 19968..=40959 | 63744..=64255 | 131072..=205743 => "漢",
-        44032..=55203 | 4352..=4607 | 12593..=12686 => "한",
+        // Syllables, then leading jamo, then the compatibility consonants ㄱ-ㅎ.
+        44032..=55203 => INITIALS[((code - 44032) / 588) as usize],
+        4352..=4370 => INITIALS[(code - 4352) as usize],
+        12593..=12622 => match first {
+            'ㄱ' | 'ㄲ' | 'ㄳ' => "ㄱ",
+            'ㄴ' | 'ㄵ' | 'ㄶ' => "ㄴ",
+            'ㄷ' | 'ㄸ' => "ㄷ",
+            'ㄹ'..='ㅀ' => "ㄹ",
+            'ㅁ' => "ㅁ",
+            'ㅂ' | 'ㅃ' | 'ㅄ' => "ㅂ",
+            'ㅅ' | 'ㅆ' => "ㅅ",
+            'ㅇ' => "ㅇ",
+            'ㅈ' | 'ㅉ' => "ㅈ",
+            'ㅊ' => "ㅊ",
+            'ㅋ' => "ㅋ",
+            'ㅌ' => "ㅌ",
+            'ㅍ' => "ㅍ",
+            _ => "ㅎ",
+        },
         ..128 => "#",
         _ => "…",
     }

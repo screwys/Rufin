@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Route
@@ -33,6 +35,7 @@ import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.player.MiniPlayer
+import io.github.screwys.rufin.player.SidebarPlayer
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.more.MoreContent
 import io.github.screwys.rufin.browse.PinsContent
@@ -42,7 +45,6 @@ import io.github.screwys.rufin.player.PlayerScreen
 import io.github.screwys.rufin.player.PlayerOutputSheet
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.sources.SourceSetupScreen
-import io.github.screwys.rufin.sources.SourceSelector
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.browse.RandomPlaySheet
@@ -97,6 +99,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -127,8 +130,33 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import io.github.screwys.rufin.ui.pageMotion
+import io.github.screwys.rufin.core.AndroidRouteDescriptor
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
 
 private data class BrowseDestination(val root: String, val depth: Int, val location: BrowseLocation?)
+
+/** The bottom tabs; Library shows the configured routes, Saved the pins. */
+private enum class ShellTab(val title: String, val icon: String) {
+    Home("Home", "rufin-home-symbolic"), Search("Search", "rufin-search-symbolic"),
+    Library("Library", "rufin-library-symbolic"), Saved("Saved", "rufin-bookmark-symbolic"),
+}
+
+/** Phones under 600 dp; a compact icon sidebar to 840 dp; the full sidebar beyond. */
+private enum class ShellWidth { Phone, Medium, Expanded }
+
+/** A detail page's scroll, for its top bar: how far it went, and whether Find is open. */
+private class DetailBarState {
+    var offset by mutableFloatStateOf(0f)
+    var finding by mutableStateOf(false)
+}
 
 @Composable
 internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
@@ -166,8 +194,19 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         return
     }
     SideEffect { model.controlNotifications = preferences.applicationSettings?.controlNotificationsEnabled != false }
+    val configuration = LocalConfiguration.current
+    val width = when {
+        configuration.screenWidthDp < 600 -> ShellWidth.Phone
+        configuration.screenWidthDp < 840 -> ShellWidth.Medium
+        else -> ShellWidth.Expanded
+    }
+    // Split views need room for two panes; flip covers get dots for routes and one column.
+    val split = configuration.screenWidthDp >= 600 && configuration.screenHeightDp >= 480
+    val tiny = configuration.screenWidthDp < 420 && configuration.screenHeightDp < 420
+    val short = configuration.screenHeightDp < 600
+    // A phone on its side: a narrower sidebar that holds the player, as Spotify's does.
+    val sidePlayer = width == ShellWidth.Expanded && configuration.screenHeightDp < 480
     var sources by rememberSaveable { mutableStateOf(false) }
-    var sourceMenu by remember { mutableStateOf(false) }
     var editSourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
     var outputs by rememberSaveable { mutableStateOf(false) }
@@ -214,12 +253,15 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }
     }
     var metadata by remember { mutableStateOf<BrowseItem?>(null) }
-    var scrolled by remember { mutableStateOf(false) }
     var moreStack by rememberSaveable { mutableStateOf(listOf(MoreDestination.Root)) }
     val moreDestination = moreStack.last()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    fun closeDrawer() { scope.launch { drawer.close() } }
     fun openMore(destination: MoreDestination) {
         moreStack = generateSequence(destination) { it.parent }.toList().reversed()
         browse.section = AppSection.More
+        closeDrawer()
     }
     LaunchedEffect(model.more.startupPeriod) {
         if (model.more.startupPeriod != null) {
@@ -227,10 +269,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             openMore(MoreDestination.Overview)
         }
     }
-    var routeMenu by remember { mutableStateOf(false) }
-    val routePosition = animateFloatAsState(
-        browse.configuredRoutes.indexOfFirst { it.id == browse.rootId }.coerceAtLeast(0).toFloat(),
-        tween(if (reduceMotion) 0 else 180), label = "libraryTab")
     val routeState = rememberSaveableStateHolder()
     val detailState = rememberSaveableStateHolder()
     val rootPages = browse.routes.filter { route ->
@@ -253,67 +291,135 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val pinsPage = remember(model, browse) {
         val options = BrowseOptions()
         val location = BrowseLocation(Route.Home, "Pins", options)
-        BrowsePage(model, browse, location, options, pinsLifetime, pins = true)
+        // Always read: the sidebar lists the Saved entries as well as the Saved tab.
+        BrowsePage(model, browse, location, options, pinsLifetime, pins = true).also { it.active = true }
     }
     LaunchedEffect(pinsPage) { pinsPage.observe() }
-    val destination = BrowseDestination(browse.rootId, browse.details.size, browse.details.lastOrNull())
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
-    val density = LocalDensity.current
-    val playerPadding = if (hasMedia) maxOf(52.dp, with(density) {
-        MaterialTheme.typography.bodyMedium.lineHeight.toDp() + MaterialTheme.typography.bodySmall.lineHeight.toDp()
-    } + 3.dp) + 10.dp else 0.dp
     LaunchedEffect(translation) { browse.refreshLabels(translation) }
+    // The Library tab returns to the route it last showed.
+    val libraryRoutes = sidebarRoutes(browse).filter { it.id != "Home" }
+    var libraryRoot by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(browse.rootId) { if (browse.rootId != "Home") libraryRoot = browse.rootId }
+    val tab = when (browse.section) {
+        AppSection.Search -> ShellTab.Search
+        AppSection.Pins -> ShellTab.Saved
+        AppSection.More -> null
+        AppSection.Browse -> if (browse.rootId == "Home") ShellTab.Home else ShellTab.Library
+    }
+    fun leaveInput() { keyboard?.hide(); focusManager.clearFocus(); searchExpanded = false }
     fun selectRoute(id: String) {
-        routeMenu = false
-        keyboard?.hide(); focusManager.clearFocus(); searchExpanded = false
+        leaveInput()
         if (id == "Search") { browse.searchText = ""; browse.section = AppSection.Search }
         else { browse.chooseRoot(id); browse.section = AppSection.Browse }
+        closeDrawer()
     }
-    BackHandler(searchExpanded || browse.detail || browse.section != AppSection.Browse) {
-        when {
-            browse.section == AppSection.More && moreStack.size > 1 -> moreStack = moreStack.dropLast(1)
-            searchExpanded -> searchExpanded = false
-            browse.section != AppSection.Browse -> browse.section = AppSection.Browse
-            else -> browse.back()
+    fun selectTab(selected: ShellTab) {
+        leaveInput()
+        when (selected) {
+            ShellTab.Home -> { browse.chooseRoot("Home"); browse.section = AppSection.Browse }
+            ShellTab.Library -> {
+                val root = libraryRoot?.takeIf { id -> libraryRoutes.any { it.id == id } } ?: libraryRoutes.firstOrNull()?.id
+                if (root != null) { browse.chooseRoot(root); browse.section = AppSection.Browse }
+            }
+            ShellTab.Search -> {
+                if (tab == ShellTab.Search) focusSearch++ else { browse.searchText = ""; browse.section = AppSection.Search }
+            }
+            ShellTab.Saved -> browse.section = AppSection.Pins
         }
     }
+    BackHandler(drawer.isOpen || searchExpanded || browse.detail || browse.section != AppSection.Browse || browse.rootId != "Home") {
+        when {
+            drawer.isOpen -> closeDrawer()
+            browse.section == AppSection.More && moreStack.size > 1 -> moreStack = moreStack.dropLast(1)
+            searchExpanded -> searchExpanded = false
+            browse.section == AppSection.Browse && browse.detail -> browse.back()
+            else -> selectTab(ShellTab.Home)
+        }
+    }
+    // Scrolling down folds the bottom bar and the mini player into one row; up unfolds it.
+    // Short screens start folded, also when a flip phone closes onto its cover screen.
+    val dockedState = rememberSaveable(short) { mutableStateOf(short) }
+    var docked by dockedState
+    val reveal = remember { androidx.compose.animation.core.Animatable(if (fullPlayer) 1f else 0f) }
+    LaunchedEffect(fullPlayer) {
+        reveal.animateTo(if (fullPlayer) 1f else 0f, if (reduceMotion) tween(0)
+            else androidx.compose.animation.core.spring(dampingRatio = .86f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow))
+    }
+    val screenHeight = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
+    val onReveal: (Float) -> Unit = { delta -> scope.launch { reveal.snapTo((reveal.value - delta / screenHeight).coerceIn(0f, 1f)) } }
+    val onRevealEnd: (Boolean) -> Unit = { opened ->
+        if (opened || reveal.value > .25f) fullPlayer = true else scope.launch { reveal.animateTo(0f) }
+    }
+    val density = LocalDensity.current
+    // Made again with the state it writes: a change of screen height makes a new one.
+    val dockScroll = remember(density, dockedState) {
+        val threshold = with(density) { 48.dp.toPx() }
+        object : NestedScrollConnection {
+            var travel = 0f
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (consumed.y == 0f) return Offset.Zero
+                travel = if (consumed.y < 0 == travel < 0) travel + consumed.y else consumed.y
+                if (travel < -threshold) dockedState.value = true else if (travel > threshold) dockedState.value = false
+                return Offset.Zero
+            }
+        }
+    }
+    // Home's bar is clear over its band and takes the surface once the band has scrolled away.
+    var homeOffset by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(browse.rootId, browse.section) { homeOffset = 0f }
+    val homeScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                homeOffset = (homeOffset - consumed.y).coerceAtLeast(0f)
+                return Offset.Zero
+            }
+        }
+    }
+    val phone = width == ShellWidth.Phone
+    val dockHeight = when {
+        !phone -> if (hasMedia && !sidePlayer) 84.dp else 0.dp
+        docked -> 72.dp
+        else -> 64.dp + if (hasMedia) 60.dp else 0.dp
+    }
+    val sidebarActions = remember(browse) {
+        SidebarActions(route = { selectRoute(it) }, saved = { item ->
+            browse.section = AppSection.Browse; browse.open(item); closeDrawer()
+        }, more = { openMore(it) }, addSource = { editSourceId = null; sources = true; closeDrawer() })
+    }
+    // Home and the detail pages draw their band under a transparent top bar.
+    // In a split view the detail pane draws its own bar, and the list keeps the shell's.
+    val overlay = browse.section == AppSection.Browse && (browse.rootId == "Home" || browse.detail && !split)
+    val barHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
     BrowseGestureSettings(preferences.swipeLeft, preferences.swipeRight, browse, { playlist = it }) {
-        Scaffold(topBar = {
-            TopAppBar(expandedHeight = 48.dp, navigationIcon = {
-                if (browse.section == AppSection.Browse && browse.detail) PlayerIconButton("rufin-go-previous-symbolic", "Back", browse::back)
-                else if (browse.section == AppSection.More && moreDestination != MoreDestination.Root)
-                    PlayerIconButton("rufin-go-previous-symbolic", "Back", { moreStack = moreStack.dropLast(1) })
-                else Box(Modifier.padding(start = 4.dp)) {
-                    Image(painterResource(R.drawable.app_icon), label("Select Source"),
-                        Modifier.size(48.dp).combinedClickable(onClick = { sourceMenu = true },
-                            onLongClick = { sourceMenu = true }, onLongClickLabel = label("Select Source")).padding(10.dp))
-                    SourceSelector(sourceMenu, model, browse, { sourceMenu = false },
-                        manage = { openMore(MoreDestination.Library) },
-                        add = { editSourceId = null; sources = true })
+    ModalNavigationDrawer(drawerContent = {
+        ModalDrawerSheet(Modifier.width(304.dp)) { Sidebar(model, browse, player, pinsPage, sidebarActions) }
+    }, drawerState = drawer, gesturesEnabled = drawer.isOpen) {
+    // The Surface gives the shell its background and its text colour.
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Row(Modifier.fillMaxSize()) {
+        when (width) {
+            ShellWidth.Medium -> SidebarRail(browse, { scope.launch { drawer.open() } }, ::selectRoute,
+                { selectTab(ShellTab.Search) }, { selectTab(ShellTab.Saved) })
+            ShellWidth.Expanded -> PermanentDrawerSheet(Modifier.width(if (sidePlayer) 240.dp else 300.dp).statusBarsPadding()) {
+                val withSearch = remember(sidebarActions) {
+                    SidebarActions(sidebarActions.route, sidebarActions.saved, sidebarActions.more, sidebarActions.addSource) { selectTab(ShellTab.Search) }
                 }
-            }, title = {
-                if (searchExpanded || browse.section == AppSection.Search) BasicTextField(
-                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus).onFocusChanged { if (it.isFocused) searchExpanded = true },
-                    value = if (browse.section == AppSection.Search) browse.searchText else browse.filter,
-                    onValueChange = { if (browse.section == AppSection.Search) browse.searchText = it else browse.filter = it },
-                    singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        if (browse.section == AppSection.Search) browse.submitSearch()
-                        focusManager.clearFocus(); keyboard?.hide(); searchExpanded = false
-                    }),
-                    decorationBox = { input -> Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                        if ((if (browse.section == AppSection.Search) browse.searchText else browse.filter).isBlank())
-                            Text(label("Search"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        input()
-                    } })
-                else Text(when (browse.section) {
-                    AppSection.Browse -> browse.current?.title ?: label("Library")
-                    AppSection.Search -> label("Search")
-                    AppSection.Pins -> label("Pins")
-                    AppSection.More -> label(moreDestination.title)
-                }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
-            }, actions = {
+                Sidebar(model, browse, player, pinsPage, withSearch, Modifier.weight(1f))
+                if (sidePlayer && hasMedia) SidebarPlayer(player, { fullPlayer = true }, { outputs = true },
+                    Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+            }
+            ShellWidth.Phone -> {}
+        }
+    Box(Modifier.weight(1f).fillMaxHeight()) {
+        CompositionLocalProvider(LocalPlayerBottomPadding provides dockHeight, LocalTinyScreen provides tiny) {
+        Column(Modifier.fillMaxSize()) {
+            if (!overlay) ShellTopBar(browse, moreDestination, searchExpanded, searchFocus, phone,
+                onMenu = { scope.launch { drawer.open() } },
+                onBack = { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) else selectTab(ShellTab.Home) },
+                onSearch = { if (searchExpanded) leaveInput() else { searchExpanded = true; focusSearch++ } },
+                onSubmit = { if (browse.section == AppSection.Search) browse.submitSearch(); leaveInput() },
+                onExpand = { searchExpanded = true }) {
                 if (browse.section == AppSection.More && moreDestination == MoreDestination.Theme) {
                     IconButton({ importTheme.launch(arrayOf("*/*")) }, enabled = preferences.state != null) {
                         RufinIcon("rufin-document-open-symbolic", translate("Import theme"))
@@ -336,189 +442,145 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
                     })
                 }
-                if (browse.section != AppSection.More) PlayerIconButton(if (searchExpanded) "rufin-window-close-symbolic" else "rufin-search-symbolic",
-                    if (searchExpanded) "Close" else "Search", {
-                        when {
-                            searchExpanded -> { searchExpanded = false; focusManager.clearFocus(); keyboard?.hide() }
-                            browse.section == AppSection.Pins -> { browse.section = AppSection.Search; searchExpanded = true; focusSearch++ }
-                            else -> { searchExpanded = true; focusSearch++ }
-                        }
-                    })
-                if (browse.section == AppSection.Browse && (browse.detail || browse.rootId != "Home"))
-                    PlayerIconButton("rufin-filter-symbolic", "Customize", { sortPage = browse.visiblePage; sort = true })
-            })
-        }, bottomBar = {
-            Column {
-                Row(Modifier.fillMaxWidth().navigationBarsPadding(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    listOf(Triple(AppSection.Browse, label("Library"), "rufin-library-symbolic"),
-                        Triple(AppSection.Search, label("Search"), "rufin-search-symbolic"),
-                        Triple(AppSection.Pins, label("Pins"), "rufin-bookmark-symbolic"),
-                        Triple(AppSection.More, label("More"), "rufin-dots-horizontal-symbolic")).forEach { (section, title, icon) ->
-                        val selected = browse.section == section && !(section == AppSection.Browse && browse.detail)
-                        val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            animationSpec = tween(if (reduceMotion) 0 else 100), label = "navigationTint")
-                        Box(Modifier.weight(1f)) {
-                        Column(Modifier.fillMaxWidth().combinedClickable(role = Role.Tab,
-                            interactionSource = remember { MutableInteractionSource() }, indication = ripple(bounded = false, radius = 28.dp),
-                            onLongClick = if (section == AppSection.Browse) ({ routeMenu = true }) else null,
-                            onLongClickLabel = if (section == AppSection.Browse) label("Library") else null, onClick = {
-                            when {
-                                section == AppSection.Browse && browse.detail -> {
-                                    keyboard?.hide(); focusManager.clearFocus(); routeMenu = false; searchExpanded = false
-                                    browse.chooseRoot("Home"); browse.section = AppSection.Browse
-                                }
-                                section == AppSection.Browse && selected -> {
-                                    keyboard?.hide(); focusManager.clearFocus(); searchExpanded = false
-                                    routeMenu = true
-                                }
-                                section == AppSection.Search && selected -> focusSearch++
-                                section == AppSection.More && selected -> openMore(MoreDestination.Root)
-                                else -> {
-                                    keyboard?.hide(); focusManager.clearFocus(); routeMenu = false
-                                    if (section == AppSection.Search) browse.searchText = ""
-                                    if (section == AppSection.More) moreStack = listOf(MoreDestination.Root)
-                                    browse.section = section; searchExpanded = false
-                                }
-                            }
-                        }).semantics { this.selected = selected }.heightIn(min = 56.dp).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
-                            RufinIcon(icon, null, Modifier.size(24.dp), tint)
-                            Text(title, color = tint, style = MaterialTheme.typography.labelSmall)
-                        }
-                        if (section == AppSection.Browse) DropdownMenu(routeMenu, { routeMenu = false }, Modifier.widthIn(min = 180.dp, max = 280.dp)) {
-                            browse.configuredRoutes.forEach { route -> DropdownMenuItem(
-                                text = { Text(route.title) }, onClick = { selectRoute(route.id) },
-                                leadingIcon = { RufinIcon(if (route.id == browse.rootId) route.selectedIconName else route.iconName, null,
-                                    tint = if (route.id == browse.rootId) MaterialTheme.colorScheme.primary else LocalContentColor.current) }) }
-                        }
-                        }
-                    }
-                }
+                if (browse.section == AppSection.Browse) PlayerIconButton("rufin-filter-symbolic", "Customize", { sortPage = browse.visiblePage; sort = true })
             }
-        }, floatingActionButton = {
-            if (browse.section == AppSection.Browse && browse.rootId == "Home" && !browse.detail && !scrolled)
-                FloatingActionButton({ random = true }, Modifier.padding(bottom = playerPadding)) { RufinIcon("rufin-random-symbolic", label("Play random")) }
-        }) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-            CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding) {
-            Column(Modifier.fillMaxSize()) {
-                if (!model.connect.operationActive && connectState?.let { it.connecting } == true) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(model.connect::showOperation) { Text(label("Open Rufin Connect")) }
+            val refreshState = rememberPullToRefreshState()
+            val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
+                it.sourceId == model.sources?.selectedSourceId
+            } == true
+            // Pull-to-refresh stays on route roots; on detail pages a pull shows the Find field.
+            val canRefresh = model.ready && model.sources?.selectedSourceId != null &&
+                browse.section == AppSection.Browse && !browse.detail && !fullPlayer
+            Box(Modifier.weight(1f).nestedScroll(dockScroll).nestedScroll(homeScroll).pullToRefresh(isRefreshing = refreshing, state = refreshState,
+                enabled = canRefresh && !model.sourceBusy, onRefresh = model::refresh)) {
+                // Each side of a transition shows the root it was composed for.
+                val rootContent: @Composable (String, Boolean) -> Unit = { root, shown ->
+                    CompositionLocalProvider(LocalOverlayBarHeight provides if (root == "Home") barHeight else 0.dp) {
+                        RootContent(model, browse, player, root, rootPages, routeState, libraryRoutes, tiny, shown && !fullPlayer,
+                            onMenu = { menu = it }, onPlaylist = { playlist = it }, onAddSource = { editSourceId = null; sources = true },
+                            onRoutes = { openMore(MoreDestination.Routes) }, onSelect = ::selectRoute)
                     }
                 }
-                model.startupError?.let { failure ->
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        ErrorNotice(failure)
-                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(model::retryStartup) { Text(label("Retry")) }
+                if (browse.section == AppSection.Browse) {
+                    val top = browse.details.lastOrNull()
+                    if (split && top != null) Row(Modifier.fillMaxSize()) {
+                        // The list beside the detail: the root, or the detail it was opened from.
+                        Box(Modifier.weight(.42f).fillMaxHeight()) {
+                            val parent = browse.details.getOrNull(browse.details.size - 2)
+                            if (parent == null) rootContent(browse.rootId, false)
+                            else detailState.SaveableStateProvider("${browse.details.size - 1}:${parent.route}") {
+                                BrowsePageContent(model, browse, player, parent, parent.options, false,
+                                    { menu = it }, { playlist = it }, {}, owner = detailPages[parent])
+                            }
                         }
-                    }
-                }
-                model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading }?.let {
-                    val progress = model.sourceProgress
-                    val total = progress?.total
-                    if (progress != null && total != null && total > 0UL) {
-                        LinearProgressIndicator(progress = {
-                            (progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        }, modifier = Modifier.fillMaxWidth())
-                    } else LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(it, Modifier.weight(1f).padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                val refreshState = rememberPullToRefreshState()
-                val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
-                    it.sourceId == model.sources?.selectedSourceId
-                } == true
-                val canRefresh = model.ready && model.sources?.selectedSourceId != null &&
-                    browse.section != AppSection.More && !fullPlayer
-                Box(Modifier.weight(1f).pullToRefresh(isRefreshing = refreshing, state = refreshState,
-                    enabled = canRefresh && !model.sourceBusy, onRefresh = model::refresh)) {
-                    if (browse.section == AppSection.Browse) AnimatedContent(
-                        targetState = destination, modifier = Modifier.fillMaxSize(), label = "libraryNavigation", transitionSpec = {
+                        VerticalDivider()
+                        Box(Modifier.weight(.58f).fillMaxHeight()) {
+                            // Under the shell's bar, the pane's own bar takes no status-bar inset.
+                            DetailPane(model, browse, player, top, browse.details.size, detailPages[top], detailState, 56.dp, !fullPlayer,
+                                { menu = it }, { playlist = it }, { sortPage = it; sort = true })
+                        }
+                    } else AnimatedContent(
+                        targetState = BrowseDestination(browse.rootId, browse.details.size, top), modifier = Modifier.fillMaxSize(),
+                        label = "libraryNavigation", transitionSpec = {
                             if (initialState.depth == 0 && targetState.depth == 0)
                                 fadeIn(tween(if (reduceMotion) 0 else 180)) togetherWith fadeOut(tween(if (reduceMotion) 0 else 180))
                             else pageMotion(targetState.depth > initialState.depth, reduceMotion)
-                        }, contentKey = { it.location ?: it.root },
+                        }, contentKey = { it.location ?: if (it.root == "Home") "Home" else "Library" },
                     ) { visible ->
                         val location = visible.location
-                        if (location == null) Column(Modifier.fillMaxSize()) {
-                            if (browse.configuredRoutes.isNotEmpty()) BrowseRouteTabs(browse, routePosition) { id -> selectRoute(id) }
-                            val routeId = visible.root
-                            Box(Modifier.weight(1f).fillMaxWidth()) {
-                                if (browse.library == null) {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        CircularProgressIndicator(Modifier.semantics { contentDescription = label("Loading...") })
-                                    }
-                                } else if (model.sources?.sources?.isEmpty() == true && routeId !in listOf("History", "Playlists", "SmartPlaylists")) {
-                                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                        RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
-                                        Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-                                        Button({ editSourceId = null; sources = true }) { Text(translate("Add Source")) }
-                                    }
-                                } else
-                                browse.routes.firstOrNull { it.id == routeId }?.let { route ->
-                                val options = remember(route.id) { browse.optionsFor(route.id) }
-                                val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
-                                routeState.SaveableStateProvider(route.id) {
-                                    BrowsePageContent(model, browse, player, location, options, !fullPlayer && !browse.detail && route.id == browse.rootId,
-                                        { menu = it }, { playlist = it }, { scrolled = it }, owner = rootPages[route.id])
-                                }
-                                } ?: if (browse.configuredRoutes.none { it.id != "Search" }) Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center) {
-                                    RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                                    TextButton({ openMore(MoreDestination.Routes) }) { Text(label("Library")) }
-                                } else Spacer(Modifier.fillMaxSize())
-                            }
-                        } else detailState.SaveableStateProvider("${visible.depth}:${location.route}") {
-                            val page = remember(location) { detailPages[location] }
-                            DisposableEffect(location) {
-                                onDispose { if (location !in browse.details) detailState.removeState("${visible.depth}:${location.route}") }
-                            }
-                            Surface(Modifier.fillMaxSize()) {
-                                BrowsePageContent(model, browse, player, location, location.options,
-                                    !fullPlayer && browse.details.lastOrNull() === location,
-                                    { menu = it }, { playlist = it }, { scrolled = it }, owner = page)
-                            }
-                        }
+                        if (location == null) rootContent(visible.root, visible.root == browse.rootId)
+                        else DetailPane(model, browse, player, location, visible.depth, detailPages[location], detailState, barHeight,
+                            !fullPlayer && browse.details.lastOrNull() === location, { menu = it }, { playlist = it }, { sortPage = it; sort = true })
                     }
-                if (browse.section != AppSection.Browse) Box(Modifier.fillMaxSize()) {
-                    if (browse.section == AppSection.More) {
-                        routeState.SaveableStateProvider("section:More") {
-                        MoreContent(model, preferences, player, browse, moreDestination, { moreStack = moreStack + it },
-                            onAddSource = { editSourceId = null; sources = true }, onEditSource = { editSourceId = it; sources = true },
-                            onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
+                    val homeBar by animateColorAsState(if (homeOffset > with(density) { 160.dp.toPx() }) MaterialTheme.colorScheme.surface
+                        else Color.Transparent, label = "homeBar")
+                    val overBand = homeOffset <= with(density) { 160.dp.toPx() }
+                    if (browse.rootId == "Home" && !browse.detail) OverlayBar(homeBar, onBand = overBand) {
+                        if (phone) PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", { scope.launch { drawer.open() } })
+                        Text(label("Home"), Modifier.weight(1f).padding(start = if (phone) 2.dp else 16.dp), maxLines = 1,
+                            style = MaterialTheme.typography.titleLarge)
+                        PlayerIconButton("rufin-random-symbolic", "Play random", { random = true })
+                    }
+                } else Box(Modifier.fillMaxSize()) {
+                    when (browse.section) {
+                        AppSection.More -> routeState.SaveableStateProvider("section:More") {
+                            MoreContent(model, preferences, player, browse, moreDestination, { moreStack = moreStack + it },
+                                onAddSource = { editSourceId = null; sources = true }, onEditSource = { editSourceId = it; sources = true },
+                                onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
                         }
-                    } else if (browse.section == AppSection.Search) {
-                        SearchContent(model, preferences, browse, player, { menu = it }, { playlist = it }, { scrolled = it })
-                    } else if (browse.section == AppSection.Pins) {
-                        routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
+                        AppSection.Search -> SearchContent(model, preferences, browse, player, { menu = it }, { playlist = it }, {})
+                        AppSection.Pins -> routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
+                        AppSection.Browse -> {}
                     }
                 }
-                    if (canRefresh) PullToRefreshDefaults.Indicator(state = refreshState, isRefreshing = refreshing,
-                        modifier = Modifier.align(Alignment.TopCenter))
-                }
-            }
-            }
-            if (hasMedia) Box(Modifier.align(Alignment.BottomCenter)) { MiniPlayer(player, { fullPlayer = true }, { outputs = true }) }
+                // The spinner follows the pull only; the refresh's progress is the toast's.
+                if (canRefresh) PullToRefreshDefaults.Indicator(state = refreshState, isRefreshing = false,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = if (overlay) barHeight else 0.dp))
             }
         }
+        }
+        // Connect, startup errors and source progress are toasts over the content, above the bar,
+        // so they never take the status bar or push the page's own bar down.
+        Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = dockHeight + 8.dp)
+            .padding(horizontal = 16.dp).widthIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val toast: @Composable (@Composable ColumnScope.() -> Unit) -> Unit = { content ->
+                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 4.dp) { Column(content = content) }
+            }
+            if (!model.connect.operationActive && connectState?.let { it.connecting } == true) toast {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(model.connect::showOperation) { Text(label("Open Rufin Connect")) }
+                }
+            }
+            model.startupError?.let { failure -> toast {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    ErrorNotice(failure)
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(model::retryStartup) { Text(label("Retry")) }
+                    }
+                }
+            } }
+            model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading }?.let { status -> toast {
+                Text(status, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
+                val progress = model.sourceProgress
+                val total = progress?.total
+                if (progress != null && total != null && total > 0UL) {
+                    LinearProgressIndicator(progress = {
+                        (progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    }, modifier = Modifier.fillMaxWidth())
+                } else LinearProgressIndicator(Modifier.fillMaxWidth())
+            } }
+        }
+        Box(Modifier.align(Alignment.BottomCenter)) {
+            if (phone) PhoneDock(tab, docked, hasMedia, player, ::selectTab, { docked = false },
+                { fullPlayer = true }, { outputs = true }, onReveal, onRevealEnd)
+            else if (hasMedia && !sidePlayer) MiniPlayer(player, { fullPlayer = true }, { outputs = true },
+                Modifier.navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 8.dp), onReveal = onReveal, onRevealEnd = onRevealEnd)
+        }
     }
-    AnimatedVisibility(fullPlayer, enter = slideInVertically(tween(if (reduceMotion) 0 else 220)) { it }, exit = slideOutVertically(tween(if (reduceMotion) 0 else 180)) { it }) {
-        PlayerScreen(player, preferences, onNavigate = { route, title, _ ->
+    }
+    }
+    }
+    }
+    // The player rises with the finger from the mini player and settles with a spring.
+    if (fullPlayer || reveal.value > 0f) Box(Modifier.fillMaxSize().graphicsLayer {
+        translationY = (1f - reveal.value) * size.height
+        alpha = (reveal.value * 3f).coerceAtMost(1f)
+    }) {
+        PlayerScreen(player, preferences, onSettings = { destination -> fullPlayer = false; openMore(destination) }, onNavigate = { route, title, _ ->
             fullPlayer = false
+            browse.section = AppSection.Browse
             browse.openRoute(route, title)
         }, onMore = {
             player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
-        }) { fullPlayer = false }
+        }, tiny = tiny) { fullPlayer = false }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
     if (random) RandomPlaySheet(model, browse) { random = false }
     menu?.let { item -> BrowseMenuSheet(model, browse, item, player, { menu = null }, { playlist = item; menu = null }, { metadata = item; menu = null },
-        onNavigate = { route, title, _ -> menu = null; fullPlayer = false; browse.openRoute(route, title) }) }
+        onNavigate = { route, title, _ -> menu = null; fullPlayer = false; browse.section = AppSection.Browse; browse.openRoute(route, title) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false }) { name, sourceId, public ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
@@ -545,11 +607,247 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
 }
 
+/** Flip covers and other tiny screens: route dots, one-column lists. */
+internal val LocalTinyScreen = compositionLocalOf { false }
+
+/** The top bar of route roots, Search, Saved and the pages of the ☰ menu: route tools live here. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, searchExpanded: Boolean, searchFocus: FocusRequester,
+    phone: Boolean, onMenu: () -> Unit, onBack: () -> Unit, onSearch: () -> Unit, onSubmit: () -> Unit, onExpand: () -> Unit,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val searching = browse.section == AppSection.Search
+    TopAppBar(expandedHeight = 56.dp, navigationIcon = {
+        when {
+            browse.section == AppSection.More && more != MoreDestination.Root ->
+                PlayerIconButton("rufin-go-previous-symbolic", "Back", onBack)
+            phone -> PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", onMenu)
+        }
+    }, title = {
+        if (searchExpanded || searching) BasicTextField(
+            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus).onFocusChanged { if (it.isFocused) onExpand() },
+            value = if (searching) browse.searchText else browse.filter,
+            onValueChange = { if (searching) browse.searchText = it else browse.filter = it },
+            singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+            decorationBox = { input -> Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                if ((if (searching) browse.searchText else browse.filter).isBlank())
+                    Text(translate(if (searching) "Search everything" else "Search"), style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                input()
+            } })
+        else Text(when (browse.section) {
+            AppSection.Browse -> translate("Library")
+            AppSection.Search -> translate("Search")
+            AppSection.Pins -> translate("Saved")
+            AppSection.More -> translate(more.title)
+        }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+    }, actions = {
+        if (browse.section == AppSection.Browse) PlayerIconButton(if (searchExpanded) "rufin-window-close-symbolic" else "rufin-search-symbolic",
+            if (searchExpanded) "Close" else "Search", onSearch)
+        actions()
+    })
+}
+
+/** Home or the Library tab's routes: route tabs under the bar, and a swipe moves between routes. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RootContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, root: String,
+    pages: Map<String, BrowsePage>, routeState: androidx.compose.runtime.saveable.SaveableStateHolder,
+    routes: List<AndroidRouteDescriptor>, tiny: Boolean, active: Boolean,
+    onMenu: (BrowseItem) -> Unit, onPlaylist: (BrowseItem) -> Unit, onAddSource: () -> Unit, onRoutes: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    if (browse.library == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(Modifier.semantics { contentDescription = translate("Loading...") })
+        }
+        return
+    }
+    if (model.sources?.sources?.isEmpty() == true && root !in listOf("History", "Playlists", "SmartPlaylists")) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
+            Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+            Button(onAddSource) { Text(translate("Add Source")) }
+        }
+        return
+    }
+    val page: @Composable (AndroidRouteDescriptor, Boolean) -> Unit = { route, shown ->
+        val options = remember(route.id) { browse.optionsFor(route.id) }
+        val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
+        routeState.SaveableStateProvider(route.id) {
+            BrowsePageContent(model, browse, player, location, options, shown, onMenu, onPlaylist, {}, owner = pages[route.id])
+        }
+    }
+    if (root == "Home") {
+        browse.routes.firstOrNull { it.id == "Home" }?.let { page(it, active) }
+        return
+    }
+    if (routes.isEmpty()) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onRoutes) { Text(translate("Library")) }
+        }
+        return
+    }
+    val index = routes.indexOfFirst { it.id == root }.coerceAtLeast(0)
+    val pager = rememberPagerState(index) { routes.size }
+    // A tab, the sidebar or the Library tab picks the page; a swipe picks the route.
+    LaunchedEffect(index) { if (pager.currentPage != index) pager.animateScrollToPage(index) }
+    LaunchedEffect(pager, routes) {
+        snapshotFlow { pager.settledPage }.collect { settled ->
+            routes.getOrNull(settled)?.id?.let { id -> if (browse.rootId != "Home" && browse.rootId != id) browse.chooseRoot(id) }
+        }
+    }
+    Column(Modifier.fillMaxSize()) {
+        val position = remember { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
+        if (tiny) RouteDots(routes.size, position.value)
+        else BrowseRouteTabs(routes, index, position, onSelect)
+        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { routes[it].id }, beyondViewportPageCount = 0) { shown ->
+            page(routes[shown], active && shown == index)
+        }
+    }
+}
+
+@Composable
+private fun RouteDots(count: Int, position: Float) {
+    Row(Modifier.fillMaxWidth().height(20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically) {
+        repeat(count) { index ->
+            val near = (1f - kotlin.math.abs(position - index)).coerceIn(0f, 1f)
+            Box(Modifier.size(6.dp).clip(CircleShape).background(lerp(MaterialTheme.colorScheme.outlineVariant,
+                MaterialTheme.colorScheme.primary, near)))
+        }
+    }
+}
+
+/** A detail page under its own bar: back and ⋯; a pull shows the Find field above the cover, and once the
+ *  header scrolls away the bar takes the band's colour with the title and Play. */
+@Composable
+private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, location: BrowseLocation,
+    depth: Int, page: BrowsePage?, detailState: androidx.compose.runtime.saveable.SaveableStateHolder, barHeight: androidx.compose.ui.unit.Dp,
+    active: Boolean, onMenu: (BrowseItem) -> Unit, onPlaylist: (BrowseItem) -> Unit, onCustomize: (BrowsePage) -> Unit,
+) {
+    val density = LocalDensity.current
+    val state = remember(location) { DetailBarState() }
+    val focus = remember { FocusRequester() }
+    val scroll = remember(state) { object : NestedScrollConnection {
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            state.offset = (state.offset - consumed.y).coerceAtLeast(0f)
+            return Offset.Zero
+        }
+    } }
+    LaunchedEffect(state.finding) { if (state.finding) focus.requestFocus() }
+    val key = "$depth:${location.route}"
+    val bandColor = remember(location) { mutableStateOf<Color?>(null) }
+    DisposableEffect(location) { onDispose { if (location !in browse.details) detailState.removeState(key) } }
+    Box(Modifier.fillMaxSize().nestedScroll(scroll)) {
+        detailState.SaveableStateProvider(key) {
+            Surface(Modifier.fillMaxSize()) {
+                CompositionLocalProvider(LocalRowSwipes provides true, LocalOverlayBarHeight provides barHeight,
+                    LocalDetailBand provides bandColor, LocalFinding provides state.finding,
+                    LocalOpenFind provides { state.finding = true }) {
+                    BrowsePageContent(model, browse, player, location, location.options, active, onMenu, onPlaylist, {}, owner = page)
+                }
+            }
+        }
+        val summary = page?.summary
+        val past = state.offset > with(density) { 260.dp.toPx() }
+        val band = bandColor.value ?: MaterialTheme.colorScheme.surface
+        // Finding, the bar is the search view's own: the page's colour, the field, and back closes it.
+        val color by animateColorAsState(if (state.finding) MaterialTheme.colorScheme.surface else if (past) band else Color.Transparent,
+            label = "detailBar")
+        var options by remember { mutableStateOf(false) }
+        val closeFind = { browse.filter = ""; state.finding = false }
+        if (state.finding) BackHandler(onBack = closeFind)
+        OverlayBar(color, inset = barHeight > 56.dp, onBand = bandColor.value != null && !state.finding) {
+            PlayerIconButton("rufin-go-previous-symbolic", "Back", if (state.finding) closeFind else browse::back)
+            Box(Modifier.weight(1f)) {
+                if (state.finding) BasicTextField(browse.filter, { browse.filter = it }, Modifier.fillMaxWidth().focusRequester(focus),
+                    singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = LocalContentColor.current),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    decorationBox = { input -> Box(Modifier.padding(horizontal = 4.dp, vertical = 8.dp)) {
+                        if (browse.filter.isBlank()) Text(translate("Find in {name}").replace("{name}", summary?.row?.title ?: location.title),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium,
+                            color = LocalContentColor.current.copy(alpha = .7f))
+                        input()
+                    } })
+                else androidx.compose.animation.AnimatedVisibility(past, enter = fadeIn(), exit = fadeOut()) {
+                    Text(summary?.row?.title ?: location.title, Modifier.padding(start = 4.dp), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            if (state.finding) { if (browse.filter.isNotEmpty()) PlayerIconButton("rufin-window-close-symbolic", "Clear", { browse.filter = "" }) }
+            else if (past && page != null) PlayerIconButton("rufin-media-playback-start-symbolic", "Play",
+                { page.play(QueuePlacement.Replace(0UL), false, summary?.row?.title ?: location.title) })
+            if (!state.finding) Box {
+                PlayerIconButton("rufin-view-more-symbolic", "More actions", { options = true })
+                DropdownMenu(options, { options = false }) {
+                    summary?.let { shown -> DropdownMenuItem(text = { Text(translate("More actions")) }, onClick = {
+                        options = false; onMenu(BrowseItem(shown.row, 0UL, null))
+                    }) }
+                    DropdownMenuItem(text = { Text(translate("Find")) }, onClick = { options = false; state.finding = true })
+                    if (page != null) DropdownMenuItem(text = { Text(translate("Customize")) }, onClick = { options = false; onCustomize(page) })
+                }
+            }
+        }
+    }
+}
+
+/** A bar over a band: the status bar inset, then 56 dp of controls. */
+@Composable
+private fun OverlayBar(color: Color, inset: Boolean = true, onBand: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    Surface(Modifier.fillMaxWidth(), color = color, contentColor = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface) {
+        Row(Modifier.then(if (inset) Modifier.statusBarsPadding() else Modifier).height(56.dp).fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, content = content)
+    }
+}
+
+/** The phone's bottom: the mini player over the tabs, or, scrolled down, one row of a tab circle,
+ *  the mini player and a Search circle. */
+@Composable
+private fun PhoneDock(tab: ShellTab?, docked: Boolean, hasMedia: Boolean, player: PlayerConnection,
+    onTab: (ShellTab) -> Unit, onUnfold: () -> Unit, onPlayer: () -> Unit, onOutput: () -> Unit,
+    onReveal: (Float) -> Unit, onRevealEnd: (Boolean) -> Unit,
+) {
+    val reduceMotion = LocalReduceMotion.current
+    AnimatedContent(docked, Modifier.fillMaxWidth(), label = "dock", transitionSpec = {
+        (fadeIn(tween(if (reduceMotion) 0 else 220)) + slideInVertically(tween(if (reduceMotion) 0 else 260)) { it / 2 }) togetherWith
+            (fadeOut(tween(if (reduceMotion) 0 else 160)) + slideOutVertically(tween(if (reduceMotion) 0 else 220)) { it / 2 })
+    }) { folded ->
+        if (folded) Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DockCircle((tab ?: ShellTab.Home).icon, "Show tabs", onUnfold)
+            Box(Modifier.weight(1f)) { if (hasMedia) MiniPlayer(player, onPlayer, onOutput, Modifier, compact = true, onReveal = onReveal, onRevealEnd = onRevealEnd) }
+            DockCircle(ShellTab.Search.icon, "Search", { onTab(ShellTab.Search) })
+        } else Column(Modifier.fillMaxWidth()) {
+            if (hasMedia) MiniPlayer(player, onPlayer, onOutput, onReveal = onReveal, onRevealEnd = onRevealEnd)
+            // A slimmer bar than Material's 80 dp, as Spotify's.
+            val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            NavigationBar(Modifier.fillMaxWidth().height(64.dp + inset)) {
+                ShellTab.entries.forEach { entry ->
+                    NavigationBarItem(tab == entry, { onTab(entry) },
+                        icon = { RufinIcon(entry.icon, null, Modifier.size(24.dp)) }, label = { Text(translate(entry.title)) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DockCircle(icon: String, label: String, onClick: () -> Unit) {
+    Surface(onClick, Modifier.size(56.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 6.dp) {
+        Box(contentAlignment = Alignment.Center) { RufinIcon(icon, translate(label), Modifier.size(24.dp)) }
+    }
+}
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun BrowseRouteTabs(browse: BrowseConnection, position: State<Float>, onSelect: (String) -> Unit) {
-    val selected = browse.configuredRoutes.indexOfFirst { it.id == browse.rootId }
-    PrimaryScrollableTabRow(selected.coerceAtLeast(0), Modifier.fillMaxWidth().height(40.dp),
+private fun BrowseRouteTabs(routes: List<AndroidRouteDescriptor>, selected: Int, position: State<Float>, onSelect: (String) -> Unit) {
+    PrimaryScrollableTabRow(selected.coerceAtLeast(0), Modifier.fillMaxWidth().height(44.dp),
         edgePadding = 8.dp, minTabWidth = 0.dp, containerColor = Color.Transparent, divider = {}, indicator = {
             if (selected >= 0) TabRowDefaults.PrimaryIndicator(
                 Modifier.zIndex(-1f).tabIndicatorLayout { measurable, constraints, tabs ->
@@ -566,13 +864,12 @@ private fun BrowseRouteTabs(browse: BrowseConnection, position: State<Float>, on
                     // The tab row already centers the indicator wrapper inside the selected tab.
                     layout(constraints.maxWidth, constraints.maxHeight) { placed.placeRelative(left - centeringOffset, (constraints.maxHeight - height) / 2) }
                 }, height = 32.dp, width = androidx.compose.ui.unit.Dp.Unspecified,
-                color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp))
+                color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(16.dp))
         }) {
-        browse.configuredRoutes.forEachIndexed { index, route ->
-            val active = index == selected
+        routes.forEachIndexed { index, route ->
             val tint = lerp(MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.colorScheme.onSecondaryContainer,
                 (1f - kotlin.math.abs(position.value - index)).coerceIn(0f, 1f))
-            Tab(active, { onSelect(route.id) }, Modifier.height(40.dp),
+            Tab(index == selected, { onSelect(route.id) }, Modifier.height(44.dp),
                 selectedContentColor = tint, unselectedContentColor = tint,
                 text = { Text(route.title, maxLines = 1, color = tint, style = MaterialTheme.typography.bodyMedium) })
         }
@@ -608,16 +905,16 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     Column(Modifier.fillMaxSize()) {
         if (location.route is Route.History) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(options.historySource == null, { options.historySource = null }, label = { Text(translate("All")) })
+                ChoiceChip(options.historySource == null, { options.historySource = null }, label = { Text(translate("All")) })
                 // The source chip keeps the source it was picked with, as on the desktop.
                 val source = options.historySource ?: model.sources?.selectedSourceId
-                if (source != null) FilterChip(options.historySource != null, { options.historySource = source },
+                if (source != null) ChoiceChip(options.historySource != null, { options.historySource = source },
                     label = { Text(model.sourceName(source)) })
             }
             // History shows cards in Grid layout, as on the desktop.
             if (covers) Box(Modifier.weight(1f)) {
                 BrowseContent(rows, emptyList(), player, false, location in browse.details, true,
-                    browse::open, onMenu, { _, _ -> }, browse::refreshSection, browse::favorite, onPlaylist, { if (active) onScrolled(it) },
+                    browse::open, onMenu, { _, _ -> }, browse::favorite, onPlaylist, { if (active) onScrolled(it) },
                     displaySize = display?.size ?: DisplaySize.DEFAULT, gridSpacing = display?.gridSpacing ?: DisplaySize.DEFAULT,
                     onPlayItem = { item, shuffled -> browse.play(item, shuffled = shuffled) }, loading = page.loading,
                     onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
@@ -632,24 +929,26 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 onPlaylist, { route, title -> browse.openRoute(route, title, summary.row.title) },
                 onLink = { link -> model.runAction {
                     openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
-                } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
+                } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
+                onDownload = { browse.download(it, remove = it.row.downloaded) })
             return@Column
         }
         if (choices.isNotEmpty()) LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             itemsIndexed(choices, key = { _, option -> option.category.name }) { _, option ->
-                FilterChip(options.category == option.category, { options.category = option.category; options.sort = null; options.displaySettings = null },
+                ChoiceChip(options.category == option.category, { options.category = option.category; options.sort = null; options.displaySettings = null },
                     label = { Text(option.title) })
             }
         }
         Box(Modifier.weight(1f)) {
             BrowseContent(rows, page.homeSections, player, location.route is Route.Home, location in browse.details, covers,
-                browse::open, onMenu, { section, shuffled -> page.playSection(section, shuffled) }, browse::refreshSection,
+                browse::open, onMenu, { section, shuffled -> page.playSection(section, shuffled) },
                 browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
                 display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.fields,
                 page.supportsLetterIndex, page::letterPosition, page.sortSelection?.descending ?: false,
                 page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
-                emptyIcon = if (location.route is Route.Folders) "rufin-folders-symbolic" else null)
+                emptyIcon = if (location.route is Route.Folders) "rufin-folders-symbolic" else null,
+                onStepShowcase = { forward -> browse.library?.stepShowcase(forward).orEmpty() })
         }
     }
 }

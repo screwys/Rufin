@@ -26,8 +26,10 @@ import kotlinx.coroutines.flow.first
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class MetadataConnection(
     private val model: RufinConnection, context: Context,
-    private val item: MetadataItemId,
+    private val item: MetadataItemId?,
     private val scope: CoroutineScope, private val onSaved: () -> Unit,
+    /** Tracks selected on a page, edited together instead of one item. */
+    private val selection: (() -> io.github.screwys.rufin.shared.library.MemberSelection)? = null,
 ) {
     var batch by mutableStateOf<MetadataBatch?>(null)
         private set
@@ -95,11 +97,19 @@ internal class MetadataConnection(
             artwork = null
             results = null
             val source = snapshotFlow { model.sourceOwner }.filterNotNull().first()
-            val editor = MetadataEditor.open(source, item)
             batch?.destroy()
-            batch = editor.trackBatch()
-            scopeActive = batch != null
-            allTracks = false
+            val tracks = selection
+            val editor = if (tracks == null) MetadataEditor.open(source, item!!).also { opened ->
+                batch = opened.trackBatch()
+                scopeActive = batch != null
+                allTracks = false
+            } else {
+                val opened = tracks().use { MetadataBatch.open(source, it) }
+                batch = opened
+                scopeActive = false
+                allTracks = true
+                opened.editor((0UL until opened.trackCount()).toList())
+            }
             selectedTracks = emptySet()
             rowsRevision++
             bridge = editor

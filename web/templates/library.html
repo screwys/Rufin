@@ -1,5 +1,6 @@
 {% import "macros.html" as m %}
 <div data-page="{{ page }}" data-title="{{ title }}" data-back="{{ back }}" data-section="{{ section }}" data-sort="{{ sort }}" data-descending="{{ descending }}" data-sorts="{{ sorts }}" data-name="{{ name }}" data-play="{{ play }}" data-writable="{{ writable }}" data-playlists="{{ playlists }}" data-count="{{ rows.len() }}" data-total="{{ total }}" data-missed="{{ missed }}">
+{% if let Some(head) = head %}{% call m::showcase(head) %}{% endcall %}{% endif %}
 {% if !cards %}
   <table class="track-list" role="presentation">
     <thead role="rowgroup"><tr role="row">{% for column in columns %}{% if column.icon != "" %}<th role="columnheader" class="{{ column.class }}" aria-label="{{ column.title }}" title="{{ column.title }}">{% call m::icon(column.icon) %}{% endcall %}</th>{% else if column.field == LibraryField::Tools %}<th role="columnheader" class="actions" aria-label="{{ localization::tr("Actions") }}"></th>{% else %}<th role="columnheader"{% if column.class != "" %} class="{{ column.class }}"{% endif %}>{{ column.title }}</th>{% endif %}{% endfor %}</tr></thead>

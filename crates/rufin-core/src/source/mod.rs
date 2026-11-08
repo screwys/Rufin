@@ -98,7 +98,8 @@ fn same_native_input(left: &SourceConfiguration, right: &SourceConfiguration) ->
 }
 
 pub(crate) struct Shared {
-    home_showcase_variation: i64,
+    /// Where Home's showcase walk stands: the position its last step landed on.
+    home_showcase_position: std::sync::atomic::AtomicI64,
     home_explore_variation: std::sync::atomic::AtomicI64,
     pub(crate) artwork: Artwork,
     pub(crate) catalog: Arc<Catalog>,
@@ -430,7 +431,7 @@ impl SourceOwner {
                 feed,
                 configuration_changed: tokio::sync::watch::channel(()).0,
                 lyrics_edited: tokio::sync::watch::channel(None).0,
-                home_showcase_variation: home_variation,
+                home_showcase_position: std::sync::atomic::AtomicI64::new(home_variation),
                 home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
                 artwork,
                 catalog,
@@ -1310,7 +1311,7 @@ impl SourceOwner {
 impl SourceOwner {
     pub fn home_variations(&self) -> (i64, i64) {
         (
-            self.shared.home_showcase_variation,
+            self.shared.home_showcase_position.load(Ordering::Relaxed),
             self.shared.home_explore_variation.load(Ordering::Relaxed),
         )
     }
@@ -2521,6 +2522,45 @@ impl SourceOwner {
                 warn!(%error,"could not refresh Home section");
             }
             Ok(())
+        })
+    }
+
+    /// Moves Home's showcase of the selected `source_id` one album forward or back, and answers
+    /// the showcase it lands on without reading Home again; other clients show it on their next
+    /// Home read. None when `source_id` is not selected or has no albums.
+    pub fn step_showcase(
+        &self,
+        source_id: SourceId,
+        forward: bool,
+    ) -> Receiver<Result<Option<library::HomeShowcase>, String>> {
+        self.reply(move |owner, catalog| async move {
+            let Some(selected) = owner
+                .selected_library()
+                .filter(|selected| selected.source_id == source_id)
+            else {
+                return Ok(None);
+            };
+            let position = &owner.shared.home_showcase_position;
+            loop {
+                let from = position.load(Ordering::Relaxed);
+                let (landed, showcase) = catalog
+                    .step_home_showcase(
+                        selected.source_key,
+                        selected.music_folder_key,
+                        from,
+                        forward,
+                        &library::ReadCancellation::new(),
+                    )
+                    .await
+                    .map_err(string_error)?;
+                // A step that raced another starts again from where that one landed.
+                if position
+                    .compare_exchange(from, landed, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    return Ok(showcase);
+                }
+            }
         })
     }
 

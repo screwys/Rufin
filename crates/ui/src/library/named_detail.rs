@@ -1,20 +1,16 @@
 use std::{cell::RefCell, rc::Rc};
 
-use adw::prelude::*;
 use artwork::ArtworkBinding;
-use library::{GenreKey, MoodKey, RadioSeed, TagRow};
+use library::{GenreKey, MoodKey, TagRow};
 use localization::{msgid, track_count_text};
-use rufin_core::playback::RadioPlayRequest;
 
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
-use crate::widgets::artwork::presentation::stable_seed;
 use crate::widgets::mounted_route::MountedRoute;
 use crate::widgets::view_model::Rows;
 use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
-use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
 use crate::menus::media_menus::CollectionPlay;
 use crate::menus::media_menus::present_row_menu;
@@ -73,13 +69,6 @@ fn named_artwork(row: &TagRow) -> Vec<ArtworkBinding> {
         .collect()
 }
 
-fn named_seed(row: &TagRow) -> u32 {
-    match row.kind {
-        library::TagKind::Genre => stable_seed(&row.object_id),
-        library::TagKind::Mood => stable_seed(&MoodKey::from_raw(row.key).to_string()),
-    }
-}
-
 impl CatalogUi {
     pub fn named_detail_view(self: &Rc<Self>, id: NamedDetailId, mut read: Opened) -> MountedRoute {
         let (false, Some(library::Header::Tag(summary))) =
@@ -93,22 +82,15 @@ impl CatalogUi {
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let title = summary.name.clone();
         let artwork = named_artwork(&summary);
-        let seed = named_seed(&summary);
         let summary_items = named_summary_items(&summary);
         let current = Rc::new(RefCell::new(summary));
         let context_menu = named_context_menu(self, Rc::clone(&current));
+        let row = library::Row::Tag(current.borrow().clone());
         let grouped = self.grouped_detail_view(GroupedDetailData {
             key: id.key(),
-            kind: if matches!(id, NamedDetailId::Genre(_)) {
-                "Genre"
-            } else {
-                "Mood"
-            },
-            genre_kind: matches!(id, NamedDetailId::Genre(_)),
-            kind_controls: named_kind_controls(self, id),
+            row,
             title,
             artwork,
-            seed,
             summary_items,
             context_menu,
             rows: rows.clone(),
@@ -124,6 +106,7 @@ impl CatalogUi {
             if let (Some(shell), Some(library::Header::Tag(summary))) = (shell.upgrade(), read) {
                 shown_view.show(
                     &shell,
+                    library::Row::Tag(summary.clone()),
                     &summary.name,
                     named_artwork(&summary),
                     &named_summary_items(&summary),
@@ -163,28 +146,12 @@ impl CatalogUi {
 fn named_context_menu(
     shell: &Rc<CatalogUi>,
     current: Rc<RefCell<TagRow>>,
-) -> Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>> {
+) -> Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)> {
     let shell = Rc::clone(shell);
-    Some(Rc::new(move |target: &gtk::Widget, position, play| {
+    Rc::new(move |target: &gtk::Widget, position, play| {
         let row = library::Row::Tag(current.borrow().clone());
         present_row_menu(target, shell.shell(), row, Some(play), position);
     })
-        as Rc<
-            dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay),
-        >)
-}
-
-fn named_kind_controls(shell: &Rc<CatalogUi>, id: NamedDetailId) -> Vec<gtk::Widget> {
-    let mut controls = Vec::new();
-    if let NamedDetailId::Genre(key) = id {
-        let radio = detail_radio_button();
-        let controller = shell.products.playback.clone();
-        radio.connect_clicked(move |_| {
-            controller.play_radio(RadioPlayRequest::now(RadioSeed::Genre(key)));
-        });
-        controls.push(radio.upcast());
-    }
-    controls
 }
 
 fn named_summary_items(summary: &TagRow) -> Vec<(&'static str, String)> {

@@ -716,7 +716,6 @@ impl PlaylistEntryGridCell {
         let cover = crate::widgets::artwork::ArtworkTile::new_elastic_square();
         let cover_frame = super::cards::square_cover_frame(&cover.widget(), None);
         let body = CollectionGridCardCell::new(&shell, fields, cover_frame.upcast());
-        body.set_download_badge(shell.downloads.download_badge(true));
         let current = Rc::new(RefCell::new(None));
         let context_current = Rc::clone(&current);
         install_playlist_entry_context(
@@ -775,10 +774,6 @@ impl ReusableCollectionGridCell<TrackRow> for PlaylistEntryGridCell {
         self.body.bind(&entry.title, |field| {
             playlist_entry_field_links(&entry, field)
         });
-        self.body.set_download_target(
-            &self.shell,
-            crate::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
-        );
         self.current.replace(Some(entry));
         self.bind_current_artwork();
     }
@@ -786,7 +781,7 @@ impl ReusableCollectionGridCell<TrackRow> for PlaylistEntryGridCell {
     fn clear(&self) {
         self.playing.unbind(self.body.title.upcast_ref());
         self.release_artwork();
-        self.body.clear(&self.shell);
+        self.body.clear();
         self.current.take();
     }
 

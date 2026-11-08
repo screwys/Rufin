@@ -238,11 +238,6 @@ impl ContextMenuSurface {
         menu_action_item(label, &self.action(true, run), icon_name)
     }
 
-    /// Lets `button`, inside the menu, run `run` and close the menu.
-    pub fn bind_button(&self, button: &gtk::Button, run: impl Fn() + 'static) {
-        button.set_action_name(Some(&self.action(true, run)));
-    }
-
     pub fn append_fixed_action(&self, label: &str, icon_name: &str, run: impl Fn() + 'static) {
         self.append_fixed_action_enabled(label, icon_name, true, run);
     }

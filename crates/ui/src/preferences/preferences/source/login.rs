@@ -1066,6 +1066,7 @@ fn credential_host_view(
         api_key: adw::SwitchRow, legacy_password: adw::SwitchRow,
         save: gtk::Button,
     });
+    crate::widgets::forms::attach_address_suggestions(&url);
     name.set_text(&snapshot.name);
     style_compact_field_row(&name);
     url.set_text(&snapshot.url);

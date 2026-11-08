@@ -296,20 +296,15 @@ fn row_surface(
     };
     let surface = ContextMenuSurface::new(target, group, position);
     let rated = rated(row);
-    if let Some((item, title, subtitle, artwork)) = header(row) {
+    let header = header(row);
+    if let Some((_, title, subtitle, artwork)) = &header {
         crate::menus::media_details::append_header(
             &surface,
-            target,
             shell,
             crate::menus::media_details::MenuHeader {
-                item,
                 title,
-                subtitle: &subtitle,
-                artwork,
-                favorite: rated
-                    .as_ref()
-                    .filter(|_| menu.favorite)
-                    .map(|rated| (rated.target.clone(), rated.favorite)),
+                subtitle,
+                artwork: *artwork,
             },
         );
     }
@@ -345,6 +340,26 @@ fn row_surface(
     {
         crate::playlists::picker::append_to_menu(&surface, shell, payload.clone());
     }
+    if menu.favorite
+        && let Some(rated) = &rated
+    {
+        let shell = Rc::clone(shell);
+        let (target, favorite) = (rated.target.clone(), rated.favorite);
+        surface.append_configurable_action(
+            ContextMenuItem::Favorites,
+            if favorite {
+                msgid("Remove from Favorites")
+            } else {
+                msgid("Add to Favorites")
+            },
+            if favorite {
+                crate::favorites::FAVORITE_REMOVE_ICON
+            } else {
+                crate::favorites::FAVORITE_ADD_ICON
+            },
+            move || shell.set_favorite(target.clone(), !favorite),
+        );
+    }
     if menu.edit_metadata
         && let Some(item) = metadata_item(row)
     {
@@ -355,9 +370,6 @@ fn row_surface(
             EDIT_ICON,
             move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone()),
         );
-    }
-    if let Some(pin) = &menu.pin {
-        append_pin_action(&surface, shell, pin.clone(), menu.pinned);
     }
     if menu.go_to {
         append_go_to(&surface, shell, row);
@@ -379,6 +391,13 @@ fn row_surface(
     if let Some(payload) = payload {
         let single = matches!(row, Row::Track(_) | Row::AlbumTrack { .. });
         append_download_actions(&surface, shell, menu, &payload, single);
+    }
+    // Details and the pin close the menu, just above the rating.
+    if let Some((item, ..)) = header {
+        crate::menus::media_details::append_details_action(&surface, target, shell, item);
+    }
+    if let Some(pin) = &menu.pin {
+        append_pin_action(&surface, shell, pin.clone(), menu.pinned);
     }
     if menu.rating
         && let Some(rated) = rated
@@ -435,6 +454,11 @@ struct Rated<'a> {
     rating: Option<i64>,
     media_uri: &'a str,
     source_id: Option<&'a str>,
+}
+
+/// What a favorite of `row` changes, and whether it is a favorite now.
+pub(crate) fn row_favorite(row: &Row) -> Option<(FavoriteTarget, bool)> {
+    rated(row).map(|rated| (rated.target, rated.favorite))
 }
 
 fn rated(row: &Row) -> Option<Rated<'_>> {
@@ -817,11 +841,11 @@ fn append_pin_action(
     surface.append_configurable_action(
         ContextMenuItem::Pins,
         if pinned {
-            msgid("Remove from Pins")
+            msgid("Remove from Saved")
         } else {
-            msgid("Add to Pins")
+            msgid("Add to Saved")
         },
-        if pinned { REMOVE_ICON } else { ADD_ICON },
+        "rufin-bookmark-symbolic",
         move || shell.set_sidebar_pin(pin.clone(), !pinned),
     );
 }

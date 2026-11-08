@@ -29,10 +29,6 @@ import io.github.screwys.rufin.core.translate
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, page: BrowsePage) {
-    DisposableEffect(page) {
-        page.active = true
-        onDispose { page.active = false }
-    }
     SideEffect { browse.visiblePage = page }
     val rows = page.pages.collectAsLazyPagingItems()
     var action by remember { mutableStateOf<BrowseItem?>(null) }

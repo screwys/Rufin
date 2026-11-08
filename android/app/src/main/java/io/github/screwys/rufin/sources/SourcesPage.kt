@@ -23,7 +23,6 @@ import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
-import io.github.screwys.rufin.settings.settingsRowShape
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -56,7 +55,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         sources.forEachIndexed { index, source -> key(source.id) {
             val selected = state?.selectedSourceId == source.id
             SettingsRow(source.name, summary = source.kind,
-                shape = settingsRowShape(index, sources.size + 1), selected = selected,
+                selected = selected,
                 leading = { SourceIcon(source.kind, Modifier.size(24.dp)) }, trailing = {
                     Row {
                         IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().source().use { it.refreshSource(source.id, false) } } }) {
@@ -69,7 +68,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
                     }
                 }, modifier = Modifier.semantics { this.selected = selected }.clickable { onEdit(source.id) })
         } }
-            SettingsRow(translate("Add Source"), shape = settingsRowShape(sources.size, sources.size + 1),
+            SettingsRow(translate("Add Source"),
                 leading = { RufinIcon("rufin-list-add-symbolic", null, Modifier.size(24.dp)) },
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp)) }, modifier = Modifier.clickable(onClick = onAdd))
         }

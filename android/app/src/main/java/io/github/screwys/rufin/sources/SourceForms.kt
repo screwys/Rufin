@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import io.github.screwys.rufin.ui.ChoiceChip
+
 import io.github.screwys.rufin.shared.rufin_core.*
 
 import androidx.compose.foundation.clickable
@@ -12,6 +14,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -24,14 +31,16 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsRow
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.settingsButtonColors
-import io.github.screwys.rufin.settings.settingsChipColors
 
 @Composable
 internal fun SourceTextField(label: String, value: String, change: (String) -> Unit, enabled: Boolean = true,
-    secret: Boolean = false, multiline: Boolean = false, hint: String? = null) {
+    secret: Boolean = false, multiline: Boolean = false, hint: String? = null,
+    /** What a password manager fills here: a login's username or password. */
+    autofill: ContentType? = null, modifier: Modifier = Modifier) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(translate(label), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium)
-    OutlinedTextField(value, change, Modifier.fillMaxWidth(), enabled = enabled,
+    OutlinedTextField(value, change, modifier.fillMaxWidth().then(autofill?.let { type -> Modifier.semantics { contentType = type } } ?: Modifier),
+        enabled = enabled,
         shape = RoundedCornerShape(16.dp), singleLine = !multiline, minLines = if (multiline) 3 else 1,
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -44,6 +53,20 @@ internal fun SourceTextField(label: String, value: String, change: (String) -> U
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
             keyboardType = when { secret -> KeyboardType.Password; label.contains("address", ignoreCase = true) -> KeyboardType.Uri; else -> KeyboardType.Text }))
+    }
+}
+
+/** A server address, with core's https:// and http:// completions under it while it has no scheme. */
+@Composable
+internal fun SourceAddressField(label: String, value: String, change: (String) -> Unit, enabled: Boolean = true) {
+    var focused by remember { mutableStateOf(false) }
+    val suggestions = remember(value) { addressSuggestions(value) }
+    Box {
+        SourceTextField(label, value, change, enabled, modifier = Modifier.onFocusChanged { focused = it.isFocused })
+        DropdownMenu(focused && enabled && suggestions.isNotEmpty(), { focused = false },
+            properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
+            suggestions.forEach { address -> DropdownMenuItem(text = { Text(address) }, onClick = { change(address) }) }
+        }
     }
 }
 
@@ -63,10 +86,11 @@ internal fun SourceRatingSettings(setup: SourceSetupConnection) {
 @Composable
 internal fun SourceCredentials(form: SourceForm, working: Boolean, editing: Boolean, apiKey: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SourceTextField("Server Address", form.url, { form.url = it }, !working)
-        if (!apiKey) SourceTextField("Username", form.username, { form.username = it }, !working)
+        SourceAddressField("Server Address", form.url, { form.url = it }, !working)
+        if (!apiKey) SourceTextField("Username", form.username, { form.username = it }, !working, autofill = ContentType.Username)
         SourceTextField(if (apiKey) "API key" else "Password", form.secret, { form.secret = it }, !working,
-            secret = true, hint = if (editing && !apiKey) "Leave the password empty to keep the saved credential" else null)
+            secret = true, hint = if (editing && !apiKey) "Leave the password empty to keep the saved credential" else null,
+            autofill = if (apiKey) null else ContentType.Password)
     }
 }
 
@@ -77,7 +101,7 @@ internal fun SourceOptions(title: String, choices: List<Pair<String, String>>, s
     Text(translate(title), Modifier.padding(start = 12.dp, top = 12.dp, bottom = 6.dp),
         style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        choices.forEach { (id, title) -> FilterChip(selected == id, { choose(id) }, label = { Text(translate(title)) }, enabled = enabled, colors = settingsChipColors()) }
+        choices.forEach { (id, title) -> ChoiceChip(selected == id, { choose(id) }, label = { Text(translate(title)) }, enabled = enabled) }
     }
     }
 }
@@ -115,9 +139,10 @@ internal fun SourceDiscovery(setup: SourceSetupConnection) {
 @Composable
 internal fun PlexSourceForm(setup: SourceSetupConnection, editing: Boolean, browser: (String) -> Unit) {
     val form = setup.form
+    val autofillManager = LocalAutofillManager.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (editing) {
-            SourceTextField("Server Address Override (optional)", form.url, { form.url = it }, !setup.working)
+            SourceAddressField("Server Address Override (optional)", form.url, { form.url = it }, !setup.working)
         } else if (setup.choosingProfiles) {
             Text(translate("Home Profile"), style = MaterialTheme.typography.titleMedium)
             SourceChoices(setup.profiles, setup.selectedProfile) { setup.selectedProfile = it; setup.homePin = "" }
@@ -129,14 +154,14 @@ internal fun PlexSourceForm(setup: SourceSetupConnection, editing: Boolean, brow
             if (setup.choices.isEmpty()) Text(translate("No Servers Found"))
             SourceChoices(setup.choices, setup.selectedServer) { setup.selectedServer = it }
             TextButton(setup::changePlexProfile, enabled = !setup.working) { Text(translate("Change Profile")) }
-            SourceTextField("Server Address Override (optional)", form.url, { form.url = it }, !setup.working)
+            SourceAddressField("Server Address Override (optional)", form.url, { form.url = it }, !setup.working)
         } else {
-            SourceTextField("Username", form.username, { form.username = it }, !setup.working)
-            SourceTextField("Password", form.secret, { form.secret = it }, !setup.working, secret = true)
+            SourceTextField("Username", form.username, { form.username = it }, !setup.working, autofill = ContentType.Username)
+            SourceTextField("Password", form.secret, { form.secret = it }, !setup.working, secret = true, autofill = ContentType.Password)
             SourceTextField("Verification Code (optional)", form.verification, { form.verification = it }, !setup.working)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton({ setup.plexLogin(true, browser) }, enabled = !setup.working, colors = settingsButtonColors()) { Text(translate("Sign In in Browser")) }
-                OutlinedButton({ setup.plexLogin(false, browser) }, enabled = !setup.working && form.username.isNotBlank(), colors = settingsButtonColors()) { Text(translate("Sign in")) }
+                OutlinedButton({ autofillManager?.commit(); setup.plexLogin(false, browser) }, enabled = !setup.working && form.username.isNotBlank(), colors = settingsButtonColors()) { Text(translate("Sign in")) }
             }
             setup.savedAccounts.forEach { account ->
             ListItem(headlineContent = { Text(account.title) },
@@ -154,13 +179,15 @@ internal fun FileSourceForm(setup: SourceSetupConnection, editing: Boolean, brow
     val form = setup.form
     val smb = form.kind == "smb"
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SourceTextField("Server Address", form.url, { form.url = it }, !setup.working)
+        SourceAddressField("Server Address", form.url, { form.url = it }, !setup.working)
         SourceOptions("Authentication", if (smb) listOf("password" to "Username and password", "anonymous" to "Guest / public access")
             else listOf("password" to "Username and password", "anonymous" to "Anonymous", "bearer" to "Bearer token"), form.fileAuth, enabled = !setup.working) { form.fileAuth = it }
-        if (form.fileAuth == "password") SourceTextField("Username", form.username, { form.username = it }, !setup.working)
+        if (form.fileAuth == "password") SourceTextField("Username", form.username, { form.username = it }, !setup.working,
+            autofill = ContentType.Username)
         if (form.fileAuth != "anonymous") SourceTextField(if (form.fileAuth == "bearer") "Bearer token" else "Password",
             form.secret, { form.secret = it }, !setup.working, secret = true,
-            hint = if (editing && form.fileAuth == "password") "Leave the password empty to keep the saved credential" else null)
+            hint = if (editing && form.fileAuth == "password") "Leave the password empty to keep the saved credential" else null,
+            autofill = if (form.fileAuth == "password") ContentType.Password else null)
         if (smb) {
             SourceTextField("SMB Domain", form.domain, { form.domain = it }, !setup.working)
             OutlinedButton(setup::smbShares, enabled = !setup.working && form.url.isNotBlank(), colors = settingsButtonColors()) { Text(translate("Find shares")) }

@@ -1,4 +1,3 @@
-@import url("showcase.css");
 
 :root {
   --radius: 8px;
@@ -566,8 +565,9 @@ row:focus {
 .album-cover-button:focus,
 .cover-hover-button:focus,
 .pill-button:focus,
-.album-detail-genre-pill:focus,
-.artist-count-button:focus,
+.detail-genre-chip:focus,
+.detail-pill:focus,
+.detail-round:focus,
 .detail-external-link-button:focus,
 .queue-link:focus,
 .queue-favorite-button:focus,
@@ -1216,21 +1216,21 @@ gridview.album-grid {
   color: var(--accent-color);
 }
 
-.sidebar-pin-controls {
+.row-transport-controls {
   min-height: 40px;
   padding-left: 4px;
   border-radius: 7px;
   background: color-mix(in srgb, currentColor 8%, var(--shell-panel-bg-color));
 }
 
-.icon-button.sidebar-pin-control {
+.icon-button.row-transport-control {
   min-width: 32px;
   min-height: 32px;
   padding: 0;
   border-radius: 7px;
 }
 
-.sidebar-pin-control:hover {
+.row-transport-control:hover {
   background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
@@ -1441,14 +1441,23 @@ dialog.alert.playlist-delete-dialog .message-area {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
-.home-genre-flow {
-  padding-bottom: 4px;
+.home-row {
+  margin: 0 -6px;
+  padding: 6px;
+  border-radius: var(--radius);
 }
 
-.home-genre-chip {
-  min-width: 170px;
-  border-radius: 8px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
+.home-row-title {
+  font-size: 15px;
+}
+
+.home-row-subtitle {
+  font-size: 13px;
+}
+
+.home-row:hover,
+.home-row.context-menu-hover-held {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 .album-button {
@@ -1893,19 +1902,12 @@ scale.volume-slider:dir(rtl) {
 }
 
 .detail-title {
-  font-size: 36px;
   font-weight: 800;
+  line-height: 1.1;
 }
 
 .detail-artist {
-  font-size: 16px;
-}
-
-.eyebrow {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--accent-color);
+  font-weight: 650;
 }
 
 .muted {
@@ -2111,64 +2113,62 @@ button.download-queue-pause image {
   min-height: 44px;
 }
 
-.album-detail-showcase,
-.detail-showcase,
-.playlist-detail-showcase {
-  padding: 25px;
+.detail-showcase-large .detail-title {
+  font-size: 40px;
 }
 
-.playlist-detail-showcase {
-  padding: 22px;
+.detail-showcase-medium .detail-title {
+  font-size: 32px;
 }
 
-.detail-showcase-tiny {
-  padding: 18px 20px 18px 14px;
+.detail-showcase-small .detail-title {
+  font-size: 26px;
 }
 
-.detail-showcase .detail-title,
-.album-detail-showcase .detail-title {
-  font-size: 34px;
-  line-height: 1.08;
+.detail-showcase-large .detail-artist {
+  font-size: 17px;
 }
 
-.detail-showcase-horizontal .detail-title {
-  font-size: 29px;
-  line-height: 1.06;
+.detail-showcase-medium .detail-artist {
+  font-size: 16px;
 }
 
-.detail-showcase-horizontal .detail-title.detail-text-long {
-  font-size: 25px;
-}
-
-.detail-showcase-horizontal .detail-title.detail-text-very-long {
-  font-size: 22px;
-}
-
-.detail-showcase-horizontal .detail-artist {
+.detail-showcase-small .detail-artist {
   font-size: 15px;
 }
 
-.detail-showcase-horizontal .detail-artist.detail-text-long {
-  font-size: 14px;
+/* The band is always dark (it is drawn from the cover's colours), so text on it is white. */
+.detail-on-band {
+  color: rgba(255, 255, 255, 0.92);
 }
 
-.detail-showcase-horizontal .detail-artist.detail-text-very-long {
-  font-size: 13px;
+/* The facts sit in a pill, divided by |: a tonal one on the page, a dark one on Home's band so
+   they read on any cover and theme. */
+.detail-summary-row.detail-facts-boxed {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--window-fg-color) 8%, transparent);
 }
 
-.playlist-detail-showcase .detail-title {
-  font-size: 34px;
+.detail-facts-boxed .detail-fact-follows {
+  padding-left: 12px;
+  border-left: 1px solid color-mix(in srgb, var(--window-fg-color) 25%, transparent);
 }
 
-.detail-showcase .eyebrow {
-  font-size: 13px;
+.detail-summary-row.detail-facts-boxed.detail-facts-pill {
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.detail-facts-pill .detail-fact-follows {
+  border-left-color: rgba(255, 255, 255, 0.4);
 }
 
 .detail-showcase-cover,
 .album-detail-cover,
 .playlist-detail-cover {
   box-shadow:
-    0 18px 38px rgba(0, 0, 0, 0.28),
+    0 10px 24px rgba(0, 0, 0, 0.3),
     inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 14%, transparent);
 }
 
@@ -2184,109 +2184,104 @@ button.download-queue-pause image {
   box-shadow: none;
 }
 
-.detail-showcase-actions {
-  margin-top: 4px;
+.detail-summary-row {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--window-fg-color) 78%, transparent);
 }
 
-.detail-showcase-action-button {
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0;
-  background: transparent;
+/* Play and Radio are labelled pills; Favorite, Download and ⋯ share Radio's tonal box. */
+.detail-pill,
+.detail-round {
+  min-height: 36px;
+  border-radius: 999px;
+  color: var(--window-fg-color);
+  background: color-mix(in srgb, var(--window-fg-color) 11%, transparent);
   box-shadow: none;
   transition: background 120ms ease-out;
 }
 
-.detail-showcase-action-face {
-  min-width: 48px;
-  min-height: 48px;
-  border-radius: 999px;
-  background: white;
-  color: #111111;
-  transform: scale(1);
-  transition:
-    background 120ms ease-out,
-    transform 120ms ease-out;
-}
-
-.detail-showcase-action-button .action-button-shadow {
-  min-width: 48px;
-  min-height: 48px;
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.18),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.detail-showcase-action-button:hover {
-  background: transparent;
-  box-shadow: none;
-}
-
-.detail-showcase-action-button:hover .detail-showcase-action-face {
-  background: #f7f7f7;
-  transform: scale(1.08);
-}
-
-.detail-showcase-action-button:active {
-  box-shadow: none;
-}
-
-.detail-showcase-action-button:active .detail-showcase-action-face {
-  transform: scale(0.96);
-}
-
-.detail-showcase-play-button {
-  min-width: 56px;
-  min-height: 56px;
-  background: transparent;
-  -gtk-icon-size: 18px;
-}
-
-.detail-showcase-play-button .detail-showcase-action-face,
-.detail-showcase-play-button .action-button-shadow {
-  min-width: 56px;
-  min-height: 56px;
-}
-
-.detail-showcase-action-button.favorite-toggle.active-toggle {
-  color: var(--error-color);
-  background: transparent;
-}
-
-.detail-showcase-action-button.favorite-toggle.active-toggle .detail-showcase-action-face {
-  background: white;
-  color: var(--error-color);
-}
-
-.detail-showcase-action-button.favorite-toggle.active-toggle:hover .detail-showcase-action-face {
-  background: #f7f7f7;
-}
-
-.detail-cover-facts {
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-.detail-summary-row {
-  font-size: 13px;
-}
-
-.artist-count-row {
-  margin-top: 2px;
-}
-
-.artist-count-button {
-  min-height: 32px;
-  padding: 4px 8px;
+.detail-pill {
+  padding: 0 16px 0 12px;
   font-size: 14px;
-  color: color-mix(in srgb, var(--window-fg-color) 95%, var(--window-bg-color));
-  background: transparent;
+  font-weight: 650;
+}
+
+.detail-round {
+  min-width: 36px;
+  padding: 0;
+}
+
+.detail-pill:hover,
+.detail-round:hover {
+  background: color-mix(in srgb, var(--window-fg-color) 17%, transparent);
+}
+
+.detail-pill:active,
+.detail-round:active {
+  background: color-mix(in srgb, var(--window-fg-color) 22%, transparent);
+}
+
+/* Play without its label is a circle like the round buttons beside it. */
+.detail-pill.detail-pill-icon {
+  min-width: 36px;
+  padding: 0;
+}
+
+.detail-pill.detail-pill-primary {
+  font-weight: 700;
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+}
+
+.detail-pill.detail-pill-primary:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 88%, white);
+}
+
+.detail-pill.detail-pill-primary:active {
+  background: color-mix(in srgb, var(--accent-bg-color) 82%, black);
+}
+
+.detail-round.active-toggle {
+  color: var(--accent-color);
+}
+
+.detail-round.favorite-toggle.active-toggle {
+  color: var(--error-color);
+  background: color-mix(in srgb, var(--window-fg-color) 11%, transparent);
+}
+
+/* Home's ‹ ›, over the band's sides while the pointer is on the showcase. */
+.detail-step {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  margin: 0 7px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(0, 0, 0, 0.42);
   box-shadow: none;
 }
 
-.artist-count-button:hover {
-  color: var(--window-fg-color);
-  background: color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+.detail-step:hover {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+button.detail-genre-chip,
+menubutton.detail-genre-chip > button {
+  min-height: 26px;
+  min-width: 0;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--window-fg-color) 88%, transparent);
+  background: color-mix(in srgb, var(--window-fg-color) 9%, transparent);
+  box-shadow: none;
+}
+
+button.detail-genre-chip:hover,
+menubutton.detail-genre-chip > button:hover {
+  background: color-mix(in srgb, var(--window-fg-color) 15%, transparent);
 }
 
 .detail-external-link-row {
@@ -2305,68 +2300,6 @@ button.download-queue-pause image {
 .detail-external-link-button:hover {
   color: var(--window-fg-color);
   background: color-mix(in srgb, var(--window-fg-color) 10%, transparent);
-}
-
-.album-detail-link-stack {
-  margin-top: -1px;
-}
-
-.album-detail-kind-row {
-  min-height: 24px;
-}
-
-.album-detail-kind-row .eyebrow {
-  font-size: 14px;
-}
-
-.detail-kind-radio-button {
-  min-width: 26px;
-  min-height: 26px;
-  padding: 1px;
-  margin-left: -7px;
-  margin-right: -1px;
-  border-radius: 999px;
-}
-
-.detail-kind-radio-button image {
-  -gtk-icon-size: 16px;
-}
-
-.album-detail-genre-row {
-  padding: 0 1px;
-}
-
-.album-detail-genre-pill {
-  min-width: 0;
-  min-height: 20px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: color-mix(in srgb, white 84%, var(--window-bg-color));
-  background: rgba(0, 0, 0, 0.58);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.14),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  font-size: 12px;
-  transition:
-    background 120ms ease-out,
-    color 120ms ease-out,
-    box-shadow 120ms ease-out;
-}
-
-.album-detail-genre-pill label {
-  color: inherit;
-}
-
-.album-detail-genre-pill:hover {
-  color: color-mix(in srgb, white 90%, var(--window-bg-color));
-  background: rgba(0, 0, 0, 0.64);
-  box-shadow:
-    0 2px 7px rgba(0, 0, 0, 0.16),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
-}
-
-.album-detail-genre-pill:disabled {
-  opacity: 0.55;
 }
 
 .queue-panel {

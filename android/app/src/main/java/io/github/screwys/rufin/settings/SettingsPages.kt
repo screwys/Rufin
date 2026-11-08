@@ -1,6 +1,9 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.ui.ChoiceChip
 
+
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
@@ -73,7 +76,7 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
     }
     val displayValue = numberFormat.format(draft) + unit?.let { " $it" }.orEmpty()
     val colors = MaterialTheme.colorScheme
-    Surface(Modifier.fillMaxWidth(), color = colors.surfaceContainer, shape = MaterialTheme.shapes.medium) {
+    Surface(Modifier.fillMaxWidth(), color = colors.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
@@ -174,11 +177,11 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SettingsSelection(title: String, selected: String, options: List<Pair<String, String>>, select: (String) -> Unit) {
-    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.small) {
+    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (id, name) -> FilterChip(selected == id, { select(id) }, label = { Text(name) }, colors = settingsChipColors()) }
+            options.forEach { (id, name) -> ChoiceChip(selected == id, { select(id) }, label = { Text(name) }) }
         }
     }
     }

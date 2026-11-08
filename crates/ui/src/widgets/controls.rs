@@ -56,6 +56,57 @@ pub fn set_active_class(widget: &impl IsA<gtk::Widget>, active: bool) {
         widget.remove_css_class("active-toggle");
     }
 }
+/// Play, Play Next and Play Later at the end of `row`, shown while the pointer is over the row or
+/// its menu holds it: the hover controls of the sidebar's Saved rows and Home's rows.
+pub fn install_row_transport_controls(
+    row: &gtk::Overlay,
+    play: impl Fn(rufin_core::playback::QueuePlacement) + 'static,
+) {
+    use crate::widgets::interactions::CONTEXT_MENU_HOVER_HELD_CLASS;
+    use rufin_core::playback::QueuePlacement;
+    let play = std::rc::Rc::new(play);
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 1);
+    controls.add_css_class("row-transport-controls");
+    controls.set_halign(gtk::Align::End);
+    controls.set_valign(gtk::Align::Center);
+    controls.set_margin_end(2);
+    controls.set_visible(false);
+    for (icon_name, label, placement) in [
+        (PLAY_ICON, "Play", QueuePlacement::Now),
+        (PLAY_NEXT_ICON, "Play Next", QueuePlacement::Next),
+        (PLAY_LATER_ICON, "Play Later", QueuePlacement::Last),
+    ] {
+        let button = icon_button(icon_name, label);
+        button.add_css_class("row-transport-control");
+        let play = std::rc::Rc::clone(&play);
+        button.connect_clicked(move |_| play(placement));
+        controls.append(&button);
+    }
+    row.add_overlay(&controls);
+    row.set_measure_overlay(&controls, false);
+
+    let motion = gtk::EventControllerMotion::new();
+    let controls_for_enter = controls.clone();
+    motion.connect_enter(move |_, _, _| controls_for_enter.set_visible(true));
+    let controls_for_leave = controls.clone();
+    let row_for_leave = row.downgrade();
+    motion.connect_leave(move |_| {
+        if row_for_leave
+            .upgrade()
+            .is_some_and(|row| !row.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS))
+        {
+            controls_for_leave.set_visible(false);
+        }
+    });
+    let motion_for_hold = motion.clone();
+    row.connect_css_classes_notify(move |row| {
+        if !row.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS) {
+            controls.set_visible(motion_for_hold.contains_pointer());
+        }
+    });
+    row.add_controller(motion);
+}
+
 pub fn icon_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = base_icon_button(icon_name);
     bind_widget_tooltip(&button, label);
@@ -83,29 +134,15 @@ pub enum ActionButtonVariant {
     CoverPrimaryTransport,
     CoverCornerMenu,
     CoverCornerFavorite,
-    DetailAction,
-    DetailPrimary,
-    DetailFavorite,
 }
 
 pub const COVER_SIDE_ACTION_SIZE: i32 = 34;
 pub const COVER_PRIMARY_ACTION_SIZE: i32 = 54;
 
 pub fn configure_action_button(button: &gtk::Button, variant: ActionButtonVariant) {
-    let is_cover = matches!(
-        variant,
-        ActionButtonVariant::CoverSideTransport
-            | ActionButtonVariant::CoverPrimaryTransport
-            | ActionButtonVariant::CoverCornerMenu
-            | ActionButtonVariant::CoverCornerFavorite
-    );
-    if is_cover {
-        button.add_css_class("cover-hover-button");
-        button.add_css_class("cover-hover-animated");
-        button.set_focus_on_click(false);
-    } else {
-        button.add_css_class("detail-showcase-action-button");
-    }
+    button.add_css_class("cover-hover-button");
+    button.add_css_class("cover-hover-animated");
+    button.set_focus_on_click(false);
 
     match variant {
         ActionButtonVariant::CoverSideTransport => {
@@ -128,18 +165,8 @@ pub fn configure_action_button(button: &gtk::Button, variant: ActionButtonVarian
             button.set_halign(gtk::Align::End);
             button.set_valign(gtk::Align::Start);
         }
-        ActionButtonVariant::DetailAction => {}
-        ActionButtonVariant::DetailPrimary => {
-            button.add_css_class("detail-showcase-play-button");
-        }
-        ActionButtonVariant::DetailFavorite => {}
     }
-    let face_class = if is_cover {
-        "cover-hover-face"
-    } else {
-        "detail-showcase-action-face"
-    };
-    wrap_button_child_in_action_layers(button, face_class);
+    wrap_button_child_in_action_layers(button);
 }
 
 fn pin_action_button(button: &gtk::Button, size: i32) {
@@ -148,7 +175,7 @@ fn pin_action_button(button: &gtk::Button, size: i32) {
     button.set_valign(gtk::Align::Center);
 }
 
-fn wrap_button_child_in_action_layers(button: &gtk::Button, face_class: &str) {
+fn wrap_button_child_in_action_layers(button: &gtk::Button) {
     let Some(child) = button.child() else {
         return;
     };
@@ -161,7 +188,7 @@ fn wrap_button_child_in_action_layers(button: &gtk::Button, face_class: &str) {
     shadow.set_can_target(false);
 
     let face = gtk::CenterBox::new();
-    face.add_css_class(face_class);
+    face.add_css_class("cover-hover-face");
     face.set_can_target(false);
     face.set_center_widget(Some(&child));
     shadow.set_center_widget(Some(&face));

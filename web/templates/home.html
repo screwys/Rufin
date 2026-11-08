@@ -1,33 +1,15 @@
 {% import "macros.html" as m %}
 <div data-page="{{ page }}" data-title="{{ title }}" data-section="Home" data-missed="{{ missed }}">
 {% for section in sections %}
-{% if section.block == "Showcase" %}
-  {% for row in section.rows %}
-  <section class="home-section home-showcase seeded-gradient-showcase seeded-gradient-palette-{{ row.palette() }}">
-    <div class="showcase-cover"><div class="album-grid">{% call m::card(row) %}{% endcall %}</div></div>
-    <div class="showcase-content" data-row="{{ row.data }}" data-kind="album">
-      <div class="showcase-heading"><span class="eyebrow">{{ section.title }}</span>{% if row.menu.radio.is_some() %}{% call m::action(localization::tr("Album radio"), "rufin-audio-only-symbolic", "radio", "icon-button") %}{% endcall %}{% endif %}</div>
-      <h2 class="showcase-title">{{ row.title }}</h2>
-      <button type="button" class="metadata-link" data-action="link" data-field="artist">{{ row.artist() }}</button>
-      <div class="showcase-summary">
-        {% if row.year() > 0 %}<span>{% call m::icon("rufin-x-office-calendar-symbolic") %}{% endcall %}{{ row.year() }}</span>{% endif %}
-        <span>{% call m::icon("rufin-tracks-symbolic") %}{% endcall %}{{ row.track_count() }}</span>
-        <span>{% call m::icon("rufin-preferences-system-time-symbolic") %}{% endcall %}{{ row.long_duration() }}</span>
-      </div>
-    </div>
-  </section>
-  {% endfor %}
+{% if let Some(head) = section.head %}
+  <div class="home-section" data-block="Showcase">{% call m::showcase(head) %}{% endcall %}</div>
 {% else %}
-  <section class="home-section" data-block="{{ section.block }}">
+  <section class="home-section" data-block="{{ section.block }}" data-index="{{ loop.index0 }}">
     <div class="home-heading"><h2>{{ section.title }}</h2>
-      {% if section.block != "" && section.block != "Genres" %}{% call m::action(localization::tr("Refresh"), "rufin-view-refresh-symbolic", "refresh-home", "icon-button") %}{% endcall %}{% endif %}
-      {% if section.block != "Genres" %}<div class="home-paging">{% call m::action(localization::tr("Previous"), "rufin-go-previous-symbolic", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "rufin-go-next-symbolic", "next-home", "icon-button") %}{% endcall %}</div>{% endif %}
+      {% call m::action(localization::tr("Play"), "rufin-media-playback-start-symbolic", "play-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Shuffle"), "rufin-shuffle-symbolic", "shuffle-home", "icon-button") %}{% endcall %}
+      <div class="home-paging">{% call m::action(localization::tr("Previous"), "rufin-go-previous-symbolic", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "rufin-go-next-symbolic", "next-home", "icon-button") %}{% endcall %}</div>
     </div>
-    {% if section.block == "Genres" %}
-      <div class="home-genres">{% for row in section.rows %}<a href="{{ row.href }}" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title }}</a>{% endfor %}</div>
-    {% else %}
-      <div class="home-row" hx-sync="this:replace"><div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div></div>
-    {% endif %}
+    <div class="home-row" hx-sync="this:replace">{% if section.column_rows > 1 %}<div class="row-columns" style="grid-template-rows: repeat({{ section.column_rows }}, auto)">{% for row in section.rows %}{% call m::column_row(row) %}{% endcall %}{% endfor %}</div>{% else %}<div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div>{% endif %}</div>
   </section>
 {% endif %}
 {% endfor %}

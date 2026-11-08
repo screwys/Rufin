@@ -6,7 +6,6 @@ import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.shared.library.SearchMode
 import io.github.screwys.rufin.shared.library.FavoriteTarget
-import io.github.screwys.rufin.shared.library.HomeBlockKind
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchResult
@@ -333,5 +332,4 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             labelsVersion++
         }
     }
-    fun refreshSection(block: HomeBlockKind) = connection.runAction { library?.refreshHome(block) }
 }

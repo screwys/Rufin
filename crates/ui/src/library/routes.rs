@@ -262,7 +262,7 @@ impl CatalogUi {
                 self.library_smart_playlists_route(read)
             }
             Route::Folders { path } => self.folders_route(path, read),
-            Route::Home => self.home_route(read.view.home_sections().unwrap_or_default()),
+            Route::Home => self.home_route(std::sync::Arc::clone(&read.view)),
             Route::Search => return self.search_route(),
         };
         mounted.with_view(view)

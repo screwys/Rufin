@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,8 +61,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
     onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
+    onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit = {},
 ) {
-    val sheet = rememberModalBottomSheetState()
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -71,6 +72,9 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
     val output by remember(player) { derivedStateOf { player.playback?.controls?.playbackOutput } }
     val currentIndex by remember(player) { derivedStateOf { player.playback?.queue?.currentIndex } }
     var searchVisible by remember { mutableStateOf(false) }
+    // Select: rows a tap picks, which then move up or down together or leave; dragging still works.
+    var selecting by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf(setOf<ULong>()) }
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("") }
     var pages by remember { mutableStateOf<Map<Int, PreparedQueuePage>>(emptyMap()) }
@@ -115,7 +119,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
             haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
         }
     }
-    fun close() { scope.launch { sheet.hide(); onDismiss() } }
+    fun close() = onDismiss()
     fun openMenu(row: QueueRow) {
         player.model.browse.library?.trackItem(row.track())?.let { menu = row to BrowseItem(it, 0UL, null) }
     }
@@ -158,6 +162,25 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
         if (dragged == null || dragScroll == 0f) return@LaunchedEffect
         while (true) { list.scrollBy(dragScroll); updateDrag(); delay(16) }
     }
+    fun startDrag(position: ULong, row: QueueRow) {
+        val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == position.toLong() } ?: return
+        dragged = position; dragIndex = info.index; dragOrigin = info.index
+        dragTop = info.offset.toFloat(); dragHeight = info.size
+        dragDistance = 0f; dragRow = row; released = null
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+    fun dragBy(amount: Float) {
+        dragDistance += amount
+        updateDrag()
+        val middle = dragTop + dragDistance + dragHeight / 2f
+        val layout = list.layoutInfo
+        dragScroll = when {
+            middle < layout.viewportStartOffset + dragHeight -> -12f
+            middle > layout.viewportEndOffset - dragHeight -> 12f
+            else -> 0f
+        }
+    }
+    fun cancelDrag() { dragged = null; dragRow = null; dragScroll = 0f }
     fun finishDrag() {
         val id = dragged
         val after = dragIndex > dragOrigin
@@ -173,7 +196,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
                 releaseOffset.animateTo(0f, if (reduceMotion) tween(0)
                     else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 1f))
             }
-            try { if (moved) player.moveQueue(id, target, after) }
+            try { if (moved) player.moveQueue(listOf(id), target, after) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { player.reportError(error) }
             finally { dragged = null }
@@ -181,23 +204,55 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
             if (released == id) released = null
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet,
-        contentWindowInsets = { WindowInsets.systemBars.only(WindowInsetsSides.Top) },
-        dragHandle = { Box(Modifier.padding(vertical = 5.dp).size(32.dp, 4.dp)
-            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))) }) {
-        Column(Modifier.fillMaxHeight(.92f)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+    // A sheet that opens half-way and pulls up to the full height: the playing track pinned on top,
+    // the queue, and Auto DJ at the bottom.
+    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        containerColor = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+            val total = player.playback?.queue?.total ?: 0UL
+            if (selecting) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(remember(player.playback?.queue?.total, translation) { player.playback?.queue?.total?.let(::trackCountText).orEmpty() },
-                    Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                PlayerIconButton("rufin-search-symbolic", "Search", { searchVisible = !searchVisible; if (!searchVisible) search = "" })
-                PlayerIconButton("rufin-playlists-symbolic", "New Playlist", { create = true }, enabled = (player.playback?.queue?.total ?: 0UL) > 0UL)
-                PlayerIconButton("rufin-user-trash-symbolic", "Clear queue", { clear = true }, enabled = (player.playback?.queue?.total ?: 0UL) > 0UL)
+                PlayerIconButton("rufin-window-close-symbolic", "Done", { selecting = false; picked = emptySet() })
+                Text(translate("{count} selected").replace("{count}", picked.size.toString()), Modifier.weight(1f).padding(start = 4.dp),
+                    style = MaterialTheme.typography.titleMedium)
+                val first = picked.minOrNull()
+                val last = picked.maxOrNull()
+                PlayerIconButton("rufin-go-up-symbolic", "Move up", {
+                    val from = first ?: return@PlayerIconButton
+                    val chosen = picked.sorted()
+                    scope.launch { player.moveQueue(chosen, from - 1UL) }
+                    picked = (0 until chosen.size).map { from - 1UL + it.toULong() }.toSet()
+                }, enabled = first != null && first > 0UL)
+                PlayerIconButton("rufin-go-down-symbolic", "Move down", {
+                    val to = last ?: return@PlayerIconButton
+                    val chosen = picked.sorted()
+                    scope.launch { player.moveQueue(chosen, to + 1UL, after = true) }
+                    val start = to + 2UL - chosen.size.toULong()
+                    picked = (0 until chosen.size).map { start + it.toULong() }.toSet()
+                }, enabled = last != null && last + 1UL < total)
+                PlayerIconButton("rufin-user-trash-symbolic", "Remove from Queue", {
+                    player.removeQueue(picked.toList()); picked = emptySet()
+                }, enabled = picked.isNotEmpty())
+            } else Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                    Text(translate("Queue"), style = MaterialTheme.typography.titleLarge)
+                    Text(remember(player.playback?.queue?.total, translation) { player.playback?.queue?.total?.let(::trackCountText).orEmpty() },
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                // The queue's tools, shown directly.
+                val filled = (player.playback?.queue?.total ?: 0UL) > 0UL
+                PlayerIconButton("rufin-search-symbolic", "Search", { searchVisible = !searchVisible; if (!searchVisible) search = "" },
+                    selected = searchVisible)
+                PlayerIconButton("rufin-list-add-symbolic", "New Playlist", { create = true }, enabled = filled)
+                PlayerIconButton("rufin-document-edit-symbolic", "Select", { selecting = true }, enabled = filled)
+                PlayerIconButton("rufin-user-trash-symbolic", "Clear queue", { clear = true }, enabled = filled)
             }
+            QueueNowPlaying(player)
             if (searchVisible) OutlinedTextField(search, { search = it }, singleLine = true,
                 label = { Text(translate("Search")) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 8.dp))
             LazyColumn(Modifier.fillMaxWidth().weight(1f), state = list,
-                contentPadding = WindowInsets.systemBars.only(WindowInsetsSides.Bottom).asPaddingValues(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (first == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
                 else if (count == 0) item { Text(translate("Your queue is empty."), Modifier.padding(24.dp)) }
@@ -248,44 +303,41 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
                                     },
                                         supportingContent = { Text(listOf(metadata.artist, metadata.album).filter(String::isNotBlank).joinToString(" · "),
                                             maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                        leadingContent = { QueueSheetCover(row, player) },
-                                        trailingContent = {
-                                            Box(Modifier.size(40.dp).semantics { contentDescription = translate("Reorder") }
-                                                .pointerInput(row) {
-                                                    detectDragGestures(onDragStart = {
-                                                        val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == position.toLong() }
-                                                        if (info != null) {
-                                                            dragged = position; dragIndex = info.index; dragOrigin = info.index
-                                                            dragTop = info.offset.toFloat(); dragHeight = info.size
-                                                            dragDistance = 0f; dragRow = row; released = null
-                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                        }
-                                                    }, onDrag = { change, amount ->
-                                                        change.consume(); dragDistance += amount.y
-                                                        updateDrag()
-                                                        val middle = dragTop + dragDistance + dragHeight / 2f
-                                                        val layout = list.layoutInfo
-                                                        dragScroll = when {
-                                                            middle < layout.viewportStartOffset + dragHeight -> -12f
-                                                            middle > layout.viewportEndOffset - dragHeight -> 12f
-                                                            else -> 0f
-                                                        }
-                                                    }, onDragEnd = ::finishDrag, onDragCancel = { dragged = null; dragRow = null; dragScroll = 0f })
-                                                }, contentAlignment = Alignment.Center) {
-                                                RufinIcon("rufin-list-drag-handle-symbolic", null, Modifier.size(20.dp))
-                                            }
-                                        }, colors = ListItemDefaults.colors(
-                                            containerColor = if (current) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerLow,
+                                        leadingContent = { Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (selecting) Checkbox(position in picked, null)
+                                            QueueSheetCover(row, player)
+                                        } },
+                                        // The handle drags at once; a hold anywhere on the row does too.
+                                        trailingContent = { RufinIcon("rufin-list-drag-handle-symbolic", translate("Drag to reorder"), Modifier.size(20.dp)
+                                            .pointerInput(row) {
+                                                detectDragGestures(onDragStart = { startDrag(position, row) },
+                                                    onDrag = { change, amount -> change.consume(); dragBy(amount.y) },
+                                                    onDragEnd = { finishDrag() }, onDragCancel = { cancelDrag() })
+                                            }, MaterialTheme.colorScheme.onSurfaceVariant) },
+                                        colors = ListItemDefaults.colors(
+                                            containerColor = if (position in picked) MaterialTheme.colorScheme.secondaryContainer
+                                                else if (current) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerLow,
                                             headlineColor = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface),
-                                        modifier = Modifier.combinedClickable(onClick = {
-                                            player.activateQueue(position); close()
-                                        }, onLongClick = { openMenu(row) }))
+                                        modifier = Modifier.semantics { contentDescription = translate("Hold to reorder") }
+                                                .pointerInput(row) {
+                                                    detectDragGesturesAfterLongPress(onDragStart = { startDrag(position, row) },
+                                                        onDrag = { change, amount -> change.consume(); dragBy(amount.y) }, onDragEnd = {
+                                                        // A hold that did not move opens the track's menu.
+                                                        if (dragOrigin == dragIndex && kotlin.math.abs(dragDistance) < 12f) {
+                                                            cancelDrag(); openMenu(row)
+                                                        } else finishDrag()
+                                                    }, onDragCancel = { cancelDrag() })
+                                                }.clickable {
+                                                    if (selecting) picked = if (position in picked) picked - position else picked + position
+                                                    else { player.activateQueue(position); close() }
+                                                })
                                 }
                             }
                         }
                     }
                 }
             }
+            QueueAutoDj(player) { onSettings(io.github.screwys.rufin.more.MoreDestination.Playback) }
         }
     }
     if (clear) {
@@ -323,5 +375,55 @@ private fun QueueSheetCover(row: QueueRow, player: PlayerConnection) {
     val artwork = rememberArtwork(identity, player, pixels)
     Box(Modifier.size(48.dp)) {
         Artwork(artwork, Modifier.fillMaxSize().clip(CoverShape))
+    }
+}
+
+/** The playing track over the queue: its cover and names, play and pause, and a thin progress line. */
+@Composable
+private fun QueueNowPlaying(player: PlayerConnection) {
+    val current = player.currentItem ?: return
+    val playing by remember(player) { derivedStateOf { player.playback?.transport?.desiredPlaying == true } }
+    val duration = player.playback?.transport?.durationMillis ?: 0UL
+    val artwork = rememberArtwork(current.artworkBinding, player, with(LocalDensity.current) { 56.dp.roundToPx() })
+    var position by remember { mutableStateOf(0UL) }
+    val interpolate = playing && !LocalReduceMotion.current
+    LaunchedEffect(player, interpolate) { do { position = player.positionNow(); if (interpolate) withFrameNanos { } } while (interpolate) }
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Column {
+            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Artwork(artwork, Modifier.size(56.dp).clip(CoverShape))
+                Column(Modifier.weight(1f)) {
+                    Text(current.metadata.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    Text(current.metadata.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                FilledIconButton(player::togglePlayback, Modifier.size(44.dp)) {
+                    RufinIcon(if (playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
+                        translate(if (playing) "Pause" else "Play"), Modifier.size(22.dp))
+                }
+            }
+            if (duration > 0UL) LinearProgressIndicator(progress = { (position.toDouble() / duration.toDouble()).toFloat().coerceIn(0f, 1f) },
+                Modifier.fillMaxWidth().height(3.dp), drawStopIndicator = {})
+        }
+    }
+}
+
+/** Auto DJ under the queue it fills: the switch, and its settings from the label. */
+@Composable
+private fun QueueAutoDj(player: PlayerConnection, onSettings: () -> Unit) {
+    val enabled by remember(player) { derivedStateOf { player.playback?.controls?.autoDjEnabled == true } }
+    HorizontalDivider()
+    Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).clickable(onClick = onSettings).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            RufinIcon("rufin-auto-dj-symbolic", null, Modifier.size(22.dp))
+            Column {
+                Text(translate("Auto DJ"), style = MaterialTheme.typography.titleSmall)
+                Text(translate("Adds similar tracks when the queue runs low"), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Switch(enabled, { player.autoDj() })
     }
 }

@@ -17,6 +17,14 @@ pub struct CoverGroupProjection {
 }
 
 impl CoverGroupProjection {
+    /// Calls `shown` with each texture the group shows: its single cover or its first quadrant.
+    pub fn connect_texture(&self, shown: Rc<dyn Fn(&gtk::gdk::Texture)>) {
+        self.single.connect_texture(Rc::clone(&shown));
+        if let Some(first) = self.quadrants.first() {
+            first.connect_texture(shown);
+        }
+    }
+
     pub fn widget(&self) -> gtk::Widget {
         self.root.clone().upcast()
     }

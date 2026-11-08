@@ -492,6 +492,7 @@ fn form(
         saved_credential_hint: gtk::Label,
         connect: gtk::Button, save: gtk::Button
     });
+    crate::widgets::forms::attach_address_suggestions(&url);
     let smb = kind == "smb";
     folders_group.set_visible(music);
     fields_group.add(&install_compact_field_row_responsiveness_at(&fields, 440));

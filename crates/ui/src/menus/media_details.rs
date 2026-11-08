@@ -1,3 +1,4 @@
+use localization::msgid;
 use std::rc::Rc;
 
 use crate::widgets::artwork::ArtworkTile;
@@ -9,17 +10,13 @@ use rufin_core::metadata::{MediaDetails, MediaDetailsItem};
 use crate::shell::shell::Shell;
 
 pub(crate) struct MenuHeader<'a> {
-    pub item: MediaDetailsItem,
     pub title: &'a str,
     pub subtitle: &'a str,
     pub artwork: Option<&'a [u8]>,
-    /// What the favorite button marks, and whether it is a favorite now; None hides it.
-    pub favorite: Option<(library::FavoriteTarget, bool)>,
 }
 
 pub(crate) fn append_header(
     surface: &ContextMenuSurface,
-    target: &gtk::Widget,
     shell: &Rc<Shell>,
     identity: MenuHeader<'_>,
 ) {
@@ -27,7 +24,6 @@ pub(crate) fn append_header(
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         header: gtk::Box, cover: gtk::Box, title_host: gtk::Box, subtitle_host: gtk::Box,
-        favorite: gtk::Button, details: gtk::Button,
     });
     let (title_slide, title) = crate::widgets::text_slide::new_label();
     let (subtitle_slide, subtitle) = crate::widgets::text_slide::new_label();
@@ -37,25 +33,26 @@ pub(crate) fn append_header(
     subtitle.set_text(identity.subtitle);
     subtitle_host.set_visible(!identity.subtitle.is_empty());
     bind_cover(&cover, shell, identity.artwork, 48);
-    favorite.set_visible(identity.favorite.is_some());
-    if let Some((favorite_target, favorited)) = identity.favorite {
-        crate::favorites::set_favorite_button_active(&favorite, favorited);
-        let favorite_shell = Rc::clone(shell);
-        surface.bind_button(&favorite, move || {
-            favorite_shell.set_favorite(favorite_target.clone(), !favorited);
-        });
-    }
+    surface.append_fixed_widget("media-header", &header);
+}
+
+/// Details, near the menu's end: the dialog of `item`'s tags and files.
+pub(crate) fn append_details_action(
+    surface: &ContextMenuSurface,
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    item: MediaDetailsItem,
+) {
     let parent = target
         .root()
         .and_downcast::<gtk::Window>()
         .map(|parent| parent.downgrade());
     let shell = shell.clone();
-    surface.bind_button(&details, move || {
+    surface.append_fixed_action(msgid("Details"), "rufin-info-symbolic", move || {
         if let Some(parent) = parent.as_ref().and_then(glib::WeakRef::upgrade) {
-            present(&parent, &shell, identity.item.clone());
+            present(&parent, &shell, item.clone());
         }
     });
-    surface.append_fixed_widget("media-header", &header);
 }
 
 fn bind_cover(host: &gtk::Box, shell: &Shell, binding: Option<&[u8]>, size: i32) {

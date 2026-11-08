@@ -59,7 +59,8 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
     }
 }
 
-internal data class PlayerArtwork(val bitmap: Bitmap, val color: Color)
+/** A decoded cover, its average colour, and the three stops of the showcase band it heads. */
+internal data class PlayerArtwork(val bitmap: Bitmap, val color: Color, val band: List<Color>)
 
 internal class ArtworkCache {
     private data class Key(val identity: String, val pixels: Int)
@@ -131,7 +132,7 @@ internal fun playerArtwork(image: AndroidArtwork): PlayerArtwork {
     val color = if (count == 0) Color.Gray else Color(
         (red / count).toInt(), (green / count).toInt(), (blue / count).toInt(),
     )
-    return PlayerArtwork(bitmap, color)
+    return PlayerArtwork(bitmap, color, image.band.map { Color(it.red, it.green, it.blue) })
 }
 
 internal val CoverShape = RoundedCornerShape(8.dp)

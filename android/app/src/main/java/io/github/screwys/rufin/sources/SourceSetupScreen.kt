@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalAutofillManager
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
@@ -30,6 +32,7 @@ import kotlinx.coroutines.delay
 internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null, connectionsOnly: Boolean = false) {
     val setup = remember(model, sourceId) { model.sourceSetupSession(sourceId) }
     val form = setup.form
+    val autofillManager = LocalAutofillManager.current
     var mapping by remember { mutableStateOf(false) }
     var saved by remember(setup) { mutableStateOf(false) }
     LaunchedEffect(saved) {
@@ -68,6 +71,8 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
         if (setup.ready && form.kind != null && form.kind != "local") {
             Surface {
                 Button({
+                    // Tells a password manager the login was sent, so it offers to save it under Rufin.
+                    autofillManager?.commit()
                     saved = false
                     setup.submit { if (sourceId == null) close() else saved = true }
                 }, Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
@@ -132,10 +137,12 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                                 Text(translate("Quick Connect"))
                             }
                         } else {
-                            SourceTextField("Username or email", form.username, { form.username = it }, !setup.working)
-                            SourceTextField("Password", form.secret, { form.secret = it }, !setup.working, secret = true)
+                            SourceTextField("Username or email", form.username, { form.username = it }, !setup.working,
+                                autofill = ContentType.Username)
+                            SourceTextField("Password", form.secret, { form.secret = it }, !setup.working, secret = true,
+                                autofill = ContentType.Password)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton({ setup.embyLogin(false, browser) }, enabled = !setup.working && form.username.isNotBlank(), colors = settingsButtonColors()) { Text(translate("Sign in")) }
+                                OutlinedButton({ autofillManager?.commit(); setup.embyLogin(false, browser) }, enabled = !setup.working && form.username.isNotBlank(), colors = settingsButtonColors()) { Text(translate("Sign in")) }
                                 OutlinedButton({ setup.embyLogin(true, browser) }, enabled = !setup.working, colors = settingsButtonColors()) { Text(translate("Sign in with a code")) }
                             }
                             SourceChoices(setup.choices, setup.selectedServer) { setup.selectedServer = it }

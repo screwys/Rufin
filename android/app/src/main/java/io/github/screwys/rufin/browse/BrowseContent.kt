@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.library.LyricsSnippet
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
@@ -75,10 +76,13 @@ import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
 import io.github.screwys.rufin.core.AndroidSortField
 import io.github.screwys.rufin.core.AndroidHomeSectionKind
-import io.github.screwys.rufin.shared.library.HomeBlockKind
 import io.github.screwys.rufin.shared.library.Row as LibraryRow
 import io.github.screwys.rufin.shared.rufin_core.playsContext
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import io.github.screwys.rufin.core.AndroidBrowseRow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
 
@@ -86,7 +90,7 @@ import kotlinx.coroutines.flow.collect
 internal fun BrowseContent(
     items: LazyPagingItems<BrowseItem>, homeSections: List<HomeSectionItems>, player: PlayerConnection,
     home: Boolean, detail: Boolean, covers: Boolean, onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    onSectionPlay: (HomeSectionItems, Boolean) -> Unit, onRefreshSection: (HomeBlockKind) -> Unit,
+    onSectionPlay: (HomeSectionItems, Boolean) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onAddToPlaylist: (BrowseItem) -> Unit,
     onScrolled: (Boolean) -> Unit, scrollSections: List<AndroidScrollSection> = emptyList(),
     displaySize: DisplaySize = DisplaySize.DEFAULT, gridSpacing: DisplaySize = DisplaySize.DEFAULT, onPlayItem: (BrowseItem, Boolean) -> Unit = { item, _ -> onActivate(item) },
@@ -98,11 +102,13 @@ internal fun BrowseContent(
     loading: Boolean = false,
     onRadio: (BrowseItem) -> Unit,
     emptyIcon: String? = null,
+    onStepShowcase: suspend (Boolean) -> List<AndroidBrowseRow> = { emptyList() },
 ) {
     val coverWidth = when (displaySize) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
     val spacing = when (gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
+    val tiny = io.github.screwys.rufin.app.LocalTinyScreen.current
     if (home) {
-        HomeContent(homeSections, player, onActivate, onMenu, onSectionPlay, onRefreshSection, onFavorite, onScrolled, onRadio)
+        HomeContent(homeSections, player, onActivate, onMenu, onSectionPlay, onFavorite, onScrolled, onRadio, onStepShowcase)
     } else {
         val scope = rememberCoroutineScope()
         val refresh = if (loading && items.itemCount == 0) LoadState.Loading else items.loadState.refresh
@@ -132,7 +138,7 @@ internal fun BrowseContent(
                     .distinctUntilChanged().collect(onScrolled)
             }
             Box(Modifier.fillMaxSize()) {
-            LazyVerticalGrid(GridCells.Adaptive(coverWidth), Modifier.fillMaxSize().padding(end = indexInset), state = state,
+            LazyVerticalGrid(if (tiny) GridCells.Fixed(1) else GridCells.Adaptive(coverWidth), Modifier.fillMaxSize().padding(end = indexInset), state = state,
                 contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp + LocalPlayerBottomPadding.current), horizontalArrangement = Arrangement.spacedBy(spacing),
                 verticalArrangement = Arrangement.spacedBy(spacing + 4.dp)) {
                 items(items.itemCount, key = items.itemKey(::browseItemKey)) { index ->
@@ -236,6 +242,8 @@ internal fun BrowseEmptyState(filtered: Boolean = false, icon: String? = null, r
     }
 }
 
+/** The fast scroller: a track the pane's height with the list's letters, a thumb where the list is
+ *  that widens while held, and the held letter in a bubble beside it. */
 @Composable
 private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScrollSection>, firstVisible: Int,
     modifier: Modifier, onRelease: (String) -> Unit,
@@ -255,7 +263,10 @@ private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScroll
     val scale = if (height > 0) minOf(1f, height / (labelHeight * letters.size)) else 1f
     val fittedStyle = style.copy(fontSize = style.fontSize * scale, lineHeight = style.lineHeight * scale)
     val railWidth = with(density) { sizes.maxOf { it.width }.toDp() + 4.dp }.coerceAtLeast(22.dp)
-    Box(modifier.fillMaxHeight().width(railWidth).background(MaterialTheme.colorScheme.surface.copy(alpha = .9f)).padding(vertical = 8.dp)
+    // Only the letters show; the list's place is the highlighted one, and a held letter shows its bubble.
+    val held = touched != null
+    val progress = ((active + .5f) / letters.size).coerceIn(0f, 1f)
+    Box(modifier.fillMaxHeight().width(railWidth).padding(vertical = 8.dp)
         .onSizeChanged { height = it.height }
         .pointerInput(letters) {
             awaitEachGesture {
@@ -291,19 +302,26 @@ private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScroll
                 }
             }
         }
-        if (touched != null) Surface(Modifier.align(Alignment.CenterStart).offset(x = (-56).dp).size(48.dp),
-            shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+    }
+    if (held) Box(modifier.fillMaxHeight().padding(vertical = 8.dp)) {
+        val travel = with(density) { (height.toDp() - 48.dp).coerceAtLeast(0.dp) }
+        Surface(Modifier.offset(x = -(railWidth + 52.dp), y = travel * progress).size(48.dp),
+            shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
+            shadowElevation = 4.dp) {
             Box(contentAlignment = Alignment.Center) { Text(letters[active], style = MaterialTheme.typography.titleLarge) }
         }
     }
 }
 
+/** The height of a transparent bar drawn over a page's band: Home's and the detail pages'. */
+internal val LocalOverlayBarHeight = compositionLocalOf { 0.dp }
+
 @Composable
 private fun HomeContent(
     sections: List<HomeSectionItems>, player: PlayerConnection, onActivate: (BrowseItem) -> Unit,
-    onMenu: (BrowseItem) -> Unit, onPlay: (HomeSectionItems, Boolean) -> Unit, onRefresh: (HomeBlockKind) -> Unit,
+    onMenu: (BrowseItem) -> Unit, onPlay: (HomeSectionItems, Boolean) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onScrolled: (Boolean) -> Unit,
-    onRadio: (BrowseItem) -> Unit,
+    onRadio: (BrowseItem) -> Unit, onStep: suspend (Boolean) -> List<AndroidBrowseRow>,
 ) {
     val state = rememberLazyListState()
     val sectionScroll = remember {
@@ -316,36 +334,195 @@ private fun HomeContent(
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }
             .distinctUntilChanged().collect(onScrolled)
     }
-    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current),
+    val bar = LocalOverlayBarHeight.current
+    val showcase = sections.firstOrNull { it.kind == AndroidHomeSectionKind.SHOWCASE }
+    LazyColumn(Modifier.fillMaxSize(), state = state,
+        contentPadding = PaddingValues(top = if (showcase == null) bar + 8.dp else 0.dp, bottom = 8.dp + LocalPlayerBottomPadding.current),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items(sections, key = { it.index.toString() + it.title }) { section ->
             if (section.kind == AndroidHomeSectionKind.SHOWCASE) {
-                section.items.forEach { item ->
-                    HomeShowcase(item, player, onActivate, onMenu, onFavorite, { shuffled -> onPlay(section, shuffled) }, onRadio, section.title)
-                }
+                HomeBand(section, player, onMenu, onFavorite, { shuffled -> onPlay(section, shuffled) }, onRadio, onStep)
             } else {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // The title, then Play and Shuffle beside it; no refresh.
                         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                             Text(section.title, Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            section.refresh?.let { block -> PlayerIconButton("rufin-view-refresh-symbolic", "Refresh", { onRefresh(block) }, glyph = true) }
+                            ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(section, false) }, { onPlay(section, true) })
+                            ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
                         }
-                        ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
-                        ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(section, false) }, { onPlay(section, true) })
                     }
-                    LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
+                    // Genres wrap as chips, track blocks page through columns of two rows, and the rest
+                    // are cards.
+                    // Tracks and genres page through columns of two rows; a genre row opens the genre, a
+                    // track row its menu, as Home's cards do.
+                    if (section.kind == AndroidHomeSectionKind.GENRES || section.kind == AndroidHomeSectionKind.TRACKS) LazyRow(
+                        modifier = Modifier.nestedScroll(sectionScroll),
+                        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        val genres = section.kind == AndroidHomeSectionKind.GENRES
+                        items(section.items.chunked(2), key = { column -> browseItemKey(column.first()) }) { column ->
+                            Column(Modifier.width(300.dp)) {
+                                column.forEach { item ->
+                                    if (genres) HomeRow(item, player, { onActivate(item) }, onMenu,
+                                        item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "))
+                                    else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle)
+                                }
+                            }
+                        }
+                    } else LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
                         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(section.items, key = ::browseItemKey) { item ->
-                            if (section.kind == AndroidHomeSectionKind.GENRES) {
-                                AssistChip(onClick = { onActivate(item) }, label = { Text(item.row.title) },
-                                    leadingIcon = { RufinIcon("rufin-audio-x-generic-symbolic", null, Modifier.size(20.dp)) })
-                            } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true)
+                            CoverCard(item, player, Modifier.width(150.dp), onMenu, onMenu, marquee = true)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** A row in a Home block (a track or a genre): cover, title and its line, and ⋯ for its menu. */
+@Composable
+private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
+    line: String) {
+    val shown = favoriteItem(player.model, item)
+    val artwork = rememberBrowseArtwork(item, player, 56.dp)
+    Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        BrowseCover(item, artwork, Modifier.size(56.dp).clip(CoverShape))
+        Column(Modifier.weight(1f)) {
+            BrowseTitle(shown, maxLines = 1, style = MaterialTheme.typography.bodyLarge, player = player, showDownloadBadge = false)
+            if (line.isNotBlank()) Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        PlayerIconButton("rufin-view-more-symbolic", "More actions", { onMenu(shown) })
+    }
+}
+
+/** Home's showcase: Rufin's band full-bleed under the bar, the cover over its edge, the title,
+ *  artist and facts on the band and the buttons beside the cover. A swipe shows the album before
+ *  or after, which core then steps to; a tap on the cover opens its menu, as on every Home entry. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu: (BrowseItem) -> Unit,
+    onFavorite: (BrowseItem) -> Unit, onPlay: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
+    onStep: suspend (Boolean) -> List<AndroidBrowseRow>,
+) {
+    // The album before, the album shown and the album after; a step answers the next three.
+    var shown by remember { mutableStateOf(section.items) }
+    LaunchedEffect(section.items) { shown = section.items }
+    if (shown.size < 3) return
+    val view = shown[1].view
+    val pager = androidx.compose.foundation.pager.rememberPagerState(1) { 3 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.settledPage }.collect { settled ->
+            if (settled == 1) return@collect
+            val rows = runCatching { onStep(settled == 2) }.getOrNull().orEmpty()
+            if (rows.size == 3) shown = rows.mapIndexed { index, row -> BrowseItem(row, index.toULong(), view, contextTitle = section.title) }
+            pager.scrollToPage(1)
+        }
+    }
+    androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth()
+        .onPreviewKeyEvent { event ->
+            // D-pad left and right step the showcase where there is no swipe.
+            if (event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            val target = when (event.key) {
+                androidx.compose.ui.input.key.Key.DirectionLeft -> 0
+                androidx.compose.ui.input.key.Key.DirectionRight -> 2
+                else -> return@onPreviewKeyEvent false
+            }
+            scope.launch { pager.animateScrollToPage(target) }
+            true
+        }, key = { shown[it].row.key + it }) { page ->
+        HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (BrowseItem) -> Unit,
+    onFavorite: (BrowseItem) -> Unit, onPlay: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
+) {
+    val projected = favoriteItem(player.model, item)
+    val bar = LocalOverlayBarHeight.current
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // Phones: a 120 dp cover; wider panes grow it to 196 dp, as GTK's Home does.
+        val cover = ((maxWidth - 32.dp) * .3f).coerceIn(112.dp, 196.dp)
+        // The band reaches past the cover's middle, or further when the title, artist and facts need it
+        // (a large font), so they always end just above its edge.
+        val density = LocalDensity.current
+        var text by remember { mutableStateOf(0.dp) }
+        val band = maxOf(bar + cover * .9f + 16.dp, bar + 24.dp + text + 12.dp)
+        val artwork = rememberBrowseArtwork(item, player, cover)
+        Box(Modifier.fillMaxWidth().height(band).then(showcaseBand(artwork?.band)))
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = bar + 24.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            BrowseCover(item, artwork, Modifier.size(cover).shadow(14.dp, CoverShape,
+                ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f)).clip(CoverShape)
+                .combinedClickable(onClick = { onMenu(projected) }, onLongClick = { onMenu(projected) }))
+            Column(Modifier.weight(1f)) {
+                // The title, artist and facts end just above the band's edge; the buttons start under it.
+                Column(Modifier.fillMaxWidth().height(band - bar - 24.dp - 12.dp), verticalArrangement = Arrangement.Bottom) {
+                    Column(Modifier.wrapContentHeight(Alignment.Bottom, unbounded = true)
+                        .onSizeChanged { text = with(density) { it.height.toDp() } }) {
+                    CompositionLocalProvider(LocalContentColor provides OnBand) {
+                    // Showcases carry no download badge; rows and cards do.
+                    BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        showDownloadBadge = false,
+                        marquee = true)
+                    if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, Modifier.rufinMarquee().padding(top = 2.dp),
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    // On the band the facts sit in a dark pill, divided by |, readable on any cover and theme.
+                    Surface(Modifier.padding(top = 8.dp), shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = .28f), contentColor = OnBand) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val facts = listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                                Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
+                                Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText))
+                            facts.forEachIndexed { index, (icon, label, value) ->
+                                if (index > 0) Text("|", style = MaterialTheme.typography.labelSmall, color = OnBand.copy(alpha = .45f))
+                                SummaryFact(icon, label, value)
+                            }
+                        }
+                    }
+                    }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, { onPlay(false) }, { onPlay(true) })
+                    ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) })
+                    ShowcaseRound(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
+                        { onFavorite(projected) }, if (projected.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
+                }
+            }
+        }
+    }
+}
+
+/** Play (hold to shuffle) in the accent, and Radio in the tonal box Favorite, Download and ⋯ share. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+    val container = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)
+    val content = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    Row(Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(container)
+        .combinedClickable(onClick = onClick, onLongClick = onLongClick,
+            onLongClickLabel = onLongClick?.let { translate("{action} (Shuffle)").replace("{action}", translate(label)) })
+        .padding(start = 14.dp, end = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RufinIcon(icon, null, Modifier.size(16.dp), content)
+        Text(translate(label), color = content, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current) {
+    Box(Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape)
+        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        RufinIcon(icon, translate(label), Modifier.size(20.dp), tint)
     }
 }
 
@@ -396,7 +573,7 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     }
 }
 
-// The palettes, stops and seed match resources/showcase.css and GTK artwork presentation.
+// Placeholder cards' palettes, picked by a hash of the item's key.
 private val showcasePalettes = arrayOf(
     intArrayOf(176,72,88, 93,60,151, 196,129,73),
     intArrayOf(194,116,57, 129,72,53, 208,165,79),
@@ -425,10 +602,11 @@ private fun showcaseMix(first: Color, second: Color, weight: Float): Color {
         (first.blue * firstAlpha + second.blue * secondAlpha) / alpha, alpha)
 }
 
+/** A placeholder card's three stops for `key`. */
 @Composable
-internal fun showcasePaint(key: String): Modifier {
+private fun showcaseColors(key: String): List<Color> {
     val scheme = MaterialTheme.colorScheme
-    val colors = remember(key, scheme.background, scheme.surfaceContainer) {
+    return remember(key, scheme.background, scheme.surfaceContainer) {
         val seed = key.toByteArray(Charsets.UTF_8).fold(0x811c9dc5u) { hash, byte -> hash * 16777619u xor byte.toUByte().toUInt() }
         val palette = showcasePalettes[((seed xor seed.rotateLeft(13) xor seed.rotateRight(9)) % 16u).toInt()]
         fun color(offset: Int, alpha: Float) = Color(palette[offset] / 255f, palette[offset + 1] / 255f, palette[offset + 2] / 255f, alpha)
@@ -436,6 +614,32 @@ internal fun showcasePaint(key: String): Modifier {
             showcaseMix(color(3, .64f), scheme.surfaceContainer, .44f).compositeOver(scheme.background),
             showcaseMix(scheme.background, color(6, .56f), .62f).compositeOver(scheme.background))
     }
+}
+
+/** A page's band: its cover's colours (`PlayerArtwork.band`) at 135°, as CSS places them,
+ *  darker toward the edge the cover overlaps; a neutral dark until the cover has loaded. */
+internal fun showcaseBand(stops: List<Color>?): Modifier = Modifier.drawWithCache {
+    val colors = stops ?: neutralBand
+    val reach = (size.width + size.height) / 4f
+    val centre = Offset(size.width / 2f, size.height / 2f)
+    val brush = Brush.linearGradient(0f to colors[0], .58f to colors[1], 1f to colors[2],
+        start = centre - Offset(reach, reach), end = centre + Offset(reach, reach))
+    val shade = Brush.verticalGradient(.3f to Color.Transparent, 1f to Color.Black.copy(alpha = .3f))
+    onDrawBehind { drawRect(brush); drawRect(shade) }
+}
+
+private val neutralBand = listOf(Color(0xFF2D3036), Color(0xFF282A30), Color(0xFF212328))
+
+/** Text and icons on a band, which is always dark. */
+internal val OnBand = Color.White.copy(alpha = .92f)
+
+/** The middle colour of the band a detail page's header shows, for its bar once scrolled. */
+internal val LocalDetailBand = compositionLocalOf<MutableState<Color?>?> { null }
+
+@Composable
+internal fun showcasePaint(key: String): Modifier {
+    val scheme = MaterialTheme.colorScheme
+    val colors = showcaseColors(key)
     return Modifier.shadow(4.dp, RoundedCornerShape(8.dp), ambientColor = Color.Black.copy(alpha = .08f),
         spotColor = Color.Black.copy(alpha = .08f)).clip(RoundedCornerShape(8.dp)).drawWithCache {
         val center = Offset(size.width / 2f, size.height / 2f)
@@ -478,8 +682,9 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Cards carry no download badge; list rows do.
                 BrowseTitle(shown, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
-                    style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
+                    style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee, showDownloadBadge = false)
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
             // The labels under the title: the list's grid fields, one per line.
@@ -525,7 +730,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                             PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                         }
                     }
-                    BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
+                    BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true, showDownloadBadge = false)
                     Text(item.row.subtitle, Modifier.rufinMarquee(), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }
