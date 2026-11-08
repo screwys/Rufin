@@ -104,6 +104,8 @@ struct JellyfinEmbySourcePayload {
     version: u32,
     base_url: String,
     #[serde(default)]
+    local_url: Option<String>,
+    #[serde(default)]
     server_id: Option<String>,
     user_id: String,
     username: String,
@@ -120,6 +122,7 @@ struct JellyfinEmbySourcePayload {
 pub struct JellyfinEmbySourceConfig {
     pub(crate) kind: ServerKind,
     pub(crate) base_url: String,
+    pub(crate) local_url: Option<String>,
     pub(crate) server_id: Option<String>,
     pub(crate) user_id: String,
     pub(crate) username: String,
@@ -136,6 +139,7 @@ impl JellyfinEmbySourceConfig {
         Ok(Self {
             kind,
             base_url: payload.base_url,
+            local_url: payload.local_url,
             server_id: payload.server_id,
             user_id: payload.user_id,
             username: payload.username,
@@ -149,7 +153,7 @@ impl JellyfinEmbySourceConfig {
     }
 
     pub(crate) fn into_payload(self) -> serde_json::Value {
-        serde_json::json!({
+        let mut payload = serde_json::json!({
             "version": SOURCE_CONFIG_VERSION,
             "base_url": self.base_url,
             "server_id": self.server_id,
@@ -158,7 +162,11 @@ impl JellyfinEmbySourceConfig {
             "trust_invalid_cert": self.trust_invalid_cert,
             "use_instant_mix": self.use_instant_mix,
             "emby_connect": self.emby_connect,
-        })
+        });
+        if let Some(local) = self.local_url {
+            payload["local_url"] = local.into();
+        }
+        payload
     }
 }
 
@@ -216,8 +224,10 @@ pub(crate) async fn edit(
         credentials.source_name.as_deref().unwrap_or_default(),
         &current.name,
     );
+    let local_url = local_url(credentials.local_server_url.as_deref())?;
     let address_changed = crate::source::comparable_address(&credentials.server_url)
-        != crate::source::comparable_address(&saved.base_url);
+        != crate::source::comparable_address(&saved.base_url)
+        || local_url != saved.local_url;
     let username_changed = credentials.username.trim() != saved.username;
     let has_password = !credentials.secret.is_empty();
     let switching_to_manual = saved.emby_connect && connect_manually;
@@ -260,6 +270,7 @@ pub(crate) async fn edit(
                 .as_str()
                 .trim_end_matches('/')
                 .to_owned(),
+            local_url,
             server_id: saved.server_id,
             user_id: saved.user_id,
             username: saved.username,
@@ -315,10 +326,11 @@ impl JellyfinEmbyClientConfig {
 }
 pub struct JellyfinEmbySource {
     pub(crate) kind: ServerKind,
-    socket_base_url: Url,
+    /// The server address, without Emby's API path.
+    address: crate::address::ServerAddress<Url>,
+    server_id: Option<String>,
     client: Client,
     media_client: Client,
-    base_url: Url,
     user_id: String,
     access_token: Arc<str>,
     device_id: Arc<str>,
@@ -339,8 +351,14 @@ impl JellyfinEmbySource {
         let mut client_config =
             JellyfinEmbyClientConfig::new(&config.base_url, config.trust_invalid_cert, device_id)?;
         client_config.kind = config.kind;
-        let socket_base_url = normalize_base_url(&client_config.base_url)?;
-        let base_url = config.kind.api_base(&socket_base_url)?;
+        let address = crate::address::ServerAddress::new(
+            normalize_base_url(&client_config.base_url)?,
+            config
+                .local_url
+                .as_deref()
+                .map(normalize_base_url)
+                .transpose()?,
+        );
         let client = build_client(client_config.trust_invalid_cert)?;
         let media_client = build_media_client(client_config.trust_invalid_cert)?;
         let authorization = authenticated_header(&client_config, &access_token)?;
@@ -348,10 +366,10 @@ impl JellyfinEmbySource {
             connect_credential,
             connect_token: tokio::sync::OnceCell::new(),
             kind: config.kind,
-            socket_base_url,
+            address,
+            server_id: config.server_id,
             client,
             media_client,
-            base_url,
             user_id: config.user_id,
             access_token: Arc::from(access_token),
             device_id: Arc::from(client_config.device_id),
@@ -372,10 +390,12 @@ impl JellyfinEmbySource {
         let CredentialInput {
             source_name: submitted_name,
             server_url,
+            local_server_url,
             username,
             secret: password,
             trust_invalid_cert,
         } = credentials;
+        let local_url = local_url(local_server_url.as_deref())?;
         let mut config = JellyfinEmbyClientConfig::new(&server_url, trust_invalid_cert, device_id)?;
         config.kind = kind;
         let socket_base_url = normalize_base_url(&config.base_url)?;
@@ -401,6 +421,7 @@ impl JellyfinEmbySource {
             submitted_name,
             use_instant_mix,
             config,
+            local_url,
             body.username,
             response,
         )
@@ -412,6 +433,7 @@ impl JellyfinEmbySource {
         submitted_name: Option<String>,
         use_instant_mix: bool,
         config: JellyfinEmbyClientConfig,
+        local_url: Option<String>,
         submitted_username: String,
         response: Value,
     ) -> SourceResult<AuthenticatedJellyfinEmby> {
@@ -442,7 +464,8 @@ impl JellyfinEmbySource {
                 emby_connect: false,
                 kind: config.kind,
                 base_url: canonical_base_url,
-                server_id,
+                local_url: local_url.clone(),
+                server_id: server_id.clone(),
                 user_id: user_id.clone(),
                 username,
                 trust_invalid_cert,
@@ -455,9 +478,12 @@ impl JellyfinEmbySource {
             connect_credential: None,
             connect_token: tokio::sync::OnceCell::new(),
             kind: config.kind,
-            socket_base_url,
+            address: crate::address::ServerAddress::new(
+                socket_base_url,
+                local_url.as_deref().map(normalize_base_url).transpose()?,
+            ),
+            server_id,
             client,
-            base_url,
             user_id,
             access_token: Arc::from(credential.clone()),
             device_id: Arc::from(config.device_id),
@@ -470,6 +496,55 @@ impl JellyfinEmbySource {
             source,
             credential,
         })
+    }
+}
+
+/// A saved local address in the same form as the public one.
+fn local_url(raw: Option<&str>) -> SourceResult<Option<String>> {
+    crate::address::optional_local(raw)
+        .map(|address| {
+            normalize_base_url(address).map(|url| url.as_str().trim_end_matches('/').to_owned())
+        })
+        .transpose()
+}
+
+impl JellyfinEmbySource {
+    /// The address requests use now, with Emby's API path.
+    fn base_url(&self) -> Url {
+        self.kind
+            .api_base(&self.address.current())
+            .expect("an API path joins any server address")
+    }
+
+    fn socket_base_url(&self) -> Url {
+        self.address.current()
+    }
+
+    /// Uses the local address while this same server answers there.
+    pub(crate) async fn select_address(&self) {
+        self.address
+            .select(async |local| {
+                let Ok(url) = self
+                    .kind
+                    .api_base(local)
+                    .and_then(|base| endpoint(&base, "System/Info/Public"))
+                else {
+                    return false;
+                };
+                let request = self
+                    .client
+                    .get(url)
+                    .timeout(crate::address::LOCAL_PROBE_TIMEOUT);
+                match send_json::<Value>(self.kind, request).await {
+                    Ok(info) => match (&self.server_id, id(&info["Id"])) {
+                        (Some(saved), Some(found)) => *saved == found,
+                        (None, found) => found.is_some(),
+                        (Some(_), None) => false,
+                    },
+                    Err(_) => false,
+                }
+            })
+            .await;
     }
 }
 
@@ -522,11 +597,58 @@ mod config_tests {
     }
 }
 
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+    #[tokio::test]
+    async fn local_address_serves_only_while_the_same_server_answers_there() {
+        let (public, local, other) = (
+            MockServer::start().await,
+            MockServer::start().await,
+            MockServer::start().await,
+        );
+        for (server, id) in [(&local, "server"), (&other, "another")] {
+            Mock::given(path("/System/Info/Public"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"Id": id})),
+                )
+                .mount(server)
+                .await;
+        }
+        let open_with = |local_url: String| {
+            let payload = serde_json::json!({"version":1,"base_url":public.uri(),"local_url":local_url,"server_id":"server","user_id":"user","username":"Listener","trust_invalid_cert":false});
+            let configuration = crate::config::encode_provider_payload(
+                SourceId::new("source"),
+                "jellyfin",
+                "Music",
+                payload,
+            );
+            open(&configuration, Some("token".into()), Some("device".into())).unwrap()
+        };
+        let address = |server: &MockServer| normalize_base_url(&server.uri()).unwrap();
+
+        let home = open_with(local.uri());
+        assert_eq!(home.socket_base_url(), address(&public));
+        home.select_address().await;
+        assert_eq!(home.socket_base_url(), address(&local));
+
+        let elsewhere = open_with(other.uri());
+        elsewhere.select_address().await;
+        assert_eq!(elsewhere.socket_base_url(), address(&public));
+
+        local.reset().await;
+        home.select_address().await;
+        assert_eq!(home.socket_base_url(), address(&public));
+    }
+}
+
 impl std::fmt::Debug for JellyfinEmbySource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JellyfinEmbySource")
             .field("kind", &self.kind)
-            .field("base_url", &self.base_url)
+            .field("address", &self.address)
             .field("user_id", &self.user_id)
             .finish_non_exhaustive()
     }

@@ -643,7 +643,7 @@ impl SubsonicSource {
         fields.extend(extra.iter().cloned());
         subsonic_json(
             self.client
-                .post(endpoint(&self.base_url, method)?)
+                .post(endpoint(&self.base_url(), method)?)
                 .form(&fields),
         )
         .await
@@ -1171,6 +1171,26 @@ pub(super) async fn subsonic_json(
         body,
     })
 }
+/// Whether an OpenSubsonic server answers at `base`. It asks without credentials, which go
+/// only to an address known to be this server.
+pub(super) async fn answers_subsonic(client: &Client, base: &Url) -> bool {
+    let Ok(mut url) = endpoint(base, "ping") else {
+        return false;
+    };
+    url.query_pairs_mut()
+        .extend_pairs([("f", "json"), ("v", API_VERSION), ("c", CLIENT_NAME)]);
+    let request = client.get(url).timeout(crate::address::LOCAL_PROBE_TIMEOUT);
+    remote_http::json::<Value>(
+        request,
+        SUBSONIC_HTTP,
+        BodyLimit {
+            max_bytes: SUBSONIC_ERROR_BODY_MAX_BYTES,
+            context: "Subsonic ping response",
+        },
+    )
+    .await
+    .is_ok_and(|envelope| envelope["subsonic-response"]["status"].is_string())
+}
 pub(super) async fn subsonic_bytes(request: reqwest::RequestBuilder) -> SourceResult<ImageBytes> {
     remote_http::bytes(
         request,
@@ -1318,7 +1338,7 @@ impl SubsonicSource {
     }
 
     fn authenticated_url(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<Url> {
-        let mut url = endpoint(&self.base_url, method)?;
+        let mut url = endpoint(&self.base_url(), method)?;
         {
             let mut query = url.query_pairs_mut();
             query.extend_pairs(self.credential.common_query(&self.username, &[]));
@@ -1427,6 +1447,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: url.to_string(),
+                local_url: None,
                 username: "listener".into(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,
@@ -1464,6 +1485,7 @@ mod tests {
                 crate::CredentialInput {
                     source_name: None,
                     server_url: server.uri(),
+                    local_server_url: None,
                     username: "listener".into(),
                     secret: "password".into(),
                     trust_invalid_cert: false,
@@ -1606,6 +1628,7 @@ mod tests {
                 crate::CredentialInput {
                     source_name: None,
                     server_url: server.uri(),
+                    local_server_url: None,
                     username: "listener".into(),
                     secret: "password".into(),
                     trust_invalid_cert: false,
@@ -1732,6 +1755,7 @@ mod tests {
                 crate::CredentialInput {
                     source_name: None,
                     server_url: server.uri(),
+                    local_server_url: None,
                     username: "api-user".into(),
                     secret: "generated & password".into(),
                     trust_invalid_cert: false,
@@ -1827,6 +1851,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,
@@ -1948,6 +1973,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".into(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,
@@ -2029,6 +2055,7 @@ mod tests {
             SubsonicFlavor::Subsonic,
             SubsonicSourceConfig {
                 base_url: server.uri(),
+                local_url: None,
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
                 navidrome_library_version: 0,

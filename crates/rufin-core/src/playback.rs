@@ -1085,6 +1085,10 @@ where
         let kind = playback::FailureKind::UnavailableMedia;
         playback::BackendFailure::with_kind(kind, kind.summary())
     };
+    let unreachable = || {
+        let kind = playback::FailureKind::Connection;
+        playback::BackendFailure::with_kind(kind, kind.summary())
+    };
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;
@@ -1172,6 +1176,9 @@ where
             .map_err(failure)?
             .with_content_type(content_type));
     }
+    if request.local_only {
+        return Err(unreachable());
+    }
     let source_id = playable
         .source_id
         .clone()
@@ -1182,6 +1189,7 @@ where
         .await
         .map_err(|error| match error {
             sources::SourceError::NotFound => unavailable(),
+            sources::SourceError::Network(_) => unreachable(),
             error => failure(error.to_string()),
         })
 }

@@ -1193,7 +1193,16 @@ impl SourceOwner {
                 observer: None,
             },
         );
+        self.select_address(&source);
         source
+    }
+
+    /// Lets a newly cached client choose between its server's local and public addresses.
+    fn select_address(&self, source: &Arc<Source>) {
+        let source = Arc::clone(source);
+        self.shared
+            .runtime
+            .spawn(async move { source.select_address().await });
     }
 
     pub(crate) fn persist_connected_source(
@@ -1782,6 +1791,24 @@ impl SourceOwner {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {
+    /// The device joined or left a network: each open server may answer again, and checks
+    /// whether it answers at its local address.
+    pub fn network_changed(&self) {
+        let clients = self
+            .shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .map(|cached| Arc::clone(&cached.source))
+            .collect::<Vec<_>>();
+        for source in clients {
+            self.shared
+                .runtime
+                .spawn(async move { source.network_changed().await });
+        }
+    }
+
     /// Turns a download rule on or off. A rule turned off gives up its downloads, which are
     /// deleted when asked. Returns whether the rule changed.
     pub fn set_download_rule(
@@ -2806,6 +2833,7 @@ impl SourceOwner {
                     observer: None,
                 },
             );
+            self.select_address(&source);
             return Ok(source);
         }
         drop(clients);
@@ -3102,6 +3130,7 @@ fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, Stri
         credentials: CredentialPreset {
             source_name: configuration.name.clone(),
             server_url: String::new(),
+            local_server_url: None,
             username: String::new(),
             trust_invalid_cert: false,
             open_subsonic_authentication: None,

@@ -12,7 +12,7 @@ impl SubsonicSource {
     ) -> SourceResult<reqwest::Response> {
         let token = self.navidrome_token().await?;
         let response = client
-            .get(navidrome_endpoint(&self.base_url, "api/events")?)
+            .get(navidrome_endpoint(&self.base_url(), "api/events")?)
             .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}"))
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send()

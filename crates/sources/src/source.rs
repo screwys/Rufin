@@ -170,6 +170,10 @@ pub(crate) async fn cache_native_lyrics(
 }
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
+/// How often a live feed pings its server, and how long it waits for any answer before it
+/// takes the connection for gone, as after a network change.
+pub(crate) const FEED_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const FEED_SILENCE_LIMIT: std::time::Duration = std::time::Duration::from_secs(75);
 /// A catch-up asks for changes from this long before the last sync, so a save the server was
 /// still writing and a small clock skew are covered.
 pub(crate) const SYNC_MARGIN: i64 = 60;
@@ -798,8 +802,13 @@ pub struct Source {
     /// The albums and artists, by URI, that a live search admitted while the Catalog held
     /// none of them: it holds only what the search found of them until they are fetched whole.
     partial: Mutex<HashSet<String>>,
+    /// When the server last failed to connect, while that stands.
+    unreachable: Mutex<Option<std::time::Instant>>,
     pub implementation: Implementation,
 }
+
+/// How long an unreachable server answers its reads at once before one tries it again.
+const UNREACHABLE_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Source {
     pub fn file_connection(&self) -> SourceResult<&crate::FileSource> {
@@ -922,8 +931,46 @@ impl Source {
             source_id,
             retired: AtomicBool::new(false),
             partial: Mutex::default(),
+            unreachable: Mutex::default(),
             implementation,
         }
+    }
+
+    /// Runs a request that has a cached answer or a report to drop. While the server is
+    /// unreachable it fails at once, and one request every `UNREACHABLE_RETRY` tries it again.
+    async fn reach<T>(&self, request: impl Future<Output = SourceResult<T>>) -> SourceResult<T> {
+        {
+            let mut unreachable = self
+                .unreachable
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(since) = *unreachable {
+                if since.elapsed() < UNREACHABLE_RETRY {
+                    return Err(SourceError::Network("The server is unreachable".into()));
+                }
+                *unreachable = Some(std::time::Instant::now());
+            }
+        }
+        let result = request.await;
+        let mut unreachable = self
+            .unreachable
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match &result {
+            Ok(_) => *unreachable = None,
+            Err(SourceError::Network(_)) => *unreachable = Some(std::time::Instant::now()),
+            Err(_) => {}
+        }
+        result
+    }
+
+    /// The device joined or left a network: the server may answer again, at another address.
+    pub async fn network_changed(&self) {
+        *self
+            .unreachable
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        self.select_address().await;
     }
 
     pub async fn connect(
@@ -950,12 +997,14 @@ impl Source {
                 login,
                 source_name,
                 use_instant_mix,
+                local_server_url,
             } => {
                 crate::jellyfin_emby::quick_connect::connect_quick(
                     source_id,
                     login,
                     source_name,
                     use_instant_mix,
+                    local_server_url,
                 )
                 .await
             }
@@ -1025,12 +1074,14 @@ impl Source {
                 login,
                 source_name,
                 use_instant_mix,
+                local_server_url,
                 ..
             } => crate::jellyfin_emby::quick_connect::connect_quick(
                 current.source_id,
                 login,
                 source_name,
                 use_instant_mix,
+                local_server_url,
             )
             .await
             .map(|source| SourceEditResult::Connected(Box::new(source))),
@@ -1135,6 +1186,19 @@ impl Source {
             }
         };
         Ok(Self::new(configuration.source_id, implementation))
+    }
+
+    /// Chooses again between the server's local and public addresses, as when the network
+    /// changed.
+    pub async fn select_address(&self) {
+        match &self.implementation {
+            Implementation::JellyfinEmby(source) => source.select_address().await,
+            Implementation::OpenSubsonic(source) => source.select_address().await,
+            Implementation::Plex(_)
+            | Implementation::Local(_)
+            | Implementation::Files(_)
+            | Implementation::Peer(_) => {}
+        }
     }
 
     pub fn retire(&self) {
@@ -1312,39 +1376,45 @@ impl Source {
         playable: &library::Playable,
         request: StreamRequest,
     ) -> SourceResult<ResolvedStream> {
-        match &self.implementation {
-            Implementation::Plex(source) => {
-                source
-                    .resolve_stream(
-                        &self.track_object_id(&playable.media_uri)?,
-                        request.quality,
-                        request.session_identifier.as_deref(),
-                    )
-                    .await
+        self.reach(async {
+            match &self.implementation {
+                Implementation::Plex(source) => {
+                    source
+                        .resolve_stream(
+                            &self.track_object_id(&playable.media_uri)?,
+                            request.quality,
+                            request.session_identifier.as_deref(),
+                        )
+                        .await
+                }
+                Implementation::Files(_) | Implementation::Local(_) => {
+                    let file = playable.file.as_ref().ok_or(SourceError::NotFound)?;
+                    self.file_source(Some(&file.path))
+                        .ok_or(SourceError::NotFound)?
+                        .stream(file, &playable.media_uri, playable.window)
+                        .await
+                }
+                Implementation::JellyfinEmby(source) => {
+                    source
+                        .resolve_stream(
+                            &self.track_object_id(&playable.media_uri)?,
+                            request.quality,
+                            request.session_identifier.as_deref(),
+                        )
+                        .await
+                }
+                Implementation::OpenSubsonic(source) => {
+                    source
+                        .resolve_stream(
+                            &self.track_object_id(&playable.media_uri)?,
+                            request.quality,
+                        )
+                        .await
+                }
+                Implementation::Peer(source) => source.stream(playable, request).await,
             }
-            Implementation::Files(_) | Implementation::Local(_) => {
-                let file = playable.file.as_ref().ok_or(SourceError::NotFound)?;
-                self.file_source(Some(&file.path))
-                    .ok_or(SourceError::NotFound)?
-                    .stream(file, &playable.media_uri, playable.window)
-                    .await
-            }
-            Implementation::JellyfinEmby(source) => {
-                source
-                    .resolve_stream(
-                        &self.track_object_id(&playable.media_uri)?,
-                        request.quality,
-                        request.session_identifier.as_deref(),
-                    )
-                    .await
-            }
-            Implementation::OpenSubsonic(source) => {
-                source
-                    .resolve_stream(&self.track_object_id(&playable.media_uri)?, request.quality)
-                    .await
-            }
-            Implementation::Peer(source) => source.stream(playable, request).await,
-        }
+        })
+        .await
     }
 
     pub async fn resolve_download(
@@ -1406,34 +1476,37 @@ impl Source {
     }
 
     pub async fn image(&self, request: SourceImageRequest) -> SourceResult<ImageBytes> {
-        match &self.implementation {
-            Implementation::Plex(source) => match request {
-                SourceImageRequest::Native { image_ref, size } => {
-                    source.image_bytes(&image_ref, size).await
-                }
-                SourceImageRequest::Local(_) => Err(SourceError::NotFound),
-            },
-            Implementation::Files(source) => source.image(request).await,
-            Implementation::Local(source) => source.image(request).await,
-            Implementation::JellyfinEmby(source) => match request {
-                SourceImageRequest::Native { image_ref, size } => {
-                    source.image_bytes(&image_ref, size).await
-                }
-                SourceImageRequest::Local(_) => Err(SourceError::NotFound),
-            },
-            Implementation::OpenSubsonic(source) => match request {
-                SourceImageRequest::Native { image_ref, size } => {
-                    source.image_bytes(&image_ref, size).await
-                }
-                SourceImageRequest::Local(_) => Err(SourceError::NotFound),
-            },
-            Implementation::Peer(source) => match request {
-                SourceImageRequest::Native { image_ref, size } => {
-                    source.image(&image_ref, size).await
-                }
-                SourceImageRequest::Local(_) => Err(SourceError::NotFound),
-            },
-        }
+        self.reach(async {
+            match &self.implementation {
+                Implementation::Plex(source) => match request {
+                    SourceImageRequest::Native { image_ref, size } => {
+                        source.image_bytes(&image_ref, size).await
+                    }
+                    SourceImageRequest::Local(_) => Err(SourceError::NotFound),
+                },
+                Implementation::Files(source) => source.image(request).await,
+                Implementation::Local(source) => source.image(request).await,
+                Implementation::JellyfinEmby(source) => match request {
+                    SourceImageRequest::Native { image_ref, size } => {
+                        source.image_bytes(&image_ref, size).await
+                    }
+                    SourceImageRequest::Local(_) => Err(SourceError::NotFound),
+                },
+                Implementation::OpenSubsonic(source) => match request {
+                    SourceImageRequest::Native { image_ref, size } => {
+                        source.image_bytes(&image_ref, size).await
+                    }
+                    SourceImageRequest::Local(_) => Err(SourceError::NotFound),
+                },
+                Implementation::Peer(source) => match request {
+                    SourceImageRequest::Native { image_ref, size } => {
+                        source.image(&image_ref, size).await
+                    }
+                    SourceImageRequest::Local(_) => Err(SourceError::NotFound),
+                },
+            }
+        })
+        .await
     }
 
     /// What the server finds for `query`, in music folder `music_folder` (its key and object
@@ -1446,70 +1519,73 @@ impl Source {
         limit: usize,
         music_folder: Option<(library::FolderKey, &str)>,
     ) -> SourceResult<library::SearchResults> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_)
-        ) {
-            return Err(SourceError::InvalidRequest("File Search is Catalog-owned"));
-        }
-        self.catalog_operation(catalog, async |changes| {
-            // As a walk, feed writes newer than the request win; the server searches the folder.
-            changes.start_observation().await?;
-            let source_id = self.source_id.as_str();
-            let folder_id = music_folder.map(|(_, id)| id);
-            let batch = match &self.implementation {
-                Implementation::Plex(source) => {
-                    source
-                        .live_search(source_id, query, limit, folder_id)
-                        .await?
-                }
-                Implementation::JellyfinEmby(source) => {
-                    source
-                        .live_search(source_id, query, limit, folder_id)
-                        .await?
-                }
-                Implementation::OpenSubsonic(source) => {
-                    source
-                        .live_search(source_id, query, limit, folder_id)
-                        .await?
-                }
-                _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
-            };
-            let tracks = batch
-                .tracks
-                .iter()
-                .map(|v| v.object_id.clone())
-                .collect::<Vec<_>>();
-            let albums = batch
-                .albums
-                .iter()
-                .map(|v| v.object_id.clone())
-                .collect::<Vec<_>>();
-            let artists = batch
-                .artists
-                .iter()
-                .map(|v| v.object_id.clone())
-                .collect::<Vec<_>>();
-            if self.is_retired() {
-                return Err(SourceError::Cancelled);
+        self.reach(async {
+            if matches!(
+                self.implementation,
+                Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_)
+            ) {
+                return Err(SourceError::InvalidRequest("File Search is Catalog-owned"));
             }
-            let partial = self.unheld_collections(catalog, &batch);
-            changes.apply_catalog(&(batch), true).await?;
-            self.partial
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .extend(partial);
-            Ok(catalog
-                .search_rows_by_objects(
-                    changes.source,
-                    music_folder.map(|(key, _)| key),
-                    false,
-                    &tracks,
-                    &albums,
-                    &artists,
-                    &library::ReadCancellation::new(),
-                )
-                .await?)
+            self.catalog_operation(catalog, async |changes| {
+                // As a walk, feed writes newer than the request win; the server searches the folder.
+                changes.start_observation().await?;
+                let source_id = self.source_id.as_str();
+                let folder_id = music_folder.map(|(_, id)| id);
+                let batch = match &self.implementation {
+                    Implementation::Plex(source) => {
+                        source
+                            .live_search(source_id, query, limit, folder_id)
+                            .await?
+                    }
+                    Implementation::JellyfinEmby(source) => {
+                        source
+                            .live_search(source_id, query, limit, folder_id)
+                            .await?
+                    }
+                    Implementation::OpenSubsonic(source) => {
+                        source
+                            .live_search(source_id, query, limit, folder_id)
+                            .await?
+                    }
+                    _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
+                };
+                let tracks = batch
+                    .tracks
+                    .iter()
+                    .map(|v| v.object_id.clone())
+                    .collect::<Vec<_>>();
+                let albums = batch
+                    .albums
+                    .iter()
+                    .map(|v| v.object_id.clone())
+                    .collect::<Vec<_>>();
+                let artists = batch
+                    .artists
+                    .iter()
+                    .map(|v| v.object_id.clone())
+                    .collect::<Vec<_>>();
+                if self.is_retired() {
+                    return Err(SourceError::Cancelled);
+                }
+                let partial = self.unheld_collections(catalog, &batch);
+                changes.apply_catalog(&(batch), true).await?;
+                self.partial
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .extend(partial);
+                Ok(catalog
+                    .search_rows_by_objects(
+                        changes.source,
+                        music_folder.map(|(key, _)| key),
+                        false,
+                        &tracks,
+                        &albums,
+                        &artists,
+                        &library::ReadCancellation::new(),
+                    )
+                    .await?)
+            })
+            .await
         })
         .await
     }
@@ -1684,59 +1760,62 @@ impl Source {
         folder_object_id: Option<&str>,
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<LiveFolderPage> {
-        match &self.implementation {
-            Implementation::Plex(source) => {
-                source
-                    .browse_folder(folder_object_id, music_folder_object_id)
-                    .await
+        self.reach(async {
+            match &self.implementation {
+                Implementation::Plex(source) => {
+                    source
+                        .browse_folder(folder_object_id, music_folder_object_id)
+                        .await
+                }
+                Implementation::Local(_) | Implementation::Files(_) => {
+                    catalog.loaded().await;
+                    let source = catalog
+                        .source_key(&self.source_id)
+                        .ok_or(SourceError::NotFound)?;
+                    let roots = match &self.implementation {
+                        Implementation::Local(local) => local.configured_file_roots()?,
+                        Implementation::Files(files) => vec![files.location("")?],
+                        _ => unreachable!(),
+                    };
+                    let (folders, tracks) = catalog
+                        .local_folder_contents(
+                            source,
+                            folder_object_id.or(music_folder_object_id),
+                            &roots,
+                        )
+                        .await?;
+                    Ok(LiveFolderPage {
+                        folders: folders
+                            .into_iter()
+                            .map(|(object_id, name)| {
+                                let name = match &self.implementation {
+                                    Implementation::Local(local) => local
+                                        .document_root_name(&object_id)
+                                        .map(str::to_owned)
+                                        .unwrap_or(name),
+                                    _ => name,
+                                };
+                                LiveFolder { object_id, name }
+                            })
+                            .collect(),
+                        tracks,
+                    })
+                }
+                Implementation::JellyfinEmby(source) => {
+                    source
+                        .browse_folder(folder_object_id, music_folder_object_id)
+                        .await
+                }
+                Implementation::OpenSubsonic(source) => {
+                    source
+                        .browse_folder(folder_object_id, music_folder_object_id)
+                        .await
+                }
+                // A paired device's tracks carry no folders; its cached scope lists them.
+                Implementation::Peer(_) => Err(SourceError::NotFound),
             }
-            Implementation::Local(_) | Implementation::Files(_) => {
-                catalog.loaded().await;
-                let source = catalog
-                    .source_key(&self.source_id)
-                    .ok_or(SourceError::NotFound)?;
-                let roots = match &self.implementation {
-                    Implementation::Local(local) => local.configured_file_roots()?,
-                    Implementation::Files(files) => vec![files.location("")?],
-                    _ => unreachable!(),
-                };
-                let (folders, tracks) = catalog
-                    .local_folder_contents(
-                        source,
-                        folder_object_id.or(music_folder_object_id),
-                        &roots,
-                    )
-                    .await?;
-                Ok(LiveFolderPage {
-                    folders: folders
-                        .into_iter()
-                        .map(|(object_id, name)| {
-                            let name = match &self.implementation {
-                                Implementation::Local(local) => local
-                                    .document_root_name(&object_id)
-                                    .map(str::to_owned)
-                                    .unwrap_or(name),
-                                _ => name,
-                            };
-                            LiveFolder { object_id, name }
-                        })
-                        .collect(),
-                    tracks,
-                })
-            }
-            Implementation::JellyfinEmby(source) => {
-                source
-                    .browse_folder(folder_object_id, music_folder_object_id)
-                    .await
-            }
-            Implementation::OpenSubsonic(source) => {
-                source
-                    .browse_folder(folder_object_id, music_folder_object_id)
-                    .await
-            }
-            // A paired device's tracks carry no folders; its cached scope lists them.
-            Implementation::Peer(_) => Err(SourceError::NotFound),
-        }
+        })
+        .await
     }
 
     pub async fn generated_track_object_ids(
@@ -2181,53 +2260,58 @@ impl Source {
         catalog: &Catalog,
         media_uri: &str,
     ) -> SourceResult<()> {
-        if !self
-            .partial
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains(media_uri)
-        {
-            return Ok(());
-        }
-        let Some((_, kind, object_id)) = library::source_entity_parts(media_uri) else {
-            return Err(SourceError::InvalidRequest("collection URI is unavailable"));
-        };
-        let collection = match kind.as_str() {
-            "album" => SourceCollection::Album(object_id),
-            "artist" => SourceCollection::Artist(object_id),
-            _ => return Err(SourceError::InvalidRequest("URI is not a collection")),
-        };
-        self.catalog_operation(catalog, async |changes| {
-            match &self.implementation {
-                Implementation::Plex(source) => {
-                    source
-                        .acquire_collection(changes, &collection, None, false, &|| {
-                            self.is_retired()
-                        })
-                        .await?
-                }
-                Implementation::JellyfinEmby(source) => {
-                    source
-                        .acquire_collection(changes, &collection, None, false, &|| {
-                            self.is_retired()
-                        })
-                        .await?
-                }
-                Implementation::OpenSubsonic(source) => {
-                    source
-                        .acquire_collection(changes, &collection, false, &|| self.is_retired())
-                        .await?
-                }
-                Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => {}
+        self.reach(async {
+            if !self
+                .partial
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(media_uri)
+            {
+                return Ok(());
             }
-            Ok::<_, SourceError>(())
+            let Some((_, kind, object_id)) = library::source_entity_parts(media_uri) else {
+                return Err(SourceError::InvalidRequest("collection URI is unavailable"));
+            };
+            let collection = match kind.as_str() {
+                "album" => SourceCollection::Album(object_id),
+                "artist" => SourceCollection::Artist(object_id),
+                _ => return Err(SourceError::InvalidRequest("URI is not a collection")),
+            };
+            self.catalog_operation(catalog, async |changes| {
+                match &self.implementation {
+                    Implementation::Plex(source) => {
+                        source
+                            .acquire_collection(changes, &collection, None, false, &|| {
+                                self.is_retired()
+                            })
+                            .await?
+                    }
+                    Implementation::JellyfinEmby(source) => {
+                        source
+                            .acquire_collection(changes, &collection, None, false, &|| {
+                                self.is_retired()
+                            })
+                            .await?
+                    }
+                    Implementation::OpenSubsonic(source) => {
+                        source
+                            .acquire_collection(changes, &collection, false, &|| self.is_retired())
+                            .await?
+                    }
+                    Implementation::Local(_)
+                    | Implementation::Files(_)
+                    | Implementation::Peer(_) => {}
+                }
+                Ok::<_, SourceError>(())
+            })
+            .await?;
+            self.partial
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(media_uri);
+            Ok(())
         })
-        .await?;
-        self.partial
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(media_uri);
-        Ok(())
+        .await
     }
 
     pub async fn refresh_home_section(
@@ -2393,17 +2477,22 @@ impl Source {
     }
 
     pub async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
-        let object_id = self.track_object_id(&report.media_uri)?;
-        match &self.implementation {
-            Implementation::Plex(source) => source.report_playback(&object_id, report).await,
-            Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => Ok(()),
-            Implementation::JellyfinEmby(source) => {
-                source.report_playback(&object_id, report).await
+        self.reach(async {
+            let object_id = self.track_object_id(&report.media_uri)?;
+            match &self.implementation {
+                Implementation::Plex(source) => source.report_playback(&object_id, report).await,
+                Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => {
+                    Ok(())
+                }
+                Implementation::JellyfinEmby(source) => {
+                    source.report_playback(&object_id, report).await
+                }
+                Implementation::OpenSubsonic(source) => {
+                    source.report_playback(&object_id, report).await
+                }
             }
-            Implementation::OpenSubsonic(source) => {
-                source.report_playback(&object_id, report).await
-            }
-        }
+        })
+        .await
     }
 
     /// Checks a mapping against a representative track: its root, and the server prefix that

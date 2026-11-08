@@ -311,6 +311,9 @@ pub(super) struct Player {
     buffering_percent: Option<u8>,
     last_error: Option<String>,
     consecutive_skips: usize,
+    /// The server failed to connect: the skips that follow play only copies on this device,
+    /// until a track starts or ends.
+    offline: bool,
 }
 
 impl Player {
@@ -369,6 +372,7 @@ impl Player {
             buffering_percent: None,
             last_error: None,
             consecutive_skips: 0,
+            offline: false,
         }
     }
 
@@ -1052,7 +1056,10 @@ impl Player {
             self.dirty = true;
             self.finish_current(RunEndReason::Failed, sample);
             self.buffering_percent = None;
-            self.report_error(error.message().to_string());
+            // The skips past an unreachable server say so once.
+            if !(self.offline && error.kind() == FailureKind::Connection) {
+                self.report_error(error.message().to_string());
+            }
             if !self.skip_unplayable(error.kind(), desired_playing) {
                 self.last_error = Some(error.message().to_string());
             }
@@ -2137,6 +2144,7 @@ impl Player {
             return;
         };
         self.consecutive_skips = 0;
+        self.offline = false;
         current.backend_loaded = true;
         if current.started_at_unix_seconds.is_some() {
             if current.status != TransportStatus::Buffering {
@@ -2367,11 +2375,19 @@ impl Player {
     }
 
     /// Moves past a track that cannot play. Returns false when playback should stop.
+    /// An unreachable server passes on to the next track with a copy on this device, at most
+    /// once around the queue.
     fn skip_unplayable(&mut self, failure: FailureKind, desired_playing: bool) -> bool {
-        if !failure.skippable()
+        let offline = failure == FailureKind::Connection;
+        let limit = if offline {
+            self.sequence.total()
+        } else {
+            MAX_CONSECUTIVE_SKIPS
+        };
+        if !(failure.skippable() || offline)
             || !self.settings.skip_unplayable_tracks
             || self.sequence.repeat_mode() == QueueRepeatMode::One
-            || self.consecutive_skips >= MAX_CONSECUTIVE_SKIPS
+            || self.consecutive_skips >= limit
         {
             return false;
         }
@@ -2379,6 +2395,7 @@ impl Player {
             return false;
         };
         self.consecutive_skips += 1;
+        self.offline |= offline;
         self.promote_or_begin(position, desired_playing);
         true
     }
@@ -2605,6 +2622,7 @@ impl Player {
         self.failed_run = None;
         if reason != RunEndReason::Failed {
             self.consecutive_skips = 0;
+            self.offline = false;
         }
         let Some(current) = self.current_run.as_mut() else {
             self.next_plan = None;
@@ -2863,7 +2881,8 @@ impl Player {
         }
     }
 
-    fn resolve_stream(&mut self, run: RunId, row: Arc<QueueRow>, request: StreamRequest) {
+    fn resolve_stream(&mut self, run: RunId, row: Arc<QueueRow>, mut request: StreamRequest) {
+        request.local_only = self.offline;
         let task = self
             .owner()
             .resolve_stream(self.playback.clone(), run, row, request);

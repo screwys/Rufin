@@ -83,12 +83,14 @@ pub(crate) async fn connect_quick(
     login: JellyfinQuickConnectLogin,
     name: Option<String>,
     use_instant_mix: bool,
+    local_server_url: Option<String>,
 ) -> SourceResult<ConnectedSource> {
     JellyfinEmbySource::finish_authentication(
         source_id,
         name,
         use_instant_mix,
         login.config,
+        super::local_url(local_server_url.as_deref())?,
         String::new(),
         login.response,
     )
@@ -168,7 +170,7 @@ mod tests {
         assert!(!format!("{login:?}").contains("local-token"));
         let login: JellyfinQuickConnectLogin =
             serde_json::from_value(serde_json::to_value(&login).unwrap()).unwrap();
-        let connected = connect_quick(SourceId::new("source"), login, None, false)
+        let connected = connect_quick(SourceId::new("source"), login, None, false, None)
             .await
             .unwrap();
         let (configuration, _, credential) = connected.into_parts();

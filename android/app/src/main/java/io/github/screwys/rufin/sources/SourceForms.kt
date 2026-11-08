@@ -87,6 +87,7 @@ internal fun SourceRatingSettings(setup: SourceSetupConnection) {
 internal fun SourceCredentials(form: SourceForm, working: Boolean, editing: Boolean, apiKey: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SourceAddressField("Server Address", form.url, { form.url = it }, !working)
+        SourceAddressField("Local Address (optional)", form.localUrl, { form.localUrl = it }, !working)
         if (!apiKey) SourceTextField("Username", form.username, { form.username = it }, !working, autofill = ContentType.Username)
         SourceTextField(if (apiKey) "API key" else "Password", form.secret, { form.secret = it }, !working,
             secret = true, hint = if (editing && !apiKey) "Leave the password empty to keep the saved credential" else null,

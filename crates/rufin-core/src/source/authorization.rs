@@ -49,6 +49,7 @@ pub enum SourceAuthorizationEvent {
 pub enum SourceAuthorizationInput {
     Jellyfin {
         use_instant_mix: bool,
+        local_server_url: Option<String>,
     },
     Emby {
         server_index: u32,
@@ -277,8 +278,13 @@ impl SourceAuthorization {
         input: SourceAuthorizationInput,
     ) -> Result<sources::SourceId, SourceAuthorizationError> {
         let authorized = self.state.lock().expect("Source authorization").clone();
+        let mut local_server_url = None;
         let (server_index, use_instant_mix, address_override, trust_invalid_cert) = match input {
-            SourceAuthorizationInput::Jellyfin { use_instant_mix } => {
+            SourceAuthorizationInput::Jellyfin {
+                use_instant_mix,
+                local_server_url: local,
+            } => {
+                local_server_url = local;
                 (0, use_instant_mix, None, false)
             }
             SourceAuthorizationInput::Emby {
@@ -325,6 +331,7 @@ impl SourceAuthorization {
                     login,
                     source_name: name,
                     use_instant_mix,
+                    local_server_url,
                 },
                 Authorization::Emby(servers) => SourceSettingsChange::EmbyConnect {
                     source_id,
@@ -362,6 +369,7 @@ impl SourceAuthorization {
                     login,
                     source_name: name,
                     use_instant_mix,
+                    local_server_url,
                 },
                 Authorization::Emby(servers) => SourceSetup::EmbyConnect {
                     server: servers

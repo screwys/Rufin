@@ -8,7 +8,9 @@ const CONNECT_URL: &str = "https://connect.emby.media/service/";
 pub struct EmbyConnectServer {
     pub id: String,
     pub name: String,
-    pub addresses: Vec<String>,
+    /// The address on the server's own network, and the public one.
+    pub local_address: Option<String>,
+    pub address: Option<String>,
     connect_user_id: String,
     access_key: String,
 }
@@ -57,15 +59,14 @@ impl EmbyConnectLogin {
         response
             .into_iter()
             .map(|server| {
-                let addresses = ["LocalAddress", "Url"]
-                    .iter()
-                    .filter_map(|key| field::<String>(&server, key))
-                    .filter(|address| !address.trim().is_empty())
-                    .collect();
+                let address = |key| {
+                    field::<String>(&server, key).filter(|address| !address.trim().is_empty())
+                };
                 Ok(EmbyConnectServer {
                     id: required(&server, "SystemId")?,
                     name: required(&server, "Name")?,
-                    addresses,
+                    local_address: address("LocalAddress"),
+                    address: address("Url"),
                     connect_user_id: self.user_id.clone(),
                     access_key: required(&server, "AccessKey")?,
                 })
@@ -199,7 +200,7 @@ pub(crate) async fn connect_server(
 ) -> SourceResult<ConnectedSource> {
     let client = build_client(false)?;
     let mut last_error = SourceError::InvalidConfig("Emby Connect server has no address".into());
-    for address in &server.addresses {
+    for address in server.local_address.iter().chain(&server.address) {
         let mut config = JellyfinEmbyClientConfig::new(address, false, &device_id)?;
         config.kind = ServerKind::Emby;
         let response = match exchange(
@@ -242,10 +243,12 @@ pub(crate) async fn connect_server(
             crate::source::configured_source_name(name, server.name),
             JellyfinEmbySourceConfig {
                 kind: ServerKind::Emby,
-                base_url: normalize_base_url(address)?
+                base_url: normalize_base_url(server.address.as_deref().unwrap_or(address))?
                     .as_str()
                     .trim_end_matches('/')
                     .to_owned(),
+                local_url: local_url(server.local_address.as_deref())?
+                    .filter(|_| server.address.is_some()),
                 server_id: Some(server.id),
                 user_id,
                 username: required(&user, "Name")?,
@@ -276,7 +279,7 @@ impl JellyfinEmbySource {
                     .as_ref()
                     .expect("Connect session has saved credentials");
                 let mut config = JellyfinEmbyClientConfig::new(
-                    self.socket_base_url.as_str(),
+                    self.socket_base_url().as_str(),
                     self.trust_invalid_cert,
                     self.device_id.as_ref(),
                 )?;
@@ -322,7 +325,8 @@ impl std::fmt::Debug for EmbyConnectServer {
         f.debug_struct("EmbyConnectServer")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("addresses", &self.addresses)
+            .field("local_address", &self.local_address)
+            .field("address", &self.address)
             .finish_non_exhaustive()
     }
 }
@@ -407,7 +411,8 @@ mod tests {
         let approved = pin.poll().await.unwrap().unwrap();
         let servers = password.servers().await.unwrap();
         assert_eq!(servers, approved.servers().await.unwrap());
-        assert_eq!(servers[0].addresses, ["http://local", "https://remote"]);
+        assert_eq!(servers[0].local_address.as_deref(), Some("http://local"));
+        assert_eq!(servers[0].address.as_deref(), Some("https://remote"));
         assert!(!format!("{servers:?}").contains("key-one"));
     }
 
@@ -437,7 +442,8 @@ mod tests {
         let login = EmbyConnectServer {
             id: "server".into(),
             name: "Home music".into(),
-            addresses: vec![server.uri()],
+            local_address: None,
+            address: Some(server.uri()),
             connect_user_id: "cloud-user".into(),
             access_key: "exchange-key".into(),
         };
@@ -468,6 +474,7 @@ mod tests {
             crate::CredentialInput {
                 source_name: Some("Renamed".into()),
                 server_url: server.uri(),
+                local_server_url: None,
                 username: "Listener".into(),
                 secret: String::new(),
                 trust_invalid_cert: false,
@@ -522,6 +529,7 @@ mod tests {
             JellyfinEmbySourceConfig {
                 kind: ServerKind::Emby,
                 base_url: server.uri(),
+                local_url: None,
                 server_id: Some("server".into()),
                 user_id: "local-user".into(),
                 username: "Listener".into(),
@@ -538,6 +546,7 @@ mod tests {
             crate::CredentialInput {
                 source_name: Some("Home".into()),
                 server_url: server.uri(),
+                local_server_url: None,
                 username: "Listener".into(),
                 secret: String::new(),
                 trust_invalid_cert: false,

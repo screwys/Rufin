@@ -24,7 +24,7 @@ impl JellyfinEmbySource {
             format!("Audio/{raw}/universal")
         };
         let token = self.session_access_token().await?;
-        let mut url = endpoint(&self.base_url, &path)?;
+        let mut url = endpoint(&self.base_url(), &path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("DeviceId", &self.device_id)
@@ -55,7 +55,7 @@ impl JellyfinEmbySource {
         stream: ResolvedStream,
         session: &str,
     ) -> SourceResult<ResolvedStream> {
-        let mut stop = endpoint(&self.base_url, "Videos/ActiveEncodings")?;
+        let mut stop = endpoint(&self.base_url(), "Videos/ActiveEncodings")?;
         stop.query_pairs_mut()
             .append_pair("DeviceId", &self.device_id)
             .append_pair("PlaySessionId", session);
@@ -78,7 +78,7 @@ impl JellyfinEmbySource {
         tracks: &[String],
         public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
-        let mut url = endpoint(&self.base_url, "Playlists")?;
+        let mut url = endpoint(&self.base_url(), "Playlists")?;
         url.query_pairs_mut()
             .append_pair("Name", name)
             .append_pair("Ids", &raw_track_ids(tracks).join(","))
@@ -102,7 +102,7 @@ impl JellyfinEmbySource {
         item["Name"] = Value::String(name.to_owned());
         self.send_unit(
             self.client
-                .post(endpoint(&self.base_url, &format!("Items/{raw}"))?)
+                .post(endpoint(&self.base_url(), &format!("Items/{raw}"))?)
                 .json(&item),
         )
         .await
@@ -136,7 +136,7 @@ impl JellyfinEmbySource {
             return Ok(None);
         };
         let url = endpoint(
-            &self.base_url,
+            &self.base_url(),
             &format!("Items/{raw}/{source_id}/Subtitles/{index}/Stream.js"),
         )?;
         let dto: Value = match self.get_json(url).await {
@@ -204,6 +204,7 @@ mod tests {
                 emby_connect: false,
                 kind: ServerKind::Emby,
                 base_url: base,
+                local_url: None,
                 server_id: Some("server".into()),
                 user_id: "listener".into(),
                 username: "Listener".into(),
@@ -232,6 +233,7 @@ mod tests {
             CredentialInput {
                 source_name: None,
                 server_url: format!("{}/music", server.uri()),
+                local_server_url: None,
                 username: "Listener".into(),
                 secret: "password".into(),
                 trust_invalid_cert: false,

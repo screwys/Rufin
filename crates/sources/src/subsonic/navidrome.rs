@@ -340,7 +340,7 @@ impl SubsonicSource {
         endpoint: &str,
         query: &[(&str, String)],
     ) -> SourceResult<T> {
-        let mut url = navidrome_endpoint(&self.base_url, &format!("api/{endpoint}"))?;
+        let mut url = navidrome_endpoint(&self.base_url(), &format!("api/{endpoint}"))?;
         url.query_pairs_mut()
             .extend_pairs(query.iter().map(|(key, value)| (*key, value.as_str())));
         let url = &url;
@@ -407,7 +407,7 @@ impl SubsonicSource {
             ));
         }
         let raw = crate::policy::raw_item_id(object);
-        let url = navidrome_endpoint(&self.base_url, &format!("api/playlist/{raw}/image"))?;
+        let url = navidrome_endpoint(&self.base_url(), &format!("api/playlist/{raw}/image"))?;
         let url = &url;
         self.navidrome_authenticated(|token| async move {
             let request = match change {
@@ -447,7 +447,7 @@ impl SubsonicSource {
         })?;
         let login = navidrome_login(
             &self.navidrome_client,
-            &self.base_url,
+            &self.base_url(),
             &self.username,
             password,
         )
@@ -1156,6 +1156,7 @@ mod tests {
             SubsonicFlavor::Navidrome,
             SubsonicSourceConfig {
                 base_url: base_url.to_string(),
+                local_url: None,
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
                 navidrome_library_version: super::super::NAVIDROME_LIBRARY_VERSION,

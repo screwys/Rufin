@@ -19,6 +19,9 @@ pub struct StreamRequest {
     /// A local copy that failed to open or decode; the stream comes from the next candidate.
     #[serde(skip)]
     pub failed_local: Option<String>,
+    /// Only a copy on this device plays: the server just failed to connect.
+    #[serde(skip)]
+    pub local_only: bool,
 }
 
 impl StreamRequest {
@@ -32,6 +35,7 @@ impl StreamRequest {
             quality,
             session_identifier: None,
             failed_local: None,
+            local_only: false,
         }
     }
 }
