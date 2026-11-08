@@ -273,14 +273,15 @@ pub(crate) fn application_window(
     default_width: i32,
     default_height: i32,
     content: &gtk::Box,
+    titlebar: &gtk::Widget,
     header: &gtk::HeaderBar,
     preview: Option<WindowBarPreview>,
 ) -> gtk::ApplicationWindow {
     if let Some(platform) = platform_window_bar(preview) {
-        content.remove(header);
+        content.remove(titlebar);
         let window = gtk_application_window(app, title, default_width, default_height, content);
         header.set_use_native_controls(platform == WindowBarPreview::Macos && preview.is_none());
-        window.set_titlebar(Some(header));
+        window.set_titlebar(Some(titlebar));
         return window;
     }
     adw::ApplicationWindow::builder()
@@ -288,6 +289,10 @@ pub(crate) fn application_window(
         .title(title)
         .default_width(default_width)
         .default_height(default_height)
+        // Without a size request libadwaita keeps windows at least 360×200; Rufin's content
+        // sets its own minimum, down to the mini player.
+        .width_request(1)
+        .height_request(1)
         .content(content)
         .build()
         .upcast()
@@ -338,7 +343,16 @@ fn present_startup_error(app: &adw::Application, error: &str, preview: Option<Wi
     status.set_icon_name(Some(STABLE_APP_ID));
     status.set_title(DISPLAY_NAME);
     status.set_description(Some(error));
-    let window = application_window(app, DISPLAY_NAME, 480, 320, &content, &header, preview);
+    let window = application_window(
+        app,
+        DISPLAY_NAME,
+        480,
+        320,
+        &content,
+        header.upcast_ref(),
+        &header,
+        preview,
+    );
     present_window(&window);
 }
 

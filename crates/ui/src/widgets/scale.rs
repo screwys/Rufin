@@ -12,11 +12,18 @@ pub fn install_scale_fill_updates(scale: &gtk::Scale) {
     });
 }
 
-pub fn horizontal_scale_value_at_x(scale: &gtk::Scale, x: f64) -> f64 {
+/// The value under a point in the scale's coordinates, along its orientation.
+pub fn scale_value_at(scale: &gtk::Scale, x: f64, y: f64) -> f64 {
     let range = scale.range_rect();
-    let fraction = ((x - f64::from(range.x())) / f64::from(range.width()).max(1.0)).clamp(0.0, 1.0);
+    let horizontal = scale.orientation() == gtk::Orientation::Horizontal;
+    let (position, start, length) = if horizontal {
+        (x, range.x(), range.width())
+    } else {
+        (y, range.y(), range.height())
+    };
+    let fraction = ((position - f64::from(start)) / f64::from(length).max(1.0)).clamp(0.0, 1.0);
     let fraction = if scale.is_inverted()
-        ^ (scale.is_flippable() && scale.direction() == gtk::TextDirection::Rtl)
+        ^ (horizontal && scale.is_flippable() && scale.direction() == gtk::TextDirection::Rtl)
     {
         1.0 - fraction
     } else {

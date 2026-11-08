@@ -10,9 +10,10 @@ use crate::widgets::{
     layout::{AllocationOwner, allocation_owner},
     localization::{bind_widget_accessible_label, bind_widget_tooltip},
     scale::{
-        horizontal_scale_value_at_x, install_pointer_value_bubble, install_scale_fill_updates,
-        install_value_bubble_dismissal, point_value_bubble_at_slider,
+        install_pointer_value_bubble, install_scale_fill_updates, install_value_bubble_dismissal,
+        point_value_bubble_at_slider, scale_value_at,
     },
+    swipe::{SWIPE_ACTION_DISTANCE, SwipeAxis, install_touch_swipe},
 };
 use adw::prelude::*;
 use gtk::glib;
@@ -82,10 +83,48 @@ pub const BOTTOM_PLAYER_COMPACT_MIN_WIDTH: i32 =
     } else {
         BOTTOM_PLAYER_ACTIONS_COMPACT_MIN_WIDTH
     };
-pub const BOTTOM_PLAYER_TINY_WIDTH: i32 = BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
+/// Below this width the bar uses its narrow layouts.
+pub const BOTTOM_PLAYER_NARROW_WIDTH: i32 = BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
+/// Shuffle, previous, play, next and repeat.
+pub const BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 4
+    + BOTTOM_PLAYER_PLAY_BUTTON_SIZE
+    + BOTTOM_PLAYER_BUTTON_GAP * 4;
+/// The narrow layouts' column of action buttons: volume above playback settings.
+pub const BOTTOM_PLAYER_ACTION_COLUMN_WIDTH: i32 = BOTTOM_PLAYER_ACTION_BUTTON_SIZE;
+/// The strip's button row: just tall enough for the play button.
+const BOTTOM_PLAYER_STRIP_ROW_HEIGHT: i32 = BOTTOM_PLAYER_PLAY_BUTTON_SIZE;
+/// The strip: the seek bar over one row of buttons.
+pub const BOTTOM_PLAYER_STRIP_HEIGHT: i32 =
+    BOTTOM_PLAYER_WAVEFORM_HEIGHT + 3 + BOTTOM_PLAYER_STRIP_ROW_HEIGHT + 4;
+/// Volume and favorite beside the controls layout's seek bar, small enough to keep its height.
+const BOTTOM_PLAYER_SEEK_BUTTON_SIZE: i32 = 28;
+/// The slider the narrow layouts' volume button opens.
+const BOTTOM_PLAYER_VOLUME_POPOVER_HEIGHT: i32 = 120;
+const BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH: i32 =
+    BOTTOM_PLAYER_HORIZONTAL_PADDING + BOTTOM_PLAYER_COVER_SIZE + BOTTOM_PLAYER_NOW_PLAYING_SPACING;
+/// The narrowest bar: the five transport buttons over the seek bar, beside the action column.
+pub const BOTTOM_PLAYER_CONTROLS_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PADDING * 2
+    + BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH
+    + BOTTOM_PLAYER_BUTTON_GAP
+    + BOTTOM_PLAYER_ACTION_COLUMN_WIDTH;
 const BOTTOM_PLAYER_PROGRESS_CENTER_PERCENT: i32 = 95;
 const BOTTOM_PLAYER_LAYOUT_COLUMNS: i32 = 3;
 pub const VOLUME_PERSIST_DELAY: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BottomPlayerLayout {
+    /// The desktop row: what is playing, the transport over the seek bar, and the actions.
+    Desktop,
+    /// A narrow page: what is playing, previous, play and next, and the volume column.
+    Compact,
+    /// Only playback controls, when the fullscreen player or the mini player shows what is playing:
+    /// the transport over the seek bar, with volume and favorite at its ends. The cover stays
+    /// beside them when nothing else shows it and there is room.
+    Controls { cover: bool },
+    /// The thinnest bar, for short mini players: the plain seek bar over volume, previous, play,
+    /// next and repeat.
+    Strip,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BottomPlayerActions {
@@ -96,7 +135,12 @@ pub enum BottomPlayerActions {
 
 pub struct PlayerControls {
     pub root: AllocationOwner,
+    pub width: Cell<i32>,
+    pub height: Cell<i32>,
+    bar: gtk::Box,
+    pub layout: Cell<BottomPlayerLayout>,
     pub cover: ArtworkTile,
+    pub identity: gtk::Box,
     pub title: gtk::Label,
     pub menu_button: gtk::Button,
     pub artist: gtk::Label,
@@ -104,6 +148,7 @@ pub struct PlayerControls {
     pub album: gtk::Label,
     pub album_links: RefCell<Option<DetailLinkBinding>>,
     pub now_playing_wall: gtk::Box,
+    pub left_slot: gtk::Overlay,
     pub right_slot: gtk::Overlay,
     pub transport: gtk::Box,
     pub transport_slot: gtk::Box,
@@ -134,6 +179,11 @@ pub struct PlayerControls {
     pub mute_button: gtk::Button,
     pub mute_icon: gtk::Image,
     pub mute_icon_state: Rc<Cell<VolumeIcon>>,
+    pub volume_group: gtk::Box,
+    pub volume_slot: gtk::Overlay,
+    pub volume_button: gtk::MenuButton,
+    pub volume_button_icon: gtk::Image,
+    pub volume_popover_box: gtk::Box,
     pub volume: gtk::Scale,
     pub settings_button: gtk::MenuButton,
     pub output_button: gtk::Button,
@@ -143,6 +193,7 @@ pub struct PlayerControls {
 pub struct NowPlayingControls {
     pub root: gtk::Box,
     pub cover: ArtworkTile,
+    pub identity: gtk::Box,
     pub title: gtk::Label,
     pub menu_button: gtk::Button,
     pub artist: gtk::Label,
@@ -179,6 +230,11 @@ pub struct PlayerActionControls {
     pub mute_button: gtk::Button,
     pub mute_icon: gtk::Image,
     pub mute_icon_state: Rc<Cell<VolumeIcon>>,
+    pub volume_group: gtk::Box,
+    pub volume_slot: gtk::Overlay,
+    pub volume_button: gtk::MenuButton,
+    pub volume_button_icon: gtk::Image,
+    pub volume_popover_box: gtk::Box,
     pub volume: gtk::Scale,
     pub settings_button: gtk::MenuButton,
     pub output_button: gtk::Button,
@@ -456,6 +512,7 @@ pub fn build_bottom_player() -> PlayerControls {
     let NowPlayingControls {
         root: now_playing,
         cover,
+        identity,
         title,
         menu_button,
         artist,
@@ -494,6 +551,11 @@ pub fn build_bottom_player() -> PlayerControls {
         mute_button,
         mute_icon,
         mute_icon_state,
+        volume_group,
+        volume_slot,
+        volume_button,
+        volume_button_icon,
+        volume_popover_box,
         volume,
         settings_button,
         output_button,
@@ -521,7 +583,12 @@ pub fn build_bottom_player() -> PlayerControls {
 
     PlayerControls {
         root: allocation_root,
+        width: Cell::new(0),
+        height: Cell::new(0),
+        bar: root.clone(),
+        layout: Cell::new(BottomPlayerLayout::Desktop),
         cover,
+        identity,
         title,
         menu_button,
         artist,
@@ -529,6 +596,7 @@ pub fn build_bottom_player() -> PlayerControls {
         album,
         album_links: RefCell::new(None),
         now_playing_wall,
+        left_slot,
         right_slot,
         transport,
         transport_slot,
@@ -559,6 +627,11 @@ pub fn build_bottom_player() -> PlayerControls {
         mute_button,
         mute_icon,
         mute_icon_state,
+        volume_group,
+        volume_slot,
+        volume_button,
+        volume_button_icon,
+        volume_popover_box,
         volume,
         settings_button,
         output_button,
@@ -609,10 +682,30 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
     NowPlayingControls {
         root: now_playing,
         cover,
+        identity,
         title,
         menu_button,
         artist,
         album,
+    }
+}
+
+/// Takes a bar button out of the box or button row that holds it.
+fn remove_from_parent(widget: &impl IsA<gtk::Widget>) {
+    let Some(parent) = widget.parent() else {
+        return;
+    };
+    if let Some(row) = parent.downcast_ref::<gtk::Fixed>() {
+        row.remove(widget);
+    } else if let Some(row) = parent.downcast_ref::<gtk::Box>() {
+        row.remove(widget);
+    }
+}
+
+/// Sets the size an allocated slot requests; its overlaid child is clipped to it.
+pub fn set_allocated_slot_size(slot: &gtk::Overlay, width: i32, height: i32) {
+    if let Some(measure) = slot.child() {
+        measure.set_size_request(width, height);
     }
 }
 
@@ -750,7 +843,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
             let point =
                 stack.compute_point(&child, &gtk::graphene::Point::new(x as f32, y as f32))?;
             let (seconds, track_center_y) = if child == scale {
-                let seconds = horizontal_scale_value_at_x(&scale, f64::from(point.x()));
+                let seconds = scale_value_at(&scale, f64::from(point.x()), f64::from(point.y()));
                 scale.set_fill_level(seconds);
                 let range = scale.range_rect();
                 (seconds, range.y() as f32 + range.height() as f32 / 2.0)
@@ -802,6 +895,9 @@ pub fn build_player_action_controls(
         output_icon: gtk::Image,
         settings_button: gtk::MenuButton,
         volume_group: gtk::Box,
+        volume_button: gtk::MenuButton,
+        volume_button_icon: gtk::Image,
+        volume_popover_box: gtk::Box,
         volume: gtk::Scale,
         volume_preview: gtk::Popover,
         volume_preview_level: gtk::Label,
@@ -823,11 +919,17 @@ pub fn build_player_action_controls(
 
     bind_widget_accessible_label(&output_button, msgid("Choose playback output"));
     bind_widget_tooltip(&settings_button, "Settings");
+    volume_button.add_css_class("player-seek-button");
+    volume_button.set_size_request(
+        BOTTOM_PLAYER_ACTION_BUTTON_SIZE,
+        BOTTOM_PLAYER_ACTION_BUTTON_SIZE,
+    );
     bind_widget_accessible_label(&settings_button, "Settings");
     volume_group.set_spacing(BOTTOM_PLAYER_VOLUME_SPACING);
     volume_group.set_valign(gtk::Align::Center);
     let favorite_button = favorite_icon_button("Favorite");
     favorite_button.add_css_class("player-favorite-button");
+    favorite_button.add_css_class("player-seek-button");
     configure_player_action_button(&favorite_button);
     volume_group.append(&favorite_button);
     let (queue_button, queue_icon) = queue_sidebar_button("Hide sidebar");
@@ -872,7 +974,11 @@ pub fn build_player_action_controls(
                 && let Some(point) =
                     slot.compute_point(&volume, &gtk::graphene::Point::new(x as f32, y as f32))
             {
-                volume.set_fill_level(horizontal_scale_value_at_x(&volume, f64::from(point.x())));
+                volume.set_fill_level(scale_value_at(
+                    &volume,
+                    f64::from(point.x()),
+                    f64::from(point.y()),
+                ));
             }
             point_value_bubble_at_slider(&volume, &preview);
             if !preview.is_visible() {
@@ -896,6 +1002,11 @@ pub fn build_player_action_controls(
         mute_button,
         mute_icon,
         mute_icon_state,
+        volume_group,
+        volume_slot,
+        volume_button,
+        volume_button_icon,
+        volume_popover_box,
         volume,
         settings_button,
         output_button,
@@ -986,9 +1097,36 @@ pub fn bottom_player_actions(player_width: i32) -> BottomPlayerActions {
     }
 }
 
-pub fn bottom_player_tiny(player_width: i32) -> bool {
-    player_width < BOTTOM_PLAYER_TINY_WIDTH
+pub fn bottom_player_layout(
+    player_width: i32,
+    player_height: i32,
+    fullscreen_visible: bool,
+    mini: crate::player::MiniPlayer,
+) -> BottomPlayerLayout {
+    use crate::player::MiniPlayer;
+    match mini {
+        MiniPlayer::Tall => BottomPlayerLayout::Controls { cover: false },
+        MiniPlayer::Short
+            if player_width
+                >= BOTTOM_PLAYER_CONTROLS_MIN_WIDTH + BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
+                && player_height >= BOTTOM_PLAYER_HEIGHT =>
+        {
+            BottomPlayerLayout::Controls { cover: true }
+        }
+        MiniPlayer::Short => BottomPlayerLayout::Strip,
+        MiniPlayer::Off if player_width >= BOTTOM_PLAYER_NARROW_WIDTH => {
+            BottomPlayerLayout::Desktop
+        }
+        MiniPlayer::Off if fullscreen_visible => BottomPlayerLayout::Controls { cover: false },
+        MiniPlayer::Off => BottomPlayerLayout::Compact,
+    }
 }
+
+/// Where the button row's buttons are centered: low enough in the desktop row to leave room for the
+/// seek bar under it, and in the middle of the strip's row.
+const BOTTOM_PLAYER_BUTTON_CENTER_Y: f64 =
+    BOTTOM_PLAYER_BUTTON_ROW_HEIGHT as f64 / 2.0 + BOTTOM_PLAYER_BUTTON_OFFSET_Y;
+const BOTTOM_PLAYER_STRIP_BUTTON_CENTER_Y: f64 = BOTTOM_PLAYER_STRIP_ROW_HEIGHT as f64 / 2.0;
 
 pub fn put_transport_button(
     buttons: &gtk::Fixed,
@@ -997,7 +1135,7 @@ pub fn put_transport_button(
     slot: f64,
     size: i32,
 ) {
-    let (x, y) = transport_button_position(width, slot, size);
+    let (x, y) = transport_button_position(width, BOTTOM_PLAYER_BUTTON_CENTER_Y, slot, size);
     buttons.put(button, x, y);
 }
 
@@ -1005,14 +1143,15 @@ pub fn move_transport_button(
     buttons: &gtk::Fixed,
     button: &impl IsA<gtk::Widget>,
     width: i32,
+    center_y: f64,
     slot: f64,
     size: i32,
 ) {
-    let (x, y) = transport_button_position(width, slot, size);
+    let (x, y) = transport_button_position(width, center_y, slot, size);
     buttons.move_(button, x, y);
 }
 
-pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64) {
+pub fn transport_button_position(width: i32, center_y: f64, slot: f64, size: i32) -> (f64, f64) {
     // Edges, not centers, are spaced evenly, so the larger play button keeps the same gap.
     let gap = f64::from(BOTTOM_PLAYER_BUTTON_GAP);
     let offset = if slot == 0.0 {
@@ -1025,8 +1164,7 @@ pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64)
     };
     let center_x = f64::from(width) / 2.0 + offset;
     let radius = f64::from(size) / 2.0;
-    let y = f64::from(BOTTOM_PLAYER_BUTTON_ROW_HEIGHT - size) / 2.0 + BOTTOM_PLAYER_BUTTON_OFFSET_Y;
-    (center_x - radius, y)
+    (center_x - radius, center_y - radius)
 }
 
 use crate::player::{progress::seekbar_target_seconds, state::NowPlayingPresentation};
@@ -1195,15 +1333,7 @@ impl crate::player::PlayerUi {
             *controls.waveform_key.borrow_mut() = waveform_key;
             controls.waveform_peak_count.set(waveform_peak_count);
         }
-        if waveform_matches {
-            controls
-                .progress_stack
-                .set_visible_child(controls.waveform.widget());
-        } else {
-            controls
-                .progress_stack
-                .set_visible_child(&controls.progress);
-        }
+        self.show_bottom_player_seekbar();
         controls
             .duration
             .set_text(&format_duration(duration_seconds));
@@ -1215,6 +1345,7 @@ impl crate::player::PlayerUi {
         if controls.mute_icon_state.get() != volume_icon {
             controls.mute_icon_state.set(volume_icon);
             set_volume_icon(&controls.mute_icon, volume_icon);
+            set_volume_icon(&controls.volume_button_icon, volume_icon);
         }
         controls.volume.set_value(volume);
         let output = player
@@ -1266,15 +1397,11 @@ impl crate::player::PlayerUi {
         controls
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
-        let rating_visible =
-            shell.settings.current.borrow().show_bottom_bar_rating && presentation.current;
-        controls.rating.widget().set_visible(rating_visible);
-        controls.rating.widget().set_sensitive(rating_visible);
-        controls.action_buttons.set_margin_top(if rating_visible {
-            BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
-        } else {
-            0
-        });
+        shell
+            .chrome
+            .topbar
+            .set_now_playing(&presentation.title, &presentation.artist);
+        self.sync_bottom_player_rating();
         self.refresh_current_controls();
     }
 
@@ -1815,7 +1942,7 @@ impl crate::player::PlayerUi {
     }
 }
 
-pub fn connect_bottom_player_resize(shell: &Rc<crate::player::PlayerUi>) {
+pub fn connect_bottom_player_scale(shell: &Rc<crate::player::PlayerUi>) {
     let Some(app) = shell.shell() else {
         return;
     };
@@ -1837,122 +1964,354 @@ pub fn connect_bottom_player_resize(shell: &Rc<crate::player::PlayerUi>) {
         }
         window.connect_realize(watch_scale);
     }
-    let resize_shell = Rc::downgrade(shell);
-    let allocated_width = Cell::new(0);
-    shell
-        .views
-        .player_controls
-        .root
-        .set_size_callback(move |width, _height| {
-            if width <= 0 || allocated_width.replace(width) == width {
-                return;
-            }
-            let Some(resize_shell) = resize_shell.upgrade() else {
-                return;
-            };
-            resize_shell.apply_bottom_player_width(width);
-        });
 }
 
 impl crate::player::PlayerUi {
-    pub fn apply_bottom_player_width(&self, player_width: i32) {
-        if player_width > 0 {
-            let tiny = bottom_player_tiny(player_width);
-            let actions = bottom_player_actions(player_width);
-            self.apply_bottom_player_tiny(tiny);
-            self.apply_bottom_player_actions(actions);
-            let player = &self.views.player_controls;
-            let desired_progress_width = bottom_player_progress_width(player_width);
-            let progress_width = if tiny {
-                desired_progress_width
-            } else {
-                // Keep the action surface inside its equal side allocation. The progress row yields
-                // when necessary so the two side slots remain the same width around the transport.
-                let action_width = widget_natural_width(&player.actions);
-                let progress_row_fixed_width = widget_natural_width(&player.elapsed)
-                    + widget_natural_width(&player.duration)
-                    + BOTTOM_PLAYER_PROGRESS_SPACING * 2;
-                centered_progress_width(
-                    desired_progress_width,
-                    bottom_player_content_width(player_width),
-                    action_width,
-                    progress_row_fixed_width,
-                )
-            };
-            self.views
-                .player_controls
-                .progress
-                .set_width_request(progress_width);
-            self.views
-                .player_controls
-                .progress_stack
-                .set_size_request(progress_width, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
-            self.views
-                .player_controls
-                .waveform
-                .widget()
-                .set_width_request(progress_width);
-            self.views
-                .player_controls
-                .waveform
-                .widget()
-                .set_content_width(progress_width);
-        }
-    }
-
-    fn apply_bottom_player_tiny(&self, tiny: bool) {
+    /// Arranges the bar for its size, the fullscreen player and the mini player.
+    pub fn apply_bottom_player_layout(&self) {
         let player = &self.views.player_controls;
-        let transport_width = if tiny {
-            BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH
+        let width = player.width.get();
+        if width <= 0 {
+            return;
+        }
+        let layout = bottom_player_layout(
+            width,
+            player.height.get(),
+            self.fullscreen_player_visible(),
+            self.mini.get(),
+        );
+        player.layout.set(layout);
+        let desktop = layout == BottomPlayerLayout::Desktop;
+        let compact = layout == BottomPlayerLayout::Compact;
+        let strip = layout == BottomPlayerLayout::Strip;
+        let cover = match layout {
+            BottomPlayerLayout::Controls { cover } => cover,
+            BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => true,
+            BottomPlayerLayout::Strip => false,
+        };
+        player.bar.set_height_request(if strip {
+            BOTTOM_PLAYER_STRIP_HEIGHT
         } else {
-            BOTTOM_PLAYER_TRANSPORT_WIDTH
+            BOTTOM_PLAYER_HEIGHT
+        });
+        player.left_slot.set_visible(cover);
+        player.identity.set_visible(desktop || compact);
+        // The desktop row shares its width equally around the transport. The narrow layouts give
+        // the cover and the action column their own width and the rest to the middle.
+        player.left_slot.set_hexpand(desktop || compact);
+        set_allocated_slot_size(
+            &player.left_slot,
+            if desktop || compact {
+                1
+            } else {
+                BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
+            },
+            1,
+        );
+        // The controls layout and the strip keep volume and favorite next to their controls, so
+        // only the desktop row and the compact bar keep the action surface.
+        player.right_slot.set_visible(desktop || compact);
+        player.right_slot.set_hexpand(desktop);
+        set_allocated_slot_size(
+            &player.right_slot,
+            if desktop {
+                1
+            } else {
+                BOTTOM_PLAYER_ACTION_COLUMN_WIDTH
+            },
+            1,
+        );
+        if desktop {
+            self.apply_bottom_player_actions(bottom_player_actions(width));
+        } else {
+            player
+                .favorite_button
+                .set_visible(matches!(layout, BottomPlayerLayout::Controls { .. }));
+            player.queue_button.set_visible(false);
+        }
+        self.apply_bottom_player_action_column(!desktop);
+        self.sync_bottom_player_rating();
+
+        let transport_width = match layout {
+            BottomPlayerLayout::Desktop => BOTTOM_PLAYER_TRANSPORT_WIDTH,
+            BottomPlayerLayout::Compact => BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH,
+            BottomPlayerLayout::Controls { cover } => (bottom_player_content_width(width)
+                - if cover {
+                    BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
+                } else {
+                    0
+                })
+            .max(BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH),
+            BottomPlayerLayout::Strip => {
+                bottom_player_content_width(width).max(BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH)
+            }
+        };
+        let (row_height, center_y) = if strip {
+            (
+                BOTTOM_PLAYER_STRIP_ROW_HEIGHT,
+                BOTTOM_PLAYER_STRIP_BUTTON_CENTER_Y,
+            )
+        } else {
+            (
+                BOTTOM_PLAYER_BUTTON_ROW_HEIGHT,
+                BOTTOM_PLAYER_BUTTON_CENTER_Y,
+            )
         };
         player.transport.set_width_request(transport_width);
         player.transport_slot.set_width_request(transport_width);
         player
             .transport_buttons
-            .set_size_request(transport_width, BOTTOM_PLAYER_BUTTON_ROW_HEIGHT);
+            .set_size_request(transport_width, row_height);
         player.now_playing_wall.set_width_request(1);
-        player.transport_slot.set_halign(if tiny {
+        player.transport_slot.set_hexpand(!desktop && !compact);
+        player.transport_slot.set_halign(if compact {
             gtk::Align::End
         } else {
             gtk::Align::Center
         });
-        move_transport_button(
-            &player.transport_buttons,
-            &player.previous_button,
-            transport_width,
-            -1.0,
-            BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
-        );
-        move_transport_button(
-            &player.transport_buttons,
-            &player.play_ring,
-            transport_width,
-            0.0,
-            BOTTOM_PLAYER_PLAY_BUTTON_SIZE,
-        );
-        move_transport_button(
-            &player.transport_buttons,
-            &player.play_button,
-            transport_width,
-            0.0,
-            BOTTOM_PLAYER_PLAY_BUTTON_SIZE,
-        );
-        move_transport_button(
-            &player.transport_buttons,
-            &player.next_button,
-            transport_width,
-            1.0,
-            BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
-        );
-        player.dj_button.set_visible(!tiny);
-        player.shuffle_button.set_visible(!tiny);
-        player.repeat_button.set_visible(!tiny);
-        player.random_button.set_visible(!tiny);
-        player.progress_row.set_visible(!tiny);
-        player.actions.set_visible(!tiny);
-        player.right_slot.set_visible(!tiny);
+        self.place_bottom_player_seek_buttons(layout);
+        let side_buttons = !compact;
+        let all_buttons =
+            side_buttons && !strip && transport_width >= BOTTOM_PLAYER_TRANSPORT_WIDTH;
+        let side = BOTTOM_PLAYER_SIDE_BUTTON_SIZE;
+        for (button, slot, visible) in [
+            (
+                player.dj_button.upcast_ref::<gtk::Widget>(),
+                -3.0,
+                all_buttons,
+            ),
+            (
+                player.shuffle_button.upcast_ref(),
+                -2.0,
+                side_buttons && !strip,
+            ),
+            (player.volume_button.upcast_ref(), -2.0, strip),
+            (player.previous_button.upcast_ref(), -1.0, true),
+            (player.next_button.upcast_ref(), 1.0, true),
+            (player.repeat_button.upcast_ref(), 2.0, side_buttons),
+            (player.random_button.upcast_ref(), 3.0, all_buttons),
+        ] {
+            if button.parent().as_ref() != Some(player.transport_buttons.upcast_ref()) {
+                continue;
+            }
+            button.set_visible(visible);
+            if visible {
+                move_transport_button(
+                    &player.transport_buttons,
+                    button,
+                    transport_width,
+                    center_y,
+                    slot,
+                    side,
+                );
+            }
+        }
+        let play = BOTTOM_PLAYER_PLAY_BUTTON_SIZE;
+        for button in [
+            player.play_ring.upcast_ref::<gtk::Widget>(),
+            player.play_button.upcast_ref(),
+        ] {
+            move_transport_button(
+                &player.transport_buttons,
+                button,
+                transport_width,
+                center_y,
+                0.0,
+                play,
+            );
+        }
+
+        // The strip puts the seek bar above its single row of buttons.
+        if strip {
+            player.progress_row.add_css_class("above-controls");
+            player
+                .transport
+                .reorder_child_after(&player.progress_row, None::<&gtk::Widget>);
+        } else {
+            player.progress_row.remove_css_class("above-controls");
+            player
+                .transport
+                .reorder_child_after(&player.progress_row, Some(&player.transport_buttons));
+        }
+        self.show_bottom_player_seekbar();
+        player.progress_row.set_visible(!compact);
+        player.actions.set_visible(desktop || compact);
+        // The desktop row sizes its seek bar from the window. The controls layout and the strip
+        // stretch it across the transport's width, between the times and the buttons beside it.
+        player.progress_row.set_halign(if desktop {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Fill
+        });
+        player.progress_stack.set_hexpand(!desktop);
+        let progress_width = if desktop {
+            // Keep the action surface inside its equal side allocation. The progress row yields
+            // when necessary so the two side slots remain the same width around the transport.
+            centered_progress_width(
+                bottom_player_progress_width(width),
+                bottom_player_content_width(width),
+                widget_natural_width(&player.actions),
+                widget_natural_width(&player.elapsed)
+                    + widget_natural_width(&player.duration)
+                    + BOTTOM_PLAYER_PROGRESS_SPACING * 2,
+            )
+        } else {
+            1
+        };
+        player.progress.set_width_request(progress_width);
+        player
+            .progress_stack
+            .set_size_request(progress_width, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
+        player.waveform.widget().set_width_request(progress_width);
+        player.waveform.widget().set_content_width(progress_width);
+    }
+
+    /// Volume and favorite sit in the action surface on the desktop row and the compact bar. The
+    /// strip puts volume in shuffle's place; the controls layout puts volume and favorite at the
+    /// ends of the seek bar.
+    fn place_bottom_player_seek_buttons(&self, layout: BottomPlayerLayout) {
+        let player = &self.views.player_controls;
+        let volume_host: &gtk::Widget = match layout {
+            BottomPlayerLayout::Strip => player.transport_buttons.upcast_ref(),
+            BottomPlayerLayout::Controls { .. } => player.progress_row.upcast_ref(),
+            BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
+                player.action_buttons.upcast_ref()
+            }
+        };
+        if player.volume_button.parent().as_ref() != Some(volume_host) {
+            remove_from_parent(&player.volume_button);
+            let size = match layout {
+                BottomPlayerLayout::Strip => {
+                    player
+                        .transport_buttons
+                        .put(&player.volume_button, 0.0, 0.0);
+                    BOTTOM_PLAYER_SIDE_BUTTON_SIZE
+                }
+                BottomPlayerLayout::Controls { .. } => {
+                    player.progress_row.prepend(&player.volume_button);
+                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE
+                }
+                BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
+                    player.action_buttons.prepend(&player.volume_button);
+                    BOTTOM_PLAYER_ACTION_BUTTON_SIZE
+                }
+            };
+            player.volume_button.set_size_request(size, size);
+        }
+        let controls = matches!(layout, BottomPlayerLayout::Controls { .. });
+        let favorite_host: &gtk::Widget = if controls {
+            player.progress_row.upcast_ref()
+        } else {
+            player.volume_group.upcast_ref()
+        };
+        if player.favorite_button.parent().as_ref() != Some(favorite_host) {
+            remove_from_parent(&player.favorite_button);
+            if controls {
+                player.progress_row.append(&player.favorite_button);
+                player.favorite_button.set_size_request(
+                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE,
+                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE,
+                );
+            } else {
+                player.volume_group.prepend(&player.favorite_button);
+                player.favorite_button.set_size_request(-1, -1);
+            }
+        }
+    }
+
+    /// The seek bar shows the waveform when one is ready, except in the strip, which keeps the
+    /// plain bar.
+    fn show_bottom_player_seekbar(&self) {
+        let controls = &self.views.player_controls;
+        if controls.waveform_key.borrow().is_some()
+            && controls.layout.get() != BottomPlayerLayout::Strip
+        {
+            controls
+                .progress_stack
+                .set_visible_child(controls.waveform.widget());
+        } else {
+            controls
+                .progress_stack
+                .set_visible_child(&controls.progress);
+        }
+    }
+
+    /// The narrow layouts stack the volume and playback settings buttons in a column; volume opens
+    /// the slider, standing upright above the mute button, in a popover.
+    fn apply_bottom_player_action_column(&self, column: bool) {
+        let player = &self.views.player_controls;
+        let in_popover =
+            player.volume_group.parent().as_ref() == Some(player.volume_popover_box.upcast_ref());
+        if in_popover == column {
+            return;
+        }
+        if let Some(parent) = player.volume_group.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&player.volume_group);
+        }
+        let orientation = if column {
+            gtk::Orientation::Vertical
+        } else {
+            gtk::Orientation::Horizontal
+        };
+        player.action_buttons.set_orientation(orientation);
+        player.volume_button.set_visible(column);
+        player.volume_group.set_orientation(orientation);
+        player.volume.set_orientation(orientation);
+        player.volume.set_inverted(column);
+        player.volume.set_hexpand(!column);
+        player.volume.set_vexpand(column);
+        if column {
+            player.volume_slot.add_css_class("volume-column");
+            player.volume.set_halign(gtk::Align::Center);
+            player.volume.set_valign(gtk::Align::Fill);
+            player
+                .volume_group
+                .reorder_child_after(&player.volume_slot, None::<&gtk::Widget>);
+            set_allocated_slot_size(
+                &player.volume_slot,
+                BOTTOM_PLAYER_ACTION_COLUMN_WIDTH,
+                BOTTOM_PLAYER_VOLUME_POPOVER_HEIGHT,
+            );
+            player.volume_popover_box.append(&player.volume_group);
+        } else {
+            player.volume_slot.remove_css_class("volume-column");
+            player.volume.set_halign(gtk::Align::Fill);
+            player.volume.set_valign(gtk::Align::Center);
+            player
+                .volume_group
+                .reorder_child_after(&player.volume_slot, Some(&player.mute_button));
+            set_allocated_slot_size(&player.volume_slot, BOTTOM_PLAYER_VOLUME_SLOT_WIDTH, 1);
+            player.action_buttons.append(&player.volume_group);
+        }
+    }
+
+    fn sync_bottom_player_rating(&self) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let controls = &self.views.player_controls;
+        let visible = controls.layout.get() == BottomPlayerLayout::Desktop
+            && shell.settings.current.borrow().show_bottom_bar_rating
+            && self
+                .selected_playback()
+                .is_some_and(|player| player.transport.current.is_some());
+        controls.rating.widget().set_visible(visible);
+        controls.rating.widget().set_sensitive(visible);
+        controls.action_buttons.set_margin_top(if visible {
+            BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
+        } else {
+            0
+        });
+    }
+
+    /// A sideways swipe over what is playing steps through the queue like the skip buttons.
+    pub fn swipe_track(&self, dx: f64) {
+        let controls = &self.views.player_controls;
+        if (dx < 0.0) != (controls.root.direction() == gtk::TextDirection::Rtl) {
+            controls.next_button.emit_clicked();
+        } else {
+            controls.previous_button.emit_clicked();
+        }
     }
 
     fn apply_bottom_player_actions(&self, actions: BottomPlayerActions) {
@@ -1997,7 +2356,7 @@ mod tests {
 
     #[test]
     fn bottom_player_actions_never_outgrow_their_equal_side() {
-        for player_width in super::BOTTOM_PLAYER_TINY_WIDTH..=4096 {
+        for player_width in super::BOTTOM_PLAYER_NARROW_WIDTH..=4096 {
             let actions = super::bottom_player_actions(player_width);
             let action_width = super::bottom_player_action_min_width(actions);
 
@@ -2009,18 +2368,23 @@ mod tests {
     }
 
     #[test]
-    fn non_tiny_player_preserves_now_playing_identity_width() {
+    fn desktop_player_preserves_now_playing_identity_width() {
         let fixed_now_playing_width = super::BOTTOM_PLAYER_HORIZONTAL_PADDING
             + super::BOTTOM_PLAYER_COVER_SIZE
             + super::BOTTOM_PLAYER_NOW_PLAYING_SPACING;
-        let identity_width = super::bottom_player_side_width(super::BOTTOM_PLAYER_TINY_WIDTH)
+        let identity_width = super::bottom_player_side_width(super::BOTTOM_PLAYER_NARROW_WIDTH)
             - fixed_now_playing_width;
 
         assert!(identity_width >= super::BOTTOM_PLAYER_IDENTITY_MIN_WIDTH);
-        assert!(super::bottom_player_tiny(
-            super::BOTTOM_PLAYER_TINY_WIDTH - 1
-        ));
-        assert!(!super::bottom_player_tiny(super::BOTTOM_PLAYER_TINY_WIDTH));
+        let off = crate::player::MiniPlayer::Off;
+        assert_eq!(
+            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH - 1, 600, false, off),
+            super::BottomPlayerLayout::Compact
+        );
+        assert_eq!(
+            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH, 600, false, off),
+            super::BottomPlayerLayout::Desktop
+        );
     }
 
     #[test]
@@ -2155,7 +2519,7 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
     let Some(app) = shell.shell() else {
         return;
     };
-    connect_bottom_player_resize(shell);
+    connect_bottom_player_scale(shell);
     let fullscreen = &shell.views.fullscreen_player;
     for (label, binding) in [
         (&fullscreen.artist, &fullscreen.artist_links),
@@ -2462,6 +2826,35 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
                 "toggle-fullscreen-player",
                 None,
             );
+        },
+    );
+    let claims_shell = Rc::downgrade(shell);
+    let release_shell = Rc::downgrade(shell);
+    install_touch_swipe(
+        &shell.player_ui.views.player_controls.now_playing_wall,
+        move |axis, _, dy| {
+            // Swiping up opens the fullscreen player, as tapping the cover does.
+            axis == SwipeAxis::Horizontal
+                || (dy < 0.0
+                    && claims_shell.upgrade().is_some_and(|shell| {
+                        shell.player_ui.mini.get() == crate::player::MiniPlayer::Off
+                            && !shell.player_ui.fullscreen_player_visible()
+                    }))
+        },
+        |_, _, _| {},
+        move |axis, dx, dy| {
+            let Some(shell) = release_shell.upgrade() else {
+                return;
+            };
+            match axis {
+                SwipeAxis::Horizontal if dx.abs() >= SWIPE_ACTION_DISTANCE => {
+                    shell.player_ui.swipe_track(dx);
+                }
+                SwipeAxis::Vertical if dy <= -SWIPE_ACTION_DISTANCE => {
+                    shell.player_ui.open_fullscreen_player();
+                }
+                SwipeAxis::Horizontal | SwipeAxis::Vertical => {}
+            }
         },
     );
 

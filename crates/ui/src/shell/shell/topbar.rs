@@ -8,15 +8,23 @@ pub(crate) struct Topbar {
     pub window_content: gtk::Box,
     pub content_host: adw::Bin,
     pub header: gtk::HeaderBar,
+    /// The header, free to be narrower than its current buttons while the window shrinks.
+    pub titlebar: super::layout::ShellAllocationOwner,
     pub search: gtk::SearchEntry,
     search_popup: std::cell::RefCell<Option<Rc<super::topbar_search::SearchPopup>>>,
     search_host: gtk::Overlay,
     search_shortcut: adw::ShortcutLabel,
     pub menu: gtk::MenuButton,
     sidebar: gtk::Button,
+    navigation: gtk::Box,
+    forward: gtk::Button,
+    actions: gtk::Box,
     source: gtk::MenuButton,
     controller: gtk::MenuButton,
+    playback_targets: gtk::Box,
     pub casting_host: gtk::Box,
+    mini_title: adw::WindowTitle,
+    mini: std::cell::Cell<bool>,
 }
 
 impl Topbar {
@@ -25,6 +33,10 @@ impl Topbar {
     }
 
     pub fn focus_search(&self) {
+        // The mini player has no search; the window grows back to pages for it.
+        if self.mini.get() {
+            return;
+        }
         self.search.grab_focus();
         if let Some(popup) = self.search_popup.borrow().as_ref() {
             popup.open();
@@ -70,24 +82,80 @@ impl Topbar {
             search_shortcut: adw::ShortcutLabel,
             menu: gtk::MenuButton,
             sidebar: gtk::Button,
+            navigation: gtk::Box,
+            forward: gtk::Button,
+            actions: gtk::Box,
             source: gtk::MenuButton,
             controller: gtk::MenuButton,
+            playback_targets: gtk::Box,
             casting_host: gtk::Box,
+            mini_title: adw::WindowTitle,
         });
         crate::widgets::controls::configure_search_entry(&search);
+        window_content.remove(&header);
+        let titlebar = super::layout::ShellAllocationOwner::new(&header);
+        titlebar.set_vexpand(false);
+        titlebar.set_minimum_size(Some(0), None);
+        window_content.prepend(&titlebar);
         Self {
             window_content,
             content_host,
             header,
+            titlebar,
             search,
             search_popup: std::cell::RefCell::new(None),
             search_host,
             search_shortcut,
             menu,
             sidebar,
+            navigation,
+            forward,
+            actions,
             source,
             controller,
+            playback_targets,
             casting_host,
+            mini_title,
+            mini: std::cell::Cell::new(false),
+        }
+    }
+
+    /// What the mini player shows in place of search.
+    pub fn set_now_playing(&self, title: &str, artist: &str) {
+        self.mini_title.set_title(title);
+        self.mini_title.set_subtitle(artist);
+    }
+
+    /// A narrow window keeps navigation and search; the controller and output buttons move to the
+    /// fullscreen player's bar. The mini player keeps only the window controls and what is playing.
+    pub fn apply_window_size(&self, narrow: bool, mini: bool, playback_targets_host: &gtk::Box) {
+        if narrow {
+            self.header.add_css_class("narrow");
+        } else {
+            self.header.remove_css_class("narrow");
+        }
+        self.forward.set_visible(!narrow);
+        let targets_host = if narrow || mini {
+            playback_targets_host
+        } else {
+            &self.navigation
+        };
+        if self.playback_targets.parent().as_ref() != Some(targets_host.upcast_ref()) {
+            if let Some(parent) = self.playback_targets.parent().and_downcast::<gtk::Box>() {
+                parent.remove(&self.playback_targets);
+            }
+            targets_host.append(&self.playback_targets);
+        }
+        if self.mini.replace(mini) == mini {
+            return;
+        }
+        self.navigation.set_visible(!mini);
+        self.actions.set_visible(!mini);
+        if mini {
+            self.close_search_popup();
+            self.header.set_title_widget(Some(&self.mini_title));
+        } else {
+            self.header.set_title_widget(Some(&self.search_host));
         }
     }
 

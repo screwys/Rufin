@@ -10,13 +10,41 @@ use playback::PlaybackView;
 use queue::QueueState;
 use rufin_core::runtime::WaveformProjection;
 use state::PlaybackState;
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 pub struct SelectedPlaybackState {
     player: PlaybackView,
     waveform: WaveformProjection,
     seek_preview_seconds: Option<u32>,
 }
+/// Window content narrower than this shows only the mini player.
+pub const MINI_PLAYER_MAX_WIDTH: i32 = 360;
+/// Window content shorter than this shows only the mini player.
+pub const MINI_PLAYER_MAX_HEIGHT: i32 = 240;
+
+/// When the window is too small for pages, it shows only playback: the mini player.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MiniPlayer {
+    #[default]
+    Off,
+    /// Short windows show the bar alone, with the cover beside the controls when it fits.
+    Short,
+    /// Narrow, tall windows show the cover above the bar.
+    Tall,
+}
+
+impl MiniPlayer {
+    pub fn for_content(width: i32, height: i32) -> Self {
+        if height < MINI_PLAYER_MAX_HEIGHT {
+            Self::Short
+        } else if width < MINI_PLAYER_MAX_WIDTH {
+            Self::Tall
+        } else {
+            Self::Off
+        }
+    }
+}
+
 pub struct PlayerUi {
     pub control_feedback: Rc<crate::widgets::feedback::ControlFeedbackState>,
     shell: Weak<Shell>,
@@ -28,6 +56,9 @@ pub struct PlayerUi {
     playback: RefCell<Option<SelectedPlaybackState>>,
     queue: RefCell<QueueState>,
     pub lyric_content: RefCell<SelectedLyricsState>,
+    pub mini: Cell<MiniPlayer>,
+    /// The tall mini player opened the fullscreen player, so leaving it closes it again.
+    fullscreen_for_mini: Cell<bool>,
 }
 impl PlayerUi {
     pub fn new(
@@ -50,7 +81,39 @@ impl PlayerUi {
             playback: RefCell::new(None),
             queue: RefCell::new(QueueState::new()),
             lyric_content: RefCell::new(SelectedLyricsState::new()),
+            mini: Cell::new(MiniPlayer::Off),
+            fullscreen_for_mini: Cell::new(false),
         }
+    }
+
+    /// Switches between the full window and the mini player. The tall mini player shows the
+    /// fullscreen player's cover above the bar; the short one shows the bar alone.
+    pub fn apply_mini_player(self: &Rc<Self>, mini: MiniPlayer) {
+        if self.mini.replace(mini) == mini {
+            return;
+        }
+        let tall = mini == MiniPlayer::Tall;
+        self.views.fullscreen_player.mini.set(tall);
+        // The mini player only plays: no menus, drags or fullscreen from the cover.
+        self.views
+            .player_controls
+            .cover
+            .area
+            .set_can_target(mini == MiniPlayer::Off);
+        // Alone in a short window, the bar keeps to the bottom of it.
+        self.views
+            .player_controls
+            .root
+            .set_vexpand(mini == MiniPlayer::Short);
+        if tall && !self.fullscreen_player_visible() {
+            self.fullscreen_for_mini.set(true);
+            self.show_fullscreen_player(false);
+        } else if !tall && self.fullscreen_for_mini.replace(false) {
+            self.hide_fullscreen_player(None, false);
+        } else {
+            self.refresh_fullscreen_mode();
+        }
+        self.apply_bottom_player_layout();
     }
     pub fn replace_player(&self, player: PlaybackView) {
         let mut playback = self.playback.borrow_mut();

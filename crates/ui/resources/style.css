@@ -602,6 +602,21 @@ headerbar.shared-topbar > windowhandle > box {
   padding-right: 14px;
 }
 
+headerbar.shared-topbar.narrow > windowhandle > box {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+headerbar.shared-topbar.narrow .topbar-search > entry.search {
+  min-width: 0;
+  padding-right: 12px;
+}
+
+headerbar.shared-topbar.narrow .topbar-search .search-shortcut,
+headerbar.shared-topbar.narrow .topbar-search .search-enter {
+  opacity: 0;
+}
+
 headerbar.shared-topbar > windowhandle > box > box.start,
 headerbar.shared-topbar > windowhandle > box > box.end,
 headerbar.shared-topbar > windowhandle > box > widget > box.start,
@@ -1683,6 +1698,25 @@ dialog.alert.playlist-delete-dialog .message-area {
   margin-top: -5px;
 }
 
+/* The mini player's strip puts the seek bar above its buttons. */
+.player-progress-row.above-controls {
+  margin-top: 0;
+}
+
+/* Volume and favorite at the ends of the controls layout's seek bar. */
+.player-progress-row > button.player-seek-button,
+.player-progress-row > menubutton.player-seek-button > button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+}
+
+.player-progress-row.above-controls scale.player-progress {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
 .player-progress-row label {
   font-size: 12px;
 }
@@ -1824,6 +1858,23 @@ scale.volume-slider:dir(rtl) {
 
 .volume-slider-slot:dir(rtl) {
   margin-right: -5px;
+}
+
+/* The narrow bar's volume button opens the slider standing up above the mute button. */
+.volume-slider-slot.volume-column {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+scale.volume-slider.vertical {
+  padding: 6px 0;
+}
+
+scale.volume-slider.vertical trough,
+scale.volume-slider.vertical trough highlight,
+scale.volume-slider.vertical trough fill {
+  min-width: 6px;
+  min-height: 0;
 }
 
 .player-transport-button {

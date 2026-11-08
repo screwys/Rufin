@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 17;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
-pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
-pub const MIN_RESTORED_WINDOW_HEIGHT: i32 = 400;
+/// A window as small as the mini player reopens at its size.
+pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 200;
+pub const MIN_RESTORED_WINDOW_HEIGHT: i32 = 100;
 pub const MAX_RESTORED_WINDOW_WIDTH: i32 = 3_400;
 pub const MAX_RESTORED_WINDOW_HEIGHT: i32 = 2_000;
 pub fn sanitized_window_size(width: Option<i32>, height: Option<i32>) -> Option<(i32, i32)> {

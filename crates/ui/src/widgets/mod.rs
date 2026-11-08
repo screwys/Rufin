@@ -35,6 +35,7 @@ pub mod table_sizing;
 
 pub mod display;
 pub mod scale;
+pub mod swipe;
 
 pub mod feedback;
 
