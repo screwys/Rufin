@@ -1635,6 +1635,9 @@ msgstr "Délka"
 msgid "Dynamic background"
 msgstr ""
 
+msgid "Dynamic"
+msgstr ""
+
 msgid "EBU R128 analysis"
 msgstr ""
 
@@ -1969,9 +1972,6 @@ msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Najděte svůj uživatelský token ListenBrainz"
-
-msgid "Find"
-msgstr ""
 
 #, fuzzy
 #| msgid "Hide lyrics"
@@ -4590,6 +4590,11 @@ msgstr "Hledat znovu"
 #| msgid "Saving..."
 msgid "Starting..."
 msgstr "Ukládání..."
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Static"
+msgstr "Automatické aktualizace"
 
 msgid "Status display"
 msgstr "Zobrazení stavu"
