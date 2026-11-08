@@ -572,9 +572,6 @@ msgstr "Artista"
 msgid "Artists"
 msgstr "Artistas"
 
-msgid "Artwork cache cleared"
-msgstr "La caché de portadas se ha vaciado"
-
 msgid "Artwork editing is no longer available"
 msgstr "Ya no es posible editar el arte del artista"
 
@@ -830,6 +827,12 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "Los cambios aplican a {count} pista"
 msgstr[1] "Los cambios aplican a {count} pistas"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "Los cambios aplican a {count} pista"
+
 msgid "Changes take effect after restarting Rufin"
 msgstr "Los cambios tomarán efecto después de reiniciar Rufin"
 
@@ -1056,9 +1059,6 @@ msgstr "Hacer conexión manual"
 
 msgid "Connect to Rufin"
 msgstr "Conectar a Rufin"
-
-msgid "Connect your music servers or local folders."
-msgstr "Conecta tus servidores de música o carpetas locales."
 
 msgid "Connect"
 msgstr "Conectar"
@@ -1457,9 +1457,6 @@ msgstr "Calidad de descarga"
 
 msgid "Download Queue"
 msgstr "Cola de descargas"
-
-msgid "Download quality"
-msgstr "Calidad de descarga"
 
 msgid "Download queued"
 msgstr "Descargas pendientes"
@@ -2356,9 +2353,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr "Opacidad del fondo de las letras"
 
-msgid "Lyrics cache cleared"
-msgstr "Las letras en caché se han borrado"
-
 msgid "Lyrics loaded"
 msgstr "Letras cargadas"
 
@@ -2427,6 +2421,11 @@ msgstr "La edición de metadatos requiere acceso Local"
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata lookups"
+msgstr "Fuente de metadatos"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
 msgstr "Fuente de metadatos"
 
 msgid "Metadata source"
@@ -3348,9 +3347,6 @@ msgstr "Reducir animaciones"
 msgid "Refresh automatically"
 msgstr "Recargar automaticamente"
 
-msgid "Refresh source"
-msgstr "Refrescar fuente"
-
 msgid "Refresh"
 msgstr "Actualizar"
 
@@ -3618,6 +3614,9 @@ msgstr "Carpeta de datos de Rufin"
 msgid "Rufin host"
 msgstr "Host de Rufin"
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Acciones de regla"
 
@@ -3749,9 +3748,6 @@ msgstr "Buscar en la página"
 msgid "Search is unavailable"
 msgstr "La búsqueda no está disponible"
 
-msgid "Search library"
-msgstr "Buscar biblioteca"
-
 msgid "Search lyrics"
 msgstr "Buscar letras"
 
@@ -3763,9 +3759,6 @@ msgstr "Buscar ajustes"
 
 msgid "Search queue"
 msgstr "Buscar en cola"
-
-msgid "Search tracks"
-msgstr "Buscar pistas"
 
 msgid "Search unavailable"
 msgstr "Búsqueda no disponible"
@@ -4918,6 +4911,27 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Artwork cache cleared"
+#~ msgstr "La caché de portadas se ha vaciado"
+
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Conecta tus servidores de música o carpetas locales."
+
+#~ msgid "Download quality"
+#~ msgstr "Calidad de descarga"
+
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "Las letras en caché se han borrado"
+
+#~ msgid "Refresh source"
+#~ msgstr "Refrescar fuente"
+
+#~ msgid "Search library"
+#~ msgstr "Buscar biblioteca"
+
+#~ msgid "Search tracks"
+#~ msgstr "Buscar pistas"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Añadir a Fijados"

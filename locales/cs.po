@@ -546,11 +546,6 @@ msgid "Artists"
 msgstr "Interpreti"
 
 #, fuzzy
-#| msgid "No folder selected"
-msgid "Artwork cache cleared"
-msgstr "Nebyla vybrána žádná složka"
-
-#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "Úprava metadat již není k dispozici"
@@ -837,6 +832,12 @@ msgstr[0] "Změny se vztahují na {count} skladbu"
 msgstr[1] "Změny se vztahují na {count} skladby"
 msgstr[2] "Změny se vztahují na {count} skladeb"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "Změny se vztahují na {count} skladbu"
+
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
@@ -1101,11 +1102,6 @@ msgstr "Spojení"
 #| msgid "Connection"
 msgid "Connect to Rufin"
 msgstr "Spojení"
-
-#, fuzzy
-#| msgid "Connecting to music server..."
-msgid "Connect your music servers or local folders."
-msgstr "Připojování k hudebnímu serveru..."
 
 msgid "Connect"
 msgstr "Připojit"
@@ -1582,9 +1578,6 @@ msgstr "Kvalita stažení"
 
 msgid "Download Queue"
 msgstr "Stáhnout frontu"
-
-msgid "Download quality"
-msgstr "Kvalita stažení"
 
 msgid "Download queued"
 msgstr "Stahování je ve frontě"
@@ -2561,11 +2554,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr ""
 
-#, fuzzy
-#| msgid "Lyrics loaded"
-msgid "Lyrics cache cleared"
-msgstr "Texty skladeb načteny"
-
 msgid "Lyrics loaded"
 msgstr "Texty skladeb načteny"
 
@@ -2638,6 +2626,11 @@ msgstr "Úprava metadat již není k dispozici"
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata lookups"
+msgstr "Zdroj metadat"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
 msgstr "Zdroj metadat"
 
 msgid "Metadata source"
@@ -3690,11 +3683,6 @@ msgstr "Akce založené na pravidlech"
 msgid "Refresh automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
-#, fuzzy
-#| msgid "Refresh section"
-msgid "Refresh source"
-msgstr "Obnovit sekci"
-
 msgid "Refresh"
 msgstr "Obnovit"
 
@@ -3988,6 +3976,9 @@ msgstr "Složka s daty aplikace Rufin"
 msgid "Rufin host"
 msgstr ""
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Akce založené na pravidlech"
 
@@ -4142,11 +4133,6 @@ msgstr "Hledat znovu"
 msgid "Search is unavailable"
 msgstr "Toto není dostupné"
 
-#, fuzzy
-#| msgid "Server Library"
-msgid "Search library"
-msgstr "Knihovna na serveru"
-
 msgid "Search lyrics"
 msgstr "Hledat texty"
 
@@ -4160,11 +4146,6 @@ msgstr "Možnosti vyhledávání"
 
 msgid "Search queue"
 msgstr "Fronta vyhledávání"
-
-#, fuzzy
-#| msgid "Search Lyrics"
-msgid "Search tracks"
-msgstr "Hledat Texty"
 
 #, fuzzy
 #| msgid "This isn't available"
@@ -5417,6 +5398,39 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "No folder selected"
+#~ msgid "Artwork cache cleared"
+#~ msgstr "Nebyla vybrána žádná složka"
+
+#, fuzzy
+#~| msgid "Connecting to music server..."
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Připojování k hudebnímu serveru..."
+
+#~ msgid "Download quality"
+#~ msgstr "Kvalita stažení"
+
+#, fuzzy
+#~| msgid "Lyrics loaded"
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "Texty skladeb načteny"
+
+#, fuzzy
+#~| msgid "Refresh section"
+#~ msgid "Refresh source"
+#~ msgstr "Obnovit sekci"
+
+#, fuzzy
+#~| msgid "Server Library"
+#~ msgid "Search library"
+#~ msgstr "Knihovna na serveru"
+
+#, fuzzy
+#~| msgid "Search Lyrics"
+#~ msgid "Search tracks"
+#~ msgstr "Hledat Texty"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Připnout"

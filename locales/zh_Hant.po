@@ -529,11 +529,6 @@ msgid "Artists"
 msgstr "藝人"
 
 #, fuzzy
-#| msgid "No folder selected"
-msgid "Artwork cache cleared"
-msgstr "無資料夾被選擇"
-
-#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "元資料已經不再能編輯"
@@ -810,6 +805,12 @@ msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "套用變更到 {count} 個曲目"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "套用變更到 {count} 個曲目"
+
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
@@ -1068,11 +1069,6 @@ msgstr "連接"
 #| msgid "Connection"
 msgid "Connect to Rufin"
 msgstr "連接"
-
-#, fuzzy
-#| msgid "Connecting to music server..."
-msgid "Connect your music servers or local folders."
-msgstr "正在連接到音樂伺服器..."
 
 msgid "Connect"
 msgstr "連接"
@@ -1537,9 +1533,6 @@ msgstr "下載品質"
 
 msgid "Download Queue"
 msgstr "下載佇列"
-
-msgid "Download quality"
-msgstr "下載品質"
 
 msgid "Download queued"
 msgstr "已加入下載佇列"
@@ -2494,11 +2487,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr ""
 
-#, fuzzy
-#| msgid "Lyrics loaded"
-msgid "Lyrics cache cleared"
-msgstr "歌詞已載入"
-
 msgid "Lyrics loaded"
 msgstr "歌詞已載入"
 
@@ -2571,6 +2559,11 @@ msgstr "元資料已經不再能編輯"
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata lookups"
+msgstr "元資料來源"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
 msgstr "元資料來源"
 
 msgid "Metadata source"
@@ -3606,11 +3599,6 @@ msgstr "選擇"
 msgid "Refresh automatically"
 msgstr ""
 
-#, fuzzy
-#| msgid "Refresh section"
-msgid "Refresh source"
-msgstr "重新整理區塊"
-
 msgid "Refresh"
 msgstr "重新整理"
 
@@ -3898,6 +3886,9 @@ msgstr "Rufin 資料資料夾"
 msgid "Rufin host"
 msgstr ""
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -4042,11 +4033,6 @@ msgstr "重新搜尋"
 msgid "Search is unavailable"
 msgstr ""
 
-#, fuzzy
-#| msgid "Caching Library"
-msgid "Search library"
-msgstr "快取庫"
-
 msgid "Search lyrics"
 msgstr "搜尋歌詞"
 
@@ -4060,11 +4046,6 @@ msgstr "搜尋偏好設定"
 
 msgid "Search queue"
 msgstr "搜尋佇列"
-
-#, fuzzy
-#| msgid "Search Lyrics"
-msgid "Search tracks"
-msgstr "搜尋歌詞"
 
 #, fuzzy
 #| msgid "Artist name"
@@ -5267,6 +5248,39 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "No folder selected"
+#~ msgid "Artwork cache cleared"
+#~ msgstr "無資料夾被選擇"
+
+#, fuzzy
+#~| msgid "Connecting to music server..."
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "正在連接到音樂伺服器..."
+
+#~ msgid "Download quality"
+#~ msgstr "下載品質"
+
+#, fuzzy
+#~| msgid "Lyrics loaded"
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "歌詞已載入"
+
+#, fuzzy
+#~| msgid "Refresh section"
+#~ msgid "Refresh source"
+#~ msgstr "重新整理區塊"
+
+#, fuzzy
+#~| msgid "Caching Library"
+#~ msgid "Search library"
+#~ msgstr "快取庫"
+
+#, fuzzy
+#~| msgid "Search Lyrics"
+#~ msgid "Search tracks"
+#~ msgstr "搜尋歌詞"
 
 #~ msgid "Add to Pins"
 #~ msgstr "加入釘選"

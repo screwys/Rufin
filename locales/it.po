@@ -556,11 +556,6 @@ msgstr "Artista"
 msgid "Artists"
 msgstr "Artisti"
 
-#, fuzzy
-#| msgid "Artwork"
-msgid "Artwork cache cleared"
-msgstr "Copertina"
-
 msgid "Artwork editing is no longer available"
 msgstr ""
 
@@ -804,6 +799,12 @@ msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "I cambiamenti si applicano a {count} traccia"
 msgstr[1] "I cambiamenti si applicano a {count} tracce"
+
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "I cambiamenti si applicano a {count} traccia"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "I cambiamenti avranno effetto una volta riaperto Rufin"
@@ -1049,9 +1050,6 @@ msgstr "Connetti manualmente"
 
 msgid "Connect to Rufin"
 msgstr "Connetti a Rufin"
-
-msgid "Connect your music servers or local folders."
-msgstr "Connetti il tuo server musicale o cartelle locali."
 
 msgid "Connect"
 msgstr "Connetti"
@@ -1490,9 +1488,6 @@ msgstr "Qualità download"
 
 msgid "Download Queue"
 msgstr "Coda di Download"
-
-msgid "Download quality"
-msgstr "Qualità download"
 
 msgid "Download queued"
 msgstr "Download messo in coda"
@@ -2380,9 +2375,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr "Sfondo dinamico"
 
-msgid "Lyrics cache cleared"
-msgstr ""
-
 msgid "Lyrics loaded"
 msgstr ""
 
@@ -2443,6 +2435,9 @@ msgid "Metadata editing requires Local access"
 msgstr ""
 
 msgid "Metadata lookups"
+msgstr ""
+
+msgid "Metadata saved"
 msgstr ""
 
 msgid "Metadata source"
@@ -3353,9 +3348,6 @@ msgstr "Collezione"
 msgid "Refresh automatically"
 msgstr ""
 
-msgid "Refresh source"
-msgstr ""
-
 msgid "Refresh"
 msgstr ""
 
@@ -3615,6 +3607,9 @@ msgstr ""
 msgid "Rufin host"
 msgstr ""
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -3736,9 +3731,6 @@ msgstr ""
 msgid "Search is unavailable"
 msgstr ""
 
-msgid "Search library"
-msgstr ""
-
 msgid "Search lyrics"
 msgstr ""
 
@@ -3749,9 +3741,6 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
-msgstr ""
-
-msgid "Search tracks"
 msgstr ""
 
 #, fuzzy
@@ -4869,6 +4858,17 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Artwork"
+#~ msgid "Artwork cache cleared"
+#~ msgstr "Copertina"
+
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Connetti il tuo server musicale o cartelle locali."
+
+#~ msgid "Download quality"
+#~ msgstr "Qualità download"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Aggiungi agli elementi fissati"
