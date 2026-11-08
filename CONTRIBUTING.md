@@ -172,8 +172,7 @@ always runs on the host and is unavailable inside the container shell.
 For GTK work, please see GTK's
 [Preparing for GTK 5](https://docs.gtk.org/gtk4/migrating-4to5.html) guide, as Rufin tries to remain compatible with GTK 5.
 
-For commit names and PRs, we prefer
-[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary) or [Scoped Commits](https://scopedcommits.com/).
+For commit names and PRs, we prefer [Scoped Commits](https://scopedcommits.com/).
 
 Do not change strings without a strong motivation, since this means more work for translators. 
 
