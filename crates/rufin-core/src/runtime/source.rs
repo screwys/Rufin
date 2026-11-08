@@ -156,7 +156,9 @@ pub enum SourceOperation {
     },
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOperation {
+    /// Whether the selected library is being replaced: pages that list a source wait for it.
     pub fn blocks_library(&self) -> bool {
         matches!(self, Self::Adding { .. } | Self::Switching { .. })
     }

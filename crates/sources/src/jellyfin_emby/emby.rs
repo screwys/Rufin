@@ -544,7 +544,8 @@ mod tests {
             .unwrap();
         Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[null,{"Id":"without-lyrics"},{"Id":"media-source","DefaultSubtitleStreamIndex":"2","MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":{}},{"Type":"Subtitle","Index":1},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;
         Mock::given(path("/emby/Users/listener/Items/12")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"12","MediaSources":[{"Id":"untimed","MediaStreams":[{"Type":"Subtitle","Index":0}]}]}))).mount(&server).await;
-        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Open","StartPositionTicks":3000000,"EndPositionTicks":0},{"Text":" "}]}))).mount(&server).await;
+        // Emby starts subtitle JSON with a byte order mark.
+        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_raw(format!("\u{feff}{}", json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Open","StartPositionTicks":3000000,"EndPositionTicks":0},{"Text":" "}]})), "application/json")).mount(&server).await;
         // Emby sends untimed lyrics with zero ticks on every line.
         Mock::given(path("/emby/Items/12/untimed/Subtitles/0/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"First","StartPositionTicks":0,"EndPositionTicks":0},{"Text":"Second","StartPositionTicks":0,"EndPositionTicks":0}]}))).mount(&server).await;
         let lyrics = source.lyrics("emby:track:11").await.unwrap().unwrap();

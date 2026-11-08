@@ -135,7 +135,8 @@ fn deserialize_json<T: DeserializeOwned>(
 ) -> SourceResult<T> {
     let bytes = body.copy_to_bytes(body.remaining());
     let text = String::from_utf8_lossy(&bytes);
-    let text = replace_unpaired_surrogates(&text);
+    // Emby starts its subtitle JSON with a UTF-8 byte order mark, which JSON doesn't allow.
+    let text = replace_unpaired_surrogates(text.strip_prefix('\u{feff}').unwrap_or(&text));
     let mut deserializer = serde_json::Deserializer::from_str(&text);
     serde_path_to_error::deserialize::<_, T>(&mut deserializer).map_err(|error| {
         let field = error.path().to_string();
