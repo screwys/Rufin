@@ -273,6 +273,11 @@ msgstr ""
 "innerhalb eines Albums beibehält"
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 "Du musst dich über die Clients, die du verwendest, mit dem neuen API-"
@@ -1370,6 +1375,11 @@ msgstr "Nur bei Bedarf herunterladen"
 msgid "Download Queue"
 msgstr "Download-Warteschlange"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Download-Ordner"
+
 msgid "Download queued"
 msgstr "Download zur Warteschlange hinzugefügt"
 
@@ -2130,6 +2140,11 @@ msgstr "Verwandte Titel werden geladen …"
 msgid "Loading..."
 msgstr "Wird geladen …"
 
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Local Address (optional)"
+msgstr "Serveradresse überschreiben (optional)"
+
 msgid "Local File Access"
 msgstr "Zugriff auf lokale Dateien"
 
@@ -2803,6 +2818,9 @@ msgstr "Original: {value}"
 
 msgid "Other releases"
 msgstr "Andere Veröffentlichungen"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr "Umriss-Balken"

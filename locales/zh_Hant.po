@@ -197,6 +197,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 
@@ -1534,6 +1539,11 @@ msgstr "下載品質"
 msgid "Download Queue"
 msgstr "下載佇列"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "下載資料夾"
+
 msgid "Download queued"
 msgstr "已加入下載佇列"
 
@@ -2400,6 +2410,9 @@ msgstr "資料夾載入中..."
 msgid "Loading..."
 msgstr "正在儲存..."
 
+msgid "Local Address (optional)"
+msgstr ""
+
 msgid "Local File Access"
 msgstr ""
 
@@ -3172,6 +3185,9 @@ msgstr ""
 #| msgid "Open release notes"
 msgid "Other releases"
 msgstr "開啟更新記錄"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr ""

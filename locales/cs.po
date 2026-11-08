@@ -210,6 +210,11 @@ msgstr ""
 "rozdíly mezi skladbami v rámci každého alba"
 
 msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+
+msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 
@@ -1579,6 +1584,11 @@ msgstr "Kvalita stažení"
 msgid "Download Queue"
 msgstr "Stáhnout frontu"
 
+#, fuzzy
+#| msgid "Download Folder"
+msgid "Download on Mobile Data"
+msgstr "Stáhnout složku"
+
 msgid "Download queued"
 msgstr "Stahování je ve frontě"
 
@@ -2463,6 +2473,9 @@ msgstr "Načítání složek..."
 msgid "Loading..."
 msgstr "Ukládání..."
 
+msgid "Local Address (optional)"
+msgstr ""
+
 msgid "Local File Access"
 msgstr "Přístup k místním souborům"
 
@@ -3248,6 +3261,9 @@ msgstr "Originál"
 #| msgid "Open release notes"
 msgid "Other releases"
 msgstr "Otevřít poznámky k verzi"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr ""
 
 msgid "Outline bars"
 msgstr ""
