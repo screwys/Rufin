@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use library::{
-    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    QueueProvenance, QueueRepeatMode, SourceKey, TrackKey, TrackReference,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, MoodKey, QueueProvenance, QueueRepeatMode,
+    SourceKey, TrackKey, TrackReference,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -219,21 +219,6 @@ pub async fn fixture() -> Fixture {
         });
     }
     observation.apply_catalog(&batch, true).await.unwrap();
-
-    observation
-        .replace_source_home_section(
-            "featured",
-            None,
-            &[HomeEntryInput {
-                position: 0,
-                kind: HomeEntryKind::Track,
-                entity_object_id: "track-0".into(),
-                title: "Featured Track".into(),
-                subtitle: "Featured".into(),
-            }],
-        )
-        .await
-        .unwrap();
 
     observation
         .complete_source_observation(

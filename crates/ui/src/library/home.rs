@@ -20,7 +20,9 @@ use super::collections::library_route_inset;
 use super::detail_showcase::{
     DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, home_album_cover_projection,
 };
-use super::grid_cells::{AlbumGridCell, MediaPlayingBinding, ReusableCollectionGridCell};
+use super::grid_cells::{
+    AlbumGridCell, ArtistGridCell, MediaPlayingBinding, ReusableCollectionGridCell,
+};
 use crate::library::home_layout::home_section_header;
 use crate::menus::media_menus::present_row_menu;
 
@@ -94,6 +96,9 @@ impl MountedHomeSection {
                     library::Row::Album(album) if self.column_rows == 1 => {
                         home_album_card(&shell, album)
                     }
+                    library::Row::Artist(artist) if self.column_rows == 1 => {
+                        home_artist_card(&shell, artist)
+                    }
                     item => home_row_widget(&shell, item),
                 };
                 cells.push(bind);
@@ -104,7 +109,16 @@ impl MountedHomeSection {
             } else {
                 ROW_COLUMN_WIDTH
             };
-            self.row.append(&column);
+            // A column stays its width: cards expand to fill grid cells and a long title asks for
+            // more, so a short row would widen them past the height measured below.
+            let clamp = adw::Clamp::builder()
+                .maximum_size(width)
+                .tightening_threshold(width)
+                .unit(adw::LengthUnit::Px)
+                .hexpand(false)
+                .child(&column)
+                .build();
+            self.row.append(&clamp);
             // The scroller measures its row with no width, but a card's square cover follows its
             // width: the column takes the height its content has at its own width.
             let height = column.measure(gtk::Orientation::Vertical, width).1;
@@ -662,6 +676,7 @@ fn home_row(item: HomeItem) -> library::Row {
             album.title = title;
             library::Row::Album(album)
         }
+        HomeItem::Artist(artist) => library::Row::Artist(*artist),
     }
 }
 
@@ -873,6 +888,24 @@ fn home_album_card(
         Rc::new(move |row| {
             if let library::Row::Album(album) = row {
                 cell.bind(0, album);
+            }
+        }),
+    )
+}
+
+fn home_artist_card(
+    shell: &Rc<CatalogUi>,
+    artist: library::ArtistRow,
+) -> (gtk::Widget, HomeRowBinding) {
+    let cell = ArtistGridCell::new(shell, &rufin_core::settings::layout::HOME_ARTIST_FIELDS);
+    cell.enable_card_activation();
+    cell.bind(0, artist);
+    let widget = cell.widget();
+    (
+        widget,
+        Rc::new(move |row| {
+            if let library::Row::Artist(artist) = row {
+                cell.bind(0, artist);
             }
         }),
     )

@@ -214,7 +214,9 @@ impl AndroidView {
 
     /// Home's sections as rows, in core's order and with its titles.
     fn home_sections(&self) -> Vec<AndroidHomeSection> {
-        use rufin_core::settings::layout::{HOME_GENRE_FIELDS, HOME_TRACK_FIELDS};
+        use rufin_core::settings::layout::{
+            HOME_ARTIST_FIELDS, HOME_GENRE_FIELDS, HOME_TRACK_FIELDS,
+        };
         use rufin_core::view::{HomeItem, HomeSection};
         let album_card = home_album_card;
         // Home cards show GTK's Home labels.
@@ -243,6 +245,9 @@ impl AndroidView {
                         .map(|item| match item {
                             HomeItem::Track(row) => track_card(*row),
                             HomeItem::Album(row) => album_card(*row),
+                            HomeItem::Artist(row) => {
+                                shown_row(Row::Artist(*row), &HOME_ARTIST_FIELDS, 0)
+                            }
                         })
                         .collect()
                 };
