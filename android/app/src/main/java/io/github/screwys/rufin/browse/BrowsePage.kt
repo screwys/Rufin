@@ -231,11 +231,12 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            // A page that lists a source opens once one is selected; selecting another source or
-            // music folder reaches it through `changes`.
+            // A page that lists a source opens once one is selected and core has installed it, as
+            // GTK waits; selecting another music folder reaches it through `changes`.
             val needsSource = !pins && routeRequiresSelectedSource(location.route, SearchMode.TITLE)
             if (!active) null else PageContext(browse.library,
-                !needsSource || connection.sources?.selectedSourceId != null, changes,
+                !needsSource || connection.sources?.selectedSourceId != null && !connection.sourceOperation.blocksLibrary(),
+                changes,
                 location.route, options.category, options.historySource, options.filter, options.sort, options.descending,
                 options.favoritesOnly, options.downloadedOnly,
                 revision, if (artistAlbums) browse.artistAlbumsRevision else 0)
