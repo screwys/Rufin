@@ -569,11 +569,6 @@ msgid "Artists"
 msgstr "Izpildītāji"
 
 #, fuzzy
-#| msgid "folders selected"
-msgid "Artwork cache cleared"
-msgstr "izvēlētas mapes"
-
-#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "Metadatu rediģēšana vairs nav pieejama"
@@ -834,6 +829,12 @@ msgstr[0] "Izmaiņas attiecas uz {count} celiņu"
 msgstr[1] "Izmaiņas attiecas uz {count} celiņiem"
 msgstr[2] "Izmaiņas attiecas uz {count} celiņiem"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "Izmaiņas attiecas uz {count} celiņu"
+
 msgid "Changes take effect after restarting Rufin"
 msgstr "Izmaiņas stāsies spēkā pēc Rufin restartēšanas"
 
@@ -1086,9 +1087,6 @@ msgstr "Savienot manuāli"
 
 msgid "Connect to Rufin"
 msgstr "Savienot ar Rufin"
-
-msgid "Connect your music servers or local folders."
-msgstr "Savienojiet savus mūzikas serverus vai lokālās mapes."
 
 msgid "Connect"
 msgstr "Savienot"
@@ -1537,9 +1535,6 @@ msgstr "Lejupielādes kvalitāte"
 
 msgid "Download Queue"
 msgstr "Lejupielādes rinda"
-
-msgid "Download quality"
-msgstr "Lejupielādes kvalitāte"
 
 msgid "Download queued"
 msgstr "Lejupielādēt no rindas"
@@ -2487,11 +2482,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr "Tekstu fona caurspīdīgums"
 
-#, fuzzy
-#| msgid "Lyrics loaded"
-msgid "Lyrics cache cleared"
-msgstr "Teksti ir ielādēti"
-
 msgid "Lyrics loaded"
 msgstr "Teksti ir ielādēti"
 
@@ -2560,6 +2550,11 @@ msgstr "Metadatu rediģēšanai nepieciešama lokāla piekļuve"
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata lookups"
+msgstr "Metadatu avots"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
 msgstr "Metadatu avots"
 
 msgid "Metadata source"
@@ -3532,9 +3527,6 @@ msgstr "Noteikumu darbības"
 msgid "Refresh automatically"
 msgstr "Atjaunot automātiski"
 
-msgid "Refresh source"
-msgstr "Atsvaidzināt avotu"
-
 msgid "Refresh"
 msgstr "Atsvaidzināt"
 
@@ -3820,6 +3812,9 @@ msgstr "Rufin datu mape"
 msgid "Rufin host"
 msgstr "Rufin serveris"
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Noteikumu darbības"
 
@@ -3954,9 +3949,6 @@ msgstr "Meklēt lapā"
 msgid "Search is unavailable"
 msgstr "Meklēšana nav pieejama"
 
-msgid "Search library"
-msgstr "Meklēt bibliotēkā"
-
 msgid "Search lyrics"
 msgstr "Meklēt tekstus"
 
@@ -3968,9 +3960,6 @@ msgstr "Meklēšanas iestatījumi"
 
 msgid "Search queue"
 msgstr "Meklēt rindā"
-
-msgid "Search tracks"
-msgstr "Meklēt dziesmas"
 
 #, fuzzy
 #| msgid "Search is unavailable"
@@ -5201,6 +5190,31 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "folders selected"
+#~ msgid "Artwork cache cleared"
+#~ msgstr "izvēlētas mapes"
+
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Savienojiet savus mūzikas serverus vai lokālās mapes."
+
+#~ msgid "Download quality"
+#~ msgstr "Lejupielādes kvalitāte"
+
+#, fuzzy
+#~| msgid "Lyrics loaded"
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "Teksti ir ielādēti"
+
+#~ msgid "Refresh source"
+#~ msgstr "Atsvaidzināt avotu"
+
+#~ msgid "Search library"
+#~ msgstr "Meklēt bibliotēkā"
+
+#~ msgid "Search tracks"
+#~ msgstr "Meklēt dziesmas"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Pievienot izlasei"

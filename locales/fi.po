@@ -533,11 +533,6 @@ msgid "Artists"
 msgstr "Esittäjät"
 
 #, fuzzy
-#| msgid "No folder selected"
-msgid "Artwork cache cleared"
-msgstr "Kansiota ei ole valittu"
-
-#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
@@ -789,6 +784,9 @@ msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Changes apply to {count} tracks"
+msgstr ""
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
@@ -1044,11 +1042,6 @@ msgstr "Yhteys"
 #| msgid "Connection"
 msgid "Connect to Rufin"
 msgstr "Yhteys"
-
-#, fuzzy
-#| msgid "Connecting to music server..."
-msgid "Connect your music servers or local folders."
-msgstr "Yhdistetään musiikkipalvelimeen..."
 
 msgid "Connect"
 msgstr "Yhdistä"
@@ -1505,9 +1498,6 @@ msgstr "Latauslaatu"
 
 msgid "Download Queue"
 msgstr "Latausjono"
-
-msgid "Download quality"
-msgstr "Latauslaatu"
 
 msgid "Download queued"
 msgstr "Lataus asetettu jonoon"
@@ -2445,11 +2435,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr ""
 
-#, fuzzy
-#| msgid "Lyrics loaded"
-msgid "Lyrics cache cleared"
-msgstr "Sanoitukset ladattu"
-
 msgid "Lyrics loaded"
 msgstr "Sanoitukset ladattu"
 
@@ -2518,6 +2503,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata lookups"
+msgstr "Metatietojen lähde"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
 msgstr "Metatietojen lähde"
 
 msgid "Metadata source"
@@ -3513,11 +3503,6 @@ msgstr "Säännön toiminnot"
 msgid "Refresh automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
 
-#, fuzzy
-#| msgid "Next source"
-msgid "Refresh source"
-msgstr "Seuraava lähde"
-
 msgid "Refresh"
 msgstr ""
 
@@ -3807,6 +3792,9 @@ msgstr "Rufin-datakansio"
 msgid "Rufin host"
 msgstr ""
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Säännön toiminnot"
 
@@ -3946,11 +3934,6 @@ msgstr "Hae sivulta"
 msgid "Search is unavailable"
 msgstr "Haku ei ole saatavilla"
 
-#, fuzzy
-#| msgid "Server Library"
-msgid "Search library"
-msgstr "Palvelinkirjasto"
-
 msgid "Search lyrics"
 msgstr "Hae sanoituksia"
 
@@ -3964,11 +3947,6 @@ msgstr ""
 
 msgid "Search queue"
 msgstr ""
-
-#, fuzzy
-#| msgid "Search Lyrics"
-msgid "Search tracks"
-msgstr "Hae sanoituksia"
 
 #, fuzzy
 #| msgid "Search is unavailable"
@@ -5190,6 +5168,39 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "No folder selected"
+#~ msgid "Artwork cache cleared"
+#~ msgstr "Kansiota ei ole valittu"
+
+#, fuzzy
+#~| msgid "Connecting to music server..."
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Yhdistetään musiikkipalvelimeen..."
+
+#~ msgid "Download quality"
+#~ msgstr "Latauslaatu"
+
+#, fuzzy
+#~| msgid "Lyrics loaded"
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "Sanoitukset ladattu"
+
+#, fuzzy
+#~| msgid "Next source"
+#~ msgid "Refresh source"
+#~ msgstr "Seuraava lähde"
+
+#, fuzzy
+#~| msgid "Server Library"
+#~ msgid "Search library"
+#~ msgstr "Palvelinkirjasto"
+
+#, fuzzy
+#~| msgid "Search Lyrics"
+#~ msgid "Search tracks"
+#~ msgstr "Hae sanoituksia"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Lisää kiinnityksiin"

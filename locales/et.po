@@ -556,9 +556,6 @@ msgstr "Esitaja"
 msgid "Artists"
 msgstr "Esitajaid"
 
-msgid "Artwork cache cleared"
-msgstr "Kaanepiltide puhver on tühjendatud"
-
 msgid "Artwork editing is no longer available"
 msgstr "Kaanepildi muutmine pole enam saadaval"
 
@@ -780,6 +777,12 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "Muudatused rakenduvad {count}-le loole"
 msgstr[1] "Muudatused rakenduvad {count}-le loole"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Changes apply to {count} tracks"
+msgstr "Muudatused rakenduvad {count}-le loole"
+
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
@@ -982,9 +985,6 @@ msgstr "Ühenda käsitsi"
 
 msgid "Connect to Rufin"
 msgstr "Ühenda Rufiniga"
-
-msgid "Connect your music servers or local folders."
-msgstr "Ühenda oma muusikaserveritega või kohalike kaustadega."
 
 msgid "Connect"
 msgstr "Ühenda"
@@ -1361,9 +1361,6 @@ msgstr "Laadi rahulikult alla"
 
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
-
-msgid "Download quality"
-msgstr "Allalaadimiste kvaliteet"
 
 msgid "Download queued"
 msgstr "Allalaadimine on lisatud järjekorda"
@@ -2202,9 +2199,6 @@ msgstr "Madalate sageduste filter"
 msgid "Lyrics background opacity"
 msgstr "Laulusõnade tausta läbipaistmatus"
 
-msgid "Lyrics cache cleared"
-msgstr "Laulusõnade vahemälu on kustutatud"
-
 msgid "Lyrics loaded"
 msgstr "Laulusõnad on laaditud"
 
@@ -2266,6 +2260,11 @@ msgstr "Metateabe muutmine eeldab ligipääsu kohalikule seadmele"
 
 msgid "Metadata lookups"
 msgstr "Metateabe otsingud"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata saved"
+msgstr "Metateabe allikas"
 
 msgid "Metadata source"
 msgstr "Metateabe allikas"
@@ -3154,9 +3153,6 @@ msgstr "Vähenda liikumist"
 msgid "Refresh automatically"
 msgstr "Laadi automaatselt uuesti"
 
-msgid "Refresh source"
-msgstr "Uuenda allikat"
-
 msgid "Refresh"
 msgstr "Uuenda andmeid"
 
@@ -3404,6 +3400,9 @@ msgstr "Rufini andmekaust"
 msgid "Rufin host"
 msgstr "Rufini host"
 
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr "Toiminguid reeglite alusel"
 
@@ -3523,9 +3522,6 @@ msgstr "Otsi lehelt"
 msgid "Search is unavailable"
 msgstr "Otsing pole saadaval"
 
-msgid "Search library"
-msgstr "Otsi meediumikogust"
-
 msgid "Search lyrics"
 msgstr "Otsi laulusõnu"
 
@@ -3537,9 +3533,6 @@ msgstr "Otsingu eelistused"
 
 msgid "Search queue"
 msgstr "Otsi esitusjärjekorrast"
-
-msgid "Search tracks"
-msgstr "Otsi lugusid"
 
 msgid "Search unavailable"
 msgstr "Otsing pole saadaval"
@@ -4640,6 +4633,27 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Artwork cache cleared"
+#~ msgstr "Kaanepiltide puhver on tühjendatud"
+
+#~ msgid "Connect your music servers or local folders."
+#~ msgstr "Ühenda oma muusikaserveritega või kohalike kaustadega."
+
+#~ msgid "Download quality"
+#~ msgstr "Allalaadimiste kvaliteet"
+
+#~ msgid "Lyrics cache cleared"
+#~ msgstr "Laulusõnade vahemälu on kustutatud"
+
+#~ msgid "Refresh source"
+#~ msgstr "Uuenda allikat"
+
+#~ msgid "Search library"
+#~ msgstr "Otsi meediumikogust"
+
+#~ msgid "Search tracks"
+#~ msgstr "Otsi lugusid"
 
 #~ msgid "Add to Pins"
 #~ msgstr "Lisa esiletõstetuks"
