@@ -12,6 +12,32 @@ Contributions are welcome for:
 
 For translations, you can visit [Weblate](https://hosted.weblate.org/projects/rufin/app/) instead.
 
+## Guidelines
+
+For commit names and PRs, we prefer [Scoped Commits](https://scopedcommits.com/).
+
+Please do not change strings without a strong motivation, since this means more work for translators. 
+
+### Pull Requests
+
+Although I do not hate surprises, it is preferable that a prior conversation was done before the PR, or it closes an issue. You can open such an issue yourself as well, which would likely save a lot of time for the both sides if we reach an agreement on the scope. If the change is straightforward enough that a direct PR saves more time, this can be skipped. 
+
+Please keep your pull requests scoped. If it affects 2 unrelated areas, it is better to split PRs. We have a PR-centric workflow and usually most PRs have an issue they adress. Hence it might be to your benefit to use `git blame` and see if the code you are changing was adressing an issue, which helps to prevent a regression. 
+
+Try to attach screenshots or examples if applicable. Talk about your motivation and what you tested, what you did not test and if you are unsure whether this affects something else.
+
+### LLM Policy
+
+AI-assisted development is welcome in this repository. This does not apply to autonomous agents. If I can tell that a PR was created without much human supervision, I will likely not want to engage with it. 
+
+In general, respect humans. Conversation must be done between humans, I absolutely do not like reading any issue/comment and such written by an LLM. There is no requirement for perfect English, I would prefer reading broken English over verbose hallucinated text. If your English is not at the level you can describe the issue, you can use [a direct translation tool](https://libretranslate.com/) or at least tell your LLM to directly translate what you want to say, instead of sending an overly verbose wall of text.
+
+If you have encountered a bug, you are free (and encouraged) to open an issue; but do not ask an LLM to find bugs just to open an issue without reproducing it yourself. This is derivable from the first sentence of the policy.
+
+If you use an LLM for contribution, then you are fully responsible of the code it generates, and you must make sure it fits these guidelines. LLMs should not edit any human facing part on its on own, absolutely not the translations. 
+
+You should definitely not do any LLM advertisement, neither in conversations or commits. LLMs can not be held accountable, hence they must not sign anything off.
+
 ## Development environment
 
 Native development uses CMake 3.25 or newer and Ninja. For the complete host
@@ -167,29 +193,3 @@ is kept under `.local/build`, container state under `.local/container`, and fini
 return commands to the host, or `just container reset` to clear the container state. `just debug`
 always runs on the host and is unavailable inside the container shell.
 
-## Guidelines
-
-For GTK work, please see GTK's
-[Preparing for GTK 5](https://docs.gtk.org/gtk4/migrating-4to5.html) guide, as Rufin tries to remain compatible with GTK 5.
-
-For commit names and PRs, we prefer [Scoped Commits](https://scopedcommits.com/).
-
-Do not change strings without a strong motivation, since this means more work for translators. 
-
-### Pull Requests
-
-Although I do not hate surprises, it is preferable that a prior conversation was done before the PR, or it closes an issue. You can open such an issue yourself as well, which would likely save a lot of time for the both sides if we reach an agreement on the scope. If the change is straightforward enough that a direct PR saves more time, this can be skipped. 
-
-Please keep your pull requests scoped. If it affects 2 unrelated areas, it is better to split PRs. We have a PR-centric workflow and usually most PRs have an issue they adress. Hence it might be to your benefit to use `git blame` and see if the code you are changing was adressing an issue, which helps to prevent a regression. 
-
-Try to attach screenshots or examples if applicable. Talk about the motivation and what you tested, what you did not test and if you are unsure whether this affects something else. This greatly speeds up the review process by reducing the number of questions.
-
-### LLM Policy
-
-In general, respect humans. Conversation must be done between humans, I absolutely do not like reading any issue/comment and such written by an LLM. There is no requirement for perfect English, I would prefer reading broken English over verbose hallucinated text. If your English is not at the level you can describe the issue, you can use [a direct translation tool](https://libretranslate.com/) or at least tell your LLM to directly translate what you want to say, instead of sending an overly verbose wall of text.
-
-I have no interest in hypothetical hardening suggestions or bugs found by LLMs. If you have encountered a bug, you are free (and encouraged) to open an issue; but do not ask an LLM to find bugs just to open an issue. This is derivable from the first sentence of the policy.
-
-It is usually obvious to spot LLM generated code if the diff is large. If you use an LLM for contribution, then you are fully responsible of the code it generates, and you must make sure it fits these guidelines. LLMs should not edit any human facing part on its on own, absolutely not the translations. 
-
-You should definitely not do any LLM advertisement, neither in conversations or commits. LLMs can not be held accountable, hence they must not sign anything off.
