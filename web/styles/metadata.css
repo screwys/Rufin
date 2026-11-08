@@ -1,0 +1,244 @@
+/* GTK's metadata dialog: Tags, Artwork and Lyrics pages over Cancel and Save. */
+#metadata-dialog {
+  width: min(850px, calc(100vw - 32px));
+  max-width: none;
+  height: min(760px, calc(100dvh - 32px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+.metadata {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+.metadata-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 14px 20px 10px;
+}
+.metadata-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.metadata-header .segmented {
+  margin: 0;
+}
+.metadata-body {
+  overflow-y: auto;
+  padding: 4px 20px 16px;
+}
+.metadata-field input {
+  flex: 0 1 55%;
+  min-width: 0;
+}
+.metadata-field .icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+.metadata-field .icon,
+.metadata-artwork-actions .icon,
+.metadata-search .icon {
+  width: 16px;
+  height: 16px;
+}
+.metadata-artwork-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+#metadata-artwork-preview {
+  width: 200px;
+  height: 200px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+#metadata-artwork-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.metadata-artwork-actions {
+  display: grid;
+  gap: 8px;
+}
+.button-like {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.button-like:hover {
+  background: var(--hover);
+}
+.metadata-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.metadata-search input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.metadata-artwork-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+}
+.metadata-artwork-result {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  background: transparent;
+  text-align: start;
+  white-space: normal;
+}
+.metadata-artwork-result img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+.metadata-artwork-result small {
+  color: var(--muted);
+}
+.metadata-lyrics-results {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.metadata-lyrics-results .menu-item {
+  justify-content: space-between;
+}
+.metadata-lyrics-results small {
+  color: var(--muted);
+}
+#metadata-lyrics-text {
+  width: 100%;
+  margin-bottom: 12px;
+  font-family: inherit;
+}
+.metadata-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 20px;
+  box-shadow: inset 0 1px var(--border-color, var(--line));
+}
+#metadata-status {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+.metadata-lookup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.metadata-lookup-row #metadata-scope {
+  flex: 1;
+  margin: 0;
+}
+.metadata-lookup-row .icon,
+#lookup-refresh .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* GTK's Lookup dialog: the tracks beside one track's matches and what they change. */
+#lookup-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-width: none;
+  height: min(760px, calc(100dvh - 32px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+.lookup {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+#lookup-progress {
+  flex: 1 0 100%;
+  height: 4px;
+}
+#lookup-matches input[type="radio"] {
+  flex: none;
+  width: auto;
+  margin: 0;
+  accent-color: var(--blue);
+}
+.lookup-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  min-height: 0;
+}
+.lookup-tracks {
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--sidebar);
+}
+.lookup-tracks[hidden] + .lookup-review {
+  grid-column: 1 / -1;
+}
+.lookup-tracks .menu-item {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  text-align: start;
+  white-space: normal;
+}
+.lookup-tracks .menu-item[aria-current="true"] {
+  background: var(--hover);
+}
+.lookup-tracks small {
+  color: var(--muted);
+}
+.lookup-review {
+  overflow-y: auto;
+  padding: 12px 20px 16px;
+}
+.lookup-review h3 {
+  margin: 0 0 12px;
+}
+.lookup-comparison {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.lookup-comparison :is(th, td) {
+  padding: 6px 8px;
+  text-align: start;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.lookup-comparison tr.changed td:last-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+.metadata-footer-space {
+  flex: 1;
+}
+@media (max-width: 640px) {
+  .lookup-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .lookup-tracks {
+    max-height: 30dvh;
+  }
+}

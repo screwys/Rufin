@@ -1,3 +1,4 @@
+import { openMetadata } from "./metadata.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
@@ -192,6 +193,8 @@ function showQueueMenu(row, anchor, event) {
   if (menu.favorite)
     actions.push([track.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"), () => setFavorite(track)]);
   actions.push([tr("Remove from Queue"), () => api(`/queue/item?${new URLSearchParams(position)}`, "DELETE")]);
+  if (menu.edit_metadata)
+    actions.push([tr("Edit metadata"), () => openMetadata({ kind: "track", uri: track.uri }), "rufin-document-edit-symbolic"]);
   const destination = menu.go_to && goToMenu(track);
   if (destination) actions.push(null, destination);
   showMenu(actions, anchor, event);

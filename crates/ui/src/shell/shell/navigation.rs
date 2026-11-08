@@ -132,16 +132,40 @@ impl Shell {
     pub(crate) fn follow_settings(self: &Rc<Self>) {
         request_sidebar_pins(self);
         let weak = Rc::downgrade(self);
-        self.settings.follow(move |sidebar_moved| {
+        self.settings.follow(move |previous| {
             let Some(shell) = weak.upgrade() else { return };
-            if sidebar_moved {
-                shell.rebuild_sidebar_navigation();
+            if let Some(previous) = previous {
+                shell.follow_remote_settings(previous);
             }
             // Search results sort as their lists do, wherever a sort changed.
             shell
                 .search_session
                 .resort(&shell.settings.current.borrow());
         });
+    }
+
+    /// What this window shows of preferences another writer changed, as its own controls do
+    /// when they change them.
+    fn follow_remote_settings(self: &Rc<Self>, previous: &rufin_core::settings::app::Settings) {
+        let current = self.settings.current.borrow().clone();
+        if previous.sidebar != current.sidebar {
+            self.rebuild_sidebar_navigation();
+        }
+        if previous.appearance != current.appearance
+            || previous.application.reduce_motion != current.application.reduce_motion
+        {
+            self.appearance.apply(&current);
+            self.publish_controller_appearance();
+        }
+        if previous.layout != current.layout {
+            self.update_layout();
+        }
+        if previous.application.private_mode != current.application.private_mode {
+            self.refresh_tray_private_mode();
+            self.reconcile_mounted_route();
+            self.update_media_controls();
+            self.player_ui.render_lyrics_panel();
+        }
     }
 
     pub(crate) fn rebuild_sidebar_navigation(self: &Rc<Self>) {

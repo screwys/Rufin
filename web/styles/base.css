@@ -609,3 +609,27 @@ a { color: inherit; text-decoration: none; }
 #connect-dialog [data-connect-section="start"] > [data-connect-section="invite"] { margin-top: 0; padding-top: 0; }
 
 #connect-continue { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* GTK's text slide: overflowing text scrolls instead of ending in an ellipsis, its cut edges
+   faded (ui.js slideText). */
+.text-slide {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip !important;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--fade-start, 0px),
+    #000 calc(100% - var(--fade-end, 0px)),
+    transparent
+  );
+}
+.text-slide.detail-facts {
+  flex-wrap: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-slide {
+    text-overflow: ellipsis !important;
+    mask-image: none;
+  }
+}

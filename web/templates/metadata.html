@@ -1,0 +1,90 @@
+<dialog id="metadata-dialog" aria-labelledby="metadata-title">
+  <form id="metadata-form" class="metadata">
+    <header class="metadata-header">
+      <h2 id="metadata-title">{{ localization::tr("Edit metadata") }}</h2>
+      <div class="segmented" role="tablist" id="metadata-pages">
+        <label><input type="radio" name="metadata-page" value="tags" checked />{{ localization::tr("Tags") }}</label>
+        <label id="metadata-artwork-tab"><input type="radio" name="metadata-page" value="artwork" />{{ localization::tr("Artwork") }}</label>
+        <label id="metadata-lyrics-tab"><input type="radio" name="metadata-page" value="lyrics" />{{ localization::tr("Lyrics") }}</label>
+      </div>
+    </header>
+    <div class="metadata-body">
+      <section id="metadata-tags">
+        <div id="metadata-fields" class="pref-group"></div>
+        <div class="pref-group" id="metadata-lock-group" hidden>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Lock metadata") }}</span><small>{{ localization::tr("Prevent automatic metadata refreshes from replacing these values") }}</small></span><input type="checkbox" role="switch" id="metadata-lock" /></label>
+        </div>
+        <div class="metadata-lookup-row">
+          <p id="metadata-scope" class="pref-note"></p>
+          <button type="button" id="metadata-lookup-open">{% call m::icon("rufin-search-symbolic") %}{% endcall %}<span></span></button>
+        </div>
+      </section>
+      <section id="metadata-artwork" hidden>
+        <div class="metadata-artwork-current">
+          <div id="metadata-artwork-preview" class="cover"></div>
+          <div class="metadata-artwork-actions">
+            <label class="button-like">{% call m::icon("rufin-document-open-symbolic") %}{% endcall %}{{ localization::tr("Upload artwork") }}<input type="file" id="metadata-artwork-file" accept="image/*" hidden /></label>
+            <button type="button" id="metadata-artwork-remove">{% call m::icon("rufin-user-trash-symbolic") %}{% endcall %}{{ localization::tr("Delete") }}</button>
+            <select id="metadata-artwork-storage" aria-label="{{ localization::tr("Artwork storage") }}"><option value="Embedded">{{ localization::tr("Embed in track") }}</option><option value="Folder">{{ localization::tr("Save in folder") }}</option></select>
+          </div>
+        </div>
+        <h4>{{ localization::tr("Search artwork") }}</h4>
+        <div class="metadata-search">
+          <input id="metadata-artwork-artist" placeholder="{{ localization::tr("Artist") }}" aria-label="{{ localization::tr("Artist") }}" />
+          <input id="metadata-artwork-album" placeholder="{{ localization::tr("Album") }}" aria-label="{{ localization::tr("Album") }}" />
+          <button type="button" id="metadata-artwork-search">{% call m::icon("rufin-search-symbolic") %}{% endcall %}{{ localization::tr("Search") }}</button>
+        </div>
+        <div id="metadata-artwork-results" class="metadata-artwork-results"></div>
+      </section>
+      <section id="metadata-lyrics" hidden>
+        <div class="metadata-search">
+          <input id="metadata-lyrics-artist" placeholder="{{ localization::tr("Artist") }}" aria-label="{{ localization::tr("Artist") }}" />
+          <input id="metadata-lyrics-title" placeholder="{{ localization::tr("Song") }}" aria-label="{{ localization::tr("Song") }}" />
+          <button type="button" id="metadata-lyrics-search">{% call m::icon("rufin-search-symbolic") %}{% endcall %}{{ localization::tr("Search") }}</button>
+        </div>
+        <div id="metadata-lyrics-results" class="metadata-lyrics-results"></div>
+        <textarea id="metadata-lyrics-text" rows="12" aria-label="{{ localization::tr("Lyrics") }}"></textarea>
+        <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Lyrics") }}</span></span><select id="metadata-lyrics-storage"><option value="Sidecar">{{ localization::tr("Save in folder") }}</option><option value="Embedded">{{ localization::tr("Embed in track") }}</option><option value="Server">{{ localization::tr("Server") }}</option></select></label>
+      </section>
+    </div>
+    <footer class="dialog-actions metadata-footer">
+      <p id="metadata-status" class="error" role="status"></p>
+      <button type="button" id="metadata-cancel">{{ localization::tr("Cancel") }}</button>
+      <button type="submit" id="metadata-save" class="primary">{{ localization::tr("Save") }}</button>
+    </footer>
+  </form>
+</dialog>
+<dialog id="lookup-dialog" aria-labelledby="lookup-title">
+  <div class="lookup">
+    <header class="metadata-header">
+      <h2 id="lookup-title">{{ localization::tr("Lookup") }}</h2>
+      <span id="lookup-stage" class="pref-note" role="status"></span>
+      <progress id="lookup-progress" max="1" value="0"></progress>
+    </header>
+    <div class="lookup-body">
+      <nav id="lookup-tracks" class="lookup-tracks" aria-label="{{ localization::tr("Tracks") }}"></nav>
+      <section class="lookup-review">
+        <h3 id="lookup-item-title"></h3>
+        <div class="metadata-search">
+          <input id="lookup-query" type="search" placeholder="{{ localization::tr("Search MusicBrainz") }}" aria-label="{{ localization::tr("Search MusicBrainz") }}" />
+          <button type="button" id="lookup-refresh">{% call m::icon("rufin-view-refresh-symbolic") %}{% endcall %}{{ localization::tr("Refresh") }}</button>
+        </div>
+        <p id="lookup-status" class="error" role="status"></p>
+        <div id="lookup-matches" class="pref-group" role="radiogroup"></div>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Only fill missing information") }}</span></span><input type="checkbox" role="switch" id="lookup-fill-missing" /></label>
+        </div>
+        <table id="lookup-comparison" class="lookup-comparison">
+          <thead><tr><th>{{ localization::tr("Field") }}</th><th>{{ localization::tr("Original") }}</th><th>{{ localization::tr("Suggested") }}</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+    <footer class="dialog-actions metadata-footer">
+      <button type="button" id="lookup-stop">{{ localization::tr("Stop") }}</button>
+      <span class="metadata-footer-space"></span>
+      <button type="button" id="lookup-cancel">{{ localization::tr("Cancel") }}</button>
+      <button type="button" id="lookup-done" class="primary">{{ localization::tr("Done") }}</button>
+    </footer>
+  </div>
+</dialog>

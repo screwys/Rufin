@@ -1,3 +1,4 @@
+import { openMetadata } from "./metadata.js";
 import { tr } from "./ui.js";
 import {
   releaseCovers,
@@ -11,6 +12,7 @@ import {
   showFavorite,
   coverGroup,
   bindHoverControls,
+  slideText,
 } from "./ui.js";
 
 import { api, browserHeaders, fragment, session, state } from "./connection.js";
@@ -26,13 +28,13 @@ import {
   goToMenu,
 } from "./menus.js";
 
-import { renderSources, sources, updateSources } from "./sources.js";
+import { sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
 import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
 let viewRequest = null;
 
-// The page shown: its token as the server resolved it, or "sources".
+// The page shown: its token as the server resolved it.
 let opened = null;
 // `token` without the read it names, so its page reads anew.
 const anew = (token) => ({ ...token, options: { ...token.options, read: undefined } });
@@ -271,7 +273,8 @@ function showPage(data) {
     state.selectedLibrary = opened.folder ?? null;
   }
   $("title").textContent = data.name || data.title;
-  $("back").hidden = !data.back;
+  document.title = `${data.name || data.title} – Rufin`;
+  showHistory();
   $("library-toolbar").hidden = data.section === "Home";
   $("play-collection").hidden = data.play !== "true";
   $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
@@ -292,26 +295,38 @@ function markSection(section) {
   });
 }
 
-// Opens `target`: a page token, a navigation entry such as "Albums", or "sources".
-function navigate(target) {
-  opened = typeof target === "string" && target !== "sources"
+// The pages Back and Forward open, as GTK's window keeps them.
+const backStack = [], forwardStack = [];
+
+function showHistory() {
+  const back = backStack.length > 0 || !!shown.back;
+  $("back").setAttribute("aria-disabled", String(!back));
+  $("forward").disabled = forwardStack.length === 0;
+}
+
+// Opens `target`: a page token or a navigation entry such as "Albums". A page
+// opened from history leaves the history as it is.
+function navigate(target, record = true) {
+  if (record && opened) {
+    backStack.push(opened);
+    if (backStack.length > 50) backStack.shift();
+    forwardStack.length = 0;
+  }
+  opened = typeof target === "string"
     ? { route: target, source: state.source || undefined, folder: state.selectedLibrary || undefined }
     : target;
   shown = {};
   $("search").value = opened.options?.filter || "";
   showOrder($("sort").value, false);
   $("navigation").classList.remove("open");
+  showHistory();
   run(() => loadView());
 }
 
 // The page opened again in the selected source and music folder, searching what it searched,
 // as GTK opens its page again.
 function reopen() {
-  navigate(
-    opened === "sources"
-      ? "sources"
-      : { ...opened, source: state.source || undefined, folder: state.selectedLibrary || undefined },
-  );
+  navigate({ ...opened, source: state.source || undefined, folder: state.selectedLibrary || undefined }, false);
 }
 
 function showOrder(sort, descending) {
@@ -324,7 +339,7 @@ function showOrder(sort, descending) {
 function empty(title, description, action) {
   const node = el("div", "empty");
   node.append(
-    icon(opened === "sources" ? "rufin-network-server-symbolic" : "rufin-home-symbolic"),
+    icon("rufin-home-symbolic"),
     el("h2", "", title),
     el("p", "", description),
   );
@@ -363,17 +378,7 @@ async function loadView(initial = false, extra = {}, at = null) {
     $("content").replaceChildren(el("p", "empty-note", tr("Loading...")));
     releaseCovers();
   }
-  $("source-name").textContent =
-    sources.find((item) => item.id === state.source)?.name || tr("Library");
-  $("search").placeholder = tr("Search");
   try {
-    if (opened === "sources") {
-      $("title").textContent = tr("Sources");
-      for (const id of ["back", "library-toolbar"]) $(id).hidden = true;
-      markSection(null);
-      renderSources(await api("/sources", "GET", undefined, signal));
-      return;
-    }
     if (!initial && at === null) {
       $("content").replaceChildren();
       $("main").scrollTop = 0;
@@ -423,7 +428,6 @@ function showState(uri, favorite) {
 // Reads the page again as a committed change asks: where it is, or opened again in the
 // selected source and music folder.
 async function refreshPage(verdict) {
-  if (opened === "sources") return;
   if (verdict === "reopen") {
     const configured = await api("/sources");
     state.source = configured.selected || state.source;
@@ -510,6 +514,8 @@ async function showTrackMenu(index, row, anchor, event) {
       tr("Remove from Playlist"),
       () => api("/playlists/entries", "DELETE", { id: opened.route.PlaylistDetail, ...media }),
     ]);
+  if (menu.edit_metadata)
+    actions.push([tr("Edit metadata"), () => openMetadata(many ? media : { kind: "track", uri: row.uri }), "rufin-document-edit-symbolic"]);
   const destination = menu.go_to && goToMenu(row);
   if (destination) actions.push(null, destination);
   showMenu(actions, anchor, event);
@@ -628,12 +634,28 @@ function init() {
     );
   $("back").addEventListener("click", (event) => {
     event.preventDefault();
-    navigate(JSON.parse(shown.back));
+    if (backStack.length) {
+      forwardStack.push(opened);
+      navigate(backStack.pop(), false);
+    } else if (shown.back) navigate(JSON.parse(shown.back), false);
+  });
+  $("forward").addEventListener("click", () => {
+    if (!forwardStack.length) return;
+    backStack.push(opened);
+    navigate(forwardStack.pop(), false);
   });
   // A search and a chosen order read the page with the search and the order the toolbar
   // shows; the order goes with the first window, and the page names it from then on.
   const order = () => {
     clearTimeout(searchTimer);
+    // Home has no list to search; its search lists the tracks, as the Tracks page does.
+    if (opened.route === "Home") {
+      const filter = $("search").value;
+      if (!filter) return;
+      navigate({ route: "Tracks", source: state.source || undefined, folder: state.selectedLibrary || undefined, options: { filter } });
+      $("search").value = filter;
+      return;
+    }
     opened.options = { ...opened.options, filter: $("search").value };
     const sort = $("sort").value, descending = $("descending").getAttribute("aria-pressed");
     run(() => loadView(false, sort ? { sort, descending } : {}));
@@ -649,6 +671,7 @@ function init() {
   });
   $("refresh").addEventListener("click", () =>
     run(async () => {
+      $("main-menu").hidePopover();
       if (state.source)
         await api("/sources/refresh", "POST", { id: state.source });
       await loadView();
@@ -662,7 +685,31 @@ function bindCards(host) {
   for (const card of host.querySelectorAll("[data-row][data-kind]")) bindCard(card);
 }
 
+// GTK's header: Play, then Radio, give up their labels while the buttons do not fit their row;
+// where even the circles do not fit, the insets and the gap beside the cover give way together.
+function fitActions(actions) {
+  const form = actions.closest("form");
+  form.style.removeProperty("--inset");
+  form.style.removeProperty("--gap");
+  const pills = [...actions.querySelectorAll(".detail-pill")];
+  for (const pill of pills) pill.classList.remove("detail-pill-icon");
+  for (const pill of pills)
+    if (actions.scrollWidth > actions.clientWidth) pill.classList.add("detail-pill-icon");
+  const overflow = actions.scrollWidth - actions.clientWidth;
+  if (overflow <= 0) return;
+  const style = getComputedStyle(form);
+  const spacing = Math.max(0, 2 * parseFloat(style.getPropertyValue("--inset")) + parseFloat(style.getPropertyValue("--gap")) - overflow) / 3;
+  form.style.setProperty("--inset", `${Math.floor(spacing)}px`);
+  form.style.setProperty("--gap", `${Math.floor(spacing)}px`);
+}
+
 function bindCard(card) {
+  for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts")) slideText(node);
+  // The header's width, not the row's, which the fitting itself changes.
+  for (const actions of card.querySelectorAll(".detail-actions")) {
+    new ResizeObserver(() => fitActions(actions)).observe(card);
+    fitActions(actions);
+  }
   {
     const host = card.parentElement;
     bindHoverControls(card);
@@ -712,6 +759,8 @@ function bindCard(card) {
               await api(`/playlists?id=${row.id}`, "DELETE");
           },
         ]);
+      if (options.edit_metadata && ["album", "artist", "track"].includes(kind))
+        actions.push([tr("Edit metadata"), () => openMetadata({ kind, uri: row.uri }), "rufin-document-edit-symbolic"]);
       const destination = options.go_to && goToMenu(row);
       if (destination) actions.push(null, destination);
       // The pin closes the menu, as on GTK and Android.

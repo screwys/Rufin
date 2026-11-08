@@ -1,8 +1,8 @@
-import { qualityControls } from "./download-quality.js";
+import { openPreferences } from "./preferences.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { loadView, navigate, reopen } from "./library.js";
+import { navigate, reopen } from "./library.js";
 
 import { $, button, el, icon, notice, openPopup, run } from "./ui.js";
 
@@ -16,9 +16,6 @@ function updateSources(configured) {
     state.source = configured.selected || sources[0]?.id || "";
   libraries = configured.libraries || [];
   state.selectedLibrary = configured.library || null;
-  const current = sources.find((item) => item.id === state.source);
-  $("source-name").textContent = current?.name || tr("Library");
-  $("source-menu-button").replaceChildren(sourceIcon(current?.kind));
 }
 
 function sourceIcon(kind) {
@@ -48,124 +45,6 @@ function sourceIcon(kind) {
   image.alt = "";
   image.src = `/source-icons/${kind}`;
   return image;
-}
-
-function renderSources(configured) {
-  updateSources(configured);
-  $("content").replaceChildren();
-  const intro = el("div", "source-intro");
-  intro.append(
-    el("p", "", tr("Connect your music servers or local folders.")),
-    button(tr("Add Source"), () => openSource(), null, "primary"),
-  );
-  $("content").append(intro);
-  for (const item of sources) {
-    const card = el("div", "list-card"),
-      label = el("div", "label");
-    label.append(el("strong", "", item.name), el("p", "", item.kind));
-    const edit = button(
-      tr("Edit"),
-      () => openSource(item),
-      "rufin-document-edit-symbolic",
-      "source-edit",
-    );
-    edit.append(el("span", "", tr("Edit")));
-    const actions = el("div", "source-actions");
-    actions.append(
-      button(
-        tr("Use This Source"),
-        async () => {
-          await api("/sources/select", "POST", { id: item.id });
-          state.source = item.id;
-          updateSources(await api("/sources"));
-          navigate("Tracks");
-        },
-        "rufin-object-select-symbolic",
-        "",
-      ),
-      button(
-        tr("Resync Library"),
-        () => api("/sources/refresh", "POST", { id: item.id }),
-        "rufin-view-refresh-symbolic",
-      ),
-      button(
-        tr("Forget Source"),
-        async () => {
-          if (
-            confirm(
-              tr(
-                "Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?",
-                { name: item.name },
-              ),
-            )
-          ) {
-            await api(
-              `/sources?${new URLSearchParams({ id: item.id })}`,
-              "DELETE",
-            );
-            await loadView();
-          }
-        },
-        "rufin-window-close-symbolic",
-      ),
-    );
-    for (const action of actions.children)
-      action.append(el("span", "", action.getAttribute("aria-label")));
-    actions.lastElementChild.classList.add("destructive");
-    card.append(sourceIcon(item.kind), label, edit, actions);
-    const quality = el("fieldset", "source-actions");
-    quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
-    qualityControls(quality, item.download_quality, async (edit) => {
-      const result = await api("/downloads/quality", "POST", { source: item.id, edit });
-      item.download_quality = result.download_quality;
-      return result.download_quality;
-    });
-    card.append(quality);
-    $("content").append(card);
-  }
-  const settings = $("cache-settings-template").content.cloneNode(true);
-  const cache = settings.firstElementChild, choices = settings.querySelectorAll("select");
-  $("content").append(settings);
-  run(async () => {
-    let current = await api("/downloads/cache-settings");
-    if (!cache.isConnected) return;
-    for (const choice of choices) {
-      choice.value = String(current[choice.dataset.setting]);
-      choice.disabled = false;
-      choice.onchange = () => run(async () => {
-        for (const select of choices) select.disabled = true;
-        try {
-          current = await api("/downloads/cache-settings", "POST", {
-            ...current, [choice.dataset.setting]: choice.value === "true",
-          });
-        } finally {
-          for (const select of choices) {
-            select.value = String(current[select.dataset.setting]);
-            select.disabled = false;
-          }
-        }
-      });
-    }
-  });
-  const cacheActions = el("div", "source-actions");
-  for (const [path, title, success] of [
-    ["clear-artwork-cache", tr("Clear artwork cache"), tr("Artwork cache cleared")],
-    ["clear-lyrics-cache", tr("Clear lyrics cache"), tr("Lyrics cache cleared")],
-  ]) {
-    cacheActions.append(button(title, async () => {
-      for (const action of cacheActions.children) action.disabled = true;
-      try {
-        await api(`/downloads/${path}`, "POST");
-        notice(success);
-      } finally {
-        for (const action of cacheActions.children) action.disabled = false;
-      }
-    }, null, ""));
-  }
-  $("content").append(cacheActions);
-  const integrations = el("section", "");
-  $("content").append(integrations);
-  run(() => renderIntegrations(integrations));
 }
 
 let previousOperation = "";
@@ -283,22 +162,6 @@ export async function chooseFileIntegration(kind, saved) {
   dialog.showModal();
 }
 
-async function renderIntegrations(host) {
-  const connections = await api("/integrations/files");
-  if (!host.isConnected) return;
-  host.replaceChildren(el("h2", "", tr("Integrations")));
-  const saved = () => renderIntegrations(host);
-  const actions = el("div", "source-actions");
-  for (const [kind, title] of [["webdav", tr("WebDAV / Nextcloud")], ["smb", tr("SMB / Samba")]])
-    actions.append(button(title, () => openSource(null, {kind, saved})));
-  host.append(actions);
-  for (const item of connections) {
-    const card = el("div", "list-card");
-    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "rufin-document-edit-symbolic"));
-    host.append(card);
-  }
-}
-
 function sourceFields() {
   const kind = $("source-kind").value;
   const local = kind === "local";
@@ -338,7 +201,7 @@ function init() {
     run(async () => {
       updateSources(await api("/sources"));
       const menu = $("source-menu");
-      menu.replaceChildren();
+      menu.replaceChildren(el("div", "menu-heading", tr("Select Source")));
       for (const item of sources) {
         const choose = button(
           item.name,
@@ -362,7 +225,7 @@ function init() {
         tr("Manage"),
         () => {
           menu.hidePopover();
-          navigate("sources");
+          openPreferences("library");
         },
         "rufin-document-edit-symbolic",
         "menu-item",
@@ -407,7 +270,7 @@ function init() {
           menu.append(choose);
         }
       }
-      openPopup(menu, $("source-menu-button"));
+      openPopup(menu, $("source-menu-button"), "end");
     }),
   );
   $("source-kind").addEventListener("change", sourceFields);
@@ -449,7 +312,8 @@ function init() {
       $("source-dialog").close();
       $("password").value = "";
       updateSources(await api("/sources"));
-      navigate(editingSource ? "sources" : "Home");
+      document.dispatchEvent(new Event("rufin-sources"));
+      if (!editingSource) navigate("Home");
     }),
   );
 }
@@ -557,7 +421,7 @@ function sourceInput() {
   return input;
 }
 export {
-  renderSources,
+  openSource,
   showSourceProgress,
   sources,
   sourceIcon,

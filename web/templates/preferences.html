@@ -1,0 +1,155 @@
+<dialog id="preferences-dialog" aria-labelledby="preferences-title">
+  <div class="preferences">
+    <nav class="pref-pages" role="tablist" aria-labelledby="preferences-title">
+      <h2 id="preferences-title">{{ localization::tr("Preferences") }}</h2>
+      {% call m::pref_page("general", localization::tr("General"), "rufin-preferences-system-symbolic") %}{% endcall %}
+      {% call m::pref_page("customization", localization::tr("Customization"), "rufin-sliders-2-symbolic") %}{% endcall %}
+      {% call m::pref_page("theme", localization::tr("Theme"), "rufin-preferences-desktop-appearance-symbolic") %}{% endcall %}
+      {% call m::pref_page("integrations", localization::tr("Integrations"), "rufin-network-workgroup-symbolic") %}{% endcall %}
+      {% call m::pref_page("playback", localization::tr("Playback"), "rufin-music-queue-symbolic") %}{% endcall %}
+      <button type="button" class="pref-tab" id="open-equalizer">{% call m::icon("rufin-sliders-vertical-symbolic") %}{% endcall %}<span>{{ localization::tr("Equalizer") }}</span></button>
+      {% call m::pref_page("library", localization::tr("Library"), "rufin-library-symbolic") %}{% endcall %}
+      {% call m::pref_page("downloads", localization::tr("Downloads"), "rufin-download-symbolic") %}{% endcall %}
+      <button type="button" class="pref-tab" data-open="open-connect">{% call m::icon("rufin-network-hotspot-symbolic") %}{% endcall %}<span>{{ localization::tr("Connect") }}</span></button>
+      {% call m::pref_page("storage", localization::tr("Storage"), "rufin-drive-harddisk-symbolic") %}{% endcall %}
+      {% call m::pref_page("privacy", localization::tr("Privacy & Security"), "rufin-system-lock-screen-symbolic") %}{% endcall %}
+    </nav>
+    <div class="pref-content">
+      <header class="pref-header">
+        <button type="button" class="icon-button" id="preferences-back" aria-label="{{ localization::tr("Back") }}">{% call m::icon("rufin-go-previous-symbolic") %}{% endcall %}</button>
+        <h3 id="preferences-page-title"></h3>
+        <button type="button" class="icon-button" data-close="preferences-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button>
+      </header>
+      <section id="pref-general" role="tabpanel" hidden>
+        <h4>{{ localization::tr("App settings") }}</h4>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Update check interval") }}</span></span><select data-setting="/release_check_interval_hours"><option value="1">{{ localization::tr("1 hour") }}</option><option value="6">{{ localization::tr("6 hours") }}</option><option value="12">{{ localization::tr("12 hours") }}</option><option value="24">{{ localization::tr("24 hours") }}</option></select></label>
+        </div>
+        <h4>{{ localization::tr("Metadata") }}</h4>
+        <div class="pref-group">
+          {% call m::switch("/prefer_distinct_track_covers", localization::tr("Prefer distinct track covers"), localization::tr("Use each track's own cover when available")) %}{% endcall %}
+          {% call m::switch("/use_sort_tags", localization::tr("Use sort tags"), localization::tr("Sort artists and albums by their sort tags instead of their names")) %}{% endcall %}
+          {% call m::switch("/external_metadata_enabled", localization::tr("External metadata lookup"), "") %}{% endcall %}
+          {% call m::switch("/external_lyrics_enabled", localization::tr("External lyrics lookup"), "") %}{% endcall %}
+        </div>
+      </section>
+      <section id="pref-customization" role="tabpanel" hidden>
+        <h4>{{ localization::tr("Accessibility") }}</h4>
+        <div class="pref-group">{% call m::switch("/reduce_motion", localization::tr("Reduce motion"), "") %}{% endcall %}</div>
+        <h4>{{ localization::tr("Layout") }}</h4>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Default left sidebar") }}</span></span><select data-setting="/layout/default_profile/left_sidebar"><option value='"Full"'>{{ localization::tr("Full") }}</option><option value='"Compact"'>{{ localization::tr("Compact") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Default right sidebar") }}</span></span><select data-setting="/layout/default_profile/right_sidebar"><option value='"Visible"'>{{ localization::tr("Visible") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
+          {% call m::switch("/lyrics_panel_visible", localization::tr("Show lyrics"), "") %}{% endcall %}
+          {% call m::switch("/layout/narrow_enabled", localization::tr("Use different layout below a threshold width"), "") %}{% endcall %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow layout threshold") }}</span></span><input type="number" min="600" max="3000" step="10" data-setting="/layout/narrow_threshold" /></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow left sidebar") }}</span></span><select data-setting="/layout/narrow_profile/left_sidebar"><option value='"Full"'>{{ localization::tr("Full") }}</option><option value='"Compact"'>{{ localization::tr("Compact") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow right sidebar") }}</span></span><select data-setting="/layout/narrow_profile/right_sidebar"><option value='"Visible"'>{{ localization::tr("Visible") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
+        </div>
+        <h4>{{ localization::tr("Sidebar Items") }}</h4>
+        <div class="pref-group" id="pref-routes"></div>
+        <div class="pref-group">{% call m::switch("/sidebar/pins_visible", localization::tr("Pins"), localization::tr("Fixed position")) %}{% endcall %}</div>
+        <h4>{{ localization::tr("Home Blocks") }}</h4>
+        <div class="pref-group" id="pref-home-blocks"></div>
+        <h4>{{ localization::tr("Context Menus") }}</h4>
+        <div class="pref-group" id="pref-context-menu">
+          {% for (item, label) in [("Play", "Play"), ("PlayNext", "Play Next"), ("PlayLater", "Play Later"), ("PlayRadio", "Play radio"), ("AddToPlaylist", "Add to Playlist"), ("Favorites", "Favorites"), ("EditMetadata", "Edit metadata"), ("Pins", "Pins"), ("GoTo", "Go to"), ("Download", "Download")] %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr(label) }}</span></span><input type="checkbox" role="switch" data-menu-item="{{ item }}" /></label>
+          {% endfor %}
+          {% call m::switch("/context_menu/rating_visible", localization::tr("Rating"), "") %}{% endcall %}
+        </div>
+      </section>
+      <section id="pref-theme" role="tabpanel" hidden>
+        <div class="pref-group theme-options">
+          <div id="pref-themes" class="theme-grid" role="radiogroup" aria-label="{{ localization::tr("Theme") }}"></div>
+          <p id="pref-theme-errors" class="theme-errors" hidden></p>
+        </div>
+        <div id="theme-accent-menu" class="media-menu" popover="auto" role="menu" aria-label="{{ localization::tr("Accent color") }}"></div>
+      </section>
+      <section id="pref-integrations" role="tabpanel" hidden>
+        <h4>{{ localization::tr("Discord") }}</h4>
+        <div class="pref-group">
+          {% call m::switch("/discord_presence_enabled", localization::tr("Discord Rich Presence"), "") %}{% endcall %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Status display") }}</span></span><select data-setting="/discord_display_type"><option value='"application"'>{{ localization::tr("Application name") }}</option><option value='"song"'>{{ localization::tr("Song title") }}</option><option value='"artist"'>{{ localization::tr("Artist name") }}</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Metadata source") }}</span><small>{{ localization::tr("Source to use for cover images and song/artist links") }}</small></span><select data-setting="/discord_link_type"><option value='"none"'>{{ localization::tr("None") }}</option><option value='"last_fm"'>Last.fm</option><option value='"musicbrainz"'>MusicBrainz</option><option value='"musicbrainz_last_fm"'>{{ localization::tr("MusicBrainz + Last.fm") }}</option></select></label>
+          {% call m::switch("/discord_show_paused", localization::tr("Show paused status"), "") %}{% endcall %}
+          {% call m::switch("/discord_show_as_listening", localization::tr("Use listening activity"), localization::tr("Set the Discord activity type to Listening")) %}{% endcall %}
+        </div>
+        <h4>{{ localization::tr("External site links") }}</h4>
+        <div class="pref-group">
+          {% call m::switch("/external_site_links/enabled", localization::tr("Show external site links"), localization::tr("Show external service icons on album and artist pages")) %}{% endcall %}
+          {% call m::switch("/external_site_links/lastfm", "Last.fm", "") %}{% endcall %}
+          {% call m::switch("/external_site_links/musicbrainz", "MusicBrainz", "") %}{% endcall %}
+          {% call m::switch("/external_site_links/server", localization::tr("Server"), "") %}{% endcall %}
+        </div>
+        <div class="pref-group-header"><h4>{{ localization::tr("File connections") }}</h4><span><button type="button" data-file-connection="webdav">{{ localization::tr("WebDAV / Nextcloud") }}</button><button type="button" data-file-connection="smb">{{ localization::tr("SMB / Samba") }}</button></span></div>
+        <div class="pref-group" id="pref-file-connections"></div>
+      </section>
+      <section id="pref-playback" role="tabpanel" hidden>
+        <h4>{{ localization::tr("Queue and transitions") }}</h4>
+        <div class="pref-group">
+          <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Transition mode") }}</span></span>
+            <div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Transition mode") }}">
+              <label><input type="radio" name="pref-transition" value='"Gapless"' data-setting="/playback/transition_mode" />{{ localization::tr("Gapless") }}</label>
+              <label><input type="radio" name="pref-transition" value='"Crossfade"' data-setting="/playback/transition_mode" />{{ localization::tr("Crossfade") }}</label>
+            </div>
+          </div>
+          <label class="pref-row" data-when="/playback/transition_mode=Crossfade"><span class="pref-label"><span>{{ localization::tr("Crossfade duration") }}</span></span><span class="pref-range"><input type="range" min="1" max="30" step="1" data-setting="/playback/crossfade_seconds" /><output></output></span></label>
+          {% call m::switch("/playback/skip_same_album_crossfade", localization::tr("Skip same-album crossfade"), "") %}{% endcall %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Playback speed") }}</span></span><span class="pref-range"><input type="range" min="0.5" max="2" step="0.05" data-setting="/playback/playback_rate" /><output></output></span></label>
+          {% call m::switch("/playback/preserve_pitch", localization::tr("Preserve pitch"), "") %}{% endcall %}
+          {% call m::switch("/playback/audio_fade_on_status_change", localization::tr("Audio fade on play/pause"), localization::tr("Fade audio when playback is paused or resumed")) %}{% endcall %}
+          {% call m::switch("/playback/skip_unplayable_tracks", localization::tr("Skip unplayable tracks"), "") %}{% endcall %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Auto DJ refill threshold") }}</span><small>{{ localization::tr("Add tracks when fewer than this many remain") }}</small></span><input type="number" min="1" max="10" step="1" data-setting="/auto_dj_refill_threshold" /></label>
+          {% call m::switch("/clear_queue_includes_current", localization::tr("Clearing queue also clears the current song"), "") %}{% endcall %}
+        </div>
+        <h4>{{ localization::tr("Audio") }}</h4>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Loudness normalization") }}</span></span><select data-setting="/playback/loudness_normalization"><option value='"Off"'>{{ localization::tr("Off") }}</option><option value='"ReplayGain"'>ReplayGain</option><option value='"EbuR128"'>EBU R128</option></select></label>
+          <label class="pref-row" data-when="/playback/loudness_normalization!=Off"><span class="pref-label"><span>{{ localization::tr("Normalization scope") }}</span><small>{{ localization::tr("Track evens out every song, while Album preserves the intended differences within each album") }}</small></span><select data-setting="/playback/loudness_normalization_scope"><option value='"Track"'>{{ localization::tr("Track") }}</option><option value='"Album"'>{{ localization::tr("Album") }}</option></select></label>
+          <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Target loudness") }}</span><small>{{ localization::tr("EBU R128 reference level") }}</small></span><span class="pref-range"><input type="range" min="-48" max="0" step="1" data-setting="/playback/ebu_r128_target_lufs" /><output></output></span></label>
+          <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Write EBU R128 tags to files") }}</span><small>{{ localization::tr("Store calculated loudness in supported Local music files") }}</small></span><input type="checkbox" role="switch" data-setting="/playback/write_ebu_r128_tags" /></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Volume scale") }}</span><small>{{ localization::tr("Perceptual for a finer control at low volume; Linear for a direct scale") }}</small></span><select data-setting="/playback/volume_scale"><option value='"Perceptual"'>{{ localization::tr("Perceptual") }}</option><option value='"Linear"'>{{ localization::tr("Linear") }}</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Stream quality") }}</span></span><select data-setting="/playback/stream_quality"><option value='"Original"'>{{ localization::tr("Original") }}</option>{% for kbps in [320, 256, 192, 128] %}<option value='{"MaxBitrateKbps":{{ kbps }}}'>{{ kbps }} kbps</option>{% endfor %}</select></label>
+        </div>
+      </section>
+      <section id="pref-library" role="tabpanel" hidden>
+        <div class="pref-group-header"><h4>{{ localization::tr("Sources") }}</h4><button type="button" id="pref-add-source">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("Add Source") }}</button></div>
+        <div class="pref-group" id="pref-sources"></div>
+      </section>
+      <section id="pref-source" role="tabpanel" hidden>
+        <h4>{{ localization::tr("Server Actions") }}</h4>
+        <div class="pref-group" id="pref-source-actions"></div>
+      </section>
+      <section id="pref-downloads" role="tabpanel" hidden>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Source") }}</span></span><select id="pref-download-source"></select></label>
+        </div>
+        <h4>{{ localization::tr("Downloads") }}</h4>
+        <div class="pref-group">
+          <div class="pref-row pref-quality" id="pref-download-quality">{% include "download_quality.html" %}</div>
+          {% call m::switch("/show_downloaded_badges", localization::tr("Show downloaded badge"), "") %}{% endcall %}
+        </div>
+      </section>
+      <section id="pref-storage" role="tabpanel" hidden>
+        <div class="pref-summary"><span>{{ localization::tr("Cached data") }}</span><strong id="pref-storage-total"></strong><small>{{ localization::tr("Database sizes show stored data, excluding database overhead.") }}</small></div>
+        <h4>{{ localization::tr("Cache") }}</h4>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Artwork") }}</span></span><select data-setting="/download_artwork_automatically"><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Lyrics") }}</span></span><select data-setting="/download_lyrics_automatically"><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
+        </div>
+        <div class="pref-group" id="pref-caches">
+          {% for (kind, label, clear) in [("waveforms", "Waveforms", "Clear waveform cache"), ("loudness", "EBU R128 analysis", "Clear EBU R128 cache"), ("fingerprints", "Audio fingerprints", "Clear fingerprint cache"), ("metadata_lookups", "Metadata lookups", "Clear lookup cache"), ("artwork", "Artwork", "Clear artwork cache"), ("lyrics", "Lyrics", "Clear lyrics cache"), ("japanese_dictionary", "Japanese dictionary", "Clear Japanese dictionary")] %}
+          <div class="pref-row" data-cache="{{ kind }}"><span class="pref-label"><span>{{ localization::tr(label) }}</span><small></small></span><button type="button" class="icon-button" title="{{ localization::tr(clear) }}" aria-label="{{ localization::tr(clear) }}">{% call m::icon("rufin-user-trash-symbolic") %}{% endcall %}</button></div>
+          {% endfor %}
+        </div>
+      </section>
+      <section id="pref-privacy" role="tabpanel" hidden>
+        <div class="pref-group">
+          {% call m::switch("/private_mode", localization::tr("Private mode"), "") %}{% endcall %}
+          {% call m::switch("/cast_proxy_enabled", localization::tr("Proxy casting through Rufin"), localization::tr("Route server media through this device instead of sharing provider URLs with the renderer")) %}{% endcall %}
+        </div>
+      </section>
+    </div>
+  </div>
+</dialog>

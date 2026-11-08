@@ -48,6 +48,7 @@ struct Editor {
     artwork: artwork::ArtworkEditor,
     lyrics: lyrics::LyricsPane,
     pages: gtk::Stack,
+    page_switcher: gtk::StackSwitcher,
     artwork_page: gtk::StackPage,
     lyrics_page: gtk::StackPage,
     scope_label: gtk::Label,
@@ -98,6 +99,7 @@ fn build_editor_view(
         editor_toolbar: adw::ToolbarView,
         editor_header: adw::HeaderBar,
         editor_pages: gtk::Stack,
+        page_switcher: gtk::StackSwitcher,
         fields: gtk::Box,
         artwork_host: gtk::Box,
         lyrics_host: gtk::Box,
@@ -149,6 +151,7 @@ fn build_editor_view(
         locked,
         model: RefCell::new(model),
         pages: editor_pages,
+        page_switcher,
         artwork_page,
         lyrics_page,
         scope_label,
@@ -440,6 +443,8 @@ fn refresh_pages(editor: &Rc<Editor>) {
         editor.pages.set_visible_child_name("tags");
     }
     editor.artwork_page.set_visible(single);
+    // Tags alone needs no switcher.
+    editor.page_switcher.set_visible(single);
     editor
         .lyrics_page
         .set_visible(single && model.draft.kind == sources::SourceEntityKind::Track);

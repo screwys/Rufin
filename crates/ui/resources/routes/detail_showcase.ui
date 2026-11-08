@@ -233,8 +233,9 @@
                         <property name="child">
                           <object class="GtkBox">
                             <property name="spacing">7</property>
+                            <property name="halign">center</property>
                             <child><object class="GtkImage"><property name="icon-name">rufin-audio-only-symbolic</property></object></child>
-                            <child><object class="GtkLabel"><property name="label" translatable="yes">Radio</property></object></child>
+                            <child><object class="GtkLabel" id="radio_text"><property name="label" translatable="yes">Radio</property></object></child>
                           </object>
                         </property>
                       </object>

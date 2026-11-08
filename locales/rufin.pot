@@ -480,9 +480,6 @@ msgstr ""
 msgid "Artists"
 msgstr ""
 
-msgid "Artwork cache cleared"
-msgstr ""
-
 msgid "Artwork editing is no longer available"
 msgstr ""
 
@@ -708,6 +705,10 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
+#, rust-format
+msgid "Changes apply to {count} tracks"
+msgstr ""
+
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
@@ -908,9 +909,6 @@ msgid "Connect manually"
 msgstr ""
 
 msgid "Connect to Rufin"
-msgstr ""
-
-msgid "Connect your music servers or local folders."
 msgstr ""
 
 msgid "Connect"
@@ -1297,9 +1295,6 @@ msgid "Download Lazily"
 msgstr ""
 
 msgid "Download Queue"
-msgstr ""
-
-msgid "Download quality"
 msgstr ""
 
 msgid "Download queued"
@@ -2135,9 +2130,6 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr ""
 
-msgid "Lyrics cache cleared"
-msgstr ""
-
 msgid "Lyrics loaded"
 msgstr ""
 
@@ -2198,6 +2190,9 @@ msgid "Metadata editing requires Local access"
 msgstr ""
 
 msgid "Metadata lookups"
+msgstr ""
+
+msgid "Metadata saved"
 msgstr ""
 
 msgid "Metadata source"
@@ -3082,9 +3077,6 @@ msgstr ""
 msgid "Refresh automatically"
 msgstr ""
 
-msgid "Refresh source"
-msgstr ""
-
 msgid "Refresh"
 msgstr ""
 
@@ -3329,6 +3321,10 @@ msgstr ""
 msgid "Rufin host"
 msgstr ""
 
+#, rust-format
+msgid "Rufin needs local access to {path}"
+msgstr ""
+
 msgid "Rule actions"
 msgstr ""
 
@@ -3449,9 +3445,6 @@ msgstr ""
 msgid "Search is unavailable"
 msgstr ""
 
-msgid "Search library"
-msgstr ""
-
 msgid "Search lyrics"
 msgstr ""
 
@@ -3462,9 +3455,6 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
-msgstr ""
-
-msgid "Search tracks"
 msgstr ""
 
 msgid "Search unavailable"

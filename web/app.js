@@ -10,6 +10,8 @@ import { initPins } from "./pins.js";
 import { init as connect } from "./connect.js";
 
 import { init as equalizer } from "./equalizer.js";
+import { init as preferences } from "./preferences.js";
+import { init as metadata } from "./metadata.js";
 
 ui();
 library();
@@ -23,3 +25,5 @@ connection();
 connect();
 
 equalizer();
+preferences();
+metadata();
