@@ -18,20 +18,20 @@
     <color type="primary" scheme_preference="dark">#28596b</color>
   </branding>
   <description>
-    <p>Enjoy your music library, local/remote folders or music server; with a powerful all-in-one music player.</p>
+    <p>Enjoy the music you own, from local folders, network shares or your music server, with a fast all-in-one music player.</p>
     <ul>
-      <li>Supports Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers; local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.</li>
-      <li>Control the player from its Web UI or custom scripts, additionally enable Rufin Connect for cross-device synchronization</li>
-      <li>Powerful transition and loudness normalization implementation</li>
-      <li>Auto DJ with server or app-matched recommendations and random play filters</li>
-      <li>Built-in Last.fm, Libre.fm, ListenBrainz and Discord Rich presence integrations</li>
-      <li>Remote tracks are downloadable with automatic download rules and playable while offline</li>
-      <li>Casting and audio device selection support</li>
-      <li>Advanced smart playlist support with in app activity recording and multiple rule combinations</li>
-      <li>Automatic lyrics/cover/metadata lookups</li>
-      <li>Built-in metadata editor with search and bulk edits</li>
-      <li>Advanced lyric settings with Japanese readings, karaoke mode, offset editor and automatic saving</li>
-      <li>Extensive customization support and keyboard shortcuts catalog</li>
+      <li>Supports Jellyfin, Navidrome/OpenSubsonic, Plex and Emby servers, local folders, WebDAV/Nextcloud and Samba shares</li>
+      <li>Rufin Connect syncs your devices, continues playback from another device and streams its local library</li>
+      <li>Gapless playback or crossfade, with ReplayGain and EBU R128 loudness normalization</li>
+      <li>Graphic and parametric equalizer with presets, multichannel output and Dolby/DTS passthrough</li>
+      <li>Auto DJ with server or app-matched recommendations, random play filters and a sleep timer</li>
+      <li>Downloads with automatic rules and optional transcoding, playable while offline</li>
+      <li>Playlists across sources with folders, and smart playlists built on metadata and listening activity</li>
+      <li>Synced lyrics with karaoke mode, Japanese readings, search by lyrics and automatic saving</li>
+      <li>Metadata and artwork editor with bulk edits, MusicBrainz and AcoustID lookup</li>
+      <li>Last.fm, Libre.fm, ListenBrainz and Discord Rich Presence integrations</li>
+      <li>Casting to UPnP and Chromecast, a Web UI and an HTTP API for scripts</li>
+      <li>Custom themes, a mini player, fullscreen visualizer and a keyboard shortcuts catalog</li>
       <li>Broad codec support including separable CUE tracks</li>
     </ul>
   </description>
