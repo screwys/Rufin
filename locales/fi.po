@@ -223,8 +223,22 @@ msgstr "Toista seuraava"
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 tunti"
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "1 year"
+msgstr "Vuosi enintään"
 
 msgid "10 bands"
 msgstr ""
@@ -448,6 +462,11 @@ msgstr "Kaikki kappaleet"
 
 msgid "All"
 msgstr "Kaikki"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Ladataan"
 
 msgid "Allow remote connections"
 msgstr "Salli etäyhteydet"
@@ -1204,6 +1223,11 @@ msgid "Could not save diagnostic log"
 msgstr "Diagnostiikkalokia ei voitu tallentaa"
 
 #, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not share: {error}"
+msgstr "Kansiota ei voitu avata: {error}"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not update Rufin to {version}"
 msgstr "Suosikkeja ei voitu päivittää"
@@ -1378,6 +1402,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "Laskevasti"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Suunta"
 
 msgid "Detail track columns"
 msgstr ""
@@ -1715,6 +1744,9 @@ msgstr "Laajenna sanoitukset ja visualisointi"
 
 msgid "Expand sidebar"
 msgstr "Laajenna sivupalkki"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Tutki"
@@ -2318,11 +2350,19 @@ msgstr "Raja"
 msgid "Linear"
 msgstr "Lineaarinen"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Linkitetty tiedosto"
+
 msgid "Link exported file"
 msgstr ""
 
 msgid "Link to file..."
 msgstr "Linkki tiedostoon..."
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Linkitetty tiedosto"
@@ -4094,6 +4134,11 @@ msgstr ""
 msgid "Server Settings"
 msgstr "Palvelimen asetukset"
 
+#, fuzzy
+#| msgid "System default"
+msgid "Server default"
+msgstr "Järjestelmän oletus"
+
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -4548,6 +4593,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Tämä ei ole saatavilla"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr ""

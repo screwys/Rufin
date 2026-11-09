@@ -226,8 +226,22 @@ msgstr "Přehrát další"
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr ""
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "1 year"
+msgstr "Maximální rok"
 
 msgid "10 bands"
 msgstr ""
@@ -459,6 +473,11 @@ msgstr "Všechny skladby"
 
 msgid "All"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Stahování"
 
 msgid "Allow remote connections"
 msgstr ""
@@ -1273,6 +1292,11 @@ msgstr "Nelze uložit diagnostický protokol"
 
 #, fuzzy
 #| msgid "Could not update favorites"
+msgid "Could not share: {error}"
+msgstr "Nelze aktualizovat oblíbené"
+
+#, fuzzy
+#| msgid "Could not update favorites"
 msgid "Could not update Rufin to {version}"
 msgstr "Nelze aktualizovat oblíbené"
 
@@ -1449,6 +1473,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "Sestupně"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Description"
+msgstr "DirectSound"
 
 msgid "Detail track columns"
 msgstr "Sloupce s podrobnostmi o skladbě"
@@ -1801,6 +1830,9 @@ msgstr ""
 
 msgid "Expand sidebar"
 msgstr "Rozbalit postranní panel"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Prozkoumat"
@@ -2428,10 +2460,16 @@ msgstr "Omezení"
 msgid "Linear"
 msgstr "Lineární"
 
+msgid "Link copied"
+msgstr ""
+
 msgid "Link exported file"
 msgstr ""
 
 msgid "Link to file..."
+msgstr ""
+
+msgid "Link"
 msgstr ""
 
 msgid "Linked file"
@@ -4303,6 +4341,11 @@ msgstr "Ukázka serveru"
 msgid "Server Settings"
 msgstr "Nastavení serveru"
 
+#, fuzzy
+#| msgid "Server path"
+msgid "Server default"
+msgstr "Cesta k serveru"
+
 msgid "Server discovery failed: {error}"
 msgstr "Server se nepodařilo nalézt: {error}"
 
@@ -4765,6 +4808,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Toto není dostupné"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr ""
@@ -5825,9 +5871,6 @@ msgstr ""
 
 #~ msgid "Remove prefix"
 #~ msgstr "Odebrat prefix"
-
-#~ msgid "Server path"
-#~ msgstr "Cesta k serveru"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

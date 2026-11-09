@@ -283,8 +283,24 @@ msgstr "(segamiseks hoia all)"
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 tund"
+
+#, fuzzy
+#| msgid "Month"
+msgid "1 month"
+msgstr "Kuu"
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "May {year}"
+msgid "1 year"
+msgstr "Mai {year}"
 
 msgid "10 bands"
 msgstr "10 sagedusriba"
@@ -482,6 +498,11 @@ msgstr "Kõik lood"
 
 msgid "All"
 msgstr "Kõik"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Allalaadimisel"
 
 msgid "Allow remote connections"
 msgstr "Liba kasutada kaugühendusi"
@@ -1108,6 +1129,11 @@ msgstr "Reaalajas uuenduste laadimine ei õnnestunud"
 msgid "Could not save diagnostic log"
 msgstr "Diagnostikalogi salvestamine ei õnnestunud"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not share: {error}"
+msgstr "Faili avamine ei õnnestunud: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Rufini uuendamine versioonini {version} ei õnnestunud"
 
@@ -1259,6 +1285,11 @@ msgstr "Üleandmine"
 
 msgid "Descending"
 msgstr "Järjesta kahanevalt"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Suund"
 
 msgid "Detail track columns"
 msgstr "Lugude üksikasjade veerud"
@@ -1548,6 +1579,9 @@ msgstr "Laienda laulusõnu ja visualiseerijat"
 
 msgid "Expand sidebar"
 msgstr "Laienda külgriba"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Uuri ja avasta"
@@ -2094,11 +2128,19 @@ msgstr "Piirang"
 msgid "Linear"
 msgstr "Lineaarne"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Seotud fail"
+
 msgid "Link exported file"
 msgstr "Lingi eksporditud fail"
 
 msgid "Link to file..."
 msgstr "Link failile…"
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Seotud fail"
@@ -3670,6 +3712,11 @@ msgstr "Serveri näidis"
 msgid "Server Settings"
 msgstr "Serveri seadistused"
 
+#, fuzzy
+#| msgid "Server path"
+msgid "Server default"
+msgstr "Serveri asukoht"
+
 msgid "Server discovery failed: {error}"
 msgstr "Serveri leidmine ei õnnestunud: {error}"
 
@@ -4074,6 +4121,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "See pole saadaval"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "Siia esitusloendisse saab lisada vaid lugusid allikast {source}"
@@ -5078,9 +5128,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Remove prefix"
 #~ msgstr "Eemalda eesliide"
-
-#~ msgid "Server path"
-#~ msgstr "Serveri asukoht"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

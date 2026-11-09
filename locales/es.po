@@ -284,8 +284,24 @@ msgstr ""
 ". Sólo necesita llenar el correo electrónico y las partes de nombre de "
 "aplicación"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 hora"
+
+#, fuzzy
+#| msgid "Month"
+msgid "1 month"
+msgstr "Mes"
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "May {year}"
+msgid "1 year"
+msgstr "Mayo del {year}"
 
 msgid "10 bands"
 msgstr ""
@@ -495,6 +511,11 @@ msgstr "Todas las pistas"
 
 msgid "All"
 msgstr "Todos"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Descargando"
 
 msgid "Allow remote connections"
 msgstr "Permitir conexiones remotas"
@@ -1184,6 +1205,11 @@ msgstr "No se pueden recibir actualizaciones en vivo"
 msgid "Could not save diagnostic log"
 msgstr "No se pudo guardar los registros de diagnóstico"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not share: {error}"
+msgstr "No se pudo abrir el archivo: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "No se pudo actualizar Rufin a la {version}"
 
@@ -1349,6 +1375,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "Descendiente"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Dirección"
 
 msgid "Detail track columns"
 msgstr "Columnas del detalle de la pista"
@@ -1663,6 +1694,9 @@ msgstr "Expandir las letras y el visualizador"
 
 msgid "Expand sidebar"
 msgstr "Abrir barra lateral"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Explorar"
@@ -2241,11 +2275,19 @@ msgstr "Límite"
 msgid "Linear"
 msgstr "Linear"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Archivo vinculado"
+
 msgid "Link exported file"
 msgstr "Enlazar archivo exportado"
 
 msgid "Link to file..."
 msgstr "Enlace al archivo..."
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Archivo vinculado"
@@ -3904,6 +3946,11 @@ msgstr "Muestra del servidor"
 msgid "Server Settings"
 msgstr "Ajustes del servidor"
 
+#, fuzzy
+#| msgid "System default"
+msgid "Server default"
+msgstr "Opción por defecto del sistema"
+
 msgid "Server discovery failed: {error}"
 msgstr "El descubrimiento de servidor falló: {error}"
 
@@ -4321,6 +4368,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Esto no está disponible"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "Esta lista de reproducción solo acepta pistas de {source}"

@@ -291,8 +291,24 @@ msgstr ""
 ". Du musst nur die Felder für die E-Mail-Adresse und den Anwendungsnamen "
 "ausfüllen"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "eine Stunde"
+
+#, fuzzy
+#| msgid "Month"
+msgid "1 month"
+msgstr "Monat"
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "May {year}"
+msgid "1 year"
+msgstr "Mai {year}"
 
 msgid "10 bands"
 msgstr "10 Bänder"
@@ -490,6 +506,11 @@ msgstr "Alle Titel"
 
 msgid "All"
 msgstr "Alle"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Wird heruntergeladen"
 
 msgid "Allow remote connections"
 msgstr "Remote-Verbindungen erlauben"
@@ -1116,6 +1137,11 @@ msgstr "Live-Updates konnten nicht empfangen werden"
 msgid "Could not save diagnostic log"
 msgstr "Diagnoseprotokoll konnte nicht gespeichert werden"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not share: {error}"
+msgstr "Datei konnte nicht geöffnet werden: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Rufin konnte nicht auf {version} aktualisiert werden"
 
@@ -1267,6 +1293,11 @@ msgstr "Bereitstellung"
 
 msgid "Descending"
 msgstr "Absteigend"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Richtung"
 
 msgid "Detail track columns"
 msgstr "Spalten der Detailansicht"
@@ -1558,6 +1589,9 @@ msgstr "Liedtexte und Visualisierung erweitern"
 
 msgid "Expand sidebar"
 msgstr "Seitenleiste ausklappen"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Entdecken"
@@ -2107,11 +2141,19 @@ msgstr "Begrenzung"
 msgid "Linear"
 msgstr "Linear"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Verknüpfte Datei"
+
 msgid "Link exported file"
 msgstr "Exportierte Datei verknüpfen"
 
 msgid "Link to file..."
 msgstr "Mit Datei verknüpfen …"
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Verknüpfte Datei"
@@ -3694,6 +3736,11 @@ msgstr "Server-Beispiel"
 msgid "Server Settings"
 msgstr "Servereinstellungen"
 
+#, fuzzy
+#| msgid "Server path"
+msgid "Server default"
+msgstr "Serverpfad"
+
 msgid "Server discovery failed: {error}"
 msgstr "Server-Erkennung fehlgeschlagen: {error}"
 
@@ -4097,6 +4144,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Dies ist nicht verfügbar"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "Diese Wiedergabeliste akzeptiert nur Titel von {source}"
@@ -5112,9 +5162,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Remove prefix"
 #~ msgstr "Präfix entfernen"
-
-#~ msgid "Server path"
-#~ msgstr "Serverpfad"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

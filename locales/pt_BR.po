@@ -284,8 +284,24 @@ msgstr "(segure para reproduzir aleatoriamente)"
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Você só precisa preencher as partes de e-mail e nome do aplicativo"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 hora"
+
+#, fuzzy
+#| msgid "Month"
+msgid "1 month"
+msgstr "Mês"
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "May {year}"
+msgid "1 year"
+msgstr "Maio de {year}"
 
 msgid "10 bands"
 msgstr "10 bandas"
@@ -483,6 +499,11 @@ msgstr "Todas as faixas"
 
 msgid "All"
 msgstr "Tudo"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Baixando"
 
 msgid "Allow remote connections"
 msgstr "Permitir conexões remotas"
@@ -1109,6 +1130,11 @@ msgstr "Não foi possível receber atualizações ao vivo"
 msgid "Could not save diagnostic log"
 msgstr "Não foi possível salvar o registro de diagnóstico"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not share: {error}"
+msgstr "Não foi possível abrir o arquivo: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Não foi possível atualizar o Rufin para {version}"
 
@@ -1260,6 +1286,11 @@ msgstr "Entrega"
 
 msgid "Descending"
 msgstr "Decrescente"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Direção"
 
 msgid "Detail track columns"
 msgstr "Colunas detalhadas da faixa"
@@ -1549,6 +1580,9 @@ msgstr "Expandir letras e visualizador"
 
 msgid "Expand sidebar"
 msgstr "Expandir barra lateral"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Explorar"
@@ -2094,11 +2128,19 @@ msgstr "Limite"
 msgid "Linear"
 msgstr "Linear"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Arquivo vinculado"
+
 msgid "Link exported file"
 msgstr "Vincular arquivo exportado"
 
 msgid "Link to file..."
 msgstr "Vincular ao arquivo..."
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Arquivo vinculado"
@@ -3678,6 +3720,11 @@ msgstr "Amostra do servidor"
 msgid "Server Settings"
 msgstr "Configurações do servidor"
 
+#, fuzzy
+#| msgid "System default"
+msgid "Server default"
+msgstr "Padrão do sistema"
+
 msgid "Server discovery failed: {error}"
 msgstr "A descoberta do servidor falhou: {error}"
 
@@ -4078,6 +4125,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Isto não está disponível"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "Esta playlist aceita apenas faixas de {source}"
