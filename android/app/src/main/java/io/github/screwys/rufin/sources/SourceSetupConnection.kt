@@ -32,6 +32,11 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         private set
     var discovery by mutableStateOf<DiscoveryUpdate?>(null)
         private set
+    /** What the source list's search found; null until the first search ends. */
+    var found by mutableStateOf<List<FoundServer>?>(null)
+        private set
+    var finding by mutableStateOf(false)
+        private set
     var choices by mutableStateOf<List<SourceChoice>>(emptyList())
         private set
     var profiles by mutableStateOf<List<SourceChoice>>(emptyList())
@@ -60,6 +65,8 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
                 providers = listOf("local" to "Local", "jellyfin" to "Jellyfin", "emby" to "Emby", "plex" to "Plex", "navidrome" to "Navidrome", "subsonic" to "OpenSubsonic", "webdav" to "WebDAV", "smb" to "SMB / Samba").map { (kind, title) -> kind to translate(title) }
                 sourceId?.let { form.load(withContext(Dispatchers.IO) { setup.editable(it) } ?: error(translate("Source is no longer available"))) }
                 ready = true
+                // Where the network needs no prompt, the list opens with what is on it.
+                if (sourceId == null && service.hasLocalNetworkAccess()) find(model.sources?.sources?.isEmpty() == true)
                 val subscription = setup.subscribeDiscovery()
                 discoverySubscription = subscription
                 launch {
@@ -94,11 +101,28 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         try { source.setHalfStars(id, enabled); form.halfStars = enabled }
         finally { source.destroy() }
     }
-    fun selectProvider(kind: String) {
+    fun selectProvider(kind: String, server: FoundServer? = null) {
         cancelAuthorization()
-        form = SourceForm().also { it.kind = kind }
+        form = SourceForm().also {
+            it.kind = kind
+            if (server != null && kind != "plex") { it.name = server.name; it.url = server.address; it.manualEmby = true }
+        }
         discovery = null
         if (kind == "plex") loadSavedAccounts()
+    }
+    /** Servers on this network and, on the first run, Rufin devices to join; Android asks for the network first. */
+    fun find(devices: Boolean) {
+        if (finding) return
+        scope.launch {
+            finding = true
+            try {
+                if (!model.connectedService().requestLocalNetworkAccess()) error(translate("Local network permission was denied"))
+                if (devices) model.connect.action(io.github.screwys.rufin.shared.rufin_core.Action.Discover)
+                found = bridge?.findServers().orEmpty()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { failure = error.userMessage() }
+            finally { finding = false }
+        }
     }
     private fun replaceAuthorization(session: SourceAuthorization) {
         auth?.let { it.cancel(); it.destroy() }

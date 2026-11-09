@@ -16,7 +16,7 @@ import { closeMenus } from "./menus.js";
 
 import { coverRequest, showLyrics, showPlayback } from "./player.js";
 
-import { showSourceProgress, updateSources } from "./sources.js";
+import { openWelcome, showSourceProgress, updateSources } from "./sources.js";
 import { refreshPins, resetPins } from "./pins.js";
 import { refreshContinuation, watch as watchConnect } from "./connect.js";
 
@@ -144,6 +144,8 @@ async function connect() {
   $("login-dialog").close();
   $("app").inert = false;
   updateSources(configured);
+  // The first run starts at the source list.
+  if (!configured.sources.length) openWelcome();
   const shown = rendered && $("content").querySelector("[data-page]");
   const initial = initialPage;
   initialPage = false;

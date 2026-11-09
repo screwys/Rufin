@@ -10,7 +10,7 @@
       <child><object class="AdwComboRow" id="saved_login"><property name="title" translatable="yes">Saved Plex Login</property><property name="visible">false</property><property name="model">saved_options</property></object></child>
       <child><object class="AdwEntryRow" id="username"><property name="title" translatable="yes">Username</property></object></child>
       <child><object class="AdwPasswordEntryRow" id="password"><property name="title" translatable="yes">Password</property></object></child>
-      <child><object class="AdwEntryRow" id="verification"><property name="title" translatable="yes">Verification Code (optional)</property></object></child>
+      <child><object class="AdwEntryRow" id="verification"><property name="title" translatable="yes">Verification Code</property></object></child>
     </object></child>
     <child><object class="GtkButton" id="reuse_login"><property name="label" translatable="yes">Use Saved Login</property><property name="visible">false</property><property name="halign">end</property></object></child>
     <child><object class="GtkBox" id="login_actions">
@@ -26,7 +26,7 @@
     <child><object class="AdwPreferencesGroup" id="connection">
       <child><object class="AdwComboRow" id="server"><property name="title" translatable="yes">Server</property><property name="model">server_options</property></object></child>
       <child><object class="AdwEntryRow" id="name"><property name="title" translatable="yes">Name</property></object></child>
-      <child><object class="AdwEntryRow" id="address"><property name="title" translatable="yes">Server Address Override (optional)</property></object></child>
+      <child><object class="AdwEntryRow" id="address"><property name="title" translatable="yes">Server Address Override</property></object></child>
       <child><object class="AdwSwitchRow" id="cert_verify"><property name="title" translatable="yes">Verify server certificate</property><property name="subtitle" translatable="yes">Turn off only for a server you control</property><property name="active">true</property></object></child>
     </object></child>
     <child><object class="GtkButton" id="change_profile"><property name="label" translatable="yes">Change Profile</property><property name="halign">end</property></object></child>

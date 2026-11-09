@@ -171,6 +171,8 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
 /// (`Changed::scope`), the startup selection's included.
 fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
+    // The first run's dialog moves to its last page once a source exists.
+    shell.update_add_server_dialog();
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
     if shell.products.source.selected_library().is_none() {
@@ -264,6 +266,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
             SourceOperation::Adding { .. } | SourceOperation::Failed { .. }
         )
         && shell.products.source.selected_library().is_some()
+        && !shell.shows_first_run()
     {
         shell.complete_add_server_dialog();
     }
@@ -283,12 +286,18 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
             if started_blocking && matches!(operation, SourceOperation::Adding { .. }) {
                 shell.close_preferences_dialog();
             }
+            shell.update_add_server_dialog();
             if !shell.has_active_mounted_route() {
                 shell.startup.route_revealed.set(false);
                 shell.render_startup_loading_view();
             }
         }
-        SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. } => {}
+        SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. } => {
+            // The first run's last page shows the refresh that follows the add.
+            if shell.shows_first_run() {
+                shell.update_add_server_dialog();
+            }
+        }
         SourceOperation::Failed {
             message, add_form, ..
         } => {

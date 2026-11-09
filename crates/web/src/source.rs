@@ -13,6 +13,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
         .route("/api/sources/local", post(add))
+        .route("/api/sources/found", get(found))
         .route("/api/sources/select", post(select))
         .route("/api/sources/library", post(select_library))
         .route("/api/sources/edit", get(editable))
@@ -457,6 +458,19 @@ async fn nextcloud_login(
             credentials: input.credentials,
         },
     )))
+}
+
+/// What the source list offers before any typing: this machine's music folder, when Rufin can
+/// read it, and the servers on its network.
+async fn found(State(products): State<ProductHandles>) -> Response<Body> {
+    let servers = products.source.find_servers().await;
+    let folder = rufin_core::runtime::source::music_folder()
+        .filter(|(_, readable)| *readable)
+        .map(|(folder, _)| folder);
+    json_response(
+        StatusCode::OK,
+        json!({"music_folder": folder, "servers": servers}),
+    )
 }
 
 async fn smb_shares(

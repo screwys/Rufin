@@ -530,6 +530,8 @@ fn form(
     name.set_text(&display_name);
     url.set_text(&value.settings.url);
     username.set_text(&value.settings.username);
+    set_required(&url, &tr("Server Address"), true);
+    set_required(&username, &tr("Username"), true);
     password.set_text(&value.secret);
     let submit = if editing { &save } else { &connect };
     connect_entry_row_activation(&name, submit);
@@ -594,11 +596,16 @@ fn form(
             }
             if let Some(row) = password.upgrade() {
                 row.set_visible(selected != 1);
-                row.set_title(&tr(if selected == 2 {
-                    "Bearer token"
-                } else {
-                    "Password"
-                }));
+                // A saved source keeps its secret when this stays empty.
+                set_required(
+                    &row,
+                    &tr(if selected == 2 {
+                        "Bearer token"
+                    } else {
+                        "Password"
+                    }),
+                    !editing,
+                );
             }
             if let Some(row) = domain.upgrade() {
                 row.set_sensitive(selected == 0);

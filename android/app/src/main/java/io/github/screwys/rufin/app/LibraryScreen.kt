@@ -49,6 +49,7 @@ import io.github.screwys.rufin.player.PlayerScreen
 import io.github.screwys.rufin.player.PlayerOutputSheet
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.sources.SourceSetupScreen
+import io.github.screwys.rufin.sources.SourceWelcome
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.browse.RandomPlaySheet
@@ -218,6 +219,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     // A phone on its side: a narrower sidebar that holds the player, as Spotify's does.
     val sidePlayer = width == ShellWidth.Expanded && configuration.screenHeightDp < 480
     var sources by rememberSaveable { mutableStateOf(false) }
+    // The first run opens source setup by itself, once.
+    var welcomed by rememberSaveable { mutableStateOf(false) }
+    val noSources = model.sources?.sources?.isEmpty() == true
+    LaunchedEffect(noSources) { if (noSources && !welcomed) { welcomed = true; sources = true } }
     var editSourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
     var outputs by rememberSaveable { mutableStateOf(false) }
@@ -660,7 +665,14 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     if (sources) Dialog(onDismissRequest = { model.closeSourceSetup(); sources = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        SourceSetupScreen(model, { model.closeSourceSetup(); sources = false }, editSourceId)
+        val close = { model.closeSourceSetup(); sources = false }
+        // Greets while there is no source; the pages keep it once the first one is being added.
+        val welcome = remember(sources) {
+            if (editSourceId != null || model.sources?.sources?.isEmpty() != true) null
+            else SourceWelcome(preferences, player, importBackup = { close(); openMore(MoreDestination.Privacy) },
+                join = { device -> close(); openMore(MoreDestination.Connect); model.connect.join(device) })
+        }
+        SourceSetupScreen(model, close, editSourceId, welcome = welcome)
     }
 }
 

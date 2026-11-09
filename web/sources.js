@@ -1,4 +1,4 @@
-import { openPreferences } from "./preferences.js";
+import { openPreferences, showSettings } from "./preferences.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
@@ -80,6 +80,8 @@ function showSourceProgress(value) {
         ? tr("{stage}: {completed} / {total}", { stage, completed: progress.completed, total: progress.total })
         : tr("{stage}: {completed}", { stage, completed: progress.completed });
   }
+  loadingLibrary = active;
+  showFirstLibrary();
   if (value.state === "failed") notice(value.message);
   if (
     value.state === "idle" &&
@@ -100,9 +102,99 @@ async function select(path, body, source = state.source) {
 }
 
 let editingSource = null;
+// The first run's pending add, settled by the source form's response.
+let firstSource = null;
 let integrationSaved = null;
 
-async function openSource(item = null, integration = null) {
+// The first run: the source list with what the Rufin machine found, then, while the first
+// library loads, the lookup switches. It follows GTK's first-run dialog.
+const sourceKinds = [
+  ["local", "Local"], ["jellyfin", "Jellyfin"], ["emby", "Emby"], ["navidrome", "Navidrome"],
+  ["open_subsonic", "OpenSubsonic"], ["web_dav", "WebDAV"], ["smb", "SMB / Samba"],
+];
+const kindIcon = (kind) => sourceIcon({ web_dav: "webdav", open_subsonic: "subsonic" }[kind] || kind);
+
+function welcomeRow(title, subtitle, image, action) {
+  const row = el("button", "pref-row welcome-row");
+  row.type = "button";
+  const label = el("span", "pref-label");
+  label.append(el("span", "", title), el("small", "", subtitle));
+  row.append(image, label, action);
+  return row;
+}
+
+async function findSources() {
+  const status = $("welcome-found-status");
+  status.textContent = tr("Searching Local Network");
+  const found = await api("/sources/found");
+  const rows = [];
+  if (found.music_folder) {
+    const add = el("span", "welcome-add primary", tr("Add"));
+    const row = welcomeRow(tr("Music folder"), found.music_folder, icon("rufin-folder-music-symbolic"), add);
+    row.addEventListener("click", () => addFirstSource(() => api("/sources/local", "POST", { paths: [found.music_folder] })));
+    rows.push(row);
+  }
+  for (const server of found.servers) {
+    const kind = sourceKinds.find(([kind]) => kind === server.kind);
+    // Plex signs in on the Rufin machine; the web has no form for it.
+    if (!kind) continue;
+    const row = welcomeRow(server.name, `${kind[1]}, ${server.address}`, kindIcon(server.kind), icon("rufin-go-next-symbolic"));
+    row.addEventListener("click", () => run(() => openSource(null, null, server)));
+    rows.push(row);
+  }
+  const again = button(tr("Search Again"), () => run(findSources), "rufin-view-refresh-symbolic", "pref-row welcome-row welcome-search");
+  again.append(document.createTextNode(tr("Search Again")));
+  $("welcome-found").replaceChildren(...rows, again);
+  status.textContent = found.servers.length ? "" : tr("No Servers Found");
+}
+
+function openWelcome() {
+  $("welcome-choices").hidden = false;
+  $("welcome-loading").hidden = true;
+  $("welcome-kinds").replaceChildren(...sourceKinds.map(([kind, title]) => {
+    const tile = el("button", "welcome-kind");
+    tile.type = "button";
+    tile.append(kindIcon(kind), el("span", "", tr(title)));
+    tile.addEventListener("click", () => run(() => openSource(null, null, { kind })));
+    return tile;
+  }));
+  if (!$("welcome-dialog").open) $("welcome-dialog").showModal();
+  run(findSources);
+}
+
+// Whether the first source is still being added, and whether its library is loading.
+let addingFirst = false;
+let loadingLibrary = false;
+function showFirstLibrary() {
+  const loading = addingFirst || loadingLibrary;
+  $("welcome-loading-title").textContent = tr(loading ? "While your library loads" : "Your library is ready");
+  $("welcome-progress").textContent = loadingLibrary ? $("source-progress-label").textContent : loading ? tr("Preparing library...") : "";
+}
+
+// Shows the loading page while `add` runs: its switches are the only thing to read meanwhile.
+async function addFirstSource(add) {
+  $("welcome-choices").hidden = true;
+  $("welcome-loading").hidden = false;
+  addingFirst = true;
+  showFirstLibrary();
+  if (!$("welcome-dialog").open) $("welcome-dialog").showModal();
+  run(showSettings);
+  try {
+    const result = await add();
+    state.source = result.id;
+    updateSources(await api("/sources"));
+    document.dispatchEvent(new Event("rufin-sources"));
+    navigate("Home");
+  } catch (error) {
+    openWelcome();
+    throw error;
+  } finally {
+    addingFirst = false;
+    showFirstLibrary();
+  }
+}
+
+async function openSource(item = null, integration = null, first = null) {
   integrationSaved = integration?.saved || null;
   if (item && integration) {
     const preset = await api(`/integrations/files/edit?${new URLSearchParams({ id: item.id })}`);
@@ -126,6 +218,11 @@ async function openSource(item = null, integration = null) {
   $("source-kind").disabled = !!editingSource || !!integration;
   $("source-kind").hidden = !!integration;
   document.querySelector('label[for="source-kind"]').hidden = !!integration;
+  if (first) {
+    $("source-kind").value = first.kind;
+    $("source-label").value = first.name || "";
+    $("server-url").value = first.address || "";
+  }
   sourceFields();
   const fileSource = !integration && editingSource && ["local", "smb", "webdav"].includes(editingSource.kind);
   $("source-playlist-save-row").hidden = !fileSource;
@@ -176,6 +273,8 @@ function sourceFields() {
     document.querySelector(`label[for="${id}"]`).hidden = kind === "plex";
   }
   const server = ["jellyfin", "emby", "navidrome", "open_subsonic"].includes(kind);
+  $("username").required = server;
+  $("password").required = false;
   $("local-url").hidden = !server;
   document.querySelector('label[for="local-url"]').hidden = !server;
   const files = kind === "web_dav" || kind === "smb";
@@ -278,6 +377,12 @@ function init() {
     }),
   );
   $("source-kind").addEventListener("change", sourceFields);
+  // An API key stands in for the username.
+  $("authentication").addEventListener("change", () => {
+    const server = ["jellyfin", "emby", "navidrome", "open_subsonic"].includes($("source-kind").value);
+    $("username").required = server && $("authentication").value !== "api_key";
+    $("password").required = server && $("authentication").value === "api_key";
+  });
   sourceFields();
   htmx.defineExtension("source-form", {
     onEvent(name, event) {
@@ -293,14 +398,33 @@ function init() {
   });
   $("source-form").addEventListener("htmx:beforeRequest", () => {
     $("source-error").textContent = "";
+    // The first source loads behind the first run's last page.
+    if (!sources.length && !editingSource && !integrationSaved) {
+      $("source-dialog").close();
+      run(() => addFirstSource(() => new Promise((resolve, reject) => { firstSource = { resolve, reject }; })));
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-open-source]")) openWelcome();
   });
   $("source-form").addEventListener("htmx:afterRequest", (event) =>
     run(async () => {
       const xhr = event.detail.xhr;
       if (!xhr.status) return;
       const result = JSON.parse(xhr.responseText);
+      const first = firstSource;
+      firstSource = null;
       if (!event.detail.successful) {
+        if (first) {
+          first.reject(new Error(result.error));
+          $("source-dialog").showModal();
+        }
         $("source-error").textContent = result.error;
+        return;
+      }
+      if (first) {
+        $("password").value = "";
+        first.resolve(result);
         return;
       }
       if (integrationSaved) {
@@ -427,6 +551,7 @@ function sourceInput() {
 }
 export {
   openSource,
+  openWelcome,
   showSourceProgress,
   sources,
   sourceIcon,

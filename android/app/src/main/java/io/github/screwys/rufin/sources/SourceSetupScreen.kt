@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,9 +30,12 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null, connectionsOnly: Boolean = false) {
+internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null, connectionsOnly: Boolean = false,
+    welcome: SourceWelcome? = null) {
     val setup = remember(model, sourceId) { model.sourceSetupSession(sourceId) }
     val form = setup.form
+    // The first source ends on the loading page instead of closing.
+    var loading by rememberSaveable { mutableStateOf(false) }
     val autofillManager = LocalAutofillManager.current
     var mapping by remember { mutableStateOf(false) }
     var saved by remember(setup) { mutableStateOf(false) }
@@ -40,9 +44,16 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     }
     val context = LocalContext.current
     val close: () -> Unit = { model.closeSourceSetup(); onClose() }
-    BackHandler(onBack = close)
+    val added: () -> Unit = { if (welcome != null) loading = true else close() }
+    // Back leaves a new source's form for the list, as the bar's arrow does.
+    val back: () -> Unit = { if (sourceId == null && form.kind != null) { setup.cancelAuthorization(); form.kind = null } else close() }
+    BackHandler(onBack = back)
+    if (loading && welcome != null) {
+        SourceLoadingPage(model, welcome, close)
+        return
+    }
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let { setup.folder(it, close) }
+        uri?.let { setup.folder(it, added) }
     }
     val browser: (String) -> Unit = { url ->
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -50,18 +61,23 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     }
     val canSubmit = when (form.kind) {
         "plex" -> sourceId != null || setup.authorized && setup.choices.isNotEmpty()
-        "emby" -> form.manualEmby && form.url.isNotBlank() || setup.authorized && setup.choices.isNotEmpty() || sourceId != null
+        "emby" -> form.manualEmby && form.url.isNotBlank() && form.username.isNotBlank()
+            || setup.authorized && setup.choices.isNotEmpty() || sourceId != null
         "peer" -> form.name.isNotBlank()
+        // A server needs its address and a username, or an API key in the username's place.
+        "jellyfin", "navidrome", "subsonic" -> setup.authorized || form.url.isNotBlank() &&
+            if (form.kind == "subsonic" && form.subsonicAuth == "api_key") form.secret.isNotBlank() else form.username.isNotBlank()
         else -> setup.authorized || form.url.isNotBlank()
     }
     if (mapping && sourceId != null) LocalAccessDialog(model, sourceId,
         onDismiss = { mapping = false }, onSaved = { mapping = false })
     Scaffold(topBar = {
-            TopAppBar(title = {
+            // The greeting has no bar: its own first line carries Skip.
+            if (welcome == null || form.kind != null) TopAppBar(title = {
                 Text(setup.providers.firstOrNull { it.first == form.kind }?.second ?: translate(
                     if (sourceId != null) "Edit Source" else if (connectionsOnly) "File connection" else "Add Source"))
             }, navigationIcon = {
-                IconButton({ if (sourceId == null && form.kind != null) { setup.cancelAuthorization(); form.kind = null } else close() }) {
+                IconButton(back) {
                     RufinIcon("rufin-go-previous-symbolic", translate("Back"))
                 }
             }, actions = {
@@ -74,7 +90,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     // Tells a password manager the login was sent, so it offers to save it under Rufin.
                     autofillManager?.commit()
                     saved = false
-                    setup.submit { if (sourceId == null) close() else saved = true }
+                    setup.submit { if (sourceId == null) added() else saved = true }
                 }, Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp), enabled = !setup.working && canSubmit) {
                     Text(translate(if (sourceId == null) "Connect" else if (saved) "Saved..." else "Save"))
@@ -97,22 +113,23 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
             }
             setup.failure?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
             if (!setup.ready) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { if (setup.failure == null) CircularProgressIndicator() }
-            else if (form.kind == null) LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
+            else if (form.kind == null && connectionsOnly) LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
                 item { SettingsGroup {
-                setup.providers.filter { !connectionsOnly || it.first in setOf("webdav", "smb") }.forEach { provider ->
+                setup.providers.filter { it.first in setOf("webdav", "smb") }.forEach { provider ->
                     SettingsRow(provider.second, leading = { SourceIcon(provider.first, Modifier.size(24.dp)) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) }, modifier = Modifier.clickable {
                             setup.selectProvider(provider.first)
-                            if (connectionsOnly) setup.form.integration = true
+                            setup.form.integration = true
                         })
                 }
                 } }
-            } else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            } else if (form.kind == null) SourceChoices(model, setup, welcome, Modifier.weight(1f), added, close)
+            else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (form.offersHalfStarSetting) SourceRatingSettings(setup)
                 SettingsGroup {
                     SettingsRow(translate("Music"), leading = { RufinIcon("rufin-folders-symbolic", null) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
-                        modifier = Modifier.clickable(enabled = !setup.working) { setup.music(close) })
+                        modifier = Modifier.clickable(enabled = !setup.working) { setup.music(added) })
                     SettingsRow(translate("Choose folder"), leading = { RufinIcon("rufin-folders-symbolic", null) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { chooseFolder.launch(null) })
@@ -134,7 +151,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                             }
                         } else {
                             SourceTextField("Username or email", form.username, { form.username = it }, !setup.working,
-                                autofill = ContentType.Username)
+                                autofill = ContentType.Username, required = true)
                             SourceTextField("Password", form.secret, { form.secret = it }, !setup.working, secret = true,
                                 autofill = ContentType.Password)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

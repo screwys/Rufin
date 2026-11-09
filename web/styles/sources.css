@@ -73,3 +73,93 @@
 .download-quality-controls output {
   font-variant-numeric: tabular-nums;
 }
+
+#welcome-dialog {
+  width: min(620px, calc(100% - 24px));
+  overflow: auto;
+}
+.welcome-header {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.welcome-header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+.welcome-icon {
+  width: 64px;
+  height: 64px;
+}
+#welcome-dialog .pref-group-header {
+  margin: 18px 0 8px;
+}
+#welcome-dialog .pref-group-header h4 {
+  font-size: 14px;
+}
+#welcome-found-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.welcome-row {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+}
+.welcome-row:hover {
+  background: var(--hover);
+}
+.welcome-row > .icon,
+.welcome-row > .source-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+.welcome-add {
+  border-radius: var(--radius);
+  padding: 6px 14px;
+}
+#welcome-found .welcome-search {
+  justify-content: center;
+  font-weight: 600;
+}
+#welcome-found .welcome-search > .icon,
+#welcome-found .welcome-row > .icon:last-child {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+#welcome-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.welcome-kind {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 12px 8px 10px;
+  border-radius: 12px;
+  background: var(--card-bg-color, var(--surface));
+  box-shadow: 0 0 0 1px var(--border-color, var(--line));
+}
+.welcome-kind:hover {
+  background: var(--hover);
+}
+.welcome-kind .source-icon {
+  width: 32px;
+  height: 32px;
+}
+.welcome-start {
+  justify-content: center;
+  margin-top: 20px;
+}
+
+/* A field the form cannot be sent without carries an asterisk on its label. */
+#source-form label:has(+ :required)::after {
+  content: " *";
+}

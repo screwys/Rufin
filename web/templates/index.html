@@ -527,7 +527,7 @@
           ><input
             id="server-url"
             placeholder="https://music.example.com"
-          /><label for="local-url">{{ localization::tr("Local Address (optional)") }}</label
+          /><label for="local-url">{{ localization::tr("Local Address") }}</label
           ><input
             id="local-url"
             placeholder="http://192.168.1.10:8096"
@@ -555,6 +555,36 @@
           ><button id="source-submit" type="submit" class="primary">{{ localization::tr("Add Source") }}</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="welcome-dialog" aria-labelledby="welcome-title">
+      <div id="welcome-choices">
+        <header class="welcome-header">
+          <img class="welcome-icon" src="/icons/rufin.svg" alt="" />
+          <h2 id="welcome-title">{{ localization::tr("Welcome to Rufin") }}</h2>
+          <p>{{ localization::tr("Choose where your music is. Add more places later in Preferences.") }}</p>
+        </header>
+        <div class="pref-group-header"><h4>{{ localization::tr("Found") }}</h4><span id="welcome-found-status" role="status"></span></div>
+        <div class="pref-group" id="welcome-found"></div>
+        <div class="pref-group-header"><h4>{{ localization::tr("Add Manually") }}</h4></div>
+        <div id="welcome-kinds"></div>
+      </div>
+      <div id="welcome-loading" hidden>
+        <header class="welcome-header">
+          <h2 id="welcome-loading-title"></h2>
+          <p id="welcome-progress" role="status"></p>
+        </header>
+        <div class="pref-group-header"><h4>{{ localization::tr("Online Lookups") }}</h4></div>
+        <p>{{ localization::tr("Rufin asks these services about the music you play. All of this can be changed later in Preferences.") }}</p>
+        <div class="pref-group">
+          {% call m::switch("/external_metadata_enabled", localization::tr("External metadata lookup"), localization::tr("Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata")) %}{% endcall %}
+          {% call m::switch("/external_lyrics_enabled", localization::tr("External lyrics lookup"), localization::tr("Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none")) %}{% endcall %}
+          {% call m::switch("/discord_presence_enabled", localization::tr("Discord Rich Presence"), localization::tr("Shows what you are playing on your Discord profile")) %}{% endcall %}
+          {% call m::switch("/private_mode", localization::tr("Private mode"), localization::tr("Turns off lookups, scrobbling, play reporting and update checks")) %}{% endcall %}
+        </div>
+        <div class="dialog-actions welcome-start">
+          <button type="button" class="primary" data-close="welcome-dialog">{{ localization::tr("Start Listening") }}</button>
+        </div>
+      </div>
     </dialog>
     <dialog id="playlist-transfer-dialog" aria-labelledby="playlist-transfer-title">
       <form id="playlist-transfer-form">

@@ -1674,6 +1674,45 @@ impl SourceOwner {
     }
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SourceOwner {
+    /// Every Jellyfin, Emby and Plex server that answers on the local network.
+    pub async fn find_servers(&self) -> Vec<crate::runtime::source::FoundServer> {
+        self.shared
+            .runtime
+            .spawn(async {
+                let find = |provider, kind: &'static str| async move {
+                    let mut servers =
+                        sources::discover_servers(provider, Duration::from_millis(1_500))
+                            .await
+                            .unwrap_or_default();
+                    // A server answers once per network it shares with this device. One row
+                    // each: this machine's own address when it runs here, else the first.
+                    servers.sort_by_key(|server| !server.address.contains("://127.0.0.1"));
+                    let mut seen = std::collections::HashSet::new();
+                    servers.retain(|server| {
+                        server.id.as_ref().is_none_or(|id| seen.insert(id.clone()))
+                    });
+                    servers
+                        .into_iter()
+                        .map(move |server| crate::runtime::source::FoundServer {
+                            kind: kind.to_owned(),
+                            name: server.name,
+                            address: server.address,
+                        })
+                };
+                let (jellyfin, emby, plex) = tokio::join!(
+                    find(sources::DiscoveryProvider::Jellyfin, "jellyfin"),
+                    find(sources::DiscoveryProvider::Emby, "emby"),
+                    find(sources::DiscoveryProvider::Plex, "plex"),
+                );
+                jellyfin.chain(emby).chain(plex).collect()
+            })
+            .await
+            .unwrap_or_default()
+    }
+}
+
 impl SourceOwner {
     pub fn configure_source(
         &self,

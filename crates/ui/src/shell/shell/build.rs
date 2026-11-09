@@ -161,6 +161,8 @@ pub async fn build(
         discovery_running: Cell::new(false),
         discovery_started: Cell::new(false),
         discovery_provider: Cell::new(rufin_core::runtime::source::DiscoveryProvider::Jellyfin),
+        found_servers: RefCell::new(None),
+        finding_servers: Cell::new(false),
         add_server: RefCell::new(None),
         refresh_feedback_generation: Rc::new(Cell::new(0)),
     });

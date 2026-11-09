@@ -368,13 +368,18 @@ impl LyricsPane {
         } else if loading && matches_current {
             LyricsPaneContent::Loading
         } else {
-            LyricsPaneContent::Empty(if settings.application.private_mode {
-                tr("Server lyrics are off in private mode")
-            } else if !settings.lyrics.preferences.external_lyrics_enabled {
-                tr("External lyric lookup is off")
-            } else {
-                tr("No lyrics")
-            })
+            // Private mode stops the lookup only; the source's own lyrics still load.
+            LyricsPaneContent::Empty(
+                if settings
+                    .lyrics
+                    .preferences
+                    .external_lyrics_network_allowed(settings.application.private_mode)
+                {
+                    tr("No lyrics")
+                } else {
+                    tr("External lyric lookup is off")
+                },
+            )
         };
         self.set_content(content, seek);
     }
