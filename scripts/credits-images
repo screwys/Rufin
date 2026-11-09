@@ -26,10 +26,7 @@ query($login: String!) {
     ) {
       nodes {
         privacyLevel
-        sponsorEntity {
-          ... on User { login avatarUrl(size: 128) }
-          ... on Organization { login avatarUrl(size: 128) }
-        }
+        sponsorEntity { ... on Actor { login avatarUrl(size: 128) } }
       }
     }
   }
