@@ -41,6 +41,8 @@ import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
@@ -136,14 +138,6 @@ internal fun settingsButtonColors() = ButtonDefaults.outlinedButtonColors(
     disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
 )
 
-@Composable
-internal fun SettingsReorderButtons(canMoveUp: Boolean, canMoveDown: Boolean, moveUp: () -> Unit, moveDown: () -> Unit) {
-    Row {
-        IconButton(moveUp, Modifier.size(40.dp), enabled = canMoveUp) { RufinIcon("rufin-go-up-symbolic", translate("Move up"), Modifier.size(20.dp)) }
-        IconButton(moveDown, Modifier.size(40.dp), enabled = canMoveDown) { RufinIcon("rufin-go-down-symbolic", translate("Move down"), Modifier.size(20.dp)) }
-    }
-}
-
 /** A row of a reorderable list; `toggleable` is false where its switch cannot change, such as
  * the last visible Home block. */
 internal data class SettingsReorderItem(val id: String, val title: String, val enabled: Boolean, val reorderable: Boolean = true,
@@ -215,10 +209,12 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (item.reorderable) 1f else .38f))
                 }
             }, trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SettingsReorderButtons(up, down, { move(id, true) }, { move(id, false) })
-                    Switch(item.enabled, { onToggle(id, it) }, Modifier.semantics { contentDescription = item.title }, enabled = item.toggleable)
-                }
+                Switch(item.enabled, { onToggle(id, it) }, Modifier.semantics { contentDescription = item.title }, enabled = item.toggleable)
+            // The handle drags; screen readers move a row a place at a time.
+            }, modifier = Modifier.semantics {
+                customActions = listOfNotNull(
+                    CustomAccessibilityAction(translate("Move up")) { move(id, true); true }.takeIf { up },
+                    CustomAccessibilityAction(translate("Move down")) { move(id, false); true }.takeIf { down })
             })
         }
     } }

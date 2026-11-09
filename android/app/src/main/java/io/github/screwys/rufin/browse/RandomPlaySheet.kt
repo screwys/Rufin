@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.settings.PreferenceChoice
+
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
@@ -42,7 +44,6 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     var filter by remember { mutableStateOf(PlayedFilter.ALL) }
     var genreTitle by remember { mutableStateOf("") }
     var genres by remember { mutableStateOf(false) }
-    var playedFilter by remember { mutableStateOf(false) }
     LaunchedEffect(library) {
         try {
             if (library == null) return@LaunchedEffect
@@ -91,35 +92,18 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
             SettingsRow(translate("Genre"), summary = genreTitle,
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(24.dp)) },
                 modifier = Modifier.clickable(enabled = settings != null) { genres = true })
-            SettingsRow(translate("Play filter"), summary = translate(when (filter) {
-                PlayedFilter.UNPLAYED -> "Only unplayed tracks"
-                PlayedFilter.PLAYED -> "Only played tracks"
-                else -> "All tracks"
-            }), trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(24.dp)) },
-                modifier = Modifier.clickable(enabled = settings != null) { playedFilter = true })
+            PreferenceChoice(translate("Play filter"), filter, listOf(PlayedFilter.ALL to translate("All tracks"),
+                PlayedFilter.UNPLAYED to translate("Only unplayed tracks"), PlayedFilter.PLAYED to translate("Only played tracks")),
+                enabled = { settings != null }) { filter = it }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ play(QueuePlacement.AfterCurrent) }, enabled = valid && model.pendingActions == 0) {
-                    RufinIcon("rufin-mail-forward-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Next"))
-                }
-                Button({ play(QueuePlacement.Replace(0UL)) }, enabled = valid && model.pendingActions == 0) {
-                    RufinIcon("rufin-media-playback-start-symbolic", null, Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(translate("Play"))
-                }
-                OutlinedButton({ play(QueuePlacement.End) }, enabled = valid && model.pendingActions == 0) {
-                    RufinIcon("rufin-go-last-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Later"))
-                }
+            // Play, Play Next and Play Later as the track menu's big buttons.
+            val ready = valid && model.pendingActions == 0
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BrowsePrimaryAction("rufin-media-playback-start-symbolic", "Play", Modifier.weight(1f), enabled = ready) { play(QueuePlacement.Replace(0UL)) }
+                BrowsePrimaryAction("rufin-mail-forward-symbolic", "Play Next", Modifier.weight(1f), enabled = ready) { play(QueuePlacement.AfterCurrent) }
+                BrowsePrimaryAction("rufin-go-last-symbolic", "Play Later", Modifier.weight(1f), enabled = ready) { play(QueuePlacement.End) }
             }
         }
-    }
-    if (playedFilter) ModalBottomSheet(onDismissRequest = { playedFilter = false }) {
-        Text(translate("Play filter"), Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
-        listOf(PlayedFilter.ALL to "All tracks", PlayedFilter.UNPLAYED to "Only unplayed tracks", PlayedFilter.PLAYED to "Only played tracks").forEach { (id, title) ->
-            ListItem(headlineContent = { Text(translate(title)) }, leadingContent = { RadioButton(filter == id, null) },
-                modifier = Modifier.clickable { filter = id; playedFilter = false })
-        }
-        Spacer(Modifier.height(24.dp))
     }
     if (genres) RandomGenreSheet(model, browse, { genres = false }) { route ->
         model.runAction {

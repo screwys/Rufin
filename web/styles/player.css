@@ -350,12 +350,8 @@
   position: relative;
   overflow: visible;
   border-radius: 50%;
-  background: color-mix(
-    in srgb,
-    var(--window-fg-color, var(--text)) 92%,
-    transparent
-  );
-  color: var(--window-bg-color, var(--bg));
+  background: var(--blue);
+  color: white;
 }
 
 .play-button .icon {
@@ -378,7 +374,7 @@
 }
 
 .play-button:hover {
-  background: var(--window-fg-color, var(--text));
+  background: color-mix(in srgb, var(--blue) 90%, white);
 }
 
 .seek-row {

@@ -1,6 +1,15 @@
 package io.github.screwys.rufin.activity
 
-import io.github.screwys.rufin.ui.ChoiceChip
+import io.github.screwys.rufin.ui.SegmentedPill
+import io.github.screwys.rufin.ui.ToolButton
+import io.github.screwys.rufin.ui.PageLoading
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 
 import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsGroup
@@ -61,37 +70,47 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                     Modifier.fillMaxSize().blur(32.dp), alpha = .15f, contentScale = ContentScale.Crop)
             }
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PlayerIconButton("rufin-go-previous-symbolic", "Previous", { more.movePeriod(true) })
-                    TextButton({ periods = true }, Modifier.weight(1f)) {
-                        Text(more.reportTitle.takeIf { more.reportPeriod == more.selectedPeriod } ?: more.selectedPeriod.key)
+                // The period in a pill between its steps, the tools beside it, and Month or Year under them.
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 10.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(Modifier.weight(1f).height(44.dp), shape = CircleShape, color = colors.surfaceContainerHigh) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlayerIconButton("rufin-go-previous-symbolic", "Previous", { more.movePeriod(true) }, iconSize = 20.dp)
+                            Text(more.reportTitle.takeIf { more.reportPeriod == more.selectedPeriod } ?: more.selectedPeriod.key,
+                                Modifier.weight(1f).clip(CircleShape).clickable { periods = true }.padding(vertical = 10.dp),
+                                textAlign = TextAlign.Center, style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                            PlayerIconButton("rufin-go-next-symbolic", "Next", { more.movePeriod(false) }, iconSize = 20.dp)
+                        }
                     }
-                    PlayerIconButton("rufin-go-next-symbolic", "Next", { more.movePeriod(false) })
-                    PlayerIconButton("rufin-sliders-2-symbolic", "Customize display", { customize = true })
-                    IconButton({ more.exportOverview(colors.surface.luminance() < .5f, colors.onSurface.toArgb(),
-                        colors.surface.toArgb(), colors.primary.toArgb()) },
-                        enabled = more.reportPeriod == more.selectedPeriod && more.reportError == null && !more.reportLoading && !more.exporting) {
-                        if (more.exporting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else RufinIcon("rufin-image-x-generic-symbolic", translate("Export PNG"))
+                    ToolButton("rufin-sliders-2-symbolic", "Customize display") { customize = true }
+                    Box(contentAlignment = Alignment.Center) {
+                        ToolButton("rufin-image-x-generic-symbolic", "Export PNG",
+                            more.reportPeriod == more.selectedPeriod && more.reportError == null && !more.reportLoading && !more.exporting) {
+                            more.exportOverview(colors.surface.luminance() < .5f, colors.onSurface.toArgb(),
+                                colors.surface.toArgb(), colors.primary.toArgb())
+                        }
+                        if (more.exporting) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp)
                     }
                 }
-                Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip(!more.yearly, { more.chooseYearly(false) }, label = { Text(translate("Month")) })
-                    ChoiceChip(more.yearly, { more.chooseYearly(true) }, label = { Text(translate("Year")) })
+                SegmentedPill(listOf(false, true), more.yearly, more::chooseYearly,
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), equal = true) { yearly, _ ->
+                    Text(translate(if (yearly) "Year" else "Month"), style = MaterialTheme.typography.titleSmall)
                 }
                 if (more.reportLoading && report != null) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (more.reportError != null) ErrorRow(translate("Could not load listening overview"), translate("Retry"), more::retryOverview)
-                if (report == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (more.reportError == null) CircularProgressIndicator()
-                } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp + LocalPlayerBottomPadding.current), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (report == null) { if (more.reportError == null) PageLoading() }
+                else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp + LocalPlayerBottomPadding.current),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)) {
                     item {
                         val headline = if (preferences?.showRufinInHeadline != false)
                             translate("Your {period} in Rufin") else translate("Your {period}")
-                        Text(headline.replace("{period}", more.reportTitle), style = MaterialTheme.typography.headlineSmall)
+                        Text(headline.replace("{period}", more.reportTitle), style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.ExtraBold)
                         val compare = preferences?.showComparison != false
                         fun change(current: Long, previous: Long) = if (!compare || previous == 0L) "" else
-                            "(%+.0f%%)".format((current.toDouble() - previous) * 100 / previous)
-                        Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            "%+.0f%%".format((current.toDouble() - previous) * 100 / previous)
+                        Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OverviewStat("rufin-history-symbolic", "Hours", "%.1f".format(report.totals.durationMillis / 3600000.0),
                                     change(report.totals.durationMillis, report.previous.durationMillis), Modifier.weight(1f))
@@ -105,46 +124,68 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                                     change(report.totals.tracks, report.previous.tracks), Modifier.weight(1f))
                             }
                         }
-                        if (report.totals.plays == 0L) Text(translate("No listening activity in this period"), Modifier.padding(vertical = 16.dp))
+                        if (report.totals.plays == 0L) Text(translate("No listening activity in this period"), Modifier.padding(top = 16.dp),
+                            color = colors.onSurfaceVariant)
                     }
-                    if (preferences?.tracks != false && report.tracks.isNotEmpty()) {
-                        item { Text(translate("Top tracks"), style = MaterialTheme.typography.titleLarge) }
-                        items(report.tracks.take(limit), key = { "track:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.title, "${row.artist} · ${row.album}", row.state.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.title, "track", more.reportPeriod!!.key)
+                    if (preferences?.tracks != false && report.tracks.isNotEmpty()) item("tracks") {
+                        SettingsGroup(translate("Top tracks")) {
+                            report.tracks.take(limit).forEachIndexed { rank, row ->
+                                OverviewRow(rank + 1, row.title, "${row.artist} · ${row.album}", row.state.playCount, row.artworkBinding, player) {
+                                    model.openOverview(row.mediaUri, row.title, "track", more.reportPeriod!!.key)
+                                }
                             }
                         }
                     }
-                    if (preferences?.albums != false && report.albums.isNotEmpty()) {
-                        item { Text(translate("Top albums"), style = MaterialTheme.typography.titleLarge) }
-                        items(report.albums.take(limit), key = { "album:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.title, row.artist, row.state.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.title, "album", more.reportPeriod!!.key)
+                    if (preferences?.albums != false && report.albums.isNotEmpty()) item("albums") {
+                        SettingsGroup(translate("Top albums")) {
+                            report.albums.take(limit).forEachIndexed { rank, row ->
+                                OverviewRow(rank + 1, row.title, row.artist, row.state.playCount, row.artworkBinding, player) {
+                                    model.openOverview(row.mediaUri, row.title, "album", more.reportPeriod!!.key)
+                                }
                             }
                         }
                     }
-                    if (preferences?.artists != false && report.artists.isNotEmpty()) {
-                        item { Text(translate("Top artists"), style = MaterialTheme.typography.titleLarge) }
-                        items(report.artists.take(limit), key = { "artist:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.name, "", row.state.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.name, "artist", more.reportPeriod!!.key)
+                    if (preferences?.artists != false && report.artists.isNotEmpty()) item("artists") {
+                        SettingsGroup(translate("Top artists")) {
+                            report.artists.take(limit).forEachIndexed { rank, row ->
+                                OverviewRow(rank + 1, row.name, "", row.state.playCount, row.artworkBinding, player) {
+                                    model.openOverview(row.mediaUri, row.name, "artist", more.reportPeriod!!.key)
+                                }
                             }
                         }
                     }
-                    if (preferences?.genres != false && report.genres.isNotEmpty()) {
-                        item { Text(translate("Top genres"), style = MaterialTheme.typography.titleLarge) }
-                        items(report.genres.take(limit), key = { it.name }) { genre -> Column {
-                            Text("${genre.name} · ${genre.plays}")
-                            LinearProgressIndicator(progress = { genre.plays.toFloat() / report.genres.first().plays.coerceAtLeast(1) }, modifier = Modifier.fillMaxWidth())
-                        } }
+                    if (preferences?.genres != false && report.genres.isNotEmpty()) item("genres") {
+                        SettingsGroup(translate("Top genres")) {
+                            val most = report.genres.first().plays.coerceAtLeast(1)
+                            report.genres.take(limit).forEach { genre ->
+                                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(5.dp), color = colors.surfaceContainer) {
+                                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(genre.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis)
+                                            PlayCount(genre.plays)
+                                        }
+                                        LinearProgressIndicator(progress = { genre.plays.toFloat() / most },
+                                            Modifier.fillMaxWidth().height(6.dp), drawStopIndicator = {}, gapSize = 0.dp,
+                                            strokeCap = StrokeCap.Round)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    if (periods) ModalBottomSheet({ periods = false }) { LazyColumn {
-        items(more.periods, key = { it.key }) { period -> ListItem(headlineContent = { Text(period.key) }, modifier = Modifier.clickable { more.choosePeriod(period); periods = false }) }
-    } }
+    if (periods) ModalBottomSheet({ periods = false }) {
+        LazyColumn(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            items(more.periods, key = { it.key }) { period ->
+                val picked = period == more.selectedPeriod
+                SettingsRow(period.key, selected = picked, modifier = Modifier.clickable { more.choosePeriod(period); periods = false })
+            }
+        }
+    }
     if (customize) ModalBottomSheet({ customize = false }) {
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -171,17 +212,35 @@ internal fun OverviewPreferences(more: MoreConnection) {
     }
 }
 
+/** A total as a tile: its icon in an accent circle, the number large, and how it changed. */
 @Composable
 private fun OverviewStat(icon: String, label: String, value: String, comparison: String, modifier: Modifier = Modifier) {
-    Surface(modifier, shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            RufinIcon(icon, null, Modifier.size(24.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(value, style = MaterialTheme.typography.headlineMedium)
-                Text(translate(label), style = MaterialTheme.typography.labelMedium)
-                if (comparison.isNotEmpty()) Text(comparison, style = MaterialTheme.typography.bodySmall)
+    val colors = MaterialTheme.colorScheme
+    Surface(modifier, shape = RoundedCornerShape(20.dp), color = colors.surfaceContainerHigh) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(36.dp).clip(CircleShape).background(colors.primary), contentAlignment = Alignment.Center) {
+                    RufinIcon(icon, null, Modifier.size(18.dp), colors.onPrimary, glyph = true)
+                }
+                Spacer(Modifier.weight(1f))
+                if (comparison.isNotEmpty()) Text(comparison, style = MaterialTheme.typography.labelLarge, color = colors.primary)
             }
+            Column {
+                Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(translate(label), style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** How often something played, as a small pill. */
+@Composable
+private fun PlayCount(plays: Long) {
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            RufinIcon("rufin-media-playback-start-symbolic", null, Modifier.size(12.dp), glyph = true)
+            Text(plays.toString(), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -194,11 +253,15 @@ private fun OverviewSwitch(more: MoreConnection, label: String, checked: Boolean
         trailing = { Switch(checked, null, enabled = enabled && more.bridge != null) })
 }
 
+/** A ranked entry in its section's box: the place, the cover, the names and the plays. */
 @Composable
-private fun OverviewRow(title: String, subtitle: String, plays: Long, binding: ByteArray?, player: PlayerConnection, open: () -> Unit) {
+private fun OverviewRow(rank: Int, title: String, subtitle: String, plays: Long, binding: ByteArray?, player: PlayerConnection, open: () -> Unit) {
     val artwork = rememberArtwork(binding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
-    ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) }, trailingContent = { Text(plays.toString()) },
-        leadingContent = { Artwork(artwork, Modifier.size(48.dp).clip(CoverShape)) },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.clickable(onClick = open))
+    SettingsRow(title, summary = subtitle.ifBlank { null }, leading = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(rank.toString(), Modifier.width(20.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Artwork(artwork, Modifier.size(48.dp).clip(CoverShape))
+        }
+    }, trailing = { PlayCount(plays) }, modifier = Modifier.clickable(onClick = open))
 }

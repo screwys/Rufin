@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.RufinSlider
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -171,7 +173,7 @@ private fun SleepTimerPanel(player: PlayerConnection, timer: SleepTimerView?, te
         val most = if (tracks) 20f else 120f
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             IconButton({ custom = (custom - 1).coerceAtLeast(1f) }) { RufinIcon("rufin-value-decrease-symbolic", translate("Less")) }
-            Slider(custom, { custom = it.roundToInt().toFloat() }, Modifier.weight(1f), valueRange = 1f..most)
+            RufinSlider(custom, { custom = it.roundToInt().toFloat() }, Modifier.weight(1f), valueRange = 1f..most)
             IconButton({ custom = (custom + 1).coerceAtMost(most) }) { RufinIcon("rufin-list-add-symbolic", translate("More")) }
             Text(if (tracks) custom.roundToInt().toString() else translate("{minutes} min").replace("{minutes}", custom.roundToInt().toString()),
                 Modifier.widthIn(min = 52.dp), textAlign = TextAlign.End, fontWeight = FontWeight.SemiBold)

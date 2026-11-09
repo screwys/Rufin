@@ -1,5 +1,19 @@
 package io.github.screwys.rufin.browse
 
+import androidx.compose.ui.semantics.selected
+
+import androidx.compose.ui.semantics.semantics
+
+import androidx.compose.foundation.verticalScroll
+
+import androidx.compose.foundation.rememberScrollState
+
+import io.github.screwys.rufin.settings.SettingsSwitch
+
+import io.github.screwys.rufin.settings.SettingsRow
+
+import io.github.screwys.rufin.settings.SettingsGroup
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -136,18 +150,19 @@ internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection
                     onEdit = { editing = true })
             }
         }
+        // As the page's own sort sheet: the fields in one box, the picked one highlighted, and a switch.
         if (sorting) ModalBottomSheet({ sorting = false }) {
-            Text(translate("Sort by"), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold)
-            SortOption(translate("Playlist order"), page.options.sort == null) { page.options.sort = null; page.options.descending = false; sorting = false }
-            // Playlist order is the position sort; "#" would offer it twice.
-            page.sortFields.filter { it.id != io.github.screwys.rufin.shared.library.LibraryField.ROW_INDEX }.forEach { field ->
-                SortOption(field.title, page.options.sort == field.id) { page.options.sort = field.id; sorting = false }
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                SettingsGroup(translate("Sort by")) {
+                    SortOption(translate("Playlist order"), page.options.sort == null) { page.options.sort = null; page.options.descending = false; sorting = false }
+                    // Playlist order is the position sort; "#" would offer it twice.
+                    page.sortFields.filter { it.id != io.github.screwys.rufin.shared.library.LibraryField.ROW_INDEX }.forEach { field ->
+                        SortOption(field.title, page.options.sort == field.id) { page.options.sort = field.id; sorting = false }
+                    }
+                }
+                SettingsGroup { SettingsSwitch(translate("Reverse order"), page.options.descending) { page.options.descending = it } }
             }
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-            ListItem(headlineContent = { Text(translate("Reverse order")) },
-                trailingContent = { Switch(page.options.descending, { page.options.descending = it }) })
-            Spacer(Modifier.navigationBarsPadding().height(12.dp))
         }
         if (adding) PlaylistPickerSheet(model, browse, playlist, player, selectionOf = { selection() }) { adding = false }
         if (editing) io.github.screwys.rufin.metadata.MetadataEditorScreen(model, null,
@@ -157,11 +172,7 @@ internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection
 
 @Composable
 private fun SortOption(title: String, selected: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(50.dp).clickable(onClick = onClick).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-        if (selected) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(16.dp), MaterialTheme.colorScheme.primary)
-    }
+    SettingsRow(title, selected = selected, modifier = Modifier.semantics { this.selected = selected }.clickable(onClick = onClick))
 }
 
 /** A Select mode's round mark in front of a row's artwork. */

@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.R
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
@@ -54,7 +56,7 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
     LaunchedEffect(selecting) { if (!selecting) picked = emptySet() }
     if (selecting) BackHandler(onBack = onSelectEnd)
     if (rows.itemSnapshotList.items.isEmpty() && (page.loading || rows.loadState.refresh is LoadState.Loading)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        PageLoading()
         return
     }
     val pins = rows.itemSnapshotList.items.mapNotNull { it.row.pin }

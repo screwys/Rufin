@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import android.content.Intent
@@ -161,7 +163,7 @@ internal fun MediaDetailsDialog(
                             }
                         }
                     }
-                } ?: Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } ?: PageLoading(Modifier.fillMaxSize().padding(padding))
             }
         }
         if (editing) MetadataEditorScreen(model, editor) { editing = false; revision++ }

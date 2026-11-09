@@ -34,7 +34,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     val state = model.sources
     var bridge by remember { mutableStateOf<SourceOwner?>(null) }
     var connections by remember { mutableStateOf<List<FileIntegration>>(emptyList()) }
-    var subtitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var subtitles by remember { mutableStateOf<Map<String, String>?>(null) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
@@ -62,18 +62,16 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
     SettingsPage(embedded = embedded) {
-        if (!connectionsOnly) {
+        // The rows wait for their lines, so the page draws once; without a running library they show their names.
+        if (!connectionsOnly && (subtitles != null || !model.ready)) {
         SettingsGroup(translate("Sources")) {
         val sources = state?.sources.orEmpty()
         sources.forEachIndexed { index, source -> key(source.id) {
             val selected = state?.selectedSourceId == source.id
-            SettingsRow(source.name, summary = subtitles[source.id],
+            SettingsRow(source.name, summary = subtitles?.get(source.id),
                 selected = selected,
                 leading = { SourceIcon(source.kind, Modifier.size(24.dp)) }, trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (selected) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(20.dp))
-                        RufinIcon("rufin-go-next-symbolic", translate("Edit Source"), Modifier.size(20.dp))
-                    }
+                    RufinIcon("rufin-go-next-symbolic", translate("Edit Source"), Modifier.size(20.dp))
                 }, modifier = Modifier.semantics { this.selected = selected }.clickable { onEdit(source.id) })
         } }
             SettingsRow(translate("Add Source"),

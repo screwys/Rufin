@@ -148,9 +148,9 @@ internal class BrowsePage(
         } ?: return@runAction
         showDisplay(display, true)
     }
-    fun moveField(field: LibraryField, up: Boolean) = connection.runAction {
+    fun reorderField(field: LibraryField, target: LibraryField, after: Boolean) = connection.runAction {
         val display = withContext(Dispatchers.IO) {
-            browse.library?.moveBrowseField(location.route, options.category, field, up)
+            browse.library?.reorderBrowseField(location.route, options.category, field, target, after)
         } ?: return@runAction
         showDisplay(display, true)
     }

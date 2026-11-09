@@ -1,5 +1,13 @@
 package io.github.screwys.rufin.browse
 
+import androidx.compose.ui.unit.toSize
+
+import androidx.compose.ui.geometry.Size
+
+import androidx.compose.ui.graphics.drawscope.DrawScope
+
+import androidx.compose.ui.draw.drawBehind
+
 
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.library.LyricsSnippet
@@ -374,7 +382,7 @@ private fun HomeContent(
                     } else LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
                         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(section.items, key = ::browseItemKey) { item ->
-                            CoverCard(item, player, Modifier.width(150.dp), onMenu, onMenu, marquee = true)
+                            CoverCard(item, player, Modifier.width(150.dp), onMenu, onMenu, oneLine = true)
                         }
                     }
                 }
@@ -437,7 +445,7 @@ private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu
             scope.launch { pager.animateScrollToPage(target) }
             true
         }, key = { shown[it].row.key + it }) { page ->
-        HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio)
+        HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio, page == 1)
     }
 }
 
@@ -445,6 +453,8 @@ private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu
 @Composable
 private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (BrowseItem) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onPlay: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
+    /** The album the band shows now, not one a swipe brings in beside it. */
+    shown: Boolean,
 ) {
     val projected = favoriteItem(player.model, item)
     val bar = LocalOverlayBarHeight.current
@@ -452,10 +462,14 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
         // Phones: a 120 dp cover; wider panes grow it to 196 dp, as GTK's Home does.
         val cover = ((maxWidth - 32.dp) * .3f).coerceIn(112.dp, 196.dp)
         val artwork = rememberBrowseArtwork(item, player, cover)
+        // The bar over the band draws this band, at its place and size, once the page moves under it.
+        var bandSize by remember { mutableStateOf(Size.Zero) }
+        val bandSlot = LocalHomeBand.current
+        if (shown) SideEffect { bandSlot?.value = HomeBandLook(artwork.image?.band, bandSize) }
         Column(Modifier.fillMaxWidth()) {
             // The band reaches past the cover's middle, or further when the title, artist and facts need it
             // (a large font), so they always end just above its edge; one layout pass decides it.
-            Box(Modifier.fillMaxWidth().then(showcaseBand(artwork.image?.band))) {
+            Box(Modifier.fillMaxWidth().onSizeChanged { bandSize = it.toSize() }.then(showcaseBand(artwork.image?.band))) {
                 Column(Modifier.fillMaxWidth().padding(start = 16.dp + cover + 16.dp, end = 16.dp, top = bar + 24.dp, bottom = 12.dp)
                     .heightIn(min = cover * .9f - 20.dp), verticalArrangement = Arrangement.Bottom) {
                     CompositionLocalProvider(LocalContentColor provides OnBand) {
@@ -602,15 +616,23 @@ private fun showcaseColors(key: String): List<Color> {
 
 /** A page's band: its cover's colours (`PlayerArtwork.band`) at 135°, as CSS places them,
  *  darker toward the edge the cover overlaps; a neutral dark until the cover has loaded. */
-internal fun showcaseBand(stops: List<Color>?): Modifier = Modifier.drawWithCache {
+internal fun showcaseBand(stops: List<Color>?): Modifier = Modifier.drawBehind { drawBand(stops, size) }
+
+/** The band of `stops` as a band of `area` draws it from this layout's top-left corner. */
+internal fun DrawScope.drawBand(stops: List<Color>?, area: Size) {
     val colors = stops ?: neutralBand
-    val reach = (size.width + size.height) / 4f
-    val centre = Offset(size.width / 2f, size.height / 2f)
-    val brush = Brush.linearGradient(0f to colors[0], .58f to colors[1], 1f to colors[2],
-        start = centre - Offset(reach, reach), end = centre + Offset(reach, reach))
-    val shade = Brush.verticalGradient(.3f to Color.Transparent, 1f to Color.Black.copy(alpha = .3f))
-    onDrawBehind { drawRect(brush); drawRect(shade) }
+    val reach = (area.width + area.height) / 4f
+    val centre = Offset(area.width / 2f, area.height / 2f)
+    drawRect(Brush.linearGradient(0f to colors[0], .58f to colors[1], 1f to colors[2],
+        start = centre - Offset(reach, reach), end = centre + Offset(reach, reach)))
+    drawRect(Brush.verticalGradient(.3f to Color.Transparent, 1f to Color.Black.copy(alpha = .3f), startY = 0f, endY = area.height))
 }
+
+/** Home's showcase band as the bar over it draws it: its colours and its size. */
+internal class HomeBandLook(val stops: List<Color>?, val size: Size)
+
+/** Where Home's showcase tells the bar over it how its band looks. */
+internal val LocalHomeBand = compositionLocalOf<MutableState<HomeBandLook?>?> { null }
 
 private val neutralBand = listOf(Color(0xFF2D3036), Color(0xFF282A30), Color(0xFF212328))
 
@@ -652,12 +674,13 @@ private fun BrowseCover(item: BrowseItem, artwork: Cover, modifier: Modifier) {
 @Composable
 internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Modifier,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    marquee: Boolean = false,
+    /** Home's cards: a line each for the title and its labels, cut short rather than sliding, as only the showcase slides. */
+    oneLine: Boolean = false,
 ) {
     val shown = favoriteItem(player.model, item)
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
-        BrowseSwipeActions(item, !marquee) {
+        BrowseSwipeActions(item, !oneLine) {
         Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).combinedClickable(onClick = { onActivate(item) },
             onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
@@ -666,13 +689,13 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Cards carry no download badge; list rows do.
-                BrowseTitle(shown, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
-                    style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee, showDownloadBadge = false)
+                BrowseTitle(shown, Modifier.weight(1f), maxLines = if (oneLine) 1 else 2,
+                    style = MaterialTheme.typography.titleSmall, player = player, showDownloadBadge = false)
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
             // The labels under the title: the list's grid fields, one per line.
             shown.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
-                Text(line, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
+                Text(line, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
@@ -785,7 +808,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
                 if (item.row.isTrack && item.row.durationMillis > 0UL) Text(item.row.durationText,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
-                    ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })
+                    ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(36.dp), iconSize = 20.dp)
         }
     }
     }

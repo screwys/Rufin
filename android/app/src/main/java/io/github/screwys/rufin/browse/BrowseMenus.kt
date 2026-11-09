@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.ui.ChoiceChip
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
@@ -24,7 +23,12 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.R
 import io.github.screwys.rufin.ui.rufinMarquee
-import io.github.screwys.rufin.ui.PagerTabIndicator
+import io.github.screwys.rufin.ui.SegmentedPill
+import io.github.screwys.rufin.settings.SettingsGroup
+import io.github.screwys.rufin.settings.SettingsRow
+import io.github.screwys.rufin.settings.SettingsSwitch
+import io.github.screwys.rufin.settings.SettingsReorderRows
+import io.github.screwys.rufin.settings.SettingsReorderItem
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.MediaNavigationSheet
@@ -32,6 +36,12 @@ import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -49,6 +59,7 @@ import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import io.github.screwys.rufin.shared.rufin_core.Share
 import io.github.screwys.rufin.player.ShareCardStyle
@@ -73,8 +84,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -123,88 +132,85 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
     val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options.descending
     val tabs = if (page?.supportsFavoriteFilter == true || page?.supportsDownloadedFilter == true)
         listOf("Filter", "Sort", "Display") else listOf("Sort", "Display")
-    val pager = rememberPagerState { tabs.size }
-    val selectedPage by remember { derivedStateOf { pager.targetPage } }
-    val scope = rememberCoroutineScope()
+    var shown by remember { mutableIntStateOf(0) }
     val reduceMotion = LocalReduceMotion.current
+    val swipe = with(LocalDensity.current) { 48.dp.toPx() }
     ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // As Mihon's: the sheet is as tall as the tab it shows, up to most of the screen.
         Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .85f)) {
-            PrimaryTabRow(selectedTabIndex = selectedPage, indicator = { PagerTabIndicator(pager) }) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(selectedPage == index, { scope.launch { if (reduceMotion) pager.scrollToPage(index) else pager.animateScrollToPage(index) } },
-                        text = { Text(translate(title)) })
-                }
+            SegmentedPill(tabs, tabs[shown], { shown = tabs.indexOf(it) },
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp), equal = true) { tab, _ ->
+                Text(translate(tab), style = MaterialTheme.typography.titleSmall)
             }
-            HorizontalPager(pager, Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) { tabIndex ->
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    if (tabs[tabIndex] == "Filter") {
-                        if (page?.supportsFavoriteFilter == true && options != null) {
-                            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(translate("Favorites")) },
-                                leadingContent = { Checkbox(options.favoritesOnly, null) },
-                                modifier = Modifier.toggleable(options.favoritesOnly, role = Role.Checkbox) { options.favoritesOnly = it })
+            // The picked tab slides straight in, from the side it sits on, while the sheet takes its height;
+            // a swipe moves to the tab beside.
+            val duration = if (reduceMotion) 0 else 280
+            AnimatedContent(shown, Modifier.fillMaxWidth().pointerInput(tabs.size) {
+                var distance = 0f
+                detectHorizontalDragGestures(onDragStart = { distance = 0f }, onHorizontalDrag = { _, amount -> distance += amount },
+                    onDragEnd = { if (distance < -swipe) shown = (shown + 1).coerceAtMost(tabs.lastIndex)
+                        else if (distance > swipe) shown = (shown - 1).coerceAtLeast(0) })
+            }, transitionSpec = {
+                val forward = targetState > initialState
+                val slide = tween<IntOffset>(duration, easing = FastOutSlowInEasing)
+                (slideInHorizontally(slide) { if (forward) it else -it } + fadeIn(tween(duration))) togetherWith
+                    (slideOutHorizontally(slide) { if (forward) -it else it } + fadeOut(tween(duration / 2))) using
+                    SizeTransform(clip = true) { _, _ -> tween(duration, easing = FastOutSlowInEasing) }
+            }, contentAlignment = Alignment.TopStart, label = "sortSheetTab") { tabIndex ->
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    if (tabs[tabIndex] == "Filter") SettingsGroup {
+                        if (page?.supportsFavoriteFilter == true && options != null)
+                            SettingsSwitch(translate("Favorites"), options.favoritesOnly) { options.favoritesOnly = it }
+                        if (page?.supportsDownloadedFilter == true && options != null)
+                            SettingsSwitch(translate("Downloaded"), options.downloadedOnly) { options.downloadedOnly = it }
+                    } else if (tabs[tabIndex] == "Sort") SettingsGroup {
+                        // The picked field shows its direction; picking it again turns it round.
+                        page?.sortFields.orEmpty().forEach { field ->
+                            val isSelected = selected == field.id
+                            SettingsRow(field.title, selected = isSelected, trailing = if (!isSelected) null else ({
+                                RufinIcon(if (descending) "rufin-go-down-symbolic" else "rufin-go-up-symbolic", null,
+                                    Modifier.size(20.dp), MaterialTheme.colorScheme.primary)
+                            }), modifier = Modifier.semantics { this.selected = isSelected }
+                                .clickable { page?.chooseSort(field.id, if (isSelected) !descending else descending) })
                         }
-                        if (page?.supportsDownloadedFilter == true && options != null) {
-                            ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(translate("Downloaded")) },
-                                leadingContent = { Checkbox(options.downloadedOnly, null) },
-                                modifier = Modifier.toggleable(options.downloadedOnly, role = Role.Checkbox) { options.downloadedOnly = it })
+                    } else (options?.displaySettings ?: page?.displaySettings)?.let { display ->
+                        // A list with one layout has no choice to offer.
+                        if (display.layouts.size > 1) DisplayChoices("Layout", display.layouts, display.layout, { translate(when (it) {
+                            LibraryLayout.ROW -> "Rows"; LibraryLayout.GRID -> "Grid"; LibraryLayout.DETAIL -> "Detail"
+                        }) }) { layout ->
+                            page?.chooseDisplay(layout, display.size, display.gridSpacing)
                         }
-                    } else if (tabs[tabIndex] == "Sort") page?.sortFields.orEmpty().forEach { field ->
-                        val isSelected = selected == field.id
-                        Row(Modifier.fillMaxWidth().clickable {
-                            page?.chooseSort(field.id, if (isSelected) !descending else descending)
-                        }.semantics { this.selected = isSelected }.padding(horizontal = 8.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            if (isSelected) RufinIcon(if (descending) "rufin-go-down-symbolic" else "rufin-go-up-symbolic", null,
-                                Modifier.size(24.dp), MaterialTheme.colorScheme.primary)
-                            else Spacer(Modifier.size(24.dp))
-                            Text(field.title, style = MaterialTheme.typography.bodyLarge)
+                        DisplayChoices("Size", DisplaySize.entries, display.size, { translate(when (it) {
+                            DisplaySize.COMPACT -> "Compact"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Large"
+                        }) }) { size ->
+                            page?.chooseDisplay(display.layout, size, display.gridSpacing)
                         }
-                    } else {
-                        (options?.displaySettings ?: page?.displaySettings)?.let { display ->
-                            DisplayChoices("Layout", display.layouts, display.layout, { translate(when (it) {
-                                LibraryLayout.ROW -> "Rows"; LibraryLayout.GRID -> "Grid"; LibraryLayout.DETAIL -> "Detail"
-                            }) }) { layout ->
-                                page?.chooseDisplay(layout, display.size, display.gridSpacing)
-                            }
-                            DisplayChoices("Size", DisplaySize.entries, display.size, { translate(when (it) {
-                                DisplaySize.COMPACT -> "Compact"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Large"
-                            }) }) { size ->
-                                page?.chooseDisplay(display.layout, size, display.gridSpacing)
-                            }
-                            if (display.layout == LibraryLayout.GRID) DisplayChoices("Grid spacing", DisplaySize.entries, display.gridSpacing, { translate(when (it) {
-                                DisplaySize.COMPACT -> "Small"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Wide"
-                            }) }) { spacing ->
-                                page?.chooseDisplay(display.layout, display.size, spacing)
-                            }
-                            if (display.fieldChoices.isNotEmpty()) {
-                                Text(display.fieldsTitle, Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall)
-                                display.fieldChoices.forEach { field ->
-                                    ListItem(colors = ListItemDefaults.colors(containerColor = Color.Transparent), headlineContent = { Text(field.title) },
-                                        leadingContent = { Checkbox(field.shown, null, enabled = field.canToggle) },
-                                        trailingContent = { Row {
-                                            PlayerIconButton("rufin-go-up-symbolic", "Move up", { page?.moveField(field.id, true) }, enabled = field.shown)
-                                            PlayerIconButton("rufin-go-down-symbolic", "Move down", { page?.moveField(field.id, false) }, enabled = field.shown)
-                                        } },
-                                        modifier = Modifier.toggleable(field.shown, field.canToggle, Role.Checkbox) { page?.showField(field.id, it) })
-                                }
-                            }
+                        if (display.layout == LibraryLayout.GRID) DisplayChoices("Grid spacing", DisplaySize.entries, display.gridSpacing, { translate(when (it) {
+                            DisplaySize.COMPACT -> "Small"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Wide"
+                        }) }) { spacing ->
+                            page?.chooseDisplay(display.layout, display.size, spacing)
+                        }
+                        // The fields as Home's blocks: a handle drags the shown ones into order, a switch shows or hides one.
+                        if (display.fieldChoices.isNotEmpty()) SettingsGroup(display.fieldsTitle) {
+                            SettingsReorderRows(display.fieldChoices.map { SettingsReorderItem(it.id.name, it.title, it.shown, it.shown, it.canToggle) },
+                                onReorder = { _, id, target, after -> page?.reorderField(LibraryField.valueOf(id), LibraryField.valueOf(target), after) },
+                                onToggle = { id, shown -> page?.showField(LibraryField.valueOf(id), shown) })
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, title: (T) -> String, choose: (T) -> Unit) {
-    Text(translate(label), Modifier.padding(top = 12.dp, bottom = 8.dp), style = MaterialTheme.typography.titleSmall)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        choices.forEach { option -> ChoiceChip(selected == option, { choose(option) }, label = { Text(title(option)) }) }
+    SettingsGroup(translate(label)) {
+        SegmentedPill(choices, selected, choose, Modifier.fillMaxWidth(), equal = true) { option, _ ->
+            Text(title(option), style = MaterialTheme.typography.titleSmall, maxLines = 1)
+        }
     }
 }
 
@@ -516,11 +522,11 @@ private fun SharedTransitionScope.RadioRow(label: String, lifted: Boolean, visib
 @Composable
 internal fun BrowsePrimaryAction(icon: String, label: String, modifier: Modifier, shuffle: (() -> Unit)? = null,
     /** The icon takes the accent while the radio drives the button. */
-    accent: Boolean = false, action: () -> Unit) {
+    accent: Boolean = false, enabled: Boolean = true, action: () -> Unit) {
     val duration = if (LocalReduceMotion.current) 0 else 380
     val tint by animateColorAsState(if (accent) MaterialTheme.colorScheme.primary else LocalContentColor.current, tween(duration), label = "primaryActionTint")
-    Surface(modifier.heightIn(min = 76.dp)
-        .combinedClickable(onClick = action, onLongClick = shuffle,
+    Surface(modifier.heightIn(min = 76.dp).alpha(if (enabled) 1f else .38f)
+        .combinedClickable(enabled = enabled, onClick = action, onLongClick = shuffle,
         onLongClickLabel = if (shuffle == null) null else translate("{action} (Shuffle)").replace("{action}", translate(label))),
         shape = RoundedCornerShape(12.dp), color = Color.Transparent) {
         Column(Modifier.padding(horizontal = 4.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {

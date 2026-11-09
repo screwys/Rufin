@@ -25,10 +25,10 @@ import kotlinx.coroutines.*
 internal fun TroubleshootingPage(model: RufinConnection, save: () -> Unit) {
     val context = LocalContext.current
     val state = rememberLazyListState()
-    val lines = remember { mutableStateListOf<String>() }
+    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(model.service, model.ready) {
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
-        lines.clear()
+        lines = emptyList()
         var cursor = 0uL
         var startCharacter = 0uL
         while (isActive) {
@@ -36,25 +36,33 @@ internal fun TroubleshootingPage(model: RufinConnection, save: () -> Unit) {
             if (update.end != cursor) {
                 val tail = state.layoutInfo.totalItemsCount - 1
                 val follow = tail <= 0 || state.layoutInfo.visibleItemsInfo.lastOrNull()?.index == tail
-                var removed = update.startCharacter - startCharacter
-                var removedLines = 0
-                while (removedLines < lines.size && removed > 0uL) {
-                    val line = lines[removedLines]
-                    val characters = line.codePointCount(0, line.length).toULong()
-                    if (characters > removed) {
-                        lines[removedLines] = line.substring(line.offsetByCodePoints(0, removed.toInt()))
-                        break
+                // The whole log can arrive at once: its lines are cut off the main thread and shown in one change,
+                // so opening the page never stalls the drawer closing over it.
+                val shown = lines
+                val trimmed = update.startCharacter - startCharacter
+                lines = withContext(Dispatchers.Default) {
+                    val next = ArrayList(shown)
+                    var removed = trimmed
+                    var removedLines = 0
+                    while (removedLines < next.size && removed > 0uL) {
+                        val line = next[removedLines]
+                        val characters = line.codePointCount(0, line.length).toULong()
+                        if (characters > removed) {
+                            next[removedLines] = line.substring(line.offsetByCodePoints(0, removed.toInt()))
+                            break
+                        }
+                        removed -= characters
+                        removedLines++
                     }
-                    removed -= characters
-                    removedLines++
-                }
-                lines.subList(0, removedLines).clear()
-                val added = update.text.split('\n')
-                for ((index, part) in added.withIndex()) {
-                    val line = part + if (index < added.lastIndex) "\n" else ""
-                    if (line.isEmpty()) continue
-                    if (lines.lastOrNull()?.endsWith('\n') == false) lines[lines.lastIndex] += line
-                    else lines.add(line)
+                    next.subList(0, removedLines).clear()
+                    val added = update.text.split('\n')
+                    for ((index, part) in added.withIndex()) {
+                        val line = part + if (index < added.lastIndex) "\n" else ""
+                        if (line.isEmpty()) continue
+                        if (next.lastOrNull()?.endsWith('\n') == false) next[next.lastIndex] += line
+                        else next.add(line)
+                    }
+                    next
                 }
                 cursor = update.end
                 startCharacter = update.startCharacter

@@ -8,6 +8,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -28,13 +33,15 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
     val sources = model.sources
     val selectedId = sources?.selectedSourceId
     var folders by remember(selectedId) { mutableStateOf<AndroidMusicFolderState?>(null) }
-    LaunchedEffect(expanded, browse.library, sources, model.catalogChanges) {
+    // Read before the menu opens, so it opens at its full height instead of growing a section after.
+    LaunchedEffect(browse.library, sources, model.catalogChanges) {
         val library = browse.library ?: return@LaunchedEffect
-        if (!expanded || selectedId != model.sources?.selectedSourceId) return@LaunchedEffect
+        if (selectedId != model.sources?.selectedSourceId) return@LaunchedEffect
         try { folders = library.musicFolders() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { model.runAction { throw failure } }
     }
+    // The current source and library carry GTK's mark: an accent line on their leading edge, no tick.
     DropdownMenu(expanded, dismiss, (width?.let { Modifier.width(it) } ?: Modifier.widthIn(min = 220.dp, max = 280.dp)).heightIn(max = 480.dp)) {
         Text(translate("Select Source"), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -43,10 +50,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
             val selected = source.id == selectedId
             DropdownMenuItem(text = { Text(source.name) }, onClick = { dismiss(); if (!selected) model.selectSource(source.id) },
                 leadingIcon = { SourceIcon(source.kind, Modifier.size(20.dp)) },
-                trailingIcon = if (selected) ({ RufinIcon("rufin-object-select-symbolic", null, Modifier.size(16.dp)) }) else null,
-                modifier = Modifier.padding(horizontal = 4.dp).background(
-                    if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
-                    .semantics { this.selected = selected })
+                modifier = Modifier.menuSelected(selected).semantics { this.selected = selected })
         }
         DropdownMenuItem(text = { Text(translate("Manage")) }, onClick = { dismiss(); manage() },
             leadingIcon = { RufinIcon("rufin-document-edit-symbolic", null, Modifier.size(20.dp)) },
@@ -62,9 +66,20 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
                 DropdownMenuItem(text = { Text(folder.title) }, onClick = {
                     dismiss()
                     model.runAction { browse.library?.setMusicFolder(folder.id) }
-                }, trailingIcon = if (selected) ({ RufinIcon("rufin-object-select-symbolic", null, Modifier.size(16.dp)) }) else null,
-                    modifier = Modifier.semantics { this.selected = selected })
+                }, modifier = Modifier.menuSelected(selected).semantics { this.selected = selected })
             }
         }
+    }
+}
+
+/** GTK's mark of a menu's current item (`rufin-menu-selected`): a thin accent line on its leading edge. */
+@Composable
+private fun Modifier.menuSelected(selected: Boolean): Modifier {
+    if (!selected) return this
+    val accent = MaterialTheme.colorScheme.primary
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    return drawBehind {
+        val line = 2.dp.toPx()
+        drawRect(accent, Offset(if (rtl) size.width - line else 0f, 0f), Size(line, size.height))
     }
 }

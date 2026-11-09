@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.RufinSlider
+
 import io.github.screwys.rufin.ui.ChoiceChip
 
 import android.content.ClipData
@@ -210,11 +212,12 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                     }
                     EqualizerModeSwitch(editingParametric) { parametric = it }
                 }
+                // A switch, as the app's other on-off settings.
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } }
-                    .padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(view.assigned, null)
-                    Text(translate("Use for this output"), style = MaterialTheme.typography.bodyMedium)
+                    .toggleable(view.assigned, role = Role.Switch) { assigned -> operation { owner.assignEqualizer(output, assigned) } }
+                    .padding(start = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(translate("Use for this output"), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(view.assigned, null)
                 }
             }
             EqualizerEditor(view, editingParametric, frequencies, curve, response, spectrum && !view.cast,
@@ -279,8 +282,10 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { transferError = error.message }
             } }, { transfer = null }) {
-            ChoiceChip(transferFormat == EqPresetFormat.JSON, { transferFormat = EqPresetFormat.JSON }, label = { Text("JSON") })
-            ChoiceChip(transferFormat == EqPresetFormat.APO, { transferFormat = EqPresetFormat.APO }, label = { Text("AutoEQ / APO") })
+            io.github.screwys.rufin.ui.SegmentedPill(listOf(EqPresetFormat.JSON, EqPresetFormat.APO), transferFormat, { transferFormat = it },
+                Modifier.weight(1f), equal = true) { format, _ ->
+                Text(if (format == EqPresetFormat.JSON) "JSON" else "AutoEQ / APO", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            }
         }
     }
 
@@ -442,13 +447,11 @@ private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRan
                     modifier = Modifier.width(132.dp).semantics { contentDescription = title })
             } else EqValue(title, draft, range, unit) { preview(it); commit() }
         }
-        Slider(draft.toFloat(), {
+        RufinSlider(draft.toFloat(), {
             draft = (round(it / step) * step).coerceIn(range)
             preview(draft)
-        }, valueRange = range.start.toFloat()..range.endInclusive.toFloat(), onValueChangeFinished = commit,
-            thumb = { Box(Modifier.size(16.dp).background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape)) },
-            track = { state -> SliderDefaults.Track(state, modifier = Modifier.height(4.dp), thumbTrackGapSize = 0.dp, drawStopIndicator = null) },
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" })
+        }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" },
+            valueRange = range.start.toFloat()..range.endInclusive.toFloat(), onValueChangeFinished = commit)
         if (reset) SliderMarks(range.start.toFloat()..range.endInclusive.toFloat(),
             listOf(range.start.toFloat(), (range.start / 2).toFloat(), 0f, (range.endInclusive / 2).toFloat(), range.endInclusive.toFloat()))
     }
@@ -673,7 +676,7 @@ internal fun PresetTransferDialog(importing: Boolean, text: String, onText: (Str
     }
     AlertDialog(onDismissRequest = dismiss, title = { Text(translate(if (importing) "Import preset" else "Export preset")) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 formats()
                 if (importing) PlayerIconButton("rufin-document-open-symbolic", "Open", {
                     open.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))

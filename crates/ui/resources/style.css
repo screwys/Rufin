@@ -1946,22 +1946,23 @@ scale.volume-slider.vertical trough fill {
 }
 
 
+/* Play is an accent circle, as on Android. */
 .player-play-button {
   border-radius: 0;
   background: radial-gradient(circle closest-side,
-    color-mix(in srgb, var(--window-fg-color) 92%, transparent) calc(100% - 1px),
-    transparent 100%);
+    var(--accent-bg-color) calc(100% - 1px), transparent 100%);
   transform: scale(1);
   transition: transform 120ms ease-out;
 }
 
 .player-play-button image {
-  color: var(--window-bg-color);
+  color: var(--accent-fg-color);
 }
 
 .player-play-button:hover {
   background: radial-gradient(circle closest-side,
-    var(--window-fg-color) calc(100% - 1px), transparent 100%);
+    color-mix(in srgb, var(--accent-bg-color) 90%, var(--accent-fg-color)) calc(100% - 1px),
+    transparent 100%);
   transform: scale(1.05);
 }
 

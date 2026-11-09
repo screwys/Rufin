@@ -157,17 +157,18 @@ impl AndroidLibrary {
         })
     }
 
-    /// Moves a shown `field` one place earlier (`up`) or later in the page's layout.
-    pub fn move_browse_field(
+    /// Moves a shown `field` before or `after` the shown `target` in the page's layout.
+    pub fn reorder_browse_field(
         &self,
         route: Route,
         category: CollectionCategory,
         field: LibraryField,
-        up: bool,
+        target: LibraryField,
+        after: bool,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
         let key = library_list_key(&route, category);
         self.update_browse_fields(key, |settings| {
-            settings.move_field(settings.layout, field, if up { -1 } else { 1 });
+            settings.reorder_field(settings.layout, field, target, after);
         })
     }
 
