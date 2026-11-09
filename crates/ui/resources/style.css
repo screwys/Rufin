@@ -1712,6 +1712,22 @@ dialog.alert.playlist-delete-dialog .message-area {
   margin: 0;
 }
 
+/* The compact layout's thin seek bar along the bar's whole top edge. */
+.player-progress-row.edge {
+  margin: 0;
+}
+
+.player-progress-row.edge scale.player-progress {
+  padding: 0 0 6px;
+}
+
+.player-progress-row.edge scale.player-progress trough,
+.player-progress-row.edge scale.player-progress trough highlight,
+.player-progress-row.edge scale.player-progress trough fill {
+  min-height: 3px;
+  border-radius: 0;
+}
+
 .player-progress-row.above-controls scale.player-progress {
   padding-top: 3px;
   padding-bottom: 3px;

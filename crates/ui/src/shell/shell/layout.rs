@@ -618,10 +618,18 @@ impl Shell {
             &self.chrome.app_content_stack,
             mini == crate::player::MiniPlayer::Off,
         );
-        set_widget_visible(
-            &self.chrome.app_content_overlay,
-            mini != crate::player::MiniPlayer::Short,
-        );
+        // A short window shows the cover and details above the strip while the cover fits there,
+        // and otherwise the strip alone, kept to the bottom.
+        let content = mini != crate::player::MiniPlayer::Short
+            || height
+                >= crate::player::bottom::BOTTOM_PLAYER_STRIP_HEIGHT
+                    + crate::player::MINI_PLAYER_PANE_MIN_HEIGHT;
+        set_widget_visible(&self.chrome.app_content_overlay, content);
+        self.player_ui
+            .views
+            .player_controls
+            .root
+            .set_vexpand(!content);
         self.chrome.topbar.apply_window_size(
             narrow,
             mini != crate::player::MiniPlayer::Off,
@@ -629,11 +637,9 @@ impl Shell {
         );
         // The bar spans the window, so it follows the size chosen here rather than its own
         // allocation, which stays at its old minimum until this layout takes effect.
-        let controls = &self.player_ui.views.player_controls;
-        let size_changed =
-            (controls.width.replace(width) != width) | (controls.height.replace(height) != height);
+        let width_changed = self.player_ui.views.player_controls.width.replace(width) != width;
         self.player_ui.apply_mini_player(mini);
-        if size_changed {
+        if width_changed {
             self.player_ui.apply_bottom_player_layout();
         }
     }

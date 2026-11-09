@@ -13,6 +13,11 @@ pub const FULLSCREEN_PLAYER_CLOSE_TRANSITION_MS: u32 = 320;
 pub const FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE: i32 = 96;
 /// How far the fullscreen player is dragged down before letting go closes it.
 const FULLSCREEN_PLAYER_DRAG_CLOSE_DISTANCE: f64 = 120.0;
+/// Below this height the lyrics and visualizer give way, and the cover sits beside the details.
+const FULLSCREEN_PLAYER_EXPERIENCE_MIN_HEIGHT: i32 = 320;
+/// Beside the cover, the album and then the facts row show once the pane has room for them.
+const FULLSCREEN_PLAYER_ALBUM_MIN_HEIGHT: i32 = 112;
+const FULLSCREEN_PLAYER_META_MIN_HEIGHT: i32 = 140;
 
 #[derive(Clone, Copy, Default)]
 enum PaneLayout {
@@ -60,8 +65,11 @@ pub struct FullscreenPlayerParts {
     topbar: gtk::Box,
     /// Holds the controller and output buttons while the window is too narrow for them.
     pub playback_targets_host: gtk::Box,
-    /// The tall mini player shows only the cover; what is playing is in the window's title.
-    pub mini: Cell<bool>,
+    /// The tall mini player shows only the cover, with what is playing in the window's title; the
+    /// short one shows the cover beside the details.
+    pub mini: Cell<super::MiniPlayer>,
+    /// Too short for the lyrics and visualizer under the cover: the cover sits beside the details.
+    single: Cell<bool>,
     left_pane: gtk::Box,
     right_pane: gtk::Box,
     hero: gtk::Box,
@@ -86,6 +94,9 @@ pub struct FullscreenPlayerParts {
     pub title: gtk::Label,
     pub artist: gtk::Label,
     pub album: gtk::Label,
+    album_row: gtk::Widget,
+    /// Whether the pane has room for the facts row.
+    meta_fits: Cell<bool>,
     pub artist_links: RefCell<Option<crate::widgets::detail_links::DetailLinkBinding>>,
     pub album_links: RefCell<Option<crate::widgets::detail_links::DetailLinkBinding>>,
     pub meta: gtk::FlowBox,
@@ -127,7 +138,15 @@ impl FullscreenPlayerParts {
     }
 
     pub fn has_experience(&self) -> bool {
-        !self.mini.get() && (self.lyrics_enabled.get() || self.visualizer_enabled.get())
+        self.mini.get() == super::MiniPlayer::Off
+            && !self.single.get()
+            && (self.lyrics_enabled.get() || self.visualizer_enabled.get())
+    }
+
+    /// The facts row shows when there are facts and the pane has room for them.
+    fn sync_meta_visible(&self) {
+        self.meta
+            .set_visible(self.meta_fits.get() && self.meta.first_child().is_some());
     }
 
     pub fn attach_lyrics_pane(&self, pane: &crate::player::lyrics::LyricsPane) {
@@ -152,7 +171,7 @@ impl FullscreenPlayerParts {
 
     pub fn update_hero_layout(&self) {
         let has_experience = self.has_experience();
-        if has_experience {
+        if has_experience || self.single.get() {
             self.hero_content
                 .set_orientation(gtk::Orientation::Horizontal);
             self.hero_content.set_halign(gtk::Align::Fill);
@@ -220,6 +239,7 @@ pub fn build_fullscreen_player(
         title: gtk::Label,
         artist: gtk::Label,
         album: gtk::Label,
+        album_fade: gtk::Widget,
         meta: gtk::FlowBox,
         stack: adw::ViewStack,
         queue_tab: gtk::ToggleButton,
@@ -283,7 +303,8 @@ pub fn build_fullscreen_player(
         close_button,
         topbar,
         playback_targets_host,
-        mini: Cell::new(false),
+        mini: Cell::new(super::MiniPlayer::Off),
+        single: Cell::new(false),
         left_pane,
         right_pane,
         hero,
@@ -308,6 +329,8 @@ pub fn build_fullscreen_player(
         title,
         artist,
         album,
+        album_row: album_fade,
+        meta_fits: Cell::new(true),
         artist_links: RefCell::new(None),
         album_links: RefCell::new(None),
         meta,
@@ -356,7 +379,10 @@ fn connect_fullscreen_player_switcher(
     });
 }
 
-use crate::player::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation};
+use crate::player::{
+    bottom::{BOTTOM_PLAYER_HEIGHT, BOTTOM_PLAYER_STRIP_HEIGHT},
+    state::NowPlayingPresentation,
+};
 use gtk::glib;
 
 fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
@@ -551,7 +577,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
                     SwipeAxis::Horizontal => skips,
                     SwipeAxis::Vertical => {
                         dy > 0.0
-                            && shell.mini.get() != super::MiniPlayer::Tall
+                            && shell.mini.get() == super::MiniPlayer::Off
                             && shell
                                 .views
                                 .fullscreen_player
@@ -913,8 +939,8 @@ impl crate::player::PlayerUi {
     }
 
     pub fn close_fullscreen_player(self: &Rc<Self>) {
-        // In the tall mini player the fullscreen player is the window's content.
-        if self.mini.get() != super::MiniPlayer::Tall {
+        // In the mini players the fullscreen player is the window's content.
+        if self.mini.get() == super::MiniPlayer::Off {
             self.hide_fullscreen_player(None, true);
         }
     }
@@ -984,16 +1010,20 @@ impl crate::player::PlayerUi {
 
     pub fn apply_fullscreen_responsive_layout_for_size(self: &Rc<Self>, width: i32, height: i32) {
         let parts = &self.views.fullscreen_player;
-        let mini = parts.mini.get();
+        let mini = parts.mini.get() != super::MiniPlayer::Off;
+        let tall = parts.mini.get() == super::MiniPlayer::Tall;
         let collapsed = width < 800;
-        let changed = parts.collapsed.replace(collapsed) != collapsed;
+        let single = parts.mini.get() == super::MiniPlayer::Short
+            || height - BOTTOM_PLAYER_HEIGHT < FULLSCREEN_PLAYER_EXPERIENCE_MIN_HEIGHT;
+        let changed = (parts.collapsed.replace(collapsed) != collapsed)
+            | (parts.single.replace(single) != single);
         let (first, second) = if mini {
             (true, false)
         } else {
             parts.pane_layout.get().visibility(collapsed)
         };
         parts.topbar.set_visible(!mini);
-        parts.details_scroll.set_visible(!mini);
+        parts.details_scroll.set_visible(!tall);
         parts.cover_button.set_can_target(!mini);
         let has_experience = parts.has_experience();
         let focused = parts.focus_button.is_active() && has_experience;
@@ -1010,7 +1040,27 @@ impl crate::player::PlayerUi {
         } else {
             width.saturating_sub(16)
         };
-        if has_experience {
+        // The height the pane has above the bar.
+        let pane_height = height.saturating_sub(if mini {
+            BOTTOM_PLAYER_STRIP_HEIGHT
+        } else {
+            BOTTOM_PLAYER_HEIGHT + 48
+        });
+        parts
+            .album_row
+            .set_visible(!single || pane_height >= FULLSCREEN_PLAYER_ALBUM_MIN_HEIGHT);
+        parts
+            .meta_fits
+            .set(!single || pane_height >= FULLSCREEN_PLAYER_META_MIN_HEIGHT);
+        parts.sync_meta_visible();
+        if single {
+            // The cover takes the pane's height, beside the details.
+            parts.hero.set_vexpand(true);
+            parts.hero.set_height_request(-1);
+            let max_w = (pane_width.saturating_sub(48) * 40) / 100;
+            let max_h = pane_height.saturating_sub(32);
+            parts.cover.set_square_size(max_w.min(max_h).clamp(48, 340));
+        } else if has_experience {
             parts.hero.set_vexpand(false);
             let hero_height = ((height - BOTTOM_PLAYER_HEIGHT).max(1) * 42 / 100).clamp(96, 544);
             if parts.hero.height_request() != hero_height {
@@ -1025,7 +1075,7 @@ impl crate::player::PlayerUi {
             parts.hero.set_height_request(-1);
             // Leave room for the details under the cover, which the mini player shows in the title.
             let (details_height, height_share, smallest) =
-                if mini { (32, 100, 48) } else { (228, 50, 96) };
+                if tall { (32, 100, 48) } else { (228, 50, 96) };
             let max_cover_from_height =
                 height.saturating_sub(BOTTOM_PLAYER_HEIGHT + details_height);
             let max_cover_from_width = pane_width.saturating_sub(48);
@@ -1105,10 +1155,7 @@ impl crate::player::PlayerUi {
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
         update_fullscreen_meta_row(&self.views.fullscreen_player.meta, &presentation.meta);
-        self.views
-            .fullscreen_player
-            .meta
-            .set_visible(!presentation.meta.is_empty());
+        self.views.fullscreen_player.sync_meta_visible();
     }
 
     fn fullscreen_player_cover_size(&self) -> i32 {
