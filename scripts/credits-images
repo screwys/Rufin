@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Write sponsors.svg and translators.svg for the README into the given directory.
+
+Sponsors are the GitHub sponsors of $GITHUB_REPOSITORY_OWNER, private ones only as a count, which
+needs a token of that user with the read:user scope. Translators are the commit
+authors of each translation file Weblate lists, under Weblate's language names, so the checkout
+needs its full history.
+GitHub serves README images without their external references, so the avatars are embedded.
+"""
+
+import base64
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+from collections import Counter
+from html import escape
+from pathlib import Path
+
+QUERY = """
+query($login: String!) {
+  user(login: $login) {
+    sponsorshipsAsMaintainer(
+      first: 100, activeOnly: false, includePrivate: true, orderBy: {field: CREATED_AT, direction: ASC}
+    ) {
+      nodes {
+        privacyLevel
+        sponsorEntity {
+          ... on User { login avatarUrl(size: 128) }
+          ... on Organization { login avatarUrl(size: 128) }
+        }
+      }
+    }
+  }
+}
+"""
+
+TRANSLATIONS = "https://hosted.weblate.org/api/components/rufin/app/translations/?page_size=1000"
+NOT_TRANSLATORS = {"Hosted Weblate", "Weblate (bot)", "screwy", "screwys"}
+
+# One grey for both GitHub themes: an image only knows the system's colour scheme, not the page's.
+STYLE = "<style>text{font:12px system-ui,sans-serif;fill:#808080}.b{font-weight:600}.m{text-anchor:middle}</style>"
+
+COLUMNS = 8
+CELL = 96
+AVATAR = 64
+ROW = 22
+NAMES_X = 230
+
+
+def svg(width, height, body):
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">{STYLE}{body}</svg>\n'
+    )
+
+
+def sponsors():
+    request = urllib.request.Request(
+        "https://api.github.com/graphql",
+        data=json.dumps({"query": QUERY, "variables": {"login": os.environ["GITHUB_REPOSITORY_OWNER"]}}).encode(),
+        headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"},
+    )
+    with urllib.request.urlopen(request) as response:
+        reply = json.load(response)
+    if "errors" in reply:
+        raise SystemExit(json.dumps(reply["errors"], indent=2))
+    nodes = reply["data"]["user"]["sponsorshipsAsMaintainer"]["nodes"]
+    public = [node["sponsorEntity"] for node in nodes if node["privacyLevel"] == "PUBLIC" and node["sponsorEntity"]]
+    return public, sum(node["privacyLevel"] == "PRIVATE" for node in nodes)
+
+
+def data_uri(url):
+    with urllib.request.urlopen(url) as response:
+        kind = response.headers.get_content_type()
+        return f"data:{kind};base64,{base64.b64encode(response.read()).decode()}"
+
+
+def sponsors_svg():
+    entries, private = sponsors()
+    inset = (CELL - AVATAR) // 2
+    body = ""
+    cells = len(entries) + bool(private)
+    for index in range(cells):
+        x = index % COLUMNS * CELL
+        y = index // COLUMNS * CELL
+        if index == len(entries):
+            body += (
+                f'<rect x="{x + inset}" y="{y}" width="{AVATAR}" height="{AVATAR}" rx="12" fill="#808080" fill-opacity=".2"/>'
+                f'<text class="b m" style="font-size:20px" x="{x + CELL // 2}" y="{y + AVATAR // 2 + 7}">+{private}</text>'
+                f'<text class="b m" x="{x + CELL // 2}" y="{y + AVATAR + 18}">private</text>'
+            )
+            continue
+        entry = entries[index]
+        body += (
+            f'<clipPath id="a{index}"><rect x="{x + inset}" y="{y}" width="{AVATAR}" height="{AVATAR}" rx="12"/></clipPath>'
+            f'<image x="{x + inset}" y="{y}" width="{AVATAR}" height="{AVATAR}" clip-path="url(#a{index})" '
+            f'href="{data_uri(entry["avatarUrl"])}"/>'
+            f'<text class="b m" x="{x + CELL // 2}" y="{y + AVATAR + 18}">{escape(entry["login"])}</text>'
+        )
+    rows = max(1, -(-cells // COLUMNS))
+    return svg(CELL * min(COLUMNS, max(1, cells)), rows * CELL, body)
+
+
+def translators_svg():
+    root = Path(__file__).resolve().parent.parent
+    with urllib.request.urlopen(TRANSLATIONS) as response:
+        translations = json.load(response)["results"]
+    lines = []
+    for translation in translations:
+        authors = subprocess.run(
+            ["git", "log", "--format=%an", "--", translation["filename"]],
+            cwd=root, check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        names = [name for name, _ in Counter(authors).most_common() if name not in NOT_TRANSLATORS]
+        if names and not translation["is_source"]:
+            lines.append((translation["language"]["name"], ", ".join(names)))
+    body = ""
+    for index, (language, names) in enumerate(sorted(lines)):
+        y = index * ROW + 14
+        body += f'<text class="b" x="0" y="{y}">{escape(language)}</text><text x="{NAMES_X}" y="{y}">{escape(names)}</text>'
+    return svg(720, max(1, len(lines)) * ROW, body)
+
+
+def main():
+    out = Path(sys.argv[1])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "sponsors.svg").write_text(sponsors_svg())
+    (out / "translators.svg").write_text(translators_svg())
+
+
+main()

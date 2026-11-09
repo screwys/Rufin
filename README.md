@@ -9,16 +9,16 @@
   <br>
   <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
-  <a href="https://search.nixos.org/packages?channel=unstable&amp;show=rufin&amp;query=rufin"><img alt="nixpkgs version" src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FNixOS%2Fnixpkgs%2Fnixos-unstable%2Fpkgs%2Fby-name%2Fru%2Frufin%2Fpackage.nix&amp;search=version+%3D+%22%28%5B%5E%22%5D%2B%29%22&amp;replace=%241&amp;label=nixpkgs&amp;logo=nixos&amp;color=5277C3"></a>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.screwys.Rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fscrewys%2FRufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D"><img alt="Obtainium version" src="https://img.shields.io/github/v/release/screwys/Rufin?logo=obtainium&amp;label=Obtainium&amp;color=6750A4"></a>
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </p>
 
 <img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="196">
 
 <p align="left">
-  Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on <a href="#installation">multiple platforms</a>.
-  Rufin offers a rich library browsing and management experience while making the most of each source's unique features.
-  It can be run headless, scripted, or controlled from its Web UI; and can be securely synced with other devices with Rufin Connect.
+  Rufin is a fast, native music player for local folders, network shares and music servers, on <a href="#installation">Linux</a>, <a href="#windows">Windows</a>, <a href="#macos">macOS</a> and <a href="#android">Android</a>. It offers deep customization for its appearance and behavior, rich library browsing and management experience with in-app lyrics/metadata/artwork searching & editing, and a careful playback engine powered by GStreamer.
+
+  Rufin Connect securely syncs your devices and moves playback between them; Rufin can also run headless, be scripted, or be controlled from its Web UI.
 </p>
 
 <br clear="all">
@@ -27,100 +27,64 @@
 
 ## 📂 Sources
 
-- <img src="resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
+| Source | Favorites, ratings and playlists | Metadata editing | Also |
+|---|---|---|---|
+| <img src="resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;**Local folders** | Kept by Rufin | Written to the files | Folders are watched for changes |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**WebDAV / Nextcloud** | Kept by Rufin | Written to the files | No mount needed |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**SMB / Samba** | Kept by Rufin | Written to the files | No mount needed, share discovery |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Jellyfin** | On the server | Over the server API | Instant Mix, live library updates |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Emby** | On the server; ratings kept by Rufin | Over the server API | Instant Mix, live library updates |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Navidrome** / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**OpenSubsonic** | On the server | Through matched local files | Radio, public share links |
+| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Plex** | On the server; favorites kept by Rufin | Over the server API | Recommendations, Plex Companion, Home profiles |
 
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
-
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if the library can be matched to local files.
-
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
-
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
-
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag/lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
-
-- <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
+Downloaded tracks, and tracks of a server matched to local folders, play from disk while activity still goes to the server. You can also configure a local and public adress for a server.
 
 ## 🎵 Playback
 
-- True gapless playback and configurable equal-power crossfade mode
-- ReplayGain/EBU R128 analysis and true-peak measurement
-- 10-band equalizer with presets, perceptual/linear volume scale preference and fade on play/pause
-- Auto DJ that keeps the queue filled; server recommendations when available with a smart local fallback
-- Random play with filters for track count, year range, genre and played/unplayed status
-- Optional waveform seekbar; waveforms are generated for the current track and cached
-- Fullscreen player with visualizer
-- CUE sheet support with separate playable tracks
-- Broad codec support [^codecs]
-- Audio output device selection
-- Configurable playback speed and pitch
+- **Transitions**: true gapless playback or equal-power crossfade, with an optional fade on play/pause
+- **Loudness**: ReplayGain and EBU R128 normalization with true-peak analysis; results can be written to tags
+- **Sound**: graphic (10, 18 or 31 bands) and parametric equalizer with saved presets per device and AutoEQ/APO import, crossfeed, playback speed and pitch
+- **Output**: audio device selection, multichannel output and Dolby/DTS bitstream passthrough, casting to UPnP and Chromecast
+- **Queue**: Auto DJ keeps it filled from server/local recommendations, skip unavailable tracks automatically, sleep timer
+- **Formats**: broad codec support [^codecs], and CUE sheets as separate playable tracks
 
 ## 📚 Library
 
-- Drag songs from your queue or lists to playlists, or select multiple of them with your keyboard batch operations
-- Combine all your music from different sources in a single listening session with global playlists
-- Import/export your playlists as .m3u/.m3u8/PLS/XSPF; as long as `media_uri` is accessible Rufin can play them
-- Download tracks manually or through automatic rules, then keep using the same remote library while offline
-- Can be set as default audio player to open any audio file, or via CLI with `rufin track.mp4`
-- Drag folders, audio files or playlists to Rufin window to import them 
-- Path matching between music servers and local folders, allowing local playback while keeping server activity and history
-- Metadata and artwork editing, including bulk editing and Musicbrainz metadata autofill 
-- Automatic metadata, artwork and lyrics caching; and in-app lyrics/artwork search functionality
-- Rating support, with an option to enable visual-only partial stars for OpenSubsonic
-- Virtualized, smooth to scroll pages
-- Can write EBU R128 tags to tracks
-- Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
-- Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
-- Granular import/export backup options including credentials, automatic backups with password protection are available
-- Listening activity can be exported as Last.fm/ListenBrainz compatible `.csv` files
+- **Browsing**: a customizable Home, Folders, Genres, Moods, History and pins; details pages for tracks, albums and artists
+- **Search**: Search within a route or globally, that you can also configure it to search songs by their lyrics
+- **Playlists**: mix tracks from different sources, organize playlists in folders, import and export M3U, PLS and XSPF
+- **Smart playlists**: rules on metadata, mood/BPM and play/skip history, with custom sorting and limits
+- **Recommendations**: track, album, artist, playlist and genre radios from the server or a local fallback
+- **Downloads**: manual or through automatic rules, with optional transcoding; downloaded music stays playable offline
+- **Metadata**: tag and artwork editor with batch editing, MusicBrainz and AcoustID lookup with on-device fingerprint calculations; missing artwork and lyrics are fetched automatically
+- **Lyrics**: synced and word-by-word lyrics with karaoke mode, Furigana/Romaji, translations, online search, editable text and offset; saved to your source as embedded tags or `.lrc` files
+- **Activity**: favorites, ratings and listening history; a listening overview you can export as an image, and history as Last.fm/ListenBrainz compatible `.csv`
+- **Sharing**: Share server links of your tracks, or share the song or selected lyrics as an elagant card for social media on Android
+- **Backups**: granular import/export including credentials; scheduled and password-protected backups
+- **Files**: open audio files and playlists as the default player, from the CLI with `rufin track.mp4`, or by dragging them into the window
 
 ## ✨ Rufin Connect
 
-- Shares sources, credentials, playlists, favorites, pins, preferences, listening history between paired devices
-- Uses [Iroh](https://github.com/n0-computer/iroh) for encrypted connections, discovery, relays and device-to-device transfers
-- Keeps playback queues, downloaded files, local paths and encoding choices per device
-- Continue playback where another device left off
-- Supports encrypted profile files through local folders, WebDAV/Nextcloud, and Samba shares
-- Local folder sync can be done with solutions like Syncthing or optional Iroh relays
-
-## 🌍️ Discovery
-
-- Server-provided artist, track, album, playlist and genre radios, including recommendations from server plugins
-- App owned smart (i.e. dynamic) playlists with custom sorting and limits; can use metadata, play/skip history or pre-defined dynamic lists
-- Dedicated Search, Folders and History pages
-- Moods browsing and mood/BPM-based smart playlists for Plex, Navidrome, Subsonic and local/remote libraries
-- Synchronized lyrics (including word-by-word) with built-in search and adjustable offset
+- Syncs sources, credentials, playlists, favorites, pins, preferences and listening history between your devices; queues, downloads and local paths stay per device
+- Continue playback where another device left off, or control what another device is playing
+- Stream your local music library to another device
+- Devices pair with emoji verification (like Matrix) and connect over encrypted [Iroh](https://github.com/n0-computer/iroh) links, directly or through a relay you choose; an encrypted sync folder (local, WebDAV or SMB) covers devices that are never online together
 
 ## 🧩 Integrations
 
-- Last.fm, Libre.fm and ListenBrainz scrobbling, with offline storage and automatic retries
-- Discord Rich Presence
-- Private mode for temporarily pausing external activity
-- Secure storage for server credentials and API secrets by default
-- Casting support for UPnP and Chromecast, plus Plex Companion queue control and playback handoff in both directions
-
-## 🛰️ Headless/Controller
-
-- Run release binaries without the desktop interface with `rufin --headless`; use `cargo run -p rufin-controller` for the separate GTK-free build
-- Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with:
+- **Scrobbling**: Last.fm, Libre.fm and ListenBrainz, with offline storage and automatic retries; Discord Rich Presence
+- **System**: media controls (MPRIS with lyrics on Linux), tray icon, running in the background; credentials are kept in the system keyring
+- **Private mode**: temporarily pauses external activity
+- **Controller**: control playback, browse the library, manage sources and playlists from a browser or the HTTP API, with token authentication; playback stays on the device running Rufin. It also runs without the desktop interface:
 ```bash
 export RUFIN_API_TOKEN="your_token"
 rufin --headless --listen
 ```
-- Control playback, browse your library, manage sources and playlists, and view the queue & lyrics from a browser
-- Playback stays on the device running Rufin
-- Token-based authentication
 
 ## 🖥️ Interface
 
-- Fast, responsive and broadly customizable
-- Theme support including custom themes
-- Extensive keyboard shortcuts catalog
-- Automatic updates for Windows and macOS builds
-- Easy built-in log viewing and exporting (privacy-conscious)
-- Type to search
-- Can run in the background or set to launch minimized, which uses the GNOME portal when available
-- System tray integration
+- **Desktop**: layouts that adapt from a wide window down to a mini player, fullscreen player with visualizer, waveform seekbar, themes including custom ones, and an extensive keyboard shortcuts catalog.
+- **Android**: a phone-first interface on the same core built with Jetpack Compose
 
 # Screenshots
 
@@ -209,6 +173,17 @@ Rufin install an available update when the app starts or manually click `Update`
 
 You can also download `.dmg` files directly from
 [GitHub Releases](https://github.com/screwys/Rufin/releases/latest), but then you have to update manually.
+
+## Android
+
+<p>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.screwys.Rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fscrewys%2FRufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D">
+    <img width="240" alt="Get it on Obtainium" src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png">
+  </a>
+</p>
+
+Rufin for Android is installed and kept up to date with [Obtainium](https://obtainium.imranr.dev/). Open the badge on your
+phone, or add `https://github.com/screwys/Rufin` in Obtainium yourself. Android 7.0 or newer is required.
 
 ## Building locally
 
@@ -361,24 +336,15 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 
 ## Translation credits
 
-- Estonian translation by Priit Jõerüüt
-- Russian and Latvian translation by [aguhadug](https://github.com/aguhadug)
-- German translation by [sevachka](https://github.com/sevachka)
-- Chezch translation by [Jakub Cabal](https://github.com/jakubcabal)
-- Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
-- Finnish translation by Jiri Grönroos
-- French translation by Arnaud Constantin
-- Italian translation by [Patrick Canal](https://github.com/Superredstone)
+<img alt="Translators of Rufin by language" src="https://raw.githubusercontent.com/screwys/Rufin/credits/translators.svg">
 
 ## Donations
 
-If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys), [buymeacoffee](https://buymeacoffee.com/screwy) or via bitcoin: `bc1q4hmfnc64xsk2zprlw6d088kxkhv5xek8hmv87t`
+If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys) or [buymeacoffee](https://buymeacoffee.com/screwy).
 
 I would like to thank everyone who has made a donation:
 
-### Past Sponsors
-
-[gf3](https://github.com/gf3), [aguhadug](https://github.com/aguhadug) and 1 private sponsor
+<img alt="GitHub sponsors of Rufin" src="https://raw.githubusercontent.com/screwys/Rufin/credits/sponsors.svg">
 
 # License
 
