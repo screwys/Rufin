@@ -285,8 +285,24 @@ msgstr ""
 ". Вам нужно заполнить только поля с адресом электронной почты и названием "
 "приложения"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 час"
+
+#, fuzzy
+#| msgid "Month"
+msgid "1 month"
+msgstr "Месяц"
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "May {year}"
+msgid "1 year"
+msgstr "Май {year}"
 
 msgid "10 bands"
 msgstr ""
@@ -499,6 +515,11 @@ msgstr "Все треки"
 
 msgid "All"
 msgstr "Все"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Загрузка"
 
 msgid "Allow remote connections"
 msgstr "Разрешить удалённые подключения"
@@ -1193,6 +1214,11 @@ msgstr "Не удалось получить обновления в режим�
 msgid "Could not save diagnostic log"
 msgstr "Не удалось сохранить диагностический журнал"
 
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Could not share: {error}"
+msgstr "Не удалось открыть файл: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Не удалось обновить Rufin на {version}"
 
@@ -1359,6 +1385,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "По убыванию"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Направление"
 
 msgid "Detail track columns"
 msgstr "Подробные колонки треков"
@@ -1673,6 +1704,9 @@ msgstr "Развернуть текст песни и визуализатор"
 
 msgid "Expand sidebar"
 msgstr "Развернуть боковую панель"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Изучить"
@@ -2255,11 +2289,19 @@ msgstr "Ограничение"
 msgid "Linear"
 msgstr "Линейная"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Связанный файл"
+
 msgid "Link exported file"
 msgstr "Привязать экспортированный файл"
 
 msgid "Link to file..."
 msgstr "Ссылка на файл..."
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Связанный файл"
@@ -3929,6 +3971,11 @@ msgstr "Пример сервера"
 msgid "Server Settings"
 msgstr "Настройки Сервера"
 
+#, fuzzy
+#| msgid "Server path"
+msgid "Server default"
+msgstr "Путь к серверу"
+
 msgid "Server discovery failed: {error}"
 msgstr "Не удалось выполнить поиск сервера: {error}"
 
@@ -4355,6 +4402,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Это недоступно"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "В этот плейлист можно добавлять только треки из источника {source}"
@@ -5425,9 +5475,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Remove prefix"
 #~ msgstr "Удалить префикс"
-
-#~ msgid "Server path"
-#~ msgstr "Путь к серверу"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

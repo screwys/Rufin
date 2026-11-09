@@ -213,8 +213,22 @@ msgstr "接續播放"
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr ""
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "1 year"
+msgstr "最大年份"
 
 msgid "10 bands"
 msgstr ""
@@ -446,6 +460,11 @@ msgstr "所有曲目"
 
 msgid "All"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "正在下載"
 
 msgid "Allow remote connections"
 msgstr ""
@@ -1238,6 +1257,11 @@ msgstr "無法儲存診斷記錄"
 
 #, fuzzy
 #| msgid "Could not update favorites"
+msgid "Could not share: {error}"
+msgstr "無法更新最愛"
+
+#, fuzzy
+#| msgid "Could not update favorites"
 msgid "Could not update Rufin to {version}"
 msgstr "無法更新最愛"
 
@@ -1410,6 +1434,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "遞減"
+
+#, fuzzy
+#| msgid "Duration"
+msgid "Description"
+msgstr "時長"
 
 msgid "Detail track columns"
 msgstr ""
@@ -1754,6 +1783,9 @@ msgstr ""
 
 msgid "Expand sidebar"
 msgstr "展開側邊欄"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "探索"
@@ -2367,10 +2399,16 @@ msgstr "限制"
 msgid "Linear"
 msgstr "線性"
 
+msgid "Link copied"
+msgstr ""
+
 msgid "Link exported file"
 msgstr ""
 
 msgid "Link to file..."
+msgstr ""
+
+msgid "Link"
 msgstr ""
 
 msgid "Linked file"
@@ -4201,6 +4239,11 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
+#, fuzzy
+#| msgid "System default"
+msgid "Server default"
+msgstr "系統預設值"
+
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -4656,6 +4699,9 @@ msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
+msgstr ""
+
+msgid "This item has no link to share"
 msgstr ""
 
 msgid "This playlist only accepts {source} tracks"

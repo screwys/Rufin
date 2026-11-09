@@ -265,8 +265,22 @@ msgstr "Atskaņot nākamo (jauktā secībā)"
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Jums jāaizpilda tikai e-pasta un lietojumprogrammas nosaukuma daļas"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 stunda"
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "1 year"
+msgstr "Maksimālais gads"
 
 msgid "10 bands"
 msgstr ""
@@ -488,6 +502,11 @@ msgstr "Visas dziesmas"
 
 msgid "All"
 msgstr "Visi"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Lejupielādē"
 
 msgid "Allow remote connections"
 msgstr "Atļaut attālinātās savienojumus"
@@ -1238,6 +1257,11 @@ msgstr "Nevar saņemt jaunākos datus"
 msgid "Could not save diagnostic log"
 msgstr "Nevarēja saglabāt diagnostikas žurnālu"
 
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not share: {error}"
+msgstr "Nevar atvērt mapi: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Nevarēja atjaunināt Rufin līdz versijai {version}"
 
@@ -1412,6 +1436,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "Dilstošā secībā"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Virziens"
 
 msgid "Detail track columns"
 msgstr "Detalizētas celiņu kolonnas"
@@ -1748,6 +1777,9 @@ msgstr "Atvērt tekstus un vizualizāciju"
 
 msgid "Expand sidebar"
 msgstr "Izvērst sānu paneli"
+
+msgid "Expires"
+msgstr ""
 
 msgid "Explore"
 msgstr "Izpētīt"
@@ -2363,11 +2395,19 @@ msgstr "Ierobežojums"
 msgid "Linear"
 msgstr "Lineārs"
 
+#, fuzzy
+#| msgid "Linked file"
+msgid "Link copied"
+msgstr "Saistīts fails"
+
 msgid "Link exported file"
 msgstr "Saistīt eksportēto failu"
 
 msgid "Link to file..."
 msgstr "Saite uz failu..."
+
+msgid "Link"
+msgstr ""
 
 msgid "Linked file"
 msgstr "Saistīts fails"
@@ -4107,6 +4147,11 @@ msgstr "Servera paraugs"
 msgid "Server Settings"
 msgstr "Servera iestatījumi"
 
+#, fuzzy
+#| msgid "Server path"
+msgid "Server default"
+msgstr "Servera ceļš"
+
 msgid "Server discovery failed: {error}"
 msgstr "Servera meklēšana neizdevās: {error}"
 
@@ -4562,6 +4607,9 @@ msgstr ""
 
 msgid "This isn't available"
 msgstr "Šis nav pieejams"
+
+msgid "This item has no link to share"
+msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
 msgstr "Šajā atskaņošanas sarakstā var ievietot tikai {source} dziesmas"
@@ -5634,9 +5682,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Remove prefix"
 #~ msgstr "Noņemt prefiksu"
-
-#~ msgid "Server path"
-#~ msgstr "Servera ceļš"
 
 #~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "

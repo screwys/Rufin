@@ -256,8 +256,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Avrai bisogno di compilare email e parti del nome dell'applicazione"
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
 msgstr "1 ora"
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+msgid "1 year"
+msgstr ""
 
 msgid "10 bands"
 msgstr ""
@@ -476,6 +488,11 @@ msgstr "Tutte le Tracce"
 
 msgid "All"
 msgstr "Tutto"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Allow downloading"
+msgstr "Scaricando"
 
 msgid "Allow remote connections"
 msgstr "Consenti connessioni remote"
@@ -1201,6 +1218,11 @@ msgstr "Non è stato possibile ricevere aggiornamenti in tempo reale"
 msgid "Could not save diagnostic log"
 msgstr "Non è stato possibile salvare i log di diagnosi"
 
+#, fuzzy
+#| msgid "Could not open folder: {error}"
+msgid "Could not share: {error}"
+msgstr "Non è stato possibile aprire la cartella: {error}"
+
 msgid "Could not update Rufin to {version}"
 msgstr "Non è stato possibile aggiornare Rufin alla versione {version}"
 
@@ -1374,6 +1396,11 @@ msgstr ""
 
 msgid "Descending"
 msgstr "Discendente"
+
+#, fuzzy
+#| msgid "Direction"
+msgid "Description"
+msgstr "Direzione"
 
 msgid "Detail track columns"
 msgstr "Dettagli delle colonne della traccia"
@@ -1690,6 +1717,9 @@ msgid "Expand lyrics and visualizer"
 msgstr ""
 
 msgid "Expand sidebar"
+msgstr ""
+
+msgid "Expires"
 msgstr ""
 
 msgid "Explore"
@@ -2260,12 +2290,18 @@ msgstr ""
 msgid "Linear"
 msgstr ""
 
+msgid "Link copied"
+msgstr ""
+
 #, fuzzy
 #| msgid "Backup exported"
 msgid "Link exported file"
 msgstr "Backup esportato"
 
 msgid "Link to file..."
+msgstr ""
+
+msgid "Link"
 msgstr ""
 
 msgid "Linked file"
@@ -3875,6 +3911,9 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
+msgid "Server default"
+msgstr ""
+
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -4292,6 +4331,9 @@ msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
+msgstr ""
+
+msgid "This item has no link to share"
 msgstr ""
 
 msgid "This playlist only accepts {source} tracks"
