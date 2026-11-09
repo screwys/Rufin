@@ -1,2 +1,5 @@
 [target.'cfg(target_os = "macos")']
-rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
+# The Swift bridges in apple-cf and mediaplayer need the Swift runtime. Their auto-link request
+# does not reach the linker in thin-LTO release links, so link it by name; ld looks for
+# /usr/lib/swift inside the SDK.
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift", "-C", "link-arg=-L/usr/lib/swift", "-C", "link-arg=-lswiftCore"]

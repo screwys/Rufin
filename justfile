@@ -353,7 +353,7 @@ debug *args:
         fi; \
         cmake --preset development; \
         cmake --build --preset development --target "$executable_name"; \
-        executable="$PWD/.local/build/cmake/development/bin/$executable_name"; \
+        executable="${CARGO_TARGET_DIR:-$PWD/target}/debug/$executable_name"; \
         if [[ "$(rustc -vV | sed -n 's/^host: //p')" == *-windows-* ]]; then \
             executable="${executable}.exe"; \
         fi; \
