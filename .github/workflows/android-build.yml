@@ -1,0 +1,155 @@
+name: Android build
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      release_tag:
+        description: Release version to validate and sign
+        default: ""
+        required: false
+        type: string
+      verify_signed_tag:
+        description: Verify that the release tag is signed
+        default: false
+        required: false
+        type: boolean
+    secrets:
+      RUFIN_ANDROID_KEYSTORE_BASE64:
+        required: false
+      RUFIN_ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      RUFIN_ANDROID_KEY_ALIAS:
+        required: false
+      RUFIN_ANDROID_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: build
+            name: Build and test
+          - check: clippy
+            name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: ${{ inputs.release_tag != '' && 0 || 1 }}
+          persist-credentials: false
+
+      - name: Verify signed release tag
+        if: matrix.check == 'build' && inputs.verify_signed_tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
+
+      - name: Validate release metadata
+        if: matrix.check == 'build' && inputs.release_tag != '' && !inputs.verify_signed_tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cargo run --locked -p xtask -- verify release-metadata "$RELEASE_TAG"
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+
+      - name: Set up Gradle
+        if: matrix.check == 'build'
+        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          cache-read-only: ${{ github.event_name != 'push' }}
+
+      - name: Restore Robolectric runtime cache
+        if: matrix.check == 'build'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ runner.os }}-robolectric-${{ hashFiles('android/app/build.gradle.kts', 'android/app/src/test/**') }}
+          restore-keys: ${{ runner.os }}-robolectric-
+
+      - name: Install Android toolchains
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-37.2" "build-tools;36.1.0" "ndk;29.0.14206865"
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - name: Restore GStreamer SDK
+        id: gstreamer
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: android/.toolchains/gstreamer-1.28.7
+          key: gstreamer-android-arm64-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: 'false'
+          # Profiles, the NDK and target flags are outside rust-cache's own key.
+          key: ${{ matrix.check }}-${{ hashFiles('Cargo.toml', '.cargo/config.toml', 'xtask/src/android.rs') }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          workspaces: |
+            . -> android/build/rust
+            . -> target
+
+      - name: Check Android development build
+        if: matrix.check == 'build'
+        run: android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug
+
+      - name: Lint Android Rust
+        if: matrix.check == 'clippy'
+        run: cargo run --locked -p xtask -- android clippy
+
+      - name: Check optimized Android release
+        if: matrix.check == 'build' && github.event_name == 'workflow_dispatch' && inputs.release_tag == ''
+        run: android/gradlew -p android assembleStableRelease lintStableRelease
+
+      - name: Build signed Android release
+        if: matrix.check == 'build' && inputs.release_tag != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RUFIN_ANDROID_KEYSTORE_BASE64 }}
+          RUFIN_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.RUFIN_ANDROID_KEYSTORE_PASSWORD }}
+          RUFIN_ANDROID_KEY_ALIAS: ${{ secrets.RUFIN_ANDROID_KEY_ALIAS }}
+          RUFIN_ANDROID_KEY_PASSWORD: ${{ secrets.RUFIN_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64"
+          export RUFIN_ANDROID_KEYSTORE="$RUNNER_TEMP/rufin-release.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUFIN_ANDROID_KEYSTORE"
+          cargo run --locked -p xtask -- android build stable
+          for apk in .local/artifacts/Rufin-android-*.apk; do
+            "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify "$apk"
+          done
+
+      - name: Upload workflow artifact
+        if: matrix.check == 'build' && inputs.release_tag != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Rufin-android-apks
+          path: .local/artifacts/Rufin-android-*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      # Saved even when a check fails, so the slow SDK download happens once per key.
+      - name: Save GStreamer SDK
+        if: always() && steps.gstreamer.outputs.cache-hit != 'true' && hashFiles('android/.toolchains/gstreamer-1.28.7/arm64/lib/pkgconfig/gstreamer-1.0.pc') != ''
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: android/.toolchains/gstreamer-1.28.7
+          key: ${{ steps.gstreamer.outputs.cache-primary-key }}

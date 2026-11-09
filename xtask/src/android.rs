@@ -9,19 +9,23 @@ use crate::process::{command_stdout, repo_root};
 
 const GSTREAMER_VERSION: &str = "1.28.7";
 const GSTREAMER_SHA256: &str = "fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da";
+const ABIS: [&str; 3] = ["arm64-v8a", "armeabi-v7a", "x86_64"];
 
 pub(crate) fn run(args: Vec<String>) -> Result<()> {
     let root = repo_root()?;
     env::set_current_dir(&root)?;
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["metadata"] => metadata(),
-        ["build", distribution @ ("stable" | "development")] => build(&root, distribution),
+        ["build", distribution @ ("stable" | "development")] => build(&root, distribution, None),
+        ["build", distribution @ ("stable" | "development"), abi] => {
+            build(&root, distribution, Some(abi))
+        }
         ["native", variant, distribution @ ("stable" | "development"), abis] => {
             native(&root, variant, distribution, abis)
         }
         ["install"] => install(&root),
         ["clippy"] => clippy(&root),
-        _ => Err("Usage: xtask android build stable|development\n       xtask android install\n       xtask android clippy\n       xtask android native VARIANT stable|development ABIS".into()),
+        _ => Err("Usage: xtask android build stable|development [ABI]\n       xtask android install\n       xtask android clippy\n       xtask android native VARIANT stable|development ABIS".into()),
     }
 }
 
@@ -56,6 +60,7 @@ fn metadata() -> Result<()> {
             "verifierManifest": verifier["manifest_path"],
             "verifierVersion": verifier["version"],
             "cargoTarget": cargo["target_directory"],
+            "abis": ABIS.join(","),
         })
     );
     Ok(())
@@ -74,41 +79,56 @@ fn execute(command: &mut Command) -> Result<()> {
     }
 }
 
-fn build(root: &Path, distribution: &str) -> Result<()> {
+fn build(root: &Path, distribution: &str, abi: Option<&str>) -> Result<()> {
     let android = root.join("android");
-    let (variant, build_type, name) = if distribution == "development" {
-        ("DevelopmentDebug", "debug", "Rufin.Devel.apk")
+    let (variant, build_type, prefix) = if distribution == "development" {
+        ("DevelopmentDebug", "debug", "Rufin.Devel")
     } else {
-        ("StableRelease", "release", "Rufin.apk")
+        ("StableRelease", "release", "Rufin-android")
     };
     let output = android.join(format!("app/build/outputs/apk/{distribution}/{build_type}"));
     // Incremental APK replacement can leave old native libraries as unused space.
-    // Rebuild the archive while keeping the native compilation caches.
-    for suffix in ["", "-unsigned"] {
-        let archive = output.join(format!("app-{distribution}-{build_type}{suffix}.apk"));
-        if archive.exists() {
-            fs::remove_file(archive)?;
+    // Rebuild the archives while keeping the native compilation caches.
+    if output.exists() {
+        for entry in fs::read_dir(&output)? {
+            let path = entry?.path();
+            if path.extension() == Some(OsStr::new("apk")) {
+                fs::remove_file(path)?;
+            }
         }
     }
-    execute(
-        Command::new(android.join("gradlew"))
-            .arg("-p")
-            .arg(&android)
-            .arg(format!("assemble{variant}")),
-    )?;
+    let mut gradle = Command::new(android.join("gradlew"));
+    gradle
+        .arg("-p")
+        .arg(&android)
+        .arg(format!("assemble{variant}"));
+    if let Some(abi) = abi {
+        gradle.arg(format!("-PandroidAbis={abi}"));
+    }
+    execute(&mut gradle)?;
     let metadata: serde_json::Value =
         serde_json::from_slice(&fs::read(output.join("output-metadata.json"))?)?;
-    let filename = metadata["elements"][0]["outputFile"]
-        .as_str()
-        .ok_or("Gradle did not produce an APK")?;
-    let source = output.join(filename);
-    let destination = root.join(".local/artifacts").join(name);
-    copy_file(&source, &destination)?;
-    fs::File::options()
-        .write(true)
-        .open(&destination)?
-        .set_modified(std::time::SystemTime::now())?;
-    println!("Created {}", destination.display());
+    // Obtainium installs the APK whose name carries the device ABI.
+    for element in metadata["elements"]
+        .as_array()
+        .ok_or("Gradle did not produce an APK")?
+    {
+        let (Some(filename), Some(abi)) = (
+            element["outputFile"].as_str(),
+            element["filters"][0]["value"].as_str(),
+        ) else {
+            return Err("Gradle produced an APK without an ABI".into());
+        };
+        let destination = root
+            .join(".local/artifacts")
+            .join(format!("{prefix}-{abi}.apk"));
+        copy_file(&output.join(filename), &destination)?;
+        fs::File::options()
+            .write(true)
+            .open(&destination)?
+            .set_modified(std::time::SystemTime::now())?;
+        println!("Created {}", destination.display());
+    }
     Ok(())
 }
 
@@ -212,7 +232,6 @@ fn toolchain<'a>(root: &Path, abis: &'a str) -> Result<(Toolchain, Vec<Target<'a
                     "armv7a-linux-androideabi",
                 ),
                 "x86_64" => ("x86_64-linux-android", "x86_64", "x86_64-linux-android"),
-                "x86" => ("i686-linux-android", "x86", "i686-linux-android"),
                 _ => return Err(format!("Unknown Android ABI: {abi}")),
             };
             Ok(Target {
@@ -580,19 +599,6 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn install(root: &Path) -> Result<()> {
-    let artifacts = root.join(".local/artifacts");
-    let apk = [
-        artifacts.join("Rufin.apk"),
-        artifacts.join("Rufin.Devel.apk"),
-    ]
-    .into_iter()
-    .filter(|path| path.is_file())
-    .map(|path| path.metadata()?.modified().map(|modified| (modified, path)))
-    .collect::<std::io::Result<Vec<_>>>()?
-    .into_iter()
-    .max_by_key(|(modified, _)| *modified)
-    .map(|(_, path)| path)
-    .ok_or("Build an APK first with just build apk or just build apk-dev.")?;
     let devices = command_stdout("adb", ["devices"])?;
     let online = devices
         .lines()
@@ -614,6 +620,23 @@ fn install(root: &Path) -> Result<()> {
             .first()
             .ok_or("No authorized, online ADB connection is available.")?
     };
+    let abi = command_stdout(
+        "adb",
+        ["-s", serial, "shell", "getprop", "ro.product.cpu.abi"],
+    )?;
+    let artifacts = root.join(".local/artifacts");
+    let apk = [
+        artifacts.join(format!("Rufin-android-{}.apk", abi.trim())),
+        artifacts.join(format!("Rufin.Devel-{}.apk", abi.trim())),
+    ]
+    .into_iter()
+    .filter(|path| path.is_file())
+    .map(|path| path.metadata()?.modified().map(|modified| (modified, path)))
+    .collect::<std::io::Result<Vec<_>>>()?
+    .into_iter()
+    .max_by_key(|(modified, _)| *modified)
+    .map(|(_, path)| path)
+    .ok_or("Build an APK first with just build apk or just build apk-dev.")?;
     execute(
         Command::new("adb")
             .args(["-s", serial, "install", "--user", "0", "-r"])

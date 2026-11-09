@@ -14,7 +14,7 @@ val metadata = JsonSlurper().parseText(providers.exec {
 }.standardOutput.asText.get()) as Map<*, *>
 val version = metadata["version"] as String
 val verifier = file(metadata["verifierManifest"]!!).parentFile
-val abis = providers.gradleProperty("androidAbis").orElse("arm64-v8a,armeabi-v7a,x86_64,x86").get()
+val abis = providers.gradleProperty("androidAbis").orElse(metadata["abis"] as String).get()
 
 repositories {
     google()
@@ -38,7 +38,6 @@ android {
         versionName = version
         val parts = version.substringBefore('-').split('.').map(String::toInt)
         versionCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
-        ndk { abiFilters += abis.split(',') }
     }
     flavorDimensions += "distribution"
     productFlavors {
@@ -76,6 +75,13 @@ android {
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include(*abis.split(',').toTypedArray())
+        }
+    }
     buildFeatures { compose = true; buildConfig = true; resValues = true; aidl = true }
     testOptions {
         unitTests {
@@ -95,8 +101,6 @@ android {
             }
         }
     }
-    // Compress native libraries in the APK and extract them during installation.
-    packaging { jniLibs.useLegacyPackaging = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
