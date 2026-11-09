@@ -123,6 +123,8 @@ enum ContextMenuSection {
     Details,
     Downloads,
     Fixed,
+    /// A custom row, such as the header or the rating, set apart from the actions around it.
+    Widget,
 }
 
 impl ContextMenuSection {
@@ -289,7 +291,7 @@ impl ContextMenuSurface {
         item.set_attribute_value("custom", Some(&id.to_variant()));
         self.entries
             .borrow_mut()
-            .push((ContextMenuSection::Fixed, item));
+            .push((ContextMenuSection::Widget, item));
         self.custom_children
             .borrow_mut()
             .push(ContextMenuCustomChild {
