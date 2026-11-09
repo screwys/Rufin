@@ -526,6 +526,7 @@ async fn playback_command(
             "next" => transport.next(),
             "previous" => transport.previous(),
             "auto-dj" => transport.toggle_auto_dj(),
+            "sleep-timer" => transport.set_sleep_timer(sleep_timer_request(&value)?),
             "seek" => transport.seek_millis(
                 value
                     .get("position_ms")
@@ -751,7 +752,62 @@ fn playback_json(
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"refilling":state.transport.refilling(),"error":state.transport.error,
-        "queue_revision":state.queue.revision
+        "queue_revision":state.queue.revision,
+        "sleep_timer":state.controls.sleep_timer.map(sleep_timer_json)
+    })
+}
+
+/// The running timer with the texts GTK shows; the page counts `remaining_ms` down.
+fn sleep_timer_json(timer: playback::SleepTimerView) -> Value {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64);
+    let text = rufin_core::playback::sleep_timer_text(timer, now);
+    let (kind, value) = match timer.choice {
+        playback::SleepTimerChoice::Minutes { minutes } => ("minutes", minutes),
+        playback::SleepTimerChoice::Tracks { tracks } => ("tracks", tracks),
+    };
+    json!({
+        "kind":kind,"value":value,"finish_track":timer.finish_track,"tracks_left":timer.tracks_left,
+        "remaining_ms":timer.ends_at_unix_millis.map(|end| (end - now).max(0)),
+        "countdown":text.countdown,"caption":text.caption,"short":text.short,"extend":text.extend
+    })
+}
+
+fn sleep_timer_request(value: &Value) -> Result<rufin_core::playback::SleepTimerRequest, Error> {
+    use rufin_core::playback::SleepTimerRequest;
+    Ok(match value.get("action").and_then(Value::as_str) {
+        Some("start") => {
+            let count = value
+                .get("value")
+                .and_then(Value::as_u64)
+                .and_then(|count| u32::try_from(count).ok())
+                .ok_or_else(|| bad_request("value must be a positive integer"))?;
+            SleepTimerRequest::Start {
+                choice: match value.get("kind").and_then(Value::as_str) {
+                    Some("minutes") => playback::SleepTimerChoice::Minutes { minutes: count },
+                    Some("tracks") => playback::SleepTimerChoice::Tracks { tracks: count },
+                    _ => return Err(bad_request("kind must be minutes or tracks")),
+                },
+                finish_track: value
+                    .get("finish_track")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }
+        }
+        Some("extend") => SleepTimerRequest::Extend,
+        Some("finish_track") => SleepTimerRequest::FinishTrack {
+            enabled: value
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| bad_request("enabled must be true or false"))?,
+        },
+        Some("off") => SleepTimerRequest::Off,
+        _ => {
+            return Err(bad_request(
+                "action must be start, extend, finish_track or off",
+            ));
+        }
     })
 }
 

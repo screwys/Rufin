@@ -333,6 +333,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         val current = playbackOwner ?: return@action
         withContext(Dispatchers.IO) { current.toggleAutoDj() }
     }
+    fun sleepTimer(request: SleepTimerRequest) = action {
+        val current = playbackOwner ?: return@action
+        withContext(Dispatchers.IO) { current.setSleepTimer(request) }
+    }
     fun repeat() = action {
         val current = playbackOwner ?: return@action
         withContext(Dispatchers.IO) { current.cycleRepeat() }

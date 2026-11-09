@@ -215,6 +215,7 @@ internal fun BrowseMenuSheet(
     onDismiss: () -> Unit, onPlaylist: () -> Unit, onMetadata: () -> Unit, onRemove: (() -> Unit)? = null,
     onNavigate: (Route, String, String?) -> Unit,
     onPlayNow: ((Boolean) -> Unit)? = null,
+    top: (@Composable () -> Unit)? = null,
 ) {
     // The menu offers and labels what the row shows now, with the changes committed since.
     val item = favoriteItem(model, listed)
@@ -256,6 +257,7 @@ internal fun BrowseMenuSheet(
         }.verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
             val offered = menu
+            top?.invoke()
             BrowseMenuHeader(item, player)
             if (offered != null) {
                 val radioLabel = offered.radio?.let { seed ->

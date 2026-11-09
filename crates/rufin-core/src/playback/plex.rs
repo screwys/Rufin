@@ -1469,6 +1469,7 @@ impl PlaybackOwner {
             command,
             Command::UpdateSettings(_)
                 | Command::SetAutoDj { .. }
+                | Command::SetSleepTimer(_)
                 | Command::SetVisualizerEnabled(_)
         ) {
             return Some(command);

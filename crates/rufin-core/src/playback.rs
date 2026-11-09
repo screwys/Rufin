@@ -10,8 +10,13 @@ mod connect;
 mod continuation;
 mod plex;
 mod queue;
+mod sleep_timer;
 pub(crate) mod state;
 pub use commands::*;
+pub use sleep_timer::{
+    SLEEP_TIMER_MINUTES, SLEEP_TIMER_TRACKS, SleepTimerPresets, SleepTimerRequest, SleepTimerText,
+    sleep_timer_presets, sleep_timer_text,
+};
 #[cfg(test)]
 mod queue_tests;
 
@@ -998,6 +1003,9 @@ impl PlaybackOwner {
             enabled: value,
             refill_threshold: usize::from(threshold),
         })
+    }
+    pub fn set_sleep_timer(&self, request: SleepTimerRequest) {
+        self.send(Command::SetSleepTimer(request))
     }
     pub fn set_visualizer_enabled(&self, enabled: bool) {
         if let Some(active) = self.active() {

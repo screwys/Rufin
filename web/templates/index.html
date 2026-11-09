@@ -327,6 +327,9 @@
           </div>
         </div>
         <div class="player-actions">
+          <button id="sleep-timer-button" class="icon-button" type="button" title="{{ localization::tr("Sleep timer") }}" aria-label="{{ localization::tr("Sleep timer") }}" aria-haspopup="dialog">
+            {% call m::icon("rufin-sleep-timer-symbolic") %}{% endcall %}<span id="sleep-timer-short" hidden></span>
+          </button>
           <button id="playback-settings-button" class="icon-button" type="button" popovertarget="playback-settings" title="{{ localization::tr("Settings") }}" aria-label="{{ localization::tr("Settings") }}" aria-haspopup="menu">
             {% call m::icon("rufin-mixer-sliders-symbolic") %}{% endcall %}
           </button>
@@ -369,6 +372,29 @@
           </div>
         </div>
       </footer>
+      <div id="sleep-timer" popover="auto" role="dialog" aria-label="{{ localization::tr("Sleep timer") }}" data-minutes="{{ page.sleep_minutes() }}" data-tracks="{{ page.sleep_tracks() }}">
+        <div class="menu-heading" id="sleep-timer-title">{{ localization::tr("Sleep timer") }}</div>
+        <div id="sleep-timer-running" hidden>
+          <div id="sleep-timer-countdown"></div>
+          <div id="sleep-timer-caption"></div>
+          <div class="sleep-timer-actions">
+            <button id="sleep-timer-extend" class="pill" type="button"></button>
+            <button id="sleep-timer-off" class="pill flat destructive" type="button">{{ localization::tr("Turn off") }}</button>
+          </div>
+          <hr />
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Sleep timer") }}">
+          <label><input type="radio" name="sleep-timer-kind" value="minutes" checked />{{ localization::tr("Time") }}</label>
+          <label><input type="radio" name="sleep-timer-kind" value="tracks" />{{ localization::tr("Tracks") }}</label>
+        </div>
+        <div id="sleep-timer-presets"></div>
+        <div class="sleep-timer-custom">
+          <label for="sleep-timer-value" id="sleep-timer-value-label">{{ localization::tr("Minutes") }}</label>
+          <input id="sleep-timer-value" type="number" min="1" max="240" value="25" inputmode="numeric" />
+          <button id="sleep-timer-start" class="pill suggested" type="button">{{ localization::tr("Start") }}</button>
+        </div>
+        <label class="menu-switch" id="sleep-timer-finish">{{ localization::tr("Finish the last track") }}<input id="sleep-timer-finish-track" type="checkbox" role="switch" /></label>
+      </div>
       <div id="playback-settings" popover="auto" role="menu" aria-label="{{ localization::tr("Settings") }}">
         <label class="menu-switch">{{ localization::tr("Show playback queue") }}<input type="checkbox" role="switch" data-setting="/right_panel/queue_visible" /></label>
         <label class="menu-switch">{{ localization::tr("Show lyrics") }}<input type="checkbox" role="switch" data-setting="/lyrics_panel_visible" /></label>

@@ -120,10 +120,9 @@ impl Playback {
             .spawn(move || {
                 let _runtime = runtime.enter();
                 loop {
-                    let message = if player.external_clock_running() {
-                        receiver.recv_timeout(Duration::from_millis(33))
-                    } else {
-                        receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                    let message = match player.wait_millis(clock().monotonic_millis) {
+                        Some(wait) => receiver.recv_timeout(Duration::from_millis(wait)),
+                        None => receiver.recv().map_err(|_| RecvTimeoutError::Disconnected),
                     };
                     let Some(_owner) = owner.upgrade() else {
                         let _ = player.shutdown_backend();

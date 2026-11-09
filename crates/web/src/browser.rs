@@ -1057,6 +1057,12 @@ impl Page {
     pub fn enabled(&self, name: &str) -> bool {
         self.controls[name].as_bool().unwrap_or(false)
     }
+    pub fn sleep_minutes(&self) -> String {
+        join_counts(&rufin_core::playback::SLEEP_TIMER_MINUTES)
+    }
+    pub fn sleep_tracks(&self) -> String {
+        join_counts(&rufin_core::playback::SLEEP_TIMER_TRACKS)
+    }
     pub fn repeat_title(&self) -> String {
         localization::tr(match self.controls["repeat"].as_str() {
             Some("all") => "Repeat all",
@@ -1064,6 +1070,14 @@ impl Page {
             _ => "Repeat off",
         })
     }
+}
+
+fn join_counts(counts: &[u32]) -> String {
+    counts
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 async fn index(

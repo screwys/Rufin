@@ -349,8 +349,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     }
     }
     if (queue) PlayerQueueSheet(player, onDismiss = { queue = false },
-        onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) },
-        onSettings = { queue = false; onSettings(it) })
+        onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) })
     if (output) PlayerOutputSheet(player) { output = false }
     AnimatedVisibility(settings, enter = slideInHorizontally(tween(if (reduceMotion) 0 else 240)) { it / 4 } + fadeIn(tween(if (reduceMotion) 0 else 180)),
         exit = slideOutHorizontally(tween(if (reduceMotion) 0 else 200)) { it / 4 } + fadeOut(tween(if (reduceMotion) 0 else 140))) {

@@ -259,7 +259,7 @@ impl UpnpController {
         let command_name = match &command {
             BackendCommand::Start { .. } => "Start",
             BackendCommand::Play { .. } => "Play",
-            BackendCommand::Pause { .. } => "Pause",
+            BackendCommand::Pause { .. } | BackendCommand::FadeOut { .. } => "Pause",
             BackendCommand::Stop { .. } => "Stop",
             BackendCommand::Seek { .. } => "Seek",
             BackendCommand::PrepareNext { .. } => "PrepareNext",
@@ -323,7 +323,9 @@ impl UpnpController {
                     state: BackendState::Playing,
                 }])
             }
-            BackendCommand::Pause { run } if self.current_run() == Some(run) => {
+            BackendCommand::Pause { run } | BackendCommand::FadeOut { run, .. }
+                if self.current_run() == Some(run) =>
+            {
                 if !self.transport_action_allowed("Pause") {
                     return Ok(Vec::new());
                 }
@@ -452,6 +454,7 @@ impl UpnpController {
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
+            | BackendCommand::FadeOut { .. }
             | BackendCommand::Stop { .. }
             | BackendCommand::Seek { .. } => Ok(Vec::new()),
         }

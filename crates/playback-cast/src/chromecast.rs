@@ -233,7 +233,9 @@ impl GoogleCastController {
                     state: BackendState::Playing,
                 }])
             }
-            BackendCommand::Pause { run } if self.current_run() == Some(run) => {
+            BackendCommand::Pause { run } | BackendCommand::FadeOut { run, .. }
+                if self.current_run() == Some(run) =>
+            {
                 self.device.pause_playback().map_err(string_error)?;
                 self.playing = false;
                 self.visualizer_playing = false;
@@ -323,6 +325,7 @@ impl GoogleCastController {
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
+            | BackendCommand::FadeOut { .. }
             | BackendCommand::Stop { .. }
             | BackendCommand::Seek { .. } => Ok(Vec::new()),
         }

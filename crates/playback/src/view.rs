@@ -108,6 +108,27 @@ pub struct ControlsView {
     pub muted: bool,
     pub audio_output: Option<String>,
     pub playback_output: PlaybackOutput,
+    pub sleep_timer: Option<SleepTimerView>,
+}
+
+/// What a sleep timer counts: minutes from when it started, or track ends.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum SleepTimerChoice {
+    Minutes { minutes: u32 },
+    Tracks { tracks: u32 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct SleepTimerView {
+    pub choice: SleepTimerChoice,
+    /// At the end of the time, playback waits for the playing track to end.
+    pub finish_track: bool,
+    /// Track ends still to come, the playing track's included; 0 while a time runs.
+    pub tracks_left: u32,
+    /// When playback pauses, in Unix milliseconds: exact for a time, an estimate for tracks.
+    pub ends_at_unix_millis: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

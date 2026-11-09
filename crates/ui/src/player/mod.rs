@@ -312,3 +312,4 @@ impl PlayerUi {
 pub mod outputs;
 
 pub mod playback_settings;
+pub mod sleep_timer;

@@ -237,6 +237,11 @@ pub enum BackendCommand {
     Pause {
         run: RunId,
     },
+    /// Fades the run out over `millis`, whatever the status fade setting, then pauses it.
+    FadeOut {
+        run: RunId,
+        millis: u64,
+    },
     Stop {
         run: RunId,
     },
@@ -260,6 +265,7 @@ impl BackendCommand {
             Self::Start { run, .. }
             | Self::Play { run }
             | Self::Pause { run }
+            | Self::FadeOut { run, .. }
             | Self::Stop { run }
             | Self::Seek { run, .. } => Some(*run),
             Self::PrepareNext { current_run, .. } => Some(*current_run),

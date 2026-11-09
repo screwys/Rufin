@@ -408,7 +408,7 @@ fn run_controller(
                 let run = command.run().or_else(|| controller.current_run());
                 let requested_playing = match command.as_ref() {
                     BackendCommand::Play { .. } => Some(true),
-                    BackendCommand::Pause { .. } => Some(false),
+                    BackendCommand::Pause { .. } | BackendCommand::FadeOut { .. } => Some(false),
                     _ => None,
                 };
                 match controller.handle(*command, &relay) {

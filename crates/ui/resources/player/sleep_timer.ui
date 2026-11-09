@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="GtkPopover" id="popover">
+    <property name="autohide">true</property>
+    <property name="position">top</property>
+    <style>
+      <class name="sleep-timer-popover" />
+    </style>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="margin-top">6</property>
+        <property name="margin-bottom">6</property>
+        <property name="margin-start">6</property>
+        <property name="margin-end">6</property>
+        <property name="width-request">336</property>
+        <child>
+          <object class="GtkLabel" id="title">
+            <property name="label" translatable="yes">Sleep timer</property>
+            <property name="xalign">0</property>
+            <property name="margin-start">4</property>
+            <style><class name="heading" /></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="running">
+            <property name="orientation">vertical</property>
+            <property name="spacing">2</property>
+            <child>
+              <object class="GtkLabel" id="countdown">
+                <style><class name="sleep-timer-countdown" /><class name="numeric" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="caption">
+                <property name="wrap">true</property>
+                <property name="justify">center</property>
+                <style><class name="dim-label" /><class name="numeric" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="halign">center</property>
+                <property name="spacing">8</property>
+                <property name="margin-top">10</property>
+                <property name="margin-bottom">4</property>
+                <child>
+                  <object class="GtkButton" id="extend">
+                    <style><class name="pill" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="off">
+                    <property name="label" translatable="yes">Turn off</property>
+                    <style><class name="pill" /><class name="flat" /><class name="error" /></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwToggleGroup" id="mode">
+            <property name="homogeneous">true</property>
+            <child>
+              <object class="AdwToggle">
+                <property name="name">time</property>
+                <property name="label" translatable="yes">Time</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwToggle">
+                <property name="name">tracks</property>
+                <property name="label" translatable="yes">Tracks</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkGrid" id="presets">
+            <property name="row-spacing">6</property>
+            <property name="column-spacing">6</property>
+            <property name="column-homogeneous">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkListBox">
+            <property name="selection-mode">none</property>
+            <style><class name="boxed-list" /></style>
+            <child>
+              <object class="AdwSpinRow" id="custom">
+                <property name="title" translatable="yes">Minutes</property>
+                <property name="adjustment">
+                  <object class="GtkAdjustment">
+                    <property name="lower">1</property>
+                    <property name="upper">240</property>
+                    <property name="value">25</property>
+                    <property name="step-increment">1</property>
+                    <property name="page-increment">5</property>
+                  </object>
+                </property>
+                <child type="suffix">
+                  <object class="GtkButton" id="start">
+                    <property name="label" translatable="yes">Start</property>
+                    <property name="valign">center</property>
+                    <style><class name="suggested-action" /></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwSwitchRow" id="finish_track">
+                <property name="title" translatable="yes">Finish the last track</property>
+                <property name="subtitle" translatable="yes">Pauses when that track ends</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

@@ -993,6 +993,7 @@ impl GstEngine {
             BackendCommand::Start { .. }
                 | BackendCommand::Play { .. }
                 | BackendCommand::Pause { .. }
+                | BackendCommand::FadeOut { .. }
         );
         let result = match command {
             BackendCommand::Start {
@@ -1179,7 +1180,14 @@ impl GstEngine {
             }
             BackendCommand::Pause { run } => {
                 if self.run_is_current(run) {
-                    self.start_status_pause()
+                    self.start_status_pause(None)
+                } else {
+                    Ok(())
+                }
+            }
+            BackendCommand::FadeOut { run, millis } => {
+                if self.run_is_current(run) {
+                    self.start_status_pause(Some(Duration::from_millis(millis)))
                 } else {
                     Ok(())
                 }
@@ -2409,7 +2417,8 @@ impl GstEngine {
         }
     }
 
-    fn start_status_pause(&mut self) -> Result<(), BackendFailure> {
+    /// Pauses after the status fade, or after `fade_out` whatever the status fade setting.
+    fn start_status_pause(&mut self, fade_out: Option<Duration>) -> Result<(), BackendFailure> {
         if !self.desired_playing {
             return Ok(());
         }
@@ -2417,10 +2426,13 @@ impl GstEngine {
         let previous_fade = self.status_fade.take();
         self.cancel_unconfirmed_handoff_for_pause();
         let (volume, muted, enabled) = self.status_fade_gain_settings();
+        let enabled = enabled || fade_out.is_some() && !self.active_pipeline().is_bitstream();
+        let duration = fade_out.unwrap_or(STATUS_FADE_DURATION);
         debug!(
             fade_on_play_stop = enabled,
             volume_gain = volume,
             muted,
+            ?fade_out,
             "GStreamer pause requested"
         );
         if !self.active_pipeline().has_session() {
@@ -2440,9 +2452,9 @@ impl GstEngine {
         self.status_fade = Some(StatusFade::new(slot, StatusFadeTarget::Pause, muted));
         let start = previous_fade.is_none().then_some(volume);
         self.pipeline_for_slot(slot)
-            .fade_output(start, 0.0, STATUS_FADE_DURATION);
+            .fade_output(start, 0.0, duration);
         self.with_tail(|tail| {
-            tail.fade_output(start, 0.0, STATUS_FADE_DURATION);
+            tail.fade_output(start, 0.0, duration);
             Ok(())
         });
         Ok(())
