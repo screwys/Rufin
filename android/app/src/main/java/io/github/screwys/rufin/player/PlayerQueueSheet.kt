@@ -61,7 +61,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
     onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
-    onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -337,7 +336,6 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
                     }
                 }
             }
-            QueueAutoDj(player) { onSettings(io.github.screwys.rufin.more.MoreDestination.Playback) }
         }
     }
     if (clear) {
@@ -406,24 +404,5 @@ private fun QueueNowPlaying(player: PlayerConnection) {
             if (duration > 0UL) LinearProgressIndicator(progress = { (position.toDouble() / duration.toDouble()).toFloat().coerceIn(0f, 1f) },
                 Modifier.fillMaxWidth().height(3.dp), drawStopIndicator = {})
         }
-    }
-}
-
-/** Auto DJ under the queue it fills: the switch, and its settings from the label. */
-@Composable
-private fun QueueAutoDj(player: PlayerConnection, onSettings: () -> Unit) {
-    val enabled by remember(player) { derivedStateOf { player.playback?.controls?.autoDjEnabled == true } }
-    HorizontalDivider()
-    Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).clickable(onClick = onSettings).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            RufinIcon("rufin-auto-dj-symbolic", null, Modifier.size(22.dp))
-            Column {
-                Text(translate("Auto DJ"), style = MaterialTheme.typography.titleSmall)
-                Text(translate("Adds similar tracks when the queue runs low"), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        Switch(enabled, { player.autoDj() })
     }
 }

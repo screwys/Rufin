@@ -68,8 +68,8 @@ pub const BOTTOM_PLAYER_IDENTITY_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PAD
         + BOTTOM_PLAYER_NOW_PLAYING_SPACING
         + BOTTOM_PLAYER_IDENTITY_MIN_WIDTH)
         * 2;
-pub const BOTTOM_PLAYER_VOLUME_GROUP_MIN_WIDTH: i32 = BOTTOM_PLAYER_ACTION_BUTTON_SIZE * 2
-    + BOTTOM_PLAYER_VOLUME_SPACING * 2
+pub const BOTTOM_PLAYER_VOLUME_GROUP_MIN_WIDTH: i32 = BOTTOM_PLAYER_ACTION_BUTTON_SIZE * 3
+    + BOTTOM_PLAYER_VOLUME_SPACING * 3
     + BOTTOM_PLAYER_VOLUME_SLOT_LAYOUT_WIDTH;
 pub const BOTTOM_PLAYER_ACTIONS_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PADDING * 2
     + BOTTOM_PLAYER_TRANSPORT_WIDTH
@@ -93,12 +93,14 @@ pub const BOTTOM_PLAYER_STRIP_HEIGHT: i32 =
     BOTTOM_PLAYER_WAVEFORM_HEIGHT + 3 + BOTTOM_PLAYER_STRIP_ROW_HEIGHT + 4;
 /// Volume and favorite beside the controls layout's seek bar, small enough to keep its height.
 const BOTTOM_PLAYER_SEEK_BUTTON_SIZE: i32 = 28;
+/// The narrowest seek bar the controls layout keeps beside its buttons.
+const BOTTOM_PLAYER_CONTROLS_SEEK_MIN_WIDTH: i32 = 60;
 /// The slider the narrow layouts' volume button opens.
 const BOTTOM_PLAYER_VOLUME_POPOVER_HEIGHT: i32 = 120;
-/// Previous, play and next in the compact layout.
-const BOTTOM_PLAYER_COMPACT_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 2
+/// Volume, previous, play, next and favorite in the compact layout.
+const BOTTOM_PLAYER_COMPACT_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 4
     + BOTTOM_PLAYER_PLAY_BUTTON_SIZE
-    + BOTTOM_PLAYER_BUTTON_GAP * 2;
+    + BOTTOM_PLAYER_BUTTON_GAP * 4;
 /// The compact layout centers its buttons on the cover.
 const BOTTOM_PLAYER_COMPACT_BUTTON_CENTER_Y: f64 = BOTTOM_PLAYER_BUTTON_ROW_HEIGHT as f64 / 2.0;
 /// The narrowest bar: five transport buttons over the seek bar.
@@ -181,6 +183,7 @@ pub struct PlayerControls {
     pub volume_button_icon: gtk::Image,
     pub volume_popover_box: gtk::Box,
     pub volume: gtk::Scale,
+    pub sleep_timer: Rc<crate::player::sleep_timer::SleepTimerControl>,
     pub settings_button: gtk::MenuButton,
     pub output_button: gtk::Button,
     pub output_icon: gtk::Image,
@@ -231,6 +234,7 @@ pub struct PlayerActionControls {
     pub volume_button_icon: gtk::Image,
     pub volume_popover_box: gtk::Box,
     pub volume: gtk::Scale,
+    pub sleep_timer: Rc<crate::player::sleep_timer::SleepTimerControl>,
     pub settings_button: gtk::MenuButton,
     pub output_button: gtk::Button,
     pub output_icon: gtk::Image,
@@ -551,6 +555,7 @@ pub fn build_bottom_player() -> PlayerControls {
         volume_button_icon,
         volume_popover_box,
         volume,
+        sleep_timer,
         settings_button,
         output_button,
         output_icon,
@@ -631,6 +636,7 @@ pub fn build_bottom_player() -> PlayerControls {
         volume_button_icon,
         volume_popover_box,
         volume,
+        sleep_timer,
         settings_button,
         output_button,
         output_icon,
@@ -891,6 +897,7 @@ pub fn build_player_action_controls(
         output_button: gtk::Button,
         output_icon: gtk::Image,
         settings_button: gtk::MenuButton,
+        sleep_button: gtk::MenuButton,
         volume_group: gtk::Box,
         volume_button: gtk::MenuButton,
         volume_button_icon: gtk::Image,
@@ -916,6 +923,7 @@ pub fn build_player_action_controls(
 
     bind_widget_accessible_label(&output_button, msgid("Choose playback output"));
     bind_widget_tooltip(&settings_button, "Settings");
+    let sleep_timer = crate::player::sleep_timer::SleepTimerControl::new(&sleep_button);
     volume_button.add_css_class("player-seek-button");
     volume_button.set_size_request(
         BOTTOM_PLAYER_ACTION_BUTTON_SIZE,
@@ -1005,6 +1013,7 @@ pub fn build_player_action_controls(
         volume_button_icon,
         volume_popover_box,
         volume,
+        sleep_timer,
         settings_button,
         output_button,
         output_icon,
@@ -1140,6 +1149,22 @@ pub fn move_transport_button(
     buttons.move_(button, x, y);
 }
 
+/// How many extras join the controls layout's five on its button row, a pair at a time so the
+/// row stays symmetric, and the gap there: the usual one, narrower where the row is tight.
+fn controls_row(width: i32) -> (usize, f64) {
+    let gap = |extras: i32| {
+        let count = 5 + extras;
+        let buttons = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * (count - 1) + BOTTOM_PLAYER_PLAY_BUTTON_SIZE;
+        (f64::from(width - buttons) / f64::from(count - 1)).min(f64::from(BOTTOM_PLAYER_BUTTON_GAP))
+    };
+    [6, 4, 2]
+        .into_iter()
+        .find(|extras| gap(*extras) >= 0.0)
+        .map_or((0, gap(0).max(0.0)), |extras| {
+            (extras as usize, gap(extras))
+        })
+}
+
 pub fn transport_button_position(width: i32, center_y: f64, slot: f64, size: i32) -> (f64, f64) {
     // Edges, not centers, are spaced evenly, so the larger play button keeps the same gap.
     let gap = f64::from(BOTTOM_PLAYER_BUTTON_GAP);
@@ -1267,6 +1292,9 @@ impl crate::player::PlayerUi {
         set_active_class(&controls.repeat_button, repeat_mode != QueueRepeatMode::Off);
         set_repeat_button_icon(&controls.repeat_button, repeat_mode);
         set_active_class(&controls.dj_button, auto_dj_enabled);
+        controls
+            .sleep_timer
+            .update(player.and_then(|player| player.controls.sleep_timer));
         controls.dj_button.set_tooltip_text(Some(&tr("Auto DJ")));
         controls
             .repeat_button
@@ -1983,12 +2011,14 @@ impl crate::player::PlayerUi {
         if desktop {
             self.apply_bottom_player_actions(bottom_player_actions(width));
         } else {
-            player
-                .favorite_button
-                .set_visible(layout == BottomPlayerLayout::Controls);
+            player.favorite_button.set_visible(matches!(
+                layout,
+                BottomPlayerLayout::Controls | BottomPlayerLayout::Compact
+            ));
             player.queue_button.set_visible(false);
+            player.sleep_timer.set_spare_width(0);
         }
-        self.apply_bottom_player_volume_popover(!desktop && !compact);
+        self.apply_bottom_player_volume_popover(!desktop);
         self.sync_bottom_player_rating();
 
         let transport_width = match layout {
@@ -2021,8 +2051,15 @@ impl crate::player::PlayerUi {
             .set_size_request(transport_width, row_height);
         player.now_playing_wall.set_width_request(1);
         player.transport_slot.set_hexpand(!desktop && !compact);
-        self.place_bottom_player_seek_buttons(layout);
-        let all_buttons = !strip && !compact && transport_width >= BOTTOM_PLAYER_TRANSPORT_WIDTH;
+        let (up, gap) = if layout == BottomPlayerLayout::Controls {
+            controls_row(transport_width)
+        } else {
+            (0, 0.0)
+        };
+        self.place_bottom_player_seek_buttons(layout, up);
+        let controls = layout == BottomPlayerLayout::Controls;
+        let all_buttons =
+            controls || !strip && !compact && transport_width >= BOTTOM_PLAYER_TRANSPORT_WIDTH;
         let side = BOTTOM_PLAYER_SIDE_BUTTON_SIZE;
         for (button, slot, visible) in [
             (
@@ -2031,7 +2068,8 @@ impl crate::player::PlayerUi {
                 all_buttons,
             ),
             (player.shuffle_button.upcast_ref(), -2.0, !strip && !compact),
-            (player.volume_button.upcast_ref(), -2.0, strip),
+            (player.volume_button.upcast_ref(), -2.0, strip || compact),
+            (player.favorite_button.upcast_ref(), 2.0, compact),
             (player.previous_button.upcast_ref(), -1.0, true),
             (player.next_button.upcast_ref(), 1.0, true),
             (player.repeat_button.upcast_ref(), 2.0, !compact),
@@ -2066,8 +2104,69 @@ impl crate::player::PlayerUi {
                 play,
             );
         }
+        // The controls layout's row: its five and the extras that went up, centered and evenly
+        // apart, in the seek bar's row's order. The extras that stayed down show there.
+        if controls {
+            let extras = self.controls_extras();
+            for button in &extras {
+                button.set_visible(true);
+            }
+            let [dj, random, sleep, settings, volume, favorite] = &extras;
+            let up_here = |button: &gtk::Widget| {
+                extras[..up]
+                    .contains(button)
+                    .then(|| (button.clone(), side))
+            };
+            let row: Vec<(gtk::Widget, i32)> = [sleep, volume, dj]
+                .into_iter()
+                .filter_map(|button| up_here(button))
+                .chain([
+                    (player.shuffle_button.clone().upcast(), side),
+                    (player.previous_button.clone().upcast(), side),
+                    (player.play_button.clone().upcast(), play),
+                    (player.next_button.clone().upcast(), side),
+                    (player.repeat_button.clone().upcast(), side),
+                ])
+                .chain(
+                    [random, favorite, settings]
+                        .into_iter()
+                        .filter_map(|button| up_here(button)),
+                )
+                .collect();
+            let gaps = (row.len() - 1) as f64;
+            let row_width = row.iter().map(|(_, size)| f64::from(*size)).sum::<f64>() + gaps * gap;
+            let mut center = (f64::from(transport_width) - row_width + f64::from(side)) / 2.0;
+            let mut previous_radius = None;
+            for (button, size) in &row {
+                let radius = f64::from(*size) / 2.0;
+                if let Some(previous) = previous_radius {
+                    center += previous + gap + radius;
+                }
+                previous_radius = Some(radius);
+                button.set_visible(true);
+                let (x, y) = (center - radius, center_y - radius);
+                player.transport_buttons.move_(button, x, y);
+                if button == player.play_button.upcast_ref::<gtk::Widget>() {
+                    player.transport_buttons.move_(&player.play_ring, x, y);
+                }
+            }
+        }
 
         self.place_bottom_player_progress(compact);
+        // The seek bar's row keeps its buttons: the seek bar and its times give way to them.
+        let seek_bar = !controls || {
+            let down = 6 - up as i32;
+            let spacing = BOTTOM_PLAYER_PROGRESS_SPACING;
+            transport_width
+                >= down * (BOTTOM_PLAYER_SEEK_BUTTON_SIZE + spacing)
+                    + widget_natural_width(&player.elapsed)
+                    + widget_natural_width(&player.duration)
+                    + 2 * spacing
+                    + BOTTOM_PLAYER_CONTROLS_SEEK_MIN_WIDTH
+        };
+        player.progress_stack.set_visible(seek_bar);
+        player.elapsed.set_visible(seek_bar && !compact);
+        player.duration.set_visible(seek_bar && !compact);
         // The strip puts the seek bar above its single row of buttons.
         if strip {
             player.progress_row.add_css_class("above-controls");
@@ -2084,7 +2183,7 @@ impl crate::player::PlayerUi {
         player.actions.set_visible(desktop);
         // The desktop row sizes its seek bar from the window. The controls layout and the strip
         // stretch it across the transport's width, between the times and the buttons beside it.
-        player.progress_row.set_halign(if desktop {
+        player.progress_row.set_halign(if desktop || !seek_bar {
             gtk::Align::Center
         } else {
             gtk::Align::Fill
@@ -2117,55 +2216,90 @@ impl crate::player::PlayerUi {
         player.waveform.widget().set_content_width(progress_width);
     }
 
-    /// Volume and favorite sit in the action surface on the desktop row. The
-    /// strip puts volume in shuffle's place; the controls layout puts volume and favorite at the
-    /// ends of the seek bar.
-    fn place_bottom_player_seek_buttons(&self, layout: BottomPlayerLayout) {
+    /// The controls layout's buttons beside its five: the order they go up to the button row in,
+    /// a pair at a time as the width allows. The rest sit at the ends of the seek bar's row.
+    fn controls_extras(&self) -> [gtk::Widget; 6] {
         let player = &self.views.player_controls;
-        let volume_host: &gtk::Widget = match layout {
-            BottomPlayerLayout::Strip => player.transport_buttons.upcast_ref(),
-            BottomPlayerLayout::Controls => player.progress_row.upcast_ref(),
-            BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
-                player.action_buttons.upcast_ref()
-            }
-        };
-        if player.volume_button.parent().as_ref() != Some(volume_host) {
-            remove_from_parent(&player.volume_button);
-            let size = match layout {
-                BottomPlayerLayout::Strip => {
-                    player
-                        .transport_buttons
-                        .put(&player.volume_button, 0.0, 0.0);
-                    BOTTOM_PLAYER_SIDE_BUTTON_SIZE
-                }
-                BottomPlayerLayout::Controls => {
-                    player.progress_row.prepend(&player.volume_button);
-                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE
-                }
-                BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
-                    player.action_buttons.prepend(&player.volume_button);
-                    BOTTOM_PLAYER_ACTION_BUTTON_SIZE
-                }
-            };
-            player.volume_button.set_size_request(size, size);
-        }
-        let controls = matches!(layout, BottomPlayerLayout::Controls);
-        let favorite_host: &gtk::Widget = if controls {
-            player.progress_row.upcast_ref()
-        } else {
-            player.volume_group.upcast_ref()
-        };
-        if player.favorite_button.parent().as_ref() != Some(favorite_host) {
-            remove_from_parent(&player.favorite_button);
-            if controls {
-                player.progress_row.append(&player.favorite_button);
-                player.favorite_button.set_size_request(
-                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE,
-                    BOTTOM_PLAYER_SEEK_BUTTON_SIZE,
-                );
+        [
+            player.dj_button.clone().upcast(),
+            player.random_button.clone().upcast(),
+            player.sleep_timer.button().clone().upcast(),
+            player.settings_button.clone().upcast(),
+            player.volume_button.clone().upcast(),
+            player.favorite_button.clone().upcast(),
+        ]
+    }
+
+    /// Volume and favorite sit in the action surface on the desktop row, beside previous and next
+    /// in the compact layout, and the strip puts volume in shuffle's place. The controls layout hides no button: the first `up` of its extras join
+    /// its button row and the rest sit at the ends of the seek bar's row.
+    fn place_bottom_player_seek_buttons(&self, layout: BottomPlayerLayout, up: usize) {
+        let player = &self.views.player_controls;
+        let controls = layout == BottomPlayerLayout::Controls;
+        let transport_buttons = player.transport_buttons.upcast_ref::<gtk::Widget>();
+        let extras = self.controls_extras();
+        let [dj, random, sleep, settings, volume, favorite] = &extras;
+        for (index, button) in extras.iter().enumerate() {
+            let host: &gtk::Widget = if controls && index < up {
+                transport_buttons
+            } else if controls {
+                player.progress_row.upcast_ref()
+            } else if button == dj
+                || button == random
+                || button == volume && layout == BottomPlayerLayout::Strip
+                || (button == volume || button == favorite) && layout == BottomPlayerLayout::Compact
+            {
+                transport_buttons
+            } else if button == favorite {
+                player.volume_group.upcast_ref()
             } else {
-                player.volume_group.prepend(&player.favorite_button);
-                player.favorite_button.set_size_request(-1, -1);
+                player.action_buttons.upcast_ref()
+            };
+            if button.parent().as_ref() == Some(host) {
+                continue;
+            }
+            remove_from_parent(button);
+            let size = if host == transport_buttons {
+                player.transport_buttons.put(button, 0.0, 0.0);
+                BOTTOM_PLAYER_SIDE_BUTTON_SIZE
+            } else if controls {
+                player.progress_row.append(button);
+                BOTTOM_PLAYER_SEEK_BUTTON_SIZE
+            } else if button == favorite {
+                player.volume_group.prepend(button);
+                -1
+            } else if button == volume {
+                player.action_buttons.prepend(button);
+                BOTTOM_PLAYER_ACTION_BUTTON_SIZE
+            } else {
+                // The desktop row: the sleep timer, then settings, after volume.
+                let after = if button == settings { sleep } else { volume };
+                let after = (after.parent().as_ref() == Some(host)).then_some(after);
+                player.action_buttons.insert_child_after(button, after);
+                -1
+            };
+            button.set_size_request(size, size);
+        }
+        if !controls {
+            return;
+        }
+        // Both rows keep one order: the sleep timer, volume and Auto DJ before the times, Play
+        // random, favorite and settings after them.
+        let row = player.progress_row.upcast_ref::<gtk::Widget>();
+        let mut previous: Option<&gtk::Widget> = None;
+        for button in [sleep, volume, dj] {
+            if button.parent().as_ref() == Some(row) {
+                player.progress_row.reorder_child_after(button, previous);
+                previous = Some(button);
+            }
+        }
+        let mut previous = player.duration.upcast_ref::<gtk::Widget>();
+        for button in [random, favorite, settings] {
+            if button.parent().as_ref() == Some(row) {
+                player
+                    .progress_row
+                    .reorder_child_after(button, Some(previous));
+                previous = button;
             }
         }
     }
@@ -2304,6 +2438,9 @@ impl crate::player::PlayerUi {
         player
             .queue_button
             .set_visible(matches!(actions, BottomPlayerActions::Queue));
+        player.sleep_timer.set_spare_width(
+            bottom_player_side_width(player.width.get()) - bottom_player_action_min_width(actions),
+        );
     }
 }
 
@@ -2872,6 +3009,18 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
         .player_controls
         .rating
         .connect_commit(move |rating| rating_shell.set_current_track_rating(rating));
+
+    let sleep_shell = Rc::downgrade(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .sleep_timer
+        .connect_request(move |request| {
+            if let Some(shell) = sleep_shell.upgrade() {
+                shell.products.playback.set_sleep_timer(request);
+            }
+        });
 
     crate::player::playback_settings::configure_playback_settings_popover(
         &shell.player_ui.views.player_controls.settings_button,

@@ -573,6 +573,7 @@ mod freedesktop {
                     muted: false,
                     audio_output: None,
                     playback_output: playback::PlaybackOutput::Local,
+                    sleep_timer: None,
                 },
             }
         }

@@ -76,6 +76,7 @@ function showPlayback(value) {
   }[value?.repeat || "off"];
   $("repeat").title = repeatLabel;
   $("auto-dj").setAttribute("aria-pressed", String(value?.auto_dj || false));
+  showSleepTimer(value?.sleep_timer || null);
   $("repeat").setAttribute("aria-label", repeatLabel);
   $("mute").setAttribute("aria-pressed", String(value?.muted || false));
   $("mute").setAttribute(
@@ -416,9 +417,128 @@ function init() {
   setInterval(() => {
     if (!document.hidden) updatePosition();
   }, 200);
+  initSleepTimer();
   $("auto-dj").addEventListener("click", () =>
     run(() => api("/playback/auto-dj", "POST", {})),
   );
+}
+
+// The sleep timer runs in the player; the page shows it as GTK's popover does and counts the
+// time left down between updates.
+let sleepTimer = null;
+
+function sleepTimerKind() {
+  return document.querySelector('input[name="sleep-timer-kind"]:checked').value;
+}
+
+function sleepCountdown(milliseconds) {
+  const total = Math.ceil(Math.max(0, milliseconds) / 1000);
+  const [hours, minutes, seconds] = [Math.floor(total / 3600), Math.floor(total / 60) % 60, total % 60];
+  const pad = (value) => String(value).padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
+function sendSleepTimer(body) {
+  run(() => api("/playback/sleep-timer", "POST", body));
+}
+
+function showSleepPresets() {
+  const kind = sleepTimerKind();
+  const values = $("sleep-timer").dataset[kind].split(",").map(Number);
+  $("sleep-timer-presets").replaceChildren(
+    ...values.map((value) => {
+      const label = kind === "minutes" ? tr("{minutes} min", { minutes: value }) : value === 1 ? tr("End of this track") : String(value);
+      const preset = el("button", "", label);
+      preset.type = "button";
+      preset.classList.toggle("wide", kind === "tracks" && value === 1);
+      preset.dataset.value = value;
+      // A preset fills the value; Start starts it.
+      preset.addEventListener("click", () => {
+        $("sleep-timer-value").value = value;
+        highlightSleepPreset();
+      });
+      return preset;
+    }),
+  );
+  $("sleep-timer-value").max = kind === "minutes" ? 240 : 100;
+  // The running timer's value, or 30 minutes or the end of this track.
+  $("sleep-timer-value").value = sleepTimer?.kind === kind ? sleepTimer.value : kind === "minutes" ? 30 : 1;
+  $("sleep-timer-value-label").textContent = kind === "minutes" ? tr("Minutes") : tr("Tracks");
+  $("sleep-timer-finish").hidden = kind !== "minutes";
+  highlightSleepPreset();
+}
+
+function highlightSleepPreset() {
+  const value = Math.round(Number($("sleep-timer-value").value));
+  for (const preset of $("sleep-timer-presets").children)
+    preset.setAttribute("aria-pressed", String(Number(preset.dataset.value) === value));
+}
+
+function startSleepTimer(kind, value) {
+  $("sleep-timer").hidePopover();
+  sendSleepTimer({
+    action: "start",
+    kind,
+    value,
+    finish_track: kind === "minutes" && $("sleep-timer-finish-track").checked,
+  });
+}
+
+function tickSleepTimer() {
+  if (!sleepTimer) return;
+  const timed = sleepTimer.remaining_ms != null && (sleepTimer.kind === "minutes" || sleepTimer.tracks_left <= 1);
+  const left = timed ? sleepCountdown(sleepTimer.remaining_ms - (performance.now() - sleepTimer.receivedAt)) : null;
+  $("sleep-timer-countdown").textContent = left ?? sleepTimer.countdown;
+  $("sleep-timer-short").textContent = left ?? sleepTimer.short;
+}
+
+function showSleepTimer(timer) {
+  const kindChanged = sleepTimer?.kind !== timer?.kind || sleepTimer?.value !== timer?.value;
+  sleepTimer = timer && { ...timer, receivedAt: performance.now() };
+  $("sleep-timer-button").classList.toggle("running", !!timer);
+  $("sleep-timer-short").hidden = !timer;
+  $("sleep-timer-running").hidden = !timer;
+  $("sleep-timer-title").hidden = !!timer;
+  if (timer) {
+    $("sleep-timer-caption").textContent = timer.caption;
+    $("sleep-timer-caption").hidden = !timer.caption;
+    $("sleep-timer-extend").textContent = timer.extend;
+    $("sleep-timer-finish-track").checked = timer.finish_track;
+  }
+  const label = timer?.caption ? `${tr("Sleep timer")}\n${timer.caption}` : tr("Sleep timer");
+  $("sleep-timer-button").title = label;
+  if (kindChanged) {
+    if (timer) document.querySelector(`input[name="sleep-timer-kind"][value="${timer.kind}"]`).checked = true;
+    showSleepPresets();
+  }
+  tickSleepTimer();
+}
+
+function initSleepTimer() {
+  // Opening shows the running timer's kind.
+  $("sleep-timer").addEventListener("beforetoggle", (event) => {
+    if (event.newState !== "open") return;
+    if (sleepTimer) document.querySelector(`input[name="sleep-timer-kind"][value="${sleepTimer.kind}"]`).checked = true;
+    showSleepPresets();
+  });
+  for (const input of document.querySelectorAll('input[name="sleep-timer-kind"]')) input.addEventListener("change", showSleepPresets);
+  $("sleep-timer-value").addEventListener("input", highlightSleepPreset);
+  $("sleep-timer-start").addEventListener("click", () => {
+    const value = Math.round(Number($("sleep-timer-value").value));
+    if (value >= 1) startSleepTimer(sleepTimerKind(), value);
+  });
+  $("sleep-timer-extend").addEventListener("click", () => sendSleepTimer({ action: "extend" }));
+  $("sleep-timer-off").addEventListener("click", () => {
+    $("sleep-timer").hidePopover();
+    sendSleepTimer({ action: "off" });
+  });
+  $("sleep-timer-finish-track").addEventListener("change", () => {
+    if (sleepTimer?.kind === "minutes") sendSleepTimer({ action: "finish_track", enabled: $("sleep-timer-finish-track").checked });
+  });
+  setInterval(() => {
+    if (!document.hidden) tickSleepTimer();
+  }, 1000);
+  showSleepPresets();
 }
 
 export { coverRequest, showLyrics, showPlayback, init };

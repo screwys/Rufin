@@ -1705,7 +1705,8 @@ dialog.alert.playlist-delete-dialog .message-area {
 
 /* Volume and favorite at the ends of the controls layout's seek bar. */
 .player-progress-row > button.player-seek-button,
-.player-progress-row > menubutton.player-seek-button > button {
+.player-progress-row > button.player-transport-button,
+.player-progress-row > menubutton > button {
   min-width: 28px;
   min-height: 28px;
   padding: 0;
@@ -2169,10 +2170,18 @@ button.download-queue-pause image {
   -gtk-icon-size: 16px;
 }
 
-.icon-button.player-transport-button {
+.icon-button.player-transport-button,
+.player-button-row > button.player-favorite-button,
+.player-button-row > menubutton > button {
   padding: 0;
   min-width: 36px;
   min-height: 36px;
+}
+
+/* The end buttons that went up to the controls layout's button row. */
+.player-button-row > button.player-favorite-button,
+.player-button-row > menubutton > button {
+  border-radius: 999px;
 }
 
 .icon-button.player-play-button {
@@ -2970,3 +2979,32 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .album-detail-list { border-spacing: 0; }
 .album-detail-list > row { padding: 0; margin: 0; min-height: 0; border-width: 0; }
 .album-detail-list > row:hover { background-color: transparent; }
+
+/* A running sleep timer is a tinted circle, or a pill with the time left where it fits. */
+.player-action-buttons > menubutton.sleep-timer-active > button,
+.player-button-row > menubutton.sleep-timer-active > button,
+.player-progress-row > menubutton.sleep-timer-active > button {
+  color: var(--accent-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
+}
+
+.player-action-buttons > menubutton.sleep-timer-active > button:hover,
+.player-button-row > menubutton.sleep-timer-active > button:hover,
+.player-progress-row > menubutton.sleep-timer-active > button:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 22%, transparent);
+}
+
+.player-action-buttons > menubutton.sleep-timer-active.sleep-timer-wide > button {
+  padding: 0 10px 0 8px;
+}
+
+.sleep-timer-button-label {
+  font-weight: 700;
+  font-size: 0.9em;
+}
+
+.sleep-timer-countdown {
+  font-size: 2.6em;
+  font-weight: 300;
+}

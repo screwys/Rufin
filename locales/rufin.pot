@@ -205,6 +205,12 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr ""
 
+msgid "+1 track"
+msgstr ""
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
@@ -356,9 +362,6 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to"
-msgstr ""
-
-msgid "Adds similar tracks when the queue runs low"
 msgstr ""
 
 msgid "Album Artists"
@@ -1470,6 +1473,13 @@ msgstr ""
 msgid "Encrypt backups"
 msgstr ""
 
+msgid "End of this track"
+msgstr ""
+
+#, rust-format
+msgid "Ends around {time}"
+msgstr ""
+
 msgid "Enter API credentials first"
 msgstr ""
 
@@ -1653,6 +1663,13 @@ msgid "Find your ListenBrainz user token"
 msgstr ""
 
 msgid "Finding lyrics..."
+msgstr ""
+
+msgid "Finish the last track"
+msgstr ""
+
+#, rust-format
+msgid "Finishes the track playing at {time}"
 msgstr ""
 
 msgid "Fit to height"
@@ -2031,6 +2048,9 @@ msgstr ""
 msgid "Legacy"
 msgstr ""
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr ""
 
@@ -2259,6 +2279,9 @@ msgid "Minimum year"
 msgstr ""
 
 msgid "Minimum"
+msgstr ""
+
+msgid "Minutes"
 msgstr ""
 
 msgid "Mirrored bars"
@@ -2785,6 +2808,16 @@ msgid "Path"
 msgstr ""
 
 msgid "Pause"
+msgstr ""
+
+#, rust-format
+msgid "Pauses at {time}"
+msgstr ""
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
 msgstr ""
 
 msgid "Peak fall speed (% per second)"
@@ -3797,6 +3830,9 @@ msgstr ""
 msgid "Slate"
 msgstr ""
 
+msgid "Sleep timer"
+msgstr ""
+
 msgid "Small"
 msgstr ""
 
@@ -3876,6 +3912,9 @@ msgid "Start minimized"
 msgstr ""
 
 msgid "Start playing automatically"
+msgstr ""
+
+msgid "Start"
 msgstr ""
 
 msgid "Starting page"
@@ -4036,6 +4075,9 @@ msgstr ""
 msgid "Thursday"
 msgstr ""
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr ""
 
@@ -4124,6 +4166,9 @@ msgid "Turn off only for a server you control"
 msgstr ""
 
 msgid "Turn off private mode"
+msgstr ""
+
+msgid "Turn off"
 msgstr ""
 
 msgid "Turn on private mode"
@@ -4516,6 +4561,10 @@ msgid "{field} \302\267 Different across {count} track"
 msgid_plural "{field} \302\267 Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
+
+#, rust-format
+msgid "{minutes} min"
+msgstr ""
 
 #, rust-format
 msgid "{stage} ({completed} of {total}, {cached} cached)"

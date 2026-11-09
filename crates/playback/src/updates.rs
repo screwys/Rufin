@@ -157,6 +157,7 @@ mod tests {
                 muted: false,
                 audio_output: None,
                 playback_output: PlaybackOutput::Local,
+                sleep_timer: None,
             },
         };
         let started = PlaybackNotice::RunStarted(RunId::new(1));

@@ -34,6 +34,8 @@ import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.player.PlayerIconButton
+import io.github.screwys.rufin.player.PlayerMenuActions
+import io.github.screwys.rufin.player.SleepTimerSheet
 import io.github.screwys.rufin.player.MiniPlayer
 import io.github.screwys.rufin.player.SidebarPlayer
 import io.github.screwys.rufin.more.MoreDestination
@@ -219,7 +221,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var sort by rememberSaveable { mutableStateOf(false) }
     var sortPage by remember { mutableStateOf<BrowsePage?>(null) }
     var random by rememberSaveable { mutableStateOf(false) }
+    var sleepTimer by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf<BrowseItem?>(null) }
+    // The playing track's menu from the player, with the player's row on top.
+    var playerMenu by remember { mutableStateOf<BrowseItem?>(null) }
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var sharing by remember { mutableStateOf<Pair<BrowseItem, Share>?>(null) }
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
@@ -504,7 +509,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         if (phone) PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", { scope.launch { drawer.open() } })
                         Text(label("Home"), Modifier.weight(1f).padding(start = if (phone) 2.dp else 16.dp), maxLines = 1,
                             style = MaterialTheme.typography.titleLarge)
-                        PlayerIconButton("rufin-random-symbolic", "Play random", { random = true })
                     }
                 } else Box(Modifier.fillMaxSize()) {
                     when (browse.section) {
@@ -579,14 +583,22 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             browse.section = AppSection.Browse
             browse.openRoute(route, title)
         }, onMore = {
-            player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
+            player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { playerMenu = BrowseItem(it, 0UL, null) } }
         }, tiny = tiny) { fullPlayer = false }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
     if (random) RandomPlaySheet(model, browse) { random = false }
-    menu?.let { item -> BrowseMenuSheet(model, browse, item, player, { menu = null }, { playlist = item; menu = null }, { metadata = item; menu = null },
-        onNavigate = { route, title, _ -> menu = null; fullPlayer = false; browse.section = AppSection.Browse; browse.openRoute(route, title) }) }
+    if (sleepTimer) SleepTimerSheet(player) { sleepTimer = false }
+    (playerMenu ?: menu)?.let { item ->
+        val close = { menu = null; playerMenu = null }
+        BrowseMenuSheet(model, browse, item, player, close, { playlist = item; close() }, { metadata = item; close() },
+            onNavigate = { route, title, _ -> close(); fullPlayer = false; browse.section = AppSection.Browse; browse.openRoute(route, title) },
+            top = if (playerMenu == null) null else { {
+                PlayerMenuActions(player, onRandom = { close(); random = true }, onSleepTimer = { close(); sleepTimer = true },
+                    onAutoDjSettings = { close(); fullPlayer = false; openMore(MoreDestination.Playback) })
+            } })
+    }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     sharing?.let { (item, share) -> BrowseShareSheet(player, item, share) { sharing = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false }) { name, sourceId, public ->

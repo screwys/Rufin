@@ -1510,6 +1510,7 @@ mod playback_refresh_tests {
                 muted: false,
                 audio_output: None,
                 playback_output: PlaybackOutput::Local,
+                sleep_timer: None,
             },
         }
     }

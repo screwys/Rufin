@@ -53,7 +53,7 @@ class RufinPlayerTest {
             positionMillis = 10_000UL, positionObservedAtMillis = 1UL, playbackRate = 1.0,
             durationMillis = 60_000UL, canSeek = true, bufferingPercent = null, error = null,
         ),
-        controls = ControlsView(QueueRepeatMode.OFF, false, false, 1.0, false, null, PlaybackOutput.Local),
+        controls = ControlsView(QueueRepeatMode.OFF, false, false, 1.0, false, null, PlaybackOutput.Local, null),
     )
 
     @Before

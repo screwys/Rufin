@@ -294,12 +294,14 @@ function resolveLayout(width) {
 // seek bar's width.
 function barLayout(width) {
   const side = (width - 16 - TRANSPORT) / 2;
-  const action = (count) => 158 + 34 * count;
+  const action = (count) => 192 + 34 * count;
   return {
     bar: width >= NARROW_BAR ? "desktop" : "controls",
     // Auto DJ and random play keep their places while all seven buttons fit.
     transport: width - 16 >= TRANSPORT ? "all" : "five",
     actions: side >= action(2) ? "queue" : side >= action(1) ? "favorite" : "volume",
+    // A running sleep timer shows its time left where the pill fits beside every action.
+    sleepLabel: side >= action(2) + 64,
     progress: Math.max(140, Math.min(140 + ((width - NARROW_BAR) * 95) / 300, width - 16 - 2 * action(0) - 72)),
   };
 }
@@ -317,6 +319,7 @@ function applyLayout() {
   app.dataset.right = layout.right ? "visible" : "hidden";
   app.dataset.bar = mini ? "mini" : bar.bar;
   app.dataset.actions = bar.actions;
+  app.toggleAttribute("data-sleep-label", bar.sleepLabel);
   app.dataset.transport = mini === "short" ? "five" : bar.transport;
   app.style.setProperty("--left-w", `${layout.leftWidth || Math.min(appLayout.preferred_left_sidebar_width || 230, MAX_LEFT)}px`);
   app.style.setProperty("--right-w", `${layout.rightWidth}px`);
@@ -425,7 +428,7 @@ function initLayout() {
     $("main-menu").hidePopover();
     $("about-dialog").showModal();
   });
-  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["playback-settings-button", "playback-settings"]]) {
+  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["sleep-timer-button", "sleep-timer"], ["playback-settings-button", "playback-settings"]]) {
     $(anchor).removeAttribute("popovertarget");
     $(anchor).addEventListener("click", () => {
       if ($(popup).matches(":popover-open")) $(popup).hidePopover();

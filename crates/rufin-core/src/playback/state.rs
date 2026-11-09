@@ -2,6 +2,7 @@ use super::{
     PlaybackOwner,
     actor::{PlaybackError, WeakPlayback},
     queue::{OccurrenceId, Sequence, SequenceError},
+    sleep_timer::{SleepTimer, SleepTimerDue, SleepTimerRequest},
 };
 use crate::playback::{QueueReorderTarget, QueueSelection};
 use playback::{
@@ -111,6 +112,7 @@ pub enum Command {
     UpdateSettings(PlaybackSettings),
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
+    SetSleepTimer(SleepTimerRequest),
 }
 
 impl Command {
@@ -314,6 +316,7 @@ pub(super) struct Player {
     /// The server failed to connect: the skips that follow play only copies on this device,
     /// until a track starts or ends.
     offline: bool,
+    sleep_timer: Option<SleepTimer>,
 }
 
 impl Player {
@@ -373,6 +376,7 @@ impl Player {
             last_error: None,
             consecutive_skips: 0,
             offline: false,
+            sleep_timer: None,
         }
     }
 
@@ -496,6 +500,7 @@ impl Player {
             self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
         }
+        let previous_current = self.external_current();
         let queue_changed = sequence.is_some();
         if let Some(sequence) = sequence {
             self.sequence = sequence;
@@ -519,7 +524,24 @@ impl Player {
         if already_external && queue_changed {
             self.maybe_request_auto_dj();
         }
+        // The receiver moved to another track: one more track end for the sleep timer.
+        if already_external
+            && previous_current.is_some()
+            && self.external_current() != previous_current
+            && self.sleep_track_ended()
+        {
+            self.owner().send(Command::Pause);
+        }
         Ok(())
+    }
+
+    fn external_current(&self) -> Option<(usize, library::TrackKey)> {
+        let offset = self.external_queue_extent().map_or(0, |(_, offset)| offset);
+        let index = self.sequence.selected_index()?;
+        Some((
+            index + offset,
+            self.sequence.entry_at(index)?.track_key.clone(),
+        ))
     }
 
     /// The external playhead is interpolated between receiver reports.
@@ -962,6 +984,7 @@ impl Player {
                 self.send_backend(BackendCommand::SetVisualizerEnabled(enabled));
             }),
             Command::StreamInputsChanged => Ok(self.stream_inputs_changed()),
+            Command::SetSleepTimer(request) => Ok(self.set_sleep_timer(request, sample)),
         }
     }
 
@@ -1745,6 +1768,9 @@ impl Player {
         self.queue_loading = false;
         self.deferred_queue.clear();
         let removing_current = include_current || self.sequence.selected_index().is_none();
+        if removing_current {
+            self.sleep_timer = None;
+        }
         self.edit_queue(|sequence| sequence.clear(removing_current));
         self.changed_queue(removing_current && previous.is_some(), true, sample);
     }
@@ -1842,6 +1868,7 @@ impl Player {
 
     fn stop(&mut self, sample: &ClockSample, reset_position: bool) {
         self.failed_run = None;
+        self.sleep_timer = None;
         if self.pending_queue.is_some() || self.pending_hydration.is_some() {
             self.queue_transport = Some(TransportStatus::Stopped);
         }
@@ -1888,6 +1915,7 @@ impl Player {
             self.send_backend(BackendCommand::Stop { run });
         }
         self.finish_current(RunEndReason::ManualSkip, sample);
+        let sleep = self.sleep_track_ended();
         let next_position = self.sequence.advance_index(false);
         let Some(next_position) = next_position else {
             self.auto_dj_waiting_for_continuation = true;
@@ -1896,7 +1924,7 @@ impl Player {
         };
         self.next_plan =
             reserved.filter(|plan| Some(plan.occurrence) == self.sequence.id_at(next_position));
-        self.promote_or_begin(next_position, true);
+        self.promote_or_begin(next_position, !sleep);
     }
 
     fn previous(&mut self, sample: &ClockSample) {
@@ -2256,11 +2284,12 @@ impl Player {
         self.dirty = true;
         let reserved = self.next_plan.clone();
         self.finish_current(RunEndReason::Completed, sample);
+        let sleep = self.sleep_track_ended();
         let next = self.sequence.advance_index(true);
         if let Some(next) = next {
             self.next_plan =
                 reserved.filter(|plan| Some(plan.occurrence) == self.sequence.id_at(next));
-            self.promote_or_begin(next, desired_playing);
+            self.promote_or_begin(next, desired_playing && !sleep);
         } else {
             self.auto_dj_waiting_for_continuation = true;
             self.maybe_request_auto_dj();
@@ -2308,6 +2337,7 @@ impl Player {
             .and_then(|plan| plan.failed_local.clone());
         self.dirty = true;
         self.finish_current(RunEndReason::Completed, sample);
+        let desired_playing = desired_playing && !self.sleep_track_ended();
         if !self.sequence.activate_backend(position) {
             return;
         }
@@ -2471,7 +2501,16 @@ impl Player {
             self.next_plan = None;
             return;
         };
-        let next = self.sequence.peek_next_eos().cloned();
+        let next = self
+            .sequence
+            .peek_next_eos()
+            .filter(|_| {
+                !self
+                    .sleep_timer
+                    .as_ref()
+                    .is_some_and(SleepTimer::stops_after_current)
+            })
+            .cloned();
         let Some(next) = next else {
             if self.next_plan.take().is_some() {
                 self.send_backend(BackendCommand::PrepareNext {
@@ -2839,6 +2878,20 @@ impl Player {
                 muted: self.output_muted(),
                 audio_output: settings.audio_output.clone(),
                 playback_output: self.playback_output().clone(),
+                sleep_timer: self.sleep_timer.as_ref().map(|timer| {
+                    let selected = sequence.selected_index().unwrap_or(0);
+                    timer.view(
+                        self.desired_playing(),
+                        self.duration_millis()
+                            .saturating_sub(self.position_millis()),
+                        (selected + 1..).map(|index| {
+                            sequence
+                                .at(index)
+                                .map(|row| row.track.metadata.duration_millis.max(0) as u64)
+                        }),
+                        self.playback_rate(),
+                    )
+                }),
             },
         }
     }
@@ -2908,7 +2961,7 @@ impl Player {
             .as_mut()
             .map(|backend| backend.drain_events())
             .unwrap_or_default();
-        if events.is_empty() && self.external.is_none() {
+        if events.is_empty() && self.external.is_none() && self.sleep_timer.is_none() {
             return;
         }
         let sample = clock();
@@ -2916,7 +2969,95 @@ impl Player {
             self.handle_backend(event, &sample);
         }
         self.advance_external_clock(&sample);
+        self.check_sleep_timer(&sample);
         self.publish(&sample);
+    }
+
+    /// How long the worker may wait for a message: the external playhead moves every frame,
+    /// and the sleep timer has a time.
+    pub(super) fn wait_millis(&self, now: u64) -> Option<u64> {
+        let external = self.external_clock_running().then_some(33);
+        let sleep = self
+            .sleep_timer
+            .as_ref()
+            .and_then(|timer| timer.wait_millis(now));
+        external.into_iter().chain(sleep).min()
+    }
+
+    fn set_sleep_timer(&mut self, request: SleepTimerRequest, sample: &ClockSample) {
+        let now = sample.monotonic_millis;
+        match request {
+            SleepTimerRequest::Start {
+                choice,
+                finish_track,
+            } => self.sleep_timer = SleepTimer::new(choice, finish_track, now),
+            SleepTimerRequest::Extend => {
+                if let Some(timer) = self.sleep_timer.as_mut() {
+                    timer.extend(now);
+                }
+            }
+            SleepTimerRequest::FinishTrack { enabled } => {
+                if let Some(timer) = self.sleep_timer.as_mut() {
+                    timer.set_finish_track(enabled, now);
+                }
+            }
+            SleepTimerRequest::Off => self.sleep_timer = None,
+        }
+        self.dirty = true;
+        self.replan_next(false);
+        self.check_sleep_timer(sample);
+    }
+
+    fn check_sleep_timer(&mut self, sample: &ClockSample) {
+        let Some(timer) = self.sleep_timer.as_mut() else {
+            return;
+        };
+        match timer.due(sample.monotonic_millis) {
+            SleepTimerDue::Waiting => {}
+            SleepTimerDue::FinishTrack => {
+                self.dirty = true;
+                self.replan_next(false);
+            }
+            SleepTimerDue::FadeOut { millis } => {
+                self.sleep_timer = None;
+                self.dirty = true;
+                self.sleep_pause(millis);
+            }
+        }
+    }
+
+    /// Counts a track end for the sleep timer; true when playback stops after it.
+    fn sleep_track_ended(&mut self) -> bool {
+        let stop = self
+            .sleep_timer
+            .as_mut()
+            .is_some_and(SleepTimer::track_ended);
+        if stop {
+            self.sleep_timer = None;
+            self.dirty = true;
+        }
+        stop
+    }
+
+    fn sleep_pause(&mut self, millis: u64) {
+        // A receiver is paused the way its controls pause it.
+        if self.external.is_some() {
+            self.owner().send(Command::Pause);
+            return;
+        }
+        if let Some(run) = self.current_run.as_mut().filter(|run| {
+            run.desired_playing
+                && matches!(
+                    run.status,
+                    TransportStatus::Playing | TransportStatus::Buffering
+                )
+        }) {
+            run.desired_playing = false;
+            let run = run.id;
+            self.send_backend(BackendCommand::FadeOut { run, millis });
+        } else {
+            self.set_playing(false);
+        }
     }
 
     pub(super) fn publish(&mut self, sample: &ClockSample) {
