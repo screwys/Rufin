@@ -26,7 +26,7 @@ on:
       - crates/ui/Cargo.toml
       - xtask/**
       - android/**
-      - .github/workflows/android.yml
+      - .github/workflows/android-build.yml
   workflow_dispatch:
 
 permissions:
@@ -81,7 +81,7 @@ jobs:
             case "$1" in
               *.md|*.css|*.ui|locales/*|resources/*|*/resources/*)
                 ;;
-              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|xtask/src/android.rs|xtask/src/main.rs|xtask/src/process.rs|xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
+              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|xtask/src/android.rs|xtask/src/main.rs|xtask/src/process.rs|xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android-build.yml)
                 add_jobs android
                 ;;
               crates/ui/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|xtask/*)
@@ -109,7 +109,7 @@ jobs:
             while IFS= read -r -d '' path; do
               select_android "$path"
               case "$path" in
-                android/*|*.kt|*.kts|crates/rufin-android/*|.github/workflows/android.yml)
+                android/*|*.kt|*.kts|crates/rufin-android/*|.github/workflows/android-build.yml)
                   ;;
                 xtask/*)
                   add_jobs source_checks workspace
@@ -264,7 +264,7 @@ jobs:
     name: Android
     needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'android')
-    uses: ./.github/workflows/android.yml
+    uses: ./.github/workflows/android-build.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
 

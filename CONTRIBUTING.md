@@ -125,8 +125,9 @@ The HTTP command reference is in `crates/web/src/help.json` and served by `GET /
 ```bash
 just build # builds the native binary, macOS disk image, or Windows installer
 just build headless # builds the headless development executable
-just build apk # builds the optimized Android release with the stable app identity
-just build apk-dev # builds the debug Android APK with the development app identity
+just build apk # builds the optimized Android release APKs, one per ABI, with the stable app identity
+just build apk-dev # builds the debug Android APKs, one per ABI, with the development app identity
+just build apk arm64-v8a # builds only one ABI; apk-dev takes one too
 just install android # installs the most recently built APK, retaining app data
 just build arch # builds the Arch package
 just build flatpak # builds the Flatpak
