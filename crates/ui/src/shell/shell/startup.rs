@@ -50,6 +50,15 @@ impl Shell {
         self.player_ui.render_lyrics_panel();
         self.player_ui.update_bottom_player();
     }
+
+    /// The selected library's first route, once its selection is installed and no source
+    /// operation blocks it. The selection comes with the change feed and the operation with
+    /// its watch, in either order, so each of them asks.
+    pub(super) fn prepare_selected_startup_route(self: &Rc<Self>) {
+        if self.selected_library().is_some() && !self.source.operation.borrow().blocks_library() {
+            self.prepare_startup_route_content();
+        }
+    }
 }
 
 fn library_loading_status(

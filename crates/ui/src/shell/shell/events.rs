@@ -249,6 +249,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
         super::navigation::refresh_sidebar_pins(shell);
     }
     shell.apply_to_mounted_route(changed);
+    shell.prepare_selected_startup_route();
 }
 
 fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
@@ -303,13 +304,11 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
                 shell.prepare_startup_route_content();
             }
         }
-        SourceOperation::Idle => {
-            shell.update_add_server_dialog();
-            if shell.selected_library().is_some() && !shell.startup.route_revealed.get() {
-                shell.prepare_startup_route_content();
-            }
-        }
+        SourceOperation::Idle => shell.update_add_server_dialog(),
     }
+    // The watch keeps only the latest operation, so the Idle that ended a switch may arrive
+    // as the refresh that followed it.
+    shell.prepare_selected_startup_route();
 }
 
 fn apply_source_refresh_feedback(
