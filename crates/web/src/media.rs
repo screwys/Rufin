@@ -12,6 +12,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/queue/random", post(random))
         .route("/api/favorite", get(selection_favorite).post(favorite))
         .route("/api/queue/radio", post(radio))
+        .route("/api/share", post(share))
 }
 
 pub(super) async fn favorite(
@@ -56,6 +57,26 @@ pub(super) async fn favorite(
         .await
         .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
+}
+
+/// The link that shares the target a row's menu offers, made with the share dialog's choices.
+async fn share(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        target: rufin_core::sharing::ShareTarget,
+        #[serde(default)]
+        options: rufin_core::sharing::ShareOptions,
+    }
+    let input: Input = body(request).await?;
+    let url = rufin_core::sharing::share(&products.source, input.target, input.options)
+        .recv()
+        .await
+        .map_err(internal)?
+        .map_err(|error| bad_request(localization::tr(&error)))?;
+    Ok(json_response(StatusCode::OK, json!({"url": url})))
 }
 
 /// The tracks of the rows at `ranges` of `page`, by URI.

@@ -53,7 +53,7 @@
         <div class="pref-group" id="pref-home-blocks"></div>
         <h4>{{ localization::tr("Context Menus") }}</h4>
         <div class="pref-group" id="pref-context-menu">
-          {% for (item, label) in [("Play", "Play"), ("PlayNext", "Play Next"), ("PlayLater", "Play Later"), ("PlayRadio", "Play radio"), ("AddToPlaylist", "Add to Playlist"), ("Favorites", "Favorites"), ("EditMetadata", "Edit metadata"), ("Pins", "Pins"), ("GoTo", "Go to"), ("Download", "Download")] %}
+          {% for (item, label) in [("Play", "Play"), ("PlayNext", "Play Next"), ("PlayLater", "Play Later"), ("PlayRadio", "Play radio"), ("AddToPlaylist", "Add to Playlist"), ("Favorites", "Favorites"), ("EditMetadata", "Edit metadata"), ("Pins", "Pins"), ("GoTo", "Go to"), ("Download", "Download"), ("Share", "Share")] %}
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr(label) }}</span></span><input type="checkbox" role="switch" data-menu-item="{{ item }}" /></label>
           {% endfor %}
           {% call m::switch("/context_menu/rating_visible", localization::tr("Rating"), "") %}{% endcall %}

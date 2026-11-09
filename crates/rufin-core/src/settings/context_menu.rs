@@ -15,10 +15,11 @@ pub enum ContextMenuItem {
     Pins,
     GoTo,
     Download,
+    Share,
 }
 
 impl ContextMenuItem {
-    pub const fn all() -> [Self; 10] {
+    pub const fn all() -> [Self; 11] {
         [
             Self::Play,
             Self::PlayNext,
@@ -30,6 +31,7 @@ impl ContextMenuItem {
             Self::Pins,
             Self::GoTo,
             Self::Download,
+            Self::Share,
         ]
     }
 }

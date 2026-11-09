@@ -161,6 +161,31 @@ function goToMenu(row) {
   return items.length ? [tr("Go to"), null, "rufin-external-link-compact-symbolic", items] : null;
 }
 
+// Share on a row: copies the link core makes for it, as GTK does; a link the server makes asks
+// first in the share dialog. Where the browser gives no clipboard, as over plain http, the link
+// shows to copy by hand.
+let sharing = null;
+
+function shareAction(share) {
+  return [tr("Share"), () => {
+    if (!share.dialog) return copyShareLink(share.target, {});
+    sharing = share.target;
+    $("share-form").reset();
+    $("share-downloadable-row").hidden = !share.dialog.downloadable;
+    $("share-dialog").showModal();
+  }, "rufin-share-symbolic"];
+}
+
+async function copyShareLink(target, options) {
+  const { url } = await api("/share", "POST", { target, options });
+  try {
+    await navigator.clipboard.writeText(url);
+    notice(tr("Link copied"));
+  } catch {
+    prompt(tr("Share"), url);
+  }
+}
+
 function renderPlaylistSubmenu(menu, target, signal) {
   menu.replaceChildren();
   const search = el("input");
@@ -344,6 +369,15 @@ function playlistEditInput() {
 }
 
 function init() {
+  $("share-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    $("share-dialog").close();
+    run(() => copyShareLink(sharing, {
+      expiry: $("share-expiry").value,
+      description: $("share-description").value,
+      downloadable: !$("share-downloadable-row").hidden && $("share-downloadable").checked,
+    }));
+  });
   $("import-playlist").addEventListener("click", () => run(() => openPlaylistTransfer()));
   $("playlist-transfer-form").addEventListener("submit", event => {
     event.preventDefault();
@@ -458,6 +492,7 @@ function init() {
 export {
   openPlaylistTransfer,
   goToMenu,
+  shareAction,
   closeMenus,
   openName,
   playRadio,

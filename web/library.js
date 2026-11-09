@@ -26,6 +26,7 @@ import {
   showMenu,
   playRadio,
   goToMenu,
+  shareAction,
 } from "./menus.js";
 
 import { sources, updateSources } from "./sources.js";
@@ -518,6 +519,7 @@ async function showTrackMenu(index, row, anchor, event) {
     actions.push([tr("Edit metadata"), () => openMetadata(many ? media : { kind: "track", uri: row.uri }), "rufin-document-edit-symbolic"]);
   const destination = menu.go_to && goToMenu(row);
   if (destination) actions.push(null, destination);
+  if (menu.share) actions.push(shareAction(menu.share));
   showMenu(actions, anchor, event);
 }
 
@@ -763,6 +765,7 @@ function bindCard(card) {
         actions.push([tr("Edit metadata"), () => openMetadata({ kind, uri: row.uri }), "rufin-document-edit-symbolic"]);
       const destination = options.go_to && goToMenu(row);
       if (destination) actions.push(null, destination);
+      if (options.share) actions.push(shareAction(options.share));
       // The pin closes the menu, as on GTK and Android.
       if (options.pin) actions.push(pinAction(options.pin));
       showMenu(actions, anchor, event);

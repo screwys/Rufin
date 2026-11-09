@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.Share
+
 import androidx.compose.runtime.compositionLocalOf
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
@@ -49,7 +51,8 @@ internal enum class BrowseSwipeAction(val icon: String) {
     AddToPlaylist("rufin-playlists-symbolic"),
     PlayRadio("rufin-audio-only-symbolic"),
     PlayRadioNext("rufin-audio-only-symbolic"),
-    PlayRadioLater("rufin-audio-only-symbolic");
+    PlayRadioLater("rufin-audio-only-symbolic"),
+    Share("rufin-share-symbolic");
 
     val label: String get() = when (this) {
         Favorite -> translate("Favorite")
@@ -60,6 +63,7 @@ internal enum class BrowseSwipeAction(val icon: String) {
         PlayRadio -> translate("Play radio")
         PlayRadioNext -> translate("Play radio next")
         PlayRadioLater -> translate("Play radio later")
+        Share -> translate("Share")
     }
 
     /** Whether the row offers it, as core's swipe Menu says. */
@@ -70,22 +74,23 @@ internal enum class BrowseSwipeAction(val icon: String) {
         Download -> offered.download
         AddToPlaylist -> offered.addToPlaylist
         PlayRadio, PlayRadioNext, PlayRadioLater -> offered.radio != null
+        Share -> offered.share != null
     }
 }
 
 private class BrowseGestureActions(
     val browse: BrowseConnection, val left: BrowseSwipeAction, val right: BrowseSwipeAction,
-    val activate: (BrowseItem, BrowseSwipeAction) -> Unit,
+    val activate: (BrowseItem, BrowseSwipeAction, Menu) -> Unit,
 )
 
 private val LocalBrowseGestureActions = staticCompositionLocalOf<BrowseGestureActions?> { null }
 
 @Composable
 internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAction, browse: BrowseConnection,
-    playlist: (BrowseItem) -> Unit, content: @Composable () -> Unit,
+    playlist: (BrowseItem) -> Unit, share: (BrowseItem, Share) -> Unit, content: @Composable () -> Unit,
 ) {
-    val actions = remember(left, right, browse, playlist) {
-        BrowseGestureActions(browse, left, right) { item, action ->
+    val actions = remember(left, right, browse, playlist, share) {
+        BrowseGestureActions(browse, left, right) { item, action, offered ->
             when (action) {
                 BrowseSwipeAction.Favorite -> browse.favorite(item)
                 BrowseSwipeAction.PlayLater -> browse.play(item, QueuePlacement.End)
@@ -95,6 +100,7 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
                 BrowseSwipeAction.PlayRadioNext -> browse.radio(item, QueuePlacement.AfterCurrent)
                 BrowseSwipeAction.PlayRadioLater -> browse.radio(item, QueuePlacement.End)
                 BrowseSwipeAction.Download -> browse.download(item)
+                BrowseSwipeAction.Share -> offered.share?.let { share(item, it) }
             }
         }
     }
@@ -137,7 +143,7 @@ internal fun BrowseSwipeActions(
                 dragging = false
                 if (activate) {
                     val action = when { released < -threshold -> left; released > threshold -> right; else -> null }
-                    if (action != null) actions.activate(currentItem, action)
+                    if (action != null && offered != null) actions.activate(currentItem, action, offered)
                 }
                 settled.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow))

@@ -10,6 +10,10 @@ import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchResult
+import io.github.screwys.rufin.shared.rufin_core.ShareOptions
+import io.github.screwys.rufin.shared.rufin_core.ShareTarget
+import android.content.Context
+import android.content.Intent
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -326,6 +330,12 @@ internal class BrowseConnection(private val connection: RufinConnection, private
      *  moving up, bottom first when moving down. */
     fun movePins(pins: List<SidebarPin>, target: SidebarPin) = connection.runAction {
         withContext(Dispatchers.IO) { pins.forEach { library?.reorderPin(it, target) } }
+    }
+    /** Share: sends the link to [target] on its server through the system share sheet. */
+    fun share(context: Context, target: ShareTarget, options: ShareOptions) = connection.runAction {
+        val url = library?.share(target, options) ?: return@runAction
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, url), translate("Share")))
     }
     fun download(item: BrowseItem, remove: Boolean = false) = connection.runAction {
         library?.downloadTarget(item.row.route, item.row.mediaUri, remove)

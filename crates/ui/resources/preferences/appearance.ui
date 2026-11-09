@@ -103,6 +103,11 @@
               </object>
             </child>
             <child>
+              <object class="AdwSwitchRow" id="context_menu_share">
+                <property name="title" translatable="yes">Share</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwSwitchRow" id="context_menu_rating_row">
                 <property name="title" translatable="yes">Rating</property>
               </object>

@@ -15,13 +15,14 @@ use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKin
 use crate::ratings::context_rating_row;
 use crate::widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
 use crate::widgets::interactions::{
-    ALBUM_ICON, ARTIST_ICON, ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON,
+    ALBUM_ICON, ARTIST_ICON, ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, SHARE_ICON,
 };
 use localization::msgid;
 use rufin_core::metadata::{MediaDetailsItem, MetadataItemId};
 use rufin_core::playlists::SmartPlaylistChange;
 use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
+use rufin_core::sharing::{Share, ShareDialog, ShareExpiry, ShareOptions, ShareTarget};
 
 use crate::widgets::selection::PlayTarget;
 pub type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
@@ -374,6 +375,9 @@ fn row_surface(
     if menu.go_to {
         append_go_to(&surface, shell, row);
     }
+    if let Some(share) = &menu.share {
+        append_share(&surface, shell, share.clone());
+    }
     match row {
         Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
             append_playlist_actions(&surface, shell, target, menu, playlist);
@@ -588,6 +592,91 @@ fn append_go_to(surface: &ContextMenuSurface, shell: &Rc<Shell>, row: &Row) {
         &submenu,
         GO_TO_ICON,
     );
+}
+
+/// Share: copies the link to the row on its server. A link the server makes asks first how
+/// long it lasts, what it says and, where the server lets Rufin say so, whether it downloads.
+fn append_share(surface: &ContextMenuSurface, shell: &Rc<Shell>, share: Share) {
+    let shell = Rc::downgrade(shell);
+    surface.append_configurable_action(
+        ContextMenuItem::Share,
+        msgid("Share"),
+        SHARE_ICON,
+        move || {
+            let Some(shell) = shell.upgrade() else { return };
+            match share.dialog {
+                Some(dialog) => present_share_dialog(&shell, share.target.clone(), dialog),
+                None => copy_share_link(&shell, share.target.clone(), ShareOptions::default()),
+            }
+        },
+    );
+}
+
+/// The dialog's Expires choices, in its order.
+const SHARE_EXPIRIES: [ShareExpiry; 5] = [
+    ShareExpiry::ServerDefault,
+    ShareExpiry::Day,
+    ShareExpiry::Week,
+    ShareExpiry::Month,
+    ShareExpiry::Year,
+];
+
+fn present_share_dialog(shell: &Rc<Shell>, target: ShareTarget, offered: ShareDialog) {
+    let resource = "preferences/dialogs/share.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        share_dialog: adw::Dialog, share_expiry: adw::ComboRow, share_description: adw::EntryRow,
+        share_downloadable: adw::SwitchRow, share_cancel: gtk::Button, share_create: gtk::Button,
+    });
+    share_downloadable.set_visible(offered.downloadable);
+    let dialog = share_dialog.downgrade();
+    share_cancel.connect_clicked(move |_| {
+        if let Some(dialog) = dialog.upgrade() {
+            dialog.close();
+        }
+    });
+    let dialog = share_dialog.downgrade();
+    let owner = Rc::downgrade(shell);
+    share_create.connect_clicked(move |_| {
+        let options = ShareOptions {
+            expiry: SHARE_EXPIRIES
+                .get(share_expiry.selected() as usize)
+                .copied()
+                .unwrap_or_default(),
+            description: share_description.text().into(),
+            downloadable: share_downloadable.is_active(),
+        };
+        if let Some(dialog) = dialog.upgrade() {
+            dialog.close();
+        }
+        if let Some(shell) = owner.upgrade() {
+            copy_share_link(&shell, target.clone(), options);
+        }
+    });
+    shell.present_selected_dialog(&share_dialog);
+}
+
+fn copy_share_link(shell: &Rc<Shell>, target: ShareTarget, options: ShareOptions) {
+    let link = rufin_core::sharing::share(&shell.products.source, target, options);
+    let shell = Rc::downgrade(shell);
+    glib::spawn_future_local(async move {
+        let (Ok(link), Some(shell)) = (link.recv().await, shell.upgrade()) else {
+            return;
+        };
+        let message = match link {
+            Ok(url) => {
+                if let Some(display) = gtk::gdk::Display::default() {
+                    display.clipboard().set_text(&url);
+                }
+                localization::tr(msgid("Link copied"))
+            }
+            Err(error) => localization::tr_with(
+                "Could not share: {error}",
+                &[("error", &localization::tr(&error))],
+            ),
+        };
+        shell.control_feedback.show_feedback_toast(message);
+    });
 }
 
 /// The item that opens `row`'s page on its server, or its folder.

@@ -592,6 +592,38 @@ impl SubsonicSource {
         Ok(json::boolean(&playlist["public"]))
     }
 
+    /// A public link to the item. Without a description Navidrome names the share after what it
+    /// holds; without an expiry the server's default applies. Only Navidrome's own API allows
+    /// downloads.
+    pub async fn create_share(
+        &self,
+        object_id: &str,
+        share: &crate::NewShare,
+    ) -> SourceResult<String> {
+        let mut query = vec![("id", raw_item_id(object_id).to_string())];
+        if !share.description.is_empty() {
+            query.push(("description", share.description.clone()));
+        }
+        if let Some(expires) = share.expires_millis {
+            query.push(("expires", expires.to_string()));
+        }
+        let body = self.get_json("createShare", &query).await?;
+        let created = json::items(&body["shares"]["share"]).first().cloned();
+        let url = created
+            .as_ref()
+            .and_then(|share| json::field::<String>(share, "url"))
+            .filter(|url| !url.is_empty())
+            .ok_or(SourceError::NotFound)?;
+        if share.downloadable {
+            let id = created
+                .as_ref()
+                .and_then(|share| json::id(&share["id"]))
+                .ok_or(SourceError::NotFound)?;
+            self.allow_share_downloads(&id, &share.description).await?;
+        }
+        Ok(url)
+    }
+
     pub async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         self.get_unit(
             "deletePlaylist",
@@ -2074,6 +2106,31 @@ mod tests {
                 .await
                 .expect("OpenSubsonic recommendations"),
             ["subsonic:track:track-two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn create_share_sends_the_raw_id_and_returns_the_server_link() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/createShare.view"))
+            .and(query_param("id", "album-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": {"status": "ok", "shares": {"share": [
+                    {"id": "abc", "url": "https://music.test/share/abc"}
+                ]}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = source(&server.uri());
+
+        assert_eq!(
+            source
+                .create_share("subsonic:album:album-one", &crate::NewShare::default())
+                .await
+                .unwrap(),
+            "https://music.test/share/abc"
         );
     }
 }

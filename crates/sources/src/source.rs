@@ -1618,10 +1618,32 @@ impl Source {
         }
     }
 
+    /// A public link to the item, made by the server.
+    pub async fn create_share(
+        &self,
+        object_id: &str,
+        share: &crate::NewShare,
+    ) -> SourceResult<String> {
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => source.create_share(object_id, share).await,
+            _ => Err(SourceError::InvalidRequest("Source makes no share links")),
+        }
+    }
+
+    /// Whether the server makes share links for this user.
+    pub fn shares_links(&self) -> bool {
+        matches!(&self.implementation, Implementation::OpenSubsonic(provider) if provider.shares_links())
+    }
+
+    /// Whether a share the server makes can allow downloads.
+    pub fn supports_share_downloads(&self) -> bool {
+        matches!(&self.implementation, Implementation::OpenSubsonic(provider) if provider.has_navidrome_api())
+    }
+
     pub fn supports_playlist_artwork(&self) -> bool {
         match &self.implementation {
             Implementation::JellyfinEmby(_) | Implementation::Plex(_) => true,
-            Implementation::OpenSubsonic(provider) => provider.supports_playlist_artwork(),
+            Implementation::OpenSubsonic(provider) => provider.has_navidrome_api(),
             Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => false,
         }
     }

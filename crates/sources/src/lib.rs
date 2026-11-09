@@ -307,6 +307,16 @@ pub use plex::{
 pub use plex::{PlexBrowserLogin, PlexConnection, PlexLogin, PlexProfile, PlexServer};
 pub use subsonic::{SubsonicAuthentication, SubsonicFlavor};
 
+/// What a server-made share link holds besides its item.
+#[derive(Clone, Debug, Default)]
+pub struct NewShare {
+    /// Empty leaves the server to name it.
+    pub description: String,
+    /// Unix milliseconds; none leaves the server's default.
+    pub expires_millis: Option<u64>,
+    pub downloadable: bool,
+}
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]

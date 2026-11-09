@@ -16,6 +16,7 @@ pub fn configure_context_menus(shell: &Rc<Shell>, builder: &gtk::Builder) {
         (ContextMenuItem::Pins, "context_menu_pins"),
         (ContextMenuItem::GoTo, "context_menu_go_to"),
         (ContextMenuItem::Download, "context_menu_download"),
+        (ContextMenuItem::Share, "context_menu_share"),
     ] {
         let row: adw::SwitchRow = crate::ui_resource::object(builder, resource, id);
         row.set_active(

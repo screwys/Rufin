@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="share_dialog">
+    <property name="title" translatable="yes">Share</property>
+    <property name="content-width">360</property>
+    <property name="default-widget">share_create</property>
+    <property name="child"><object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar"/></child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">18</property>
+            <property name="margin-end">18</property>
+            <property name="margin-bottom">18</property>
+            <child><object class="GtkListBox">
+                <property name="selection-mode">none</property>
+                <style><class name="boxed-list"/></style>
+                <child><object class="AdwComboRow" id="share_expiry">
+                    <property name="title" translatable="yes">Expires</property>
+                    <property name="model"><object class="GtkStringList"><items>
+                        <item translatable="yes">Server default</item>
+                        <item translatable="yes">1 day</item>
+                        <item translatable="yes">1 week</item>
+                        <item translatable="yes">1 month</item>
+                        <item translatable="yes">1 year</item>
+                      </items></object></property>
+                  </object></child>
+                <child><object class="AdwEntryRow" id="share_description">
+                    <property name="title" translatable="yes">Description</property>
+                    <property name="activates-default">true</property>
+                  </object></child>
+                <child><object class="AdwSwitchRow" id="share_downloadable">
+                    <property name="title" translatable="yes">Allow downloading</property>
+                  </object></child>
+              </object></child>
+            <child><object class="GtkBox">
+                <property name="halign">end</property>
+                <property name="spacing">8</property>
+                <property name="margin-top">6</property>
+                <child><object class="GtkButton" id="share_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+                <child><object class="GtkButton" id="share_create"><property name="label" translatable="yes">Share</property><style><class name="suggested-action"/></style></object></child>
+              </object></child>
+          </object>
+        </property>
+      </object></property>
+  </object>
+</interface>

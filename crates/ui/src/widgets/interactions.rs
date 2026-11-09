@@ -24,6 +24,7 @@ pub const ALBUM_ICON: &str = "rufin-albums-symbolic";
 pub const ARTIST_ICON: &str = "rufin-artists-symbolic";
 pub const DOWNLOAD_ICON: &str = "rufin-download-symbolic";
 pub const GO_TO_ICON: &str = "rufin-external-link-compact-symbolic";
+pub const SHARE_ICON: &str = "rufin-share-symbolic";
 pub const RADIO_ICON: &str = "rufin-audio-only-symbolic";
 
 #[derive(Default)]
@@ -132,9 +133,10 @@ impl ContextMenuSection {
             | ContextMenuItem::PlayLater
             | ContextMenuItem::PlayRadio => Self::Playback,
             ContextMenuItem::AddToPlaylist | ContextMenuItem::Favorites => Self::Collection,
-            ContextMenuItem::EditMetadata | ContextMenuItem::Pins | ContextMenuItem::GoTo => {
-                Self::Details
-            }
+            ContextMenuItem::EditMetadata
+            | ContextMenuItem::Pins
+            | ContextMenuItem::GoTo
+            | ContextMenuItem::Share => Self::Details,
             ContextMenuItem::Download => Self::Downloads,
         }
     }
