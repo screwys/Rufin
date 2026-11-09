@@ -1991,7 +1991,7 @@ mod tests {
             format!("{}\n{}\n", present.display(), missing.display()),
         )
         .unwrap();
-        let playlist = crate::import_local_playlist_file(&catalog, &path, None, |_| None)
+        let playlist = crate::import_local_playlist_file(&catalog, &path, &[], None, |_| None)
             .await
             .unwrap()
             .playlist;
@@ -1999,7 +1999,7 @@ mod tests {
             if appeared {
                 fs::write(&missing, silent_wav()).unwrap();
             }
-            crate::import_local_playlist_file(&catalog, &path, Some(playlist), |_| None)
+            crate::import_local_playlist_file(&catalog, &path, &[], Some(playlist), |_| None)
                 .await
                 .unwrap();
             source
@@ -2054,7 +2054,7 @@ mod tests {
         let path = root.join("mix.m3u8");
         let contents = format!("{0}\n{0}\n", imported_path.display());
         fs::write(&path, &contents).unwrap();
-        let playlist = crate::import_local_playlist_file(&catalog, &path, None, |_| None)
+        let playlist = crate::import_local_playlist_file(&catalog, &path, &[], None, |_| None)
             .await
             .unwrap();
         source
@@ -2069,10 +2069,15 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().all(|(_, value)| value == &uri));
         fs::write(&path, format!("#EXTM3U\n{contents}")).unwrap();
-        let reloaded =
-            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
-                .await
-                .unwrap();
+        let reloaded = crate::import_local_playlist_file(
+            &catalog,
+            &path,
+            &[],
+            Some(playlist.playlist),
+            |_| None,
+        )
+        .await
+        .unwrap();
         assert!(!reloaded.changed);
         assert_eq!(
             catalog
@@ -2087,9 +2092,15 @@ mod tests {
             fs::write(&other, silent_wav()).unwrap();
             fs::remove_file(&imported_path).unwrap();
             std::os::unix::fs::symlink(&other, &imported_path).unwrap();
-            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
-                .await
-                .unwrap();
+            crate::import_local_playlist_file(
+                &catalog,
+                &path,
+                &[],
+                Some(playlist.playlist),
+                |_| None,
+            )
+            .await
+            .unwrap();
             let other_uri = url::Url::from_file_path(&other).unwrap().to_string();
             let retargeted = catalog
                 .playlist_entry_uri_page(playlist.playlist, 0)
@@ -2099,9 +2110,15 @@ mod tests {
             assert!(retargeted.iter().all(|(_, value)| value == &other_uri));
             fs::remove_file(&imported_path).unwrap();
             std::os::unix::fs::symlink(&audio, &imported_path).unwrap();
-            crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
-                .await
-                .unwrap();
+            crate::import_local_playlist_file(
+                &catalog,
+                &path,
+                &[],
+                Some(playlist.playlist),
+                |_| None,
+            )
+            .await
+            .unwrap();
         }
         assert!(
             catalog

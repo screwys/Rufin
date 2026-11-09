@@ -275,7 +275,9 @@ pub use file::documents::{
 pub use file::documents::{
     read_document_image, read_document_prefix, read_document_track_reference,
 };
-pub use file::local::media::{local_media_identity_path, read_local_track_reference};
+pub use file::local::media::{
+    local_access_locator, local_media_identity_path, read_local_track_reference,
+};
 pub use file::metadata::read_embedded_lyrics;
 pub use file::playlist::{
     import_local_playlist_file, playlist_file_is_non_audio, playlist_file_revision,

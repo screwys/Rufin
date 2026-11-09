@@ -1909,11 +1909,12 @@ impl Source {
             Implementation::Files(source) => {
                 source.import_playlist_file(catalog, path, target).await
             }
-            Implementation::Local(_) => {
+            Implementation::Local(local) => {
                 let path = self
                     .local_playlist_path(path)
                     .ok_or(SourceError::NotFound)?;
-                crate::import_local_playlist_file(catalog, &path, target, |_| None).await
+                crate::import_local_playlist_file(catalog, &path, local.roots(), target, |_| None)
+                    .await
             }
             _ => Err(SourceError::InvalidRequest(
                 "This source does not store playlist files",

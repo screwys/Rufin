@@ -564,6 +564,15 @@ pub(crate) fn local_location(
     (None, path.to_string_lossy().into_owned(), path.to_owned())
 }
 
+pub(crate) fn local_roots(owner: &SourceOwner) -> Vec<PathBuf> {
+    owner
+        .shared
+        .settings
+        .local_configuration()
+        .map(|local| local.local_roots())
+        .unwrap_or_default()
+}
+
 pub(crate) fn source_location(
     owner: &SourceOwner,
     source: &SourceId,
@@ -715,6 +724,7 @@ async fn reload_on(
         sources::import_local_playlist_file(
             &owner.shared.catalog,
             &access,
+            &local_roots(owner),
             Some(link.playlist),
             |_| None,
         )

@@ -85,6 +85,7 @@ pub fn import_playlist(
             let report = sources::import_local_playlist_file(
                 &owner.shared.catalog,
                 &access,
+                &crate::playlist_files::local_roots(&owner),
                 target,
                 |locator| {
                     current

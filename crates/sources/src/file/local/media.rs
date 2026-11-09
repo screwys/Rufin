@@ -21,8 +21,31 @@ pub fn read_local_track_reference(path: &Path) -> Option<library::TrackReference
     else {
         return None;
     };
-    let uri = url::Url::from_file_path(path).ok()?.to_string();
+    let uri = track.track.media_uri.clone()?;
     Some(crate::file::media::track_reference(*track, uri))
+}
+
+/// Where this process opens a local file whose identity names another path, as a file reached
+/// through a sandbox's folder or file grant does.
+pub fn local_access_locator(media_uri: &str, access: &Path) -> Option<library::LocalLocatorWrite> {
+    let access_uri = url::Url::from_file_path(access).ok()?.to_string();
+    (access_uri != media_uri).then(|| library::LocalLocatorWrite {
+        source_id: None,
+        media_uri: media_uri.to_owned(),
+        origin: "import".into(),
+        path: access.to_string_lossy().into_owned(),
+        root: access
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_string_lossy()
+            .into_owned(),
+        relative_path: access
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        access_uri,
+    })
 }
 
 pub(crate) fn read_media(

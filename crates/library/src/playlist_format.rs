@@ -454,10 +454,10 @@ pub(crate) async fn import_playlist_on(
     };
     let mut entries = Vec::with_capacity(parsed.entries.len());
     let mut skipped = parsed.skipped;
+    let base = playlist_base(file);
     for item in parsed.entries {
         let locator = recognize(&item.locator).unwrap_or_else(|| item.locator.clone());
-        let Some(uri) = playlist_locator(&locator, file.parent().unwrap_or_else(|| Path::new(".")))
-        else {
+        let Some(uri) = playlist_locator(&locator, &base) else {
             skipped += 1;
             continue;
         };
@@ -785,7 +785,10 @@ fn xspf_location(node: roxmltree::Node<'_, '_>, file: &Path) -> Option<String> {
         .to_str()
         .filter(|file| file.contains("://"))
         .and_then(|file| url::Url::parse(file).ok())
-        .or_else(|| normalized_file_uri(file).and_then(|value| url::Url::parse(&value).ok()))?;
+        .or_else(|| {
+            normalized_file_uri(&playlist_host_path(file))
+                .and_then(|value| url::Url::parse(&value).ok())
+        })?;
     if base.scheme() == "content" {
         let mut location = node.text()?.to_owned();
         for value in ancestors
@@ -828,11 +831,8 @@ fn export_locator(uri: &str, file: &Path, mode: PlaylistPathMode) -> String {
             .is_some_and(|file| file.starts_with("content:"))
     {
         if let Some(path) = crate::file_media_path(uri) {
-            if let Some(relative) = relative_path(
-                &playlist_host_path(&path),
-                playlist_host_path(file).parent().unwrap_or(Path::new(".")),
-            )
-            .filter(|path| mode == PlaylistPathMode::Relative || !path.starts_with(".."))
+            if let Some(relative) = relative_path(&playlist_host_path(&path), &playlist_base(file))
+                .filter(|path| mode == PlaylistPathMode::Relative || !path.starts_with(".."))
             {
                 let mut locator = relative
                     .to_string_lossy()
@@ -950,6 +950,14 @@ fn normalized_file_uri(path: &Path) -> Option<String> {
     url::Url::parse(uri.as_str())
         .ok()
         .map(|uri| uri.to_string())
+}
+
+/// The folder a playlist file's relative entries are relative to: its folder on the host, as
+/// export writes them and other players read them, whichever path opened the file.
+pub fn playlist_base(file: &Path) -> std::path::PathBuf {
+    playlist_host_path(file)
+        .parent()
+        .map_or_else(|| ".".into(), Path::to_path_buf)
 }
 
 /// Return the host's path for a document-portal grant, without changing the path used for I/O.
@@ -1440,8 +1448,8 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[test]
-    fn portal_grants_export_in_host_coordinates() {
+    #[tokio::test]
+    async fn portal_grants_export_and_import_in_host_coordinates() {
         use std::os::unix::ffi::OsStrExt;
         let directory = tempfile::tempdir().unwrap();
         let music = directory.path().join("granted-music");
@@ -1469,11 +1477,41 @@ mod tests {
             export_locator(&uri, &destination, PlaylistPathMode::Relative),
             "../Artist/song.flac"
         );
+        let host_uri = url::Url::from_file_path(host.join("Artist/song.flac"))
+            .unwrap()
+            .to_string();
         assert_eq!(
             export_locator(&uri, &destination, PlaylistPathMode::Absolute),
-            url::Url::from_file_path(host.join("Artist/song.flac"))
+            host_uri
+        );
+        // The exported file, opened again through its grant, names the same host file.
+        let catalog = Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let report = catalog
+            .import_playlist_file(
+                std::io::Cursor::new("#EXTM3U\n../Artist/song.flac\n"),
+                &destination,
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        let mut output = Vec::new();
+        catalog
+            .export_playlist_file(
+                report.playlist,
+                &directory.path().join("out.m3u8"),
+                PlaylistPathMode::Absolute,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8(output)
                 .unwrap()
-                .to_string()
+                .lines()
+                .any(|line| line == host_uri)
         );
     }
 
