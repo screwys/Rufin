@@ -391,9 +391,32 @@ impl SubsonicSource {
         }
     }
 
-    pub(crate) fn supports_playlist_artwork(&self) -> bool {
+    /// Whether Navidrome's own API is open to Rufin: playlist artwork and share downloads.
+    pub(crate) fn has_navidrome_api(&self) -> bool {
         self.flavor == super::SubsonicFlavor::Navidrome
             && self.credential.navidrome_password().is_some()
+    }
+
+    /// Lets the share `id` download its tracks; Navidrome writes its description with it.
+    pub(super) async fn allow_share_downloads(
+        &self,
+        id: &str,
+        description: &str,
+    ) -> SourceResult<()> {
+        let url = navidrome_endpoint(&self.base_url(), &format!("api/share/{id}"))?;
+        let body = serde_json::json!({"description": description, "downloadable": true});
+        let (url, body) = (&url, &body);
+        self.navidrome_authenticated(|token| async move {
+            let request = self
+                .navidrome_client
+                .put(url.clone())
+                .json(body)
+                .header(&NAVIDROME_AUTH_HEADER, format!("Bearer {token}"));
+            remote_http::unit_with_header(request, NAVIDROME_HTTP, &NAVIDROME_AUTH_HEADER)
+                .await
+                .map(|rotated| ((), rotated))
+        })
+        .await
     }
 
     pub async fn change_playlist_artwork(
@@ -401,7 +424,7 @@ impl SubsonicSource {
         object: &str,
         change: &crate::ArtworkChange,
     ) -> SourceResult<()> {
-        if !self.supports_playlist_artwork() {
+        if !self.has_navidrome_api() {
             return Err(SourceError::InvalidRequest(
                 "This server cannot edit playlist artwork",
             ));
@@ -1767,6 +1790,48 @@ mod tests {
                 .as_deref(),
             Some("/music/Artist/Album/Track.flac")
         );
+    }
+
+    #[tokio::test]
+    async fn downloadable_share_is_made_by_create_share_and_opened_by_navidrome() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/createShare.view"))
+            .and(query_param("id", "album-one"))
+            .and(query_param("description", "For you"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": {"status": "ok", "shares": {"share": [
+                    {"id": "abc", "url": "https://music.test/share/abc"}
+                ]}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/share/abc"))
+            .and(header("x-nd-authorization", "Bearer token-a"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({"description": "For you", "downloadable": true}),
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = navidrome_source_with_token(&server, "token-a");
+
+        let url = source
+            .create_share(
+                "navidrome:album:album-one",
+                &crate::NewShare {
+                    description: "For you".to_string(),
+                    expires_millis: None,
+                    downloadable: true,
+                },
+            )
+            .await
+            .expect("downloadable share");
+
+        assert_eq!(url, "https://music.test/share/abc");
     }
 
     #[tokio::test]

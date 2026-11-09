@@ -541,6 +541,16 @@
         <div class="dialog-actions"><button type="button" data-close="playlist-transfer-dialog">{{ localization::tr("Cancel") }}</button><button type="submit" class="primary">{{ localization::tr("Continue") }}</button></div>
       </form>
     </dialog>
+    <dialog id="share-dialog" aria-labelledby="share-title">
+      <form id="share-form">
+        <h2 id="share-title">{{ localization::tr("Share") }}</h2>
+        <label for="share-expiry">{{ localization::tr("Expires") }}</label>
+        <select id="share-expiry"><option value="ServerDefault">{{ localization::tr("Server default") }}</option><option value="Day">{{ localization::tr("1 day") }}</option><option value="Week">{{ localization::tr("1 week") }}</option><option value="Month">{{ localization::tr("1 month") }}</option><option value="Year">{{ localization::tr("1 year") }}</option></select>
+        <label for="share-description">{{ localization::tr("Description") }}</label><input id="share-description" autocomplete="off" />
+        <label id="share-downloadable-row"><input type="checkbox" role="switch" id="share-downloadable" />{{ localization::tr("Allow downloading") }}</label>
+        <div class="dialog-actions"><button type="button" data-close="share-dialog">{{ localization::tr("Cancel") }}</button><button type="submit" class="primary">{{ localization::tr("Share") }}</button></div>
+      </form>
+    </dialog>
     <dialog id="name-dialog" aria-labelledby="name-title">
       <form id="name-form">
         <h2 id="name-title">{{ localization::tr("New Playlist") }}</h2>

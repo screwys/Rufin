@@ -27,6 +27,8 @@ pub struct AndroidPlayerMetadata {
     pub album_text: String,
     pub album_links: Vec<AndroidArtistLink>,
     pub source_link: Option<crate::browse::AndroidDetailLink>,
+    /// The share sheet's link, when the item's server has links.
+    pub share: Option<rufin_core::sharing::Share>,
 }
 
 #[derive(uniffi::Record)]
@@ -290,6 +292,7 @@ impl AndroidPlayer {
                     }
                 }
                 Ok(Some(AndroidPlayerMetadata {
+                    share: rufin_core::sharing::media(&source, &media_uri),
                     media_uri,
                     source_id,
                     artist_text: artists.display_text().to_string(),

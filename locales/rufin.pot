@@ -208,7 +208,19 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 day"
+msgstr ""
+
 msgid "1 hour"
+msgstr ""
+
+msgid "1 month"
+msgstr ""
+
+msgid "1 week"
+msgstr ""
+
+msgid "1 year"
 msgstr ""
 
 msgid "10 bands"
@@ -404,6 +416,9 @@ msgid "All tracks"
 msgstr ""
 
 msgid "All"
+msgstr ""
+
+msgid "Allow downloading"
 msgstr ""
 
 msgid "Allow remote connections"
@@ -1040,6 +1055,10 @@ msgid "Could not save diagnostic log"
 msgstr ""
 
 #, rust-format
+msgid "Could not share: {error}"
+msgstr ""
+
+#, rust-format
 msgid "Could not update Rufin to {version}"
 msgstr ""
 
@@ -1191,6 +1210,9 @@ msgid "Delivery"
 msgstr ""
 
 msgid "Descending"
+msgstr ""
+
+msgid "Description"
 msgstr ""
 
 msgid "Detail track columns"
@@ -1482,6 +1504,9 @@ msgid "Expand lyrics and visualizer"
 msgstr ""
 
 msgid "Expand sidebar"
+msgstr ""
+
+msgid "Expires"
 msgstr ""
 
 msgid "Explore"
@@ -2024,10 +2049,16 @@ msgstr ""
 msgid "Linear"
 msgstr ""
 
+msgid "Link copied"
+msgstr ""
+
 msgid "Link exported file"
 msgstr ""
 
 msgid "Link to file..."
+msgstr ""
+
+msgid "Link"
 msgstr ""
 
 msgid "Linked file"
@@ -3590,6 +3621,9 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
+msgid "Server default"
+msgstr ""
+
 #, rust-format
 msgid "Server discovery failed: {error}"
 msgstr ""
@@ -3984,6 +4018,9 @@ msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 msgid "This isn't available"
+msgstr ""
+
+msgid "This item has no link to share"
 msgstr ""
 
 #, rust-format

@@ -50,6 +50,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import io.github.screwys.rufin.shared.rufin_core.Share
+import io.github.screwys.rufin.player.ShareCardStyle
+import io.github.screwys.rufin.player.ShareKind
+import io.github.screwys.rufin.player.ShareSheet
+import io.github.screwys.rufin.player.ShareSubject
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import io.github.screwys.rufin.app.RufinConnection
@@ -215,6 +220,7 @@ internal fun BrowseMenuSheet(
     val item = favoriteItem(model, listed)
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf<Share?>(null) }
     var folderPicker by remember { mutableStateOf(false) }
     val playlistFolder = item.row.playlistFolder
     val smartPlaylist = item.row.smartPlaylist
@@ -316,6 +322,7 @@ internal fun BrowseMenuSheet(
                 if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
                 if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
                 if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
+                offered.share?.let { share -> BrowseMenuAction("rufin-share-symbolic", "Share") { sharing = share } }
                 if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
                 onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
                 if (playlistFolder != null) {
@@ -360,6 +367,7 @@ internal fun BrowseMenuSheet(
                 onDismiss = { rename = false; onDismiss() })
         }
     }
+    sharing?.let { share -> BrowseShareSheet(player, item, share) { sharing = null; onDismiss() } }
     if (delete) AlertDialog(onDismissRequest = { delete = false },
         title = { Text(translate("Delete \"{name}\"?").replace("{name}", item.row.title)) },
         confirmButton = { TextButton({ model.runAction {
@@ -377,10 +385,27 @@ internal fun BrowseMenuSheet(
         dismissButton = { TextButton({ delete = false }) { Text(translate("Cancel")) } })
 }
 
+/** The share sheet of a row, as its menu's Share and a Share swipe open it. */
+@Composable
+internal fun BrowseShareSheet(player: PlayerConnection, item: BrowseItem, share: Share, onDismiss: () -> Unit) {
+    val card = when {
+        item.row.isTrack -> "Song"
+        item.row.route is Route.AlbumDetail -> "Album"
+        item.row.route is Route.PlaylistDetail -> "Playlist"
+        else -> "Artist"
+    }
+    ShareSheet(player, ShareSubject(item.row.title, menuSubtitle(item), item.row.artworkIdentity, card, share, lyrics = false),
+        ShareKind.SONG, remember { ShareCardStyle() }, null, null, onDismiss)
+}
+
+/** A row's artist and album, or its own subtitle, as its menu's header shows them. */
+private fun menuSubtitle(item: BrowseItem) =
+    listOf(item.row.artist, item.row.album.takeIf { item.row.isTrack || it != item.row.title }.orEmpty())
+        .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
+
 @Composable
 internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection) {
-    val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.isTrack || it != item.row.title }.orEmpty())
-        .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
+    val subtitle = menuSubtitle(item)
     CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, player) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
             style = MaterialTheme.typography.bodyLarge,

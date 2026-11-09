@@ -56,6 +56,9 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import io.github.screwys.rufin.browse.OnBand
+import io.github.screwys.rufin.shared.rufin_core.Share
+import io.github.screwys.rufin.shared.rufin_core.ShareExpiry
+import io.github.screwys.rufin.shared.rufin_core.ShareOptions
 import io.github.screwys.rufin.browse.showcaseBand
 import io.github.screwys.rufin.core.AndroidLyricsDocument
 import io.github.screwys.rufin.core.AndroidLyricsLine
@@ -73,8 +76,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.absoluteValue
 
-/** What a share card shows: the track, or lines of its lyrics. */
-internal enum class ShareKind { SONG, LYRICS }
+/** What a share sends: a card of the item, a card of lines of its lyrics, or its link on its server. */
+internal enum class ShareKind { SONG, LYRICS, LINK }
+
+/** What the share sheet shares: the item's card, its link when its server has one, and the playing
+ *  track's lyrics. `card` names the card: Song, Album, Artist or Playlist. */
+internal class ShareSubject(val title: String, val subtitle: String, val artwork: ByteArray?, val card: String,
+    val share: Share?, val lyrics: Boolean)
 
 /** Where a card takes its colours: the track's cover, the app theme, or a fixed colour. */
 internal enum class CardColours {
@@ -131,23 +139,25 @@ internal fun defaultShareLines(document: AndroidLyricsDocument, positionMillis: 
     return picked
 }
 
-/** The share sheet: a song card and, when the track has lyrics, a lyrics card, side by side. */
+/** The share sheet: the item's card, a lyrics card when the playing track has lyrics, and its link when
+ *  its server has one, side by side. Every Share opens it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PlayerShareSheet(player: PlayerConnection, initial: ShareKind, style: ShareCardStyle, chosenLines: List<Int>?,
-    onEditLyrics: (List<Int>) -> Unit, onDismiss: () -> Unit) {
+internal fun ShareSheet(player: PlayerConnection, subject: ShareSubject, initial: ShareKind, style: ShareCardStyle,
+    chosenLines: List<Int>?, onEditLyrics: ((List<Int>) -> Unit)?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val reduceMotion = LocalReduceMotion.current
     val duration = if (reduceMotion) 0 else 280
-    LaunchedEffect(player.currentId, player.bridge) { player.requestLyrics() }
-    val document = player.currentLyrics?.document?.takeIf { it.lines.isNotEmpty() }
+    if (subject.lyrics) LaunchedEffect(player.currentId, player.bridge) { player.requestLyrics() }
+    val document = player.currentLyrics?.document?.takeIf { subject.lyrics && it.lines.isNotEmpty() }
     val selection = remember(document, chosenLines) { document?.let { chosenLines ?: defaultShareLines(it, player.positionNow()) }.orEmpty() }
     val lines = selection.mapNotNull { document?.lines?.getOrNull(it)?.let(::lyricsShareText) }
-    val kinds = if (lines.isEmpty()) listOf(ShareKind.SONG) else ShareKind.entries
+    val kinds = listOfNotNull(ShareKind.SONG, ShareKind.LYRICS.takeIf { lines.isNotEmpty() }, ShareKind.LINK.takeIf { subject.share != null })
     val pager = rememberPagerState(kinds.indexOf(initial).coerceAtLeast(0)) { kinds.size }
+    val link = remember { LinkChoices() }
     val layers = listOf(rememberGraphicsLayer(), rememberGraphicsLayer())
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 320.dp.roundToPx() })
+    val artwork = rememberArtwork(subject.artwork, player, with(LocalDensity.current) { 320.dp.roundToPx() })
     val scheme = MaterialTheme.colorScheme
     val fill by animateColorAsState(when (style.colours) { CardColours.THEME -> scheme.primary; CardColours.STATIC -> style.fixed
         CardColours.DYNAMIC -> Color.Transparent }, tween(duration), label = "shareCardFill")
@@ -156,34 +166,43 @@ internal fun PlayerShareSheet(player: PlayerConnection, initial: ShareKind, styl
         CardColours.THEME -> scheme.onPrimary
         CardColours.STATIC -> if (style.fixed.luminance() > .5f) Color.Black.copy(alpha = .87f) else Color.White
     }, tween(duration), label = "shareCardContent")
+    val shown = kinds[pager.targetPage]
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             // The other card peeks in beside the one shown and grows as it comes in.
             HorizontalPager(pager, Modifier.fillMaxWidth().widthIn(max = 480.dp), contentPadding = PaddingValues(horizontal = 44.dp),
                 pageSpacing = 12.dp, verticalAlignment = Alignment.CenterVertically) { page ->
                 val away = ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
-                ShareCard(layers[page], artwork, fill, content, kinds[page] == ShareKind.LYRICS, Modifier.graphicsLayer {
+                val scaled = Modifier.graphicsLayer {
                     val scale = 1f - .08f * away
                     scaleX = scale
                     scaleY = scale
-                }) {
-                    if (kinds[page] == ShareKind.SONG) SongCardContent(player, artwork, content)
-                    else LyricsCardContent(player, artwork, lines, content)
+                }
+                when (kinds[page]) {
+                    ShareKind.SONG -> ShareCard(layers[0], artwork, fill, content, false, scaled) { SongCardContent(subject, artwork, content) }
+                    ShareKind.LYRICS -> ShareCard(layers[1], artwork, fill, content, true, scaled) { LyricsCardContent(subject, artwork, lines, content) }
+                    ShareKind.LINK -> LinkPage(subject, artwork, link, scaled)
                 }
             }
             Spacer(Modifier.height(20.dp))
-            if (kinds.size > 1) SegmentedPill(kinds, kinds[pager.targetPage], { kind ->
+            if (kinds.size > 1) SegmentedPill(kinds, shown, { kind ->
                 scope.launch { if (reduceMotion) pager.scrollToPage(kinds.indexOf(kind)) else pager.animateScrollToPage(kinds.indexOf(kind)) }
             }, Modifier.fillMaxWidth().padding(horizontal = 32.dp), equal = true) { kind, _ ->
-                Text(translate(if (kind == ShareKind.SONG) "Song" else "Lyrics"), style = MaterialTheme.typography.titleSmall)
+                Text(when (kind) { ShareKind.SONG -> translate(subject.card); ShareKind.LYRICS -> translate("Lyrics")
+                    ShareKind.LINK -> translate("Link") }, style = MaterialTheme.typography.titleSmall)
             }
-            Spacer(Modifier.height(12.dp))
-            ColourPill(style)
-            AnimatedVisibility(kinds[pager.targetPage] == ShareKind.LYRICS,
+            AnimatedVisibility(shown != ShareKind.LINK, enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
+                exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration / 2))) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(Modifier.height(12.dp))
+                    ColourPill(style)
+                }
+            }
+            AnimatedVisibility(shown == ShareKind.LYRICS && onEditLyrics != null,
                 enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
                 exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration / 2))) {
-                FilledTonalButton({ onEditLyrics(selection) }, Modifier.padding(top = 12.dp)) {
+                FilledTonalButton({ onEditLyrics?.invoke(selection) }, Modifier.padding(top = 12.dp)) {
                     RufinIcon("rufin-document-edit-symbolic", null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(translate("Edit Lyrics"))
@@ -191,14 +210,65 @@ internal fun PlayerShareSheet(player: PlayerConnection, initial: ShareKind, styl
             }
             Spacer(Modifier.height(20.dp))
             Button({
-                scope.launch {
-                    shareImage(context, layers[pager.currentPage], if (kinds[pager.currentPage] == ShareKind.SONG) "song.png" else "lyrics.png")
+                val share = subject.share
+                if (kinds[pager.currentPage] == ShareKind.LINK && share != null) {
+                    player.model.browse.share(context, share.target, link.options())
+                    onDismiss()
+                } else scope.launch {
+                    shareImage(context, layers[if (kinds[pager.currentPage] == ShareKind.SONG) 0 else 1],
+                        if (kinds[pager.currentPage] == ShareKind.SONG) "song.png" else "lyrics.png")
                     onDismiss()
                 }
             }, Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(52.dp)) {
                 RufinIcon("rufin-share-symbolic", null, Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(translate("Share"), style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
+}
+
+/** The Link page's choices, kept while the pager moves. */
+private class LinkChoices {
+    var expiry by mutableStateOf(ShareExpiry.SERVER_DEFAULT)
+    var description by mutableStateOf("")
+    var downloadable by mutableStateOf(false)
+
+    fun options() = ShareOptions(expiry, description, downloadable)
+}
+
+/** Expires' choices, in GTK's order. */
+private val expiries = listOf(ShareExpiry.SERVER_DEFAULT to "Server default", ShareExpiry.DAY to "1 day",
+    ShareExpiry.WEEK to "1 week", ShareExpiry.MONTH to "1 month", ShareExpiry.YEAR to "1 year")
+
+/** The Link page: the item, and when its server makes the link, how long it lasts, what it says and,
+ *  where the server lets Rufin say so, whether it downloads. */
+@Composable
+private fun LinkPage(subject: ShareSubject, artwork: Cover, link: LinkChoices, modifier: Modifier) {
+    val dialog = subject.share?.dialog
+    Surface(modifier.fillMaxWidth(), RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Artwork(artwork, Modifier.size(56.dp).clip(CoverShape))
+                Column(Modifier.weight(1f)) {
+                    Text(subject.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                    Text(subject.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (dialog != null) {
+                Text(translate("Expires"), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                SegmentedPill(expiries.map { it.first }, link.expiry, { link.expiry = it }, Modifier.fillMaxWidth(),
+                    scroll = rememberScrollState()) { option, _ ->
+                    Text(translate(expiries.first { it.first == option }.second), style = MaterialTheme.typography.titleSmall)
+                }
+                OutlinedTextField(link.description, { link.description = it }, Modifier.fillMaxWidth(),
+                    label = { Text(translate("Description")) }, singleLine = true)
+                if (dialog.downloadable) Row(Modifier.fillMaxWidth().clickable { link.downloadable = !link.downloadable },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(translate("Allow downloading"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(link.downloadable, { link.downloadable = it })
+                }
             }
         }
     }
@@ -256,24 +326,22 @@ private fun ShareCard(layer: GraphicsLayer, artwork: Cover, fill: Color, content
 }
 
 @Composable
-private fun ColumnScope.SongCardContent(player: PlayerConnection, artwork: Cover, content: Color) {
-    val metadata = player.currentItem?.metadata
+private fun ColumnScope.SongCardContent(subject: ShareSubject, artwork: Cover, content: Color) {
     Artwork(artwork, Modifier.fillMaxWidth().aspectRatio(1f).clip(CoverShape))
     Spacer(Modifier.height(16.dp))
-    Text(metadata?.title.orEmpty(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2)
-    Text(metadata?.artist.orEmpty(), style = MaterialTheme.typography.bodyLarge, maxLines = 1, color = content.copy(alpha = .8f))
+    Text(subject.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2)
+    Text(subject.subtitle, style = MaterialTheme.typography.bodyLarge, maxLines = 1, color = content.copy(alpha = .8f))
     Spacer(Modifier.height(12.dp))
     ShareMark()
 }
 
 @Composable
-private fun ColumnScope.LyricsCardContent(player: PlayerConnection, artwork: Cover, lines: List<String>, content: Color) {
-    val metadata = player.currentItem?.metadata
+private fun ColumnScope.LyricsCardContent(subject: ShareSubject, artwork: Cover, lines: List<String>, content: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Artwork(artwork, Modifier.size(44.dp).clip(CoverShape))
         Column {
-            Text(metadata?.title.orEmpty(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(metadata?.artist.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1, color = content.copy(alpha = .8f))
+            Text(subject.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(subject.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = content.copy(alpha = .8f))
         }
     }
     Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.CenterStart) {

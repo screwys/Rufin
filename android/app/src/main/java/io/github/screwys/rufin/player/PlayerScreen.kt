@@ -357,7 +357,10 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
         PlayerSettingsScreen(player) { settings = false }
     }
     sharing?.let { kind ->
-        PlayerShareSheet(player, kind, shareStyle, shareLines, onEditLyrics = { lines ->
+        val item = player.currentItem
+        val links = player.metadataLinks?.takeIf { it.mediaUri == player.currentId?.mediaUri }
+        ShareSheet(player, ShareSubject(item?.metadata?.title.orEmpty(), item?.metadata?.artist.orEmpty(), item?.artworkBinding,
+            "Song", links?.share, lyrics = true), kind, shareStyle, shareLines, onEditLyrics = { lines ->
             sharing = null
             lyricsSelection = lines
             surface = PlayerSurface.LYRICS

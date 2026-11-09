@@ -25,6 +25,20 @@ impl AndroidLibrary {
         rufin_core::menu::swipes(&self.source, &self.settings.load(), &row.row)
     }
 
+    /// The link to `target`, as a row's menu or the playing track offers it; a link the server
+    /// makes holds `options`.
+    pub async fn share(
+        &self,
+        target: rufin_core::sharing::ShareTarget,
+        options: rufin_core::sharing::ShareOptions,
+    ) -> Result<String, AndroidError> {
+        rufin_core::sharing::share(&self.source, target, options)
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(|failure| error(localization::tr(&failure)))
+    }
+
     pub async fn download_target(
         &self,
         route: Option<Route>,

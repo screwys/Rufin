@@ -221,6 +221,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var random by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf<BrowseItem?>(null) }
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
+    var sharing by remember { mutableStateOf<Pair<BrowseItem, Share>?>(null) }
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
     var selectingPins by remember { mutableStateOf(false) }
@@ -393,7 +394,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     // In a split view the detail pane draws its own bar, and the list keeps the shell's.
     val overlay = browse.section == AppSection.Browse && (browse.rootId == "Home" || browse.detail && !split)
     val barHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
-    BrowseGestureSettings(preferences.swipeLeft, preferences.swipeRight, browse, { playlist = it }) {
+    BrowseGestureSettings(preferences.swipeLeft, preferences.swipeRight, browse, { playlist = it }, { item, share -> sharing = item to share }) {
     ModalNavigationDrawer(drawerContent = {
         ModalDrawerSheet(Modifier.width(304.dp)) { Sidebar(model, browse, player, pinsPage, sidebarActions) }
     }, drawerState = drawer, gesturesEnabled = drawer.isOpen) {
@@ -587,6 +588,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     menu?.let { item -> BrowseMenuSheet(model, browse, item, player, { menu = null }, { playlist = item; menu = null }, { metadata = item; menu = null },
         onNavigate = { route, title, _ -> menu = null; fullPlayer = false; browse.section = AppSection.Browse; browse.openRoute(route, title) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
+    sharing?.let { (item, share) -> BrowseShareSheet(player, item, share) { sharing = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false }) { name, sourceId, public ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet

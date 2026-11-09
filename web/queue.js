@@ -4,7 +4,7 @@ import { api, state } from "./connection.js";
 
 import { setFavorite, openLinks } from "./library.js";
 
-import { playlistMenu, radioMenu, showMenu, goToMenu } from "./menus.js";
+import { playlistMenu, radioMenu, showMenu, goToMenu, shareAction } from "./menus.js";
 
 import { $, button, el, run } from "./ui.js";
 import {
@@ -197,6 +197,7 @@ function showQueueMenu(row, anchor, event) {
     actions.push([tr("Edit metadata"), () => openMetadata({ kind: "track", uri: track.uri }), "rufin-document-edit-symbolic"]);
   const destination = menu.go_to && goToMenu(track);
   if (destination) actions.push(null, destination);
+  if (menu.share) actions.push(shareAction(menu.share));
   showMenu(actions, anchor, event);
 }
 

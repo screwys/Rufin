@@ -247,10 +247,26 @@ impl SubsonicSource {
     }
 
     /// Uses the local address while an OpenSubsonic server answers there.
+    /// Chooses the address that answers, and learns from getUser's shareRole whether the user
+    /// may make share links; Navidrome reports its sharing setting there.
     pub(crate) async fn select_address(&self) {
         self.address
             .select(async |local| client::answers_subsonic(&self.client, local).await)
             .await;
+        if self.share_role.get().is_none()
+            && let Ok(body) = self
+                .get_json("getUser", &[("username", self.username.clone())])
+                .await
+        {
+            let _ = self
+                .share_role
+                .set(json::boolean(&body["user"]["shareRole"]).unwrap_or(false));
+        }
+    }
+
+    /// Whether the server makes share links for this user.
+    pub(crate) fn shares_links(&self) -> bool {
+        self.share_role.get().copied().unwrap_or(false)
     }
 }
 
@@ -299,6 +315,8 @@ pub struct SubsonicSource {
     navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
     extensions: tokio::sync::OnceCell<serde_json::Value>,
+    /// getUser's shareRole, once the server answered it.
+    share_role: std::sync::OnceLock<bool>,
 }
 impl SubsonicSource {
     fn open(
@@ -347,6 +365,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
             extensions: tokio::sync::OnceCell::new(),
+            share_role: std::sync::OnceLock::new(),
         })
     }
 
@@ -471,6 +490,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
             extensions: tokio::sync::OnceCell::new(),
+            share_role: std::sync::OnceLock::new(),
         };
         Ok(AuthenticatedSubsonic {
             configuration,

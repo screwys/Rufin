@@ -31,6 +31,8 @@ pub struct Menu {
     pub download: bool,
     /// Remove Download, or Remove Downloads of a collection.
     pub remove_download: bool,
+    /// Share: the link to the row on its server.
+    pub share: Option<crate::sharing::Share>,
     /// Add current: the playing track into a writable playlist.
     pub add_current: bool,
     /// A playlist's or smart playlist's folder actions, and whether it is in a folder.
@@ -155,6 +157,7 @@ fn offered(
     };
     menu.download = !downloaded && downloadable(source, row) && shown(ContextMenuItem::Download);
     menu.remove_download = downloaded && shown(ContextMenuItem::Download);
+    menu.share = crate::sharing::offered(owner, row).filter(|_| shown(ContextMenuItem::Share));
     menu.pin = row
         .pin()
         .filter(|_| settings.sidebar.pins_visible && shown(ContextMenuItem::Pins));

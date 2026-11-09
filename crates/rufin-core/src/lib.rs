@@ -36,6 +36,7 @@ pub mod metadata;
 pub mod open;
 pub mod playlist_files;
 pub mod playlists;
+pub mod sharing;
 
 pub use playback::equalizer::{
     EqCastFormat, EqEdit, EqPresetFormat, EqPresetSummary, EqSubscription, EqView,
