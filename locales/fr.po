@@ -285,6 +285,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "(maintenir pour mélanger)"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Tous les morceaux"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 ". Vous devez uniquement renseigner les champs e-mail et nom de l’application"
@@ -444,9 +452,6 @@ msgstr "Ajouter"
 
 msgid "Added to"
 msgstr "Ajouté à"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "Artistes de l’album"
@@ -1552,6 +1557,16 @@ msgstr "Téléchargement"
 msgid "Encrypt backups"
 msgstr "Chiffrer les sauvegardes"
 
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "End of this track"
+msgstr "Impossible de jouer ce morceau"
+
+#, fuzzy
+#| msgid "Enable background image"
+msgid "Ends around {time}"
+msgstr "Activer l'image de fond"
+
 msgid "Enter API credentials first"
 msgstr "Entrez d'abord les identifiants API"
 
@@ -1738,6 +1753,12 @@ msgstr "retrouvez votre jeton d'utilisateur ListenBrainz"
 
 msgid "Finding lyrics..."
 msgstr "Trouver les paroles..."
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr "Adapter à la hauteur"
@@ -2121,6 +2142,9 @@ msgstr "Mot de passe hérité"
 msgid "Legacy"
 msgstr "Hérité"
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Bibliothèque"
 
@@ -2362,6 +2386,9 @@ msgstr "Année minimum"
 
 msgid "Minimum"
 msgstr "Année minimum"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr "Barres en miroir"
@@ -2892,6 +2919,17 @@ msgstr "Chemin"
 
 msgid "Pause"
 msgstr "Pause"
+
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Pauses at {time}"
+msgstr "Cherchez à {temps}"
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr "Vitesse de chute des pics (% par seconde)"
@@ -3912,6 +3950,11 @@ msgstr "Uniquement les morceaux non lus"
 msgid "Slate"
 msgstr "Ardoise"
 
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Sleep timer"
+msgstr "Cherchez à {temps}"
+
 msgid "Small"
 msgstr "Petit"
 
@@ -3992,6 +4035,11 @@ msgstr "Démarrer minimisé"
 
 msgid "Start playing automatically"
 msgstr "Lancement automatique"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start"
+msgstr "Démarrage..."
 
 msgid "Starting page"
 msgstr "Page de démarrage"
@@ -4160,6 +4208,9 @@ msgstr "Cela supprimera la configuration enregistrée. Voulez-vous continuer ?
 msgid "Thursday"
 msgstr "Jeudi"
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Morceau (fusionné)"
 
@@ -4249,6 +4300,9 @@ msgstr "Désactiver uniquement pour un serveur que vous contrôlez"
 
 msgid "Turn off private mode"
 msgstr "Désactivez le mode privé"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Activer le mode privé"
@@ -4630,6 +4684,9 @@ msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] "{field} · Différent sur {count} morceau"
 msgstr[1] "{field} · Différent sur {count} morceaux"
+
+msgid "{minutes} min"
+msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} sur {total}, {cached} en cache)"

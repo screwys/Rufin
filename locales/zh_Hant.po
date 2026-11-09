@@ -210,6 +210,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "接續播放"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "所有曲目"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
@@ -388,9 +396,6 @@ msgstr "新增"
 
 msgid "Added to"
 msgstr "已加入"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "專輯藝人"
@@ -1744,6 +1749,14 @@ msgstr "正在下載"
 msgid "Encrypt backups"
 msgstr ""
 
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "End of this track"
+msgstr "無法載入此資料夾"
+
+msgid "Ends around {time}"
+msgstr ""
+
 msgid "Enter API credentials first"
 msgstr "先輸入 API 憑證"
 
@@ -1968,6 +1981,12 @@ msgstr "尋找您的 ListenBrainz 使用者憑證"
 #| msgid "No lyrics"
 msgid "Finding lyrics..."
 msgstr "無歌詞"
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr ""
@@ -2381,6 +2400,9 @@ msgstr "密碼"
 msgid "Legacy"
 msgstr ""
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "媒體庫"
 
@@ -2644,6 +2666,9 @@ msgstr "最小年份"
 #| msgid "Minimum year"
 msgid "Minimum"
 msgstr "最小年份"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr ""
@@ -3263,6 +3288,15 @@ msgstr ""
 
 msgid "Pause"
 msgstr "暫停"
+
+msgid "Pauses at {time}"
+msgstr ""
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr ""
@@ -4439,6 +4473,9 @@ msgstr "僅未播放過的曲目"
 msgid "Slate"
 msgstr ""
 
+msgid "Sleep timer"
+msgstr ""
+
 msgid "Small"
 msgstr ""
 
@@ -4533,6 +4570,11 @@ msgstr ""
 
 msgid "Start playing automatically"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start"
+msgstr "正在儲存..."
 
 #, fuzzy
 #| msgid "Search Again"
@@ -4716,6 +4758,9 @@ msgstr ""
 msgid "Thursday"
 msgstr ""
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "標題（已合併）"
 
@@ -4825,6 +4870,9 @@ msgstr ""
 
 msgid "Turn off private mode"
 msgstr "關閉無痕模式"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "開啟無痕模式"
@@ -5230,6 +5278,9 @@ msgstr[0] "{count} 年之前"
 msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
+
+msgid "{minutes} min"
+msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""

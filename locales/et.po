@@ -280,6 +280,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "(segamiseks hoia all)"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Kõik lood"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
 
@@ -438,9 +446,6 @@ msgstr "Lisa"
 
 msgid "Added to"
 msgstr "Lisatud asukohta"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "Albumi esitajad"
@@ -1544,6 +1549,16 @@ msgstr "Kodeering"
 msgid "Encrypt backups"
 msgstr "Krüpti varukoopiad"
 
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "End of this track"
+msgstr "Selle loo esitamine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Enable background image"
+msgid "Ends around {time}"
+msgstr "Kasuta taustapilti"
+
 msgid "Enter API credentials first"
 msgstr "Esmalt sisesta API tuvastusandmed"
 
@@ -1728,6 +1743,12 @@ msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
 
 msgid "Finding lyrics..."
 msgstr "Otsin laulusõnu…"
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr "Sobita kõrgusele"
@@ -2110,6 +2131,9 @@ msgstr "Vana tüüpi salasõna"
 msgid "Legacy"
 msgstr "Vanem versioon"
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Meediumikogu"
 
@@ -2347,6 +2371,9 @@ msgstr "Minimaalne aasta"
 
 msgid "Minimum"
 msgstr "Minimaalne"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr "Peegeldatud ribad"
@@ -2875,6 +2902,17 @@ msgstr "Asukoht"
 
 msgid "Pause"
 msgstr "Peata esitus"
+
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Pauses at {time}"
+msgstr "Keri {time} ajapunkti"
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr "Tipumarkeri allalangemise kiirus (% sekundis)"
@@ -3888,6 +3926,11 @@ msgstr "Jäta esitamatud lood vahele"
 msgid "Slate"
 msgstr "Paekarva"
 
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Sleep timer"
+msgstr "Keri {time} ajapunkti"
+
 msgid "Small"
 msgstr "Väike"
 
@@ -3968,6 +4011,11 @@ msgstr "Käivita minimeerituna"
 
 msgid "Start playing automatically"
 msgstr "Alusta esitust automaatselt"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start"
+msgstr "Käivitan…"
 
 msgid "Starting page"
 msgstr "Avaleht"
@@ -4137,6 +4185,9 @@ msgstr "Järgnevaga eemaldad seadistatud oleku. Kas soovid jätkata?"
 msgid "Thursday"
 msgstr "Neljapäev"
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Pealkiri (mestitud)"
 
@@ -4226,6 +4277,9 @@ msgstr "Lülita välja vaid enda kontrollitava serveri jaoks"
 
 msgid "Turn off private mode"
 msgstr "Lülita privaatne režiim välja"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Lülita privaatne režiim sisse"
@@ -4610,6 +4664,9 @@ msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] "{field} · {count} raja puhul erinev"
 msgstr[1] "{field} · {count} raja puhul erinev"
+
+msgid "{minutes} min"
+msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} / {total}, {cached} cached)"

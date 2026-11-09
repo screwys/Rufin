@@ -280,6 +280,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "(удерживайте, чтобы перемешать)"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Все треки"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 ". Вам нужно заполнить только поля с адресом электронной почты и названием "
@@ -449,9 +457,6 @@ msgstr "Добавить"
 
 msgid "Added to"
 msgstr "Добавлено в"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "Авторы альбома"
@@ -1669,6 +1674,16 @@ msgstr "Загрузка"
 msgid "Encrypt backups"
 msgstr "Шифровать резервные копии"
 
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "End of this track"
+msgstr "Не удалось воспроизвести этот трек"
+
+#, fuzzy
+#| msgid "Enable background image"
+msgid "Ends around {time}"
+msgstr "Включить фоновое изображение"
+
 msgid "Enter API credentials first"
 msgstr "Сначала введите данные для доступа к API"
 
@@ -1875,6 +1890,12 @@ msgstr "Найдите свой токен пользователя ListenBrainz
 
 msgid "Finding lyrics..."
 msgstr "Поиск текста песни..."
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr ""
@@ -2271,6 +2292,9 @@ msgstr "Устаревшая версия пароля"
 msgid "Legacy"
 msgstr "Устаревшая версия"
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Библиотека"
 
@@ -2528,6 +2552,9 @@ msgstr "Минимальный год"
 #| msgid "Minimum year"
 msgid "Minimum"
 msgstr "Минимальный год"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr "Отражённые полосы"
@@ -3076,6 +3103,17 @@ msgstr "Путь"
 
 msgid "Pause"
 msgstr "Приостановить"
+
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Pauses at {time}"
+msgstr "Перейти к {time}"
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr "Максимальная скорость снижения пиков (% в секунду)"
@@ -4154,6 +4192,11 @@ msgstr "Только непрослушанные треки"
 msgid "Slate"
 msgstr "Серый"
 
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Sleep timer"
+msgstr "Перейти к {time}"
+
 msgid "Small"
 msgstr "Маленький"
 
@@ -4244,6 +4287,11 @@ msgstr "Запускать в свернутом виде"
 
 msgid "Start playing automatically"
 msgstr "Начинать воспроизведение автоматически"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start"
+msgstr "Запуск..."
 
 #, fuzzy
 #| msgid "Search in page"
@@ -4418,6 +4466,9 @@ msgstr "Это удалит все настроенные параметры. Х
 msgid "Thursday"
 msgstr "Четверг"
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Название (объединено)"
 
@@ -4519,6 +4570,9 @@ msgstr "Отключайте только для сервера, которым 
 
 msgid "Turn off private mode"
 msgstr "Выключить приватный режим"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Включить приватный режим"
@@ -4923,6 +4977,9 @@ msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+msgid "{minutes} min"
+msgstr ""
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"

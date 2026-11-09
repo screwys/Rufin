@@ -223,6 +223,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "Přehrát další"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Všechny skladby"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
 
@@ -401,9 +409,6 @@ msgstr "Přidat"
 
 msgid "Added to"
 msgstr "Přidáno do"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "Interpreti alba"
@@ -1791,6 +1796,14 @@ msgstr "Stahování"
 msgid "Encrypt backups"
 msgstr ""
 
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "End of this track"
+msgstr "Nelze načíst tuto složku"
+
+msgid "Ends around {time}"
+msgstr ""
+
 msgid "Enter API credentials first"
 msgstr "Nejprve zadejte přihlašovací údaje k API"
 
@@ -2019,6 +2032,12 @@ msgstr "Najděte svůj uživatelský token ListenBrainz"
 #| msgid "Hide lyrics"
 msgid "Finding lyrics..."
 msgstr "Skrýt text skladby"
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr ""
@@ -2442,6 +2461,9 @@ msgstr "Heslo"
 msgid "Legacy"
 msgstr "Stará verze"
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Knihovna"
 
@@ -2711,6 +2733,9 @@ msgstr "Minimální rok"
 #| msgid "Minimum year"
 msgid "Minimum"
 msgstr "Minimální rok"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr ""
@@ -3339,6 +3364,15 @@ msgstr ""
 
 msgid "Pause"
 msgstr "Pauza"
+
+msgid "Pauses at {time}"
+msgstr ""
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr ""
@@ -4543,6 +4577,9 @@ msgstr "Pouze nepřehrané skladby"
 msgid "Slate"
 msgstr "Šedá"
 
+msgid "Sleep timer"
+msgstr ""
+
 msgid "Small"
 msgstr ""
 
@@ -4639,6 +4676,11 @@ msgstr "Spustit v minimalizovaném režimu"
 #| msgid "Searching will start automatically"
 msgid "Start playing automatically"
 msgstr "Vyhledávání se spustí automaticky"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start"
+msgstr "Ukládání..."
 
 #, fuzzy
 #| msgid "Search Again"
@@ -4824,6 +4866,9 @@ msgstr ""
 msgid "Thursday"
 msgstr ""
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Název (sloučeno)"
 
@@ -4937,6 +4982,9 @@ msgstr "Vypněte pouze u serveru, který spravujete"
 
 msgid "Turn off private mode"
 msgstr "Vypnout soukromý režim"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Zapnout soukromý režim"
@@ -5380,6 +5428,9 @@ msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+msgid "{minutes} min"
+msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
