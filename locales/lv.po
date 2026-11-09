@@ -262,6 +262,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "Atskaņot nākamo (jauktā secībā)"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Visas dziesmas"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Jums jāaizpilda tikai e-pasta un lietojumprogrammas nosaukuma daļas"
 
@@ -432,9 +440,6 @@ msgstr "Pievienot"
 
 msgid "Added to"
 msgstr "Pievienots"
-
-msgid "Adds similar tracks when the queue runs low"
-msgstr ""
 
 msgid "Album Artists"
 msgstr "Albumu izpildītāji"
@@ -1736,6 +1741,16 @@ msgstr "Lejupielādē"
 msgid "Encrypt backups"
 msgstr "Šifrēt dublējumus"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "End of this track"
+msgstr "Šo lapu nevarēja ielādēt"
+
+#, fuzzy
+#| msgid "Enable background image"
+msgid "Ends around {time}"
+msgstr "Ieslēgt fona attēlu"
+
 msgid "Enter API credentials first"
 msgstr "Vispirms ievadiet API autentifikācijas datus"
 
@@ -1956,6 +1971,12 @@ msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
 
 msgid "Finding lyrics..."
 msgstr "Meklējam tekstus..."
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr ""
@@ -2377,6 +2398,9 @@ msgstr "Vecās versijas parole"
 msgid "Legacy"
 msgstr "Vecā versija"
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Bibliotēka"
 
@@ -2639,6 +2663,9 @@ msgstr "Minimālais gads"
 #| msgid "Minimum year"
 msgid "Minimum"
 msgstr "Minimālais gads"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr "Atspoguļotas joslas"
@@ -3217,6 +3244,17 @@ msgstr "Ceļš"
 
 msgid "Pause"
 msgstr "Pauzēt"
+
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Pauses at {time}"
+msgstr "Pārvietot uz {time}"
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr "Maksimālais ātruma samazinājums (% sekundē)"
@@ -4341,6 +4379,11 @@ msgstr "Tikai neatskaņotās dziesmas"
 msgid "Slate"
 msgstr "Pelēks"
 
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Sleep timer"
+msgstr "Pārvietot uz {time}"
+
 msgid "Small"
 msgstr ""
 
@@ -4435,6 +4478,11 @@ msgstr "Sākt minimizētu"
 #| msgid "Save playlist changes automatically"
 msgid "Start playing automatically"
 msgstr "Automātiski saglabāt atskaņošanas saraksta izmaiņas"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start"
+msgstr "Sākas..."
 
 #, fuzzy
 #| msgid "Search in page"
@@ -4623,6 +4671,9 @@ msgstr ""
 msgid "Thursday"
 msgstr "Ceturtdiena"
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Nosaukums (apvienots)"
 
@@ -4734,6 +4785,9 @@ msgstr "Izslēdziet tikai serverim, ko pārvaldāt"
 
 msgid "Turn off private mode"
 msgstr "Izslēgt privāto režīmu"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Ieslēgt privāto režīmu"
@@ -5158,6 +5212,9 @@ msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+msgid "{minutes} min"
+msgstr ""
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"

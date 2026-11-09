@@ -220,6 +220,14 @@ msgstr ""
 msgid "(hold to shuffle)"
 msgstr "Toista seuraava"
 
+#, fuzzy
+#| msgid "All tracks"
+msgid "+1 track"
+msgstr "Kaikki kappaleet"
+
+msgid "+5 min"
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
@@ -389,9 +397,6 @@ msgid "Add"
 msgstr "Lisää"
 
 msgid "Added to"
-msgstr ""
-
-msgid "Adds similar tracks when the queue runs low"
 msgstr ""
 
 msgid "Album Artists"
@@ -1705,6 +1710,16 @@ msgstr "Ladataan"
 msgid "Encrypt backups"
 msgstr "Salaa varmuuskopiot"
 
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "End of this track"
+msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
+#| msgid "Enable background image"
+msgid "Ends around {time}"
+msgstr "Käytä taustakuvaa"
+
 msgid "Enter API credentials first"
 msgstr ""
 
@@ -1923,6 +1938,12 @@ msgstr ""
 #| msgid "Edit lyrics"
 msgid "Finding lyrics..."
 msgstr "Muokkaa sanoituksia"
+
+msgid "Finish the last track"
+msgstr ""
+
+msgid "Finishes the track playing at {time}"
+msgstr ""
 
 msgid "Fit to height"
 msgstr ""
@@ -2332,6 +2353,9 @@ msgstr "Käyttäjätunnus ja salana"
 msgid "Legacy"
 msgstr ""
 
+msgid "Less"
+msgstr ""
+
 msgid "Library"
 msgstr "Kirjasto"
 
@@ -2592,6 +2616,9 @@ msgstr "Vuosi vähintään"
 #| msgid "Minimum year"
 msgid "Minimum"
 msgstr "Vuosi vähintään"
+
+msgid "Minutes"
+msgstr ""
 
 msgid "Mirrored bars"
 msgstr ""
@@ -3179,6 +3206,17 @@ msgstr "Polku"
 
 msgid "Pause"
 msgstr "Keskeytä"
+
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Pauses at {time}"
+msgstr "Siirry kohtaan {time}"
+
+msgid "Pauses when that track ends"
+msgstr ""
+
+msgid "Pauses when this track ends"
+msgstr ""
 
 msgid "Peak fall speed (% per second)"
 msgstr ""
@@ -4336,6 +4374,11 @@ msgstr "Vain toistetut kappaleet"
 msgid "Slate"
 msgstr ""
 
+#, fuzzy
+#| msgid "Seek to {time}"
+msgid "Sleep timer"
+msgstr "Siirry kohtaan {time}"
+
 msgid "Small"
 msgstr ""
 
@@ -4428,6 +4471,11 @@ msgstr "Käynnistä pienennettynä"
 #| msgid "Save lyrics automatically"
 msgid "Start playing automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start"
+msgstr "Tallennetaan..."
 
 #, fuzzy
 #| msgid "Search in page"
@@ -4609,6 +4657,9 @@ msgstr ""
 msgid "Thursday"
 msgstr "Torstai"
 
+msgid "Time"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr ""
 
@@ -4720,6 +4771,9 @@ msgstr ""
 
 msgid "Turn off private mode"
 msgstr "Poista yksityistila käytöstä"
+
+msgid "Turn off"
+msgstr ""
 
 msgid "Turn on private mode"
 msgstr "Ota yksityistila käyttöön"
@@ -5142,6 +5196,9 @@ msgid "{field} · Different across {count} track"
 msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "{minutes} min"
+msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
