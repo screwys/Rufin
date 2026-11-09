@@ -95,8 +95,12 @@ pub const BOTTOM_PLAYER_STRIP_HEIGHT: i32 =
 const BOTTOM_PLAYER_SEEK_BUTTON_SIZE: i32 = 28;
 /// The slider the narrow layouts' volume button opens.
 const BOTTOM_PLAYER_VOLUME_POPOVER_HEIGHT: i32 = 120;
-const BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH: i32 =
-    BOTTOM_PLAYER_HORIZONTAL_PADDING + BOTTOM_PLAYER_COVER_SIZE + BOTTOM_PLAYER_NOW_PLAYING_SPACING;
+/// Previous, play and next in the compact layout.
+const BOTTOM_PLAYER_COMPACT_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 2
+    + BOTTOM_PLAYER_PLAY_BUTTON_SIZE
+    + BOTTOM_PLAYER_BUTTON_GAP * 2;
+/// The compact layout centers its buttons on the cover.
+const BOTTOM_PLAYER_COMPACT_BUTTON_CENTER_Y: f64 = BOTTOM_PLAYER_BUTTON_ROW_HEIGHT as f64 / 2.0;
 /// The narrowest bar: five transport buttons over the seek bar.
 pub const BOTTOM_PLAYER_CONTROLS_MIN_WIDTH: i32 =
     BOTTOM_PLAYER_EDGE_PADDING * 2 + BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH;
@@ -108,10 +112,12 @@ pub const VOLUME_PERSIST_DELAY: Duration = Duration::from_millis(250);
 pub enum BottomPlayerLayout {
     /// The desktop row: what is playing, the transport over the seek bar, and the actions.
     Desktop,
-    /// Narrow windows and mini players: the transport over the seek bar, with volume and favorite
-    /// at its ends. The cover stays beside them unless the fullscreen player or the tall mini
-    /// player shows it, or there is no room.
-    Controls { cover: bool },
+    /// Narrow windows, such as phones: what is playing beside previous, play and next, with a thin
+    /// seek bar along the top edge. The other controls stay in the fullscreen player.
+    Compact,
+    /// The tall mini player, and narrow windows under the fullscreen player: the transport over
+    /// the seek bar, with volume and favorite at its ends. The fullscreen player shows the cover.
+    Controls,
     /// The thinnest bar, for short mini players: the plain seek bar over volume, previous, play,
     /// next and repeat.
     Strip,
@@ -127,11 +133,10 @@ pub enum BottomPlayerActions {
 pub struct PlayerControls {
     pub root: AllocationOwner,
     pub width: Cell<i32>,
-    pub height: Cell<i32>,
     bar: gtk::Box,
+    edge: gtk::Overlay,
     pub layout: Cell<BottomPlayerLayout>,
     pub cover: ArtworkTile,
-    pub identity: gtk::Box,
     pub title: gtk::Label,
     pub menu_button: gtk::Button,
     pub artist: gtk::Label,
@@ -184,7 +189,6 @@ pub struct PlayerControls {
 pub struct NowPlayingControls {
     pub root: gtk::Box,
     pub cover: ArtworkTile,
-    pub identity: gtk::Box,
     pub title: gtk::Label,
     pub menu_button: gtk::Button,
     pub artist: gtk::Label,
@@ -503,7 +507,6 @@ pub fn build_bottom_player() -> PlayerControls {
     let NowPlayingControls {
         root: now_playing,
         cover,
-        identity,
         title,
         menu_button,
         artist,
@@ -570,16 +573,20 @@ pub fn build_bottom_player() -> PlayerControls {
     // Bottom-player topology follows the real allocation. Applying it during GTK's tentative
     // height-for-width measurement lets a provisional width and the allocated width alternate,
     // continuously invalidating the shell layout.
-    let allocation_root = allocation_owner(&root, |_, _| {});
+    // The compact layout lays its seek bar over the top edge.
+    let edge = gtk::Overlay::new();
+    edge.set_hexpand(true);
+    edge.set_valign(gtk::Align::End);
+    edge.set_child(Some(&root));
+    let allocation_root = allocation_owner(&edge, |_, _| {});
 
     PlayerControls {
         root: allocation_root,
         width: Cell::new(0),
-        height: Cell::new(0),
         bar: root.clone(),
+        edge,
         layout: Cell::new(BottomPlayerLayout::Desktop),
         cover,
-        identity,
         title,
         menu_button,
         artist,
@@ -673,7 +680,6 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
     NowPlayingControls {
         root: now_playing,
         cover,
-        identity,
         title,
         menu_button,
         artist,
@@ -1090,27 +1096,18 @@ pub fn bottom_player_actions(player_width: i32) -> BottomPlayerActions {
 
 pub fn bottom_player_layout(
     player_width: i32,
-    player_height: i32,
     fullscreen_visible: bool,
     mini: crate::player::MiniPlayer,
 ) -> BottomPlayerLayout {
     use crate::player::MiniPlayer;
     match mini {
-        MiniPlayer::Tall => BottomPlayerLayout::Controls { cover: false },
-        MiniPlayer::Short
-            if player_width
-                >= BOTTOM_PLAYER_CONTROLS_MIN_WIDTH + BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
-                && player_height >= BOTTOM_PLAYER_HEIGHT =>
-        {
-            BottomPlayerLayout::Controls { cover: true }
-        }
+        MiniPlayer::Tall => BottomPlayerLayout::Controls,
         MiniPlayer::Short => BottomPlayerLayout::Strip,
         MiniPlayer::Off if player_width >= BOTTOM_PLAYER_NARROW_WIDTH => {
             BottomPlayerLayout::Desktop
         }
-        MiniPlayer::Off => BottomPlayerLayout::Controls {
-            cover: !fullscreen_visible,
-        },
+        MiniPlayer::Off if fullscreen_visible => BottomPlayerLayout::Controls,
+        MiniPlayer::Off => BottomPlayerLayout::Compact,
     }
 }
 
@@ -1966,63 +1963,38 @@ impl crate::player::PlayerUi {
         if width <= 0 {
             return;
         }
-        let layout = bottom_player_layout(
-            width,
-            player.height.get(),
-            self.fullscreen_player_visible(),
-            self.mini.get(),
-        );
+        let layout = bottom_player_layout(width, self.fullscreen_player_visible(), self.mini.get());
         player.layout.set(layout);
         let desktop = layout == BottomPlayerLayout::Desktop;
+        let compact = layout == BottomPlayerLayout::Compact;
         let strip = layout == BottomPlayerLayout::Strip;
-        let cover = match layout {
-            BottomPlayerLayout::Controls { cover } => cover,
-            BottomPlayerLayout::Desktop => true,
-            BottomPlayerLayout::Strip => false,
-        };
         player.bar.set_height_request(if strip {
             BOTTOM_PLAYER_STRIP_HEIGHT
         } else {
             BOTTOM_PLAYER_HEIGHT
         });
-        player.left_slot.set_visible(cover);
-        player.identity.set_visible(desktop);
-        // The desktop row shares its width equally around the transport. The other layouts give
-        // the cover its own width and the rest to the controls.
-        player.left_slot.set_hexpand(desktop);
-        set_allocated_slot_size(
-            &player.left_slot,
-            if desktop {
-                1
-            } else {
-                BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
-            },
-            1,
-        );
-        // The controls layout and the strip keep volume and favorite next to their controls, so
-        // only the desktop row keeps the action surface.
+        // Only the desktop row and the compact layout show what is playing; the fullscreen player
+        // and the mini players show it themselves.
+        player.left_slot.set_visible(desktop || compact);
+        // The controls layout and the strip keep volume and favorite next to their controls, and
+        // the compact layout leaves them to the fullscreen player, so only the desktop row keeps
+        // the action surface.
         player.right_slot.set_visible(desktop);
         if desktop {
             self.apply_bottom_player_actions(bottom_player_actions(width));
         } else {
             player
                 .favorite_button
-                .set_visible(matches!(layout, BottomPlayerLayout::Controls { .. }));
+                .set_visible(layout == BottomPlayerLayout::Controls);
             player.queue_button.set_visible(false);
         }
-        self.apply_bottom_player_volume_popover(!desktop);
+        self.apply_bottom_player_volume_popover(!desktop && !compact);
         self.sync_bottom_player_rating();
 
         let transport_width = match layout {
             BottomPlayerLayout::Desktop => BOTTOM_PLAYER_TRANSPORT_WIDTH,
-            BottomPlayerLayout::Controls { cover } => (bottom_player_content_width(width)
-                - if cover {
-                    BOTTOM_PLAYER_NOW_PLAYING_COVER_WIDTH
-                } else {
-                    0
-                })
-            .max(BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH),
-            BottomPlayerLayout::Strip => {
+            BottomPlayerLayout::Compact => BOTTOM_PLAYER_COMPACT_TRANSPORT_WIDTH,
+            BottomPlayerLayout::Controls | BottomPlayerLayout::Strip => {
                 bottom_player_content_width(width).max(BOTTOM_PLAYER_CONTROLS_TRANSPORT_WIDTH)
             }
         };
@@ -2030,6 +2002,11 @@ impl crate::player::PlayerUi {
             (
                 BOTTOM_PLAYER_STRIP_ROW_HEIGHT,
                 BOTTOM_PLAYER_STRIP_BUTTON_CENTER_Y,
+            )
+        } else if compact {
+            (
+                BOTTOM_PLAYER_BUTTON_ROW_HEIGHT,
+                BOTTOM_PLAYER_COMPACT_BUTTON_CENTER_Y,
             )
         } else {
             (
@@ -2043,9 +2020,9 @@ impl crate::player::PlayerUi {
             .transport_buttons
             .set_size_request(transport_width, row_height);
         player.now_playing_wall.set_width_request(1);
-        player.transport_slot.set_hexpand(!desktop);
+        player.transport_slot.set_hexpand(!desktop && !compact);
         self.place_bottom_player_seek_buttons(layout);
-        let all_buttons = !strip && transport_width >= BOTTOM_PLAYER_TRANSPORT_WIDTH;
+        let all_buttons = !strip && !compact && transport_width >= BOTTOM_PLAYER_TRANSPORT_WIDTH;
         let side = BOTTOM_PLAYER_SIDE_BUTTON_SIZE;
         for (button, slot, visible) in [
             (
@@ -2053,11 +2030,11 @@ impl crate::player::PlayerUi {
                 -3.0,
                 all_buttons,
             ),
-            (player.shuffle_button.upcast_ref(), -2.0, !strip),
+            (player.shuffle_button.upcast_ref(), -2.0, !strip && !compact),
             (player.volume_button.upcast_ref(), -2.0, strip),
             (player.previous_button.upcast_ref(), -1.0, true),
             (player.next_button.upcast_ref(), 1.0, true),
-            (player.repeat_button.upcast_ref(), 2.0, true),
+            (player.repeat_button.upcast_ref(), 2.0, !compact),
             (player.random_button.upcast_ref(), 3.0, all_buttons),
         ] {
             if button.parent().as_ref() != Some(player.transport_buttons.upcast_ref()) {
@@ -2090,13 +2067,14 @@ impl crate::player::PlayerUi {
             );
         }
 
+        self.place_bottom_player_progress(compact);
         // The strip puts the seek bar above its single row of buttons.
         if strip {
             player.progress_row.add_css_class("above-controls");
             player
                 .transport
                 .reorder_child_after(&player.progress_row, None::<&gtk::Widget>);
-        } else {
+        } else if !compact {
             player.progress_row.remove_css_class("above-controls");
             player
                 .transport
@@ -2127,9 +2105,14 @@ impl crate::player::PlayerUi {
             1
         };
         player.progress.set_width_request(progress_width);
-        player
-            .progress_stack
-            .set_size_request(progress_width, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
+        player.progress_stack.set_size_request(
+            progress_width,
+            if compact {
+                -1
+            } else {
+                BOTTOM_PLAYER_WAVEFORM_HEIGHT
+            },
+        );
         player.waveform.widget().set_width_request(progress_width);
         player.waveform.widget().set_content_width(progress_width);
     }
@@ -2141,8 +2124,10 @@ impl crate::player::PlayerUi {
         let player = &self.views.player_controls;
         let volume_host: &gtk::Widget = match layout {
             BottomPlayerLayout::Strip => player.transport_buttons.upcast_ref(),
-            BottomPlayerLayout::Controls { .. } => player.progress_row.upcast_ref(),
-            BottomPlayerLayout::Desktop => player.action_buttons.upcast_ref(),
+            BottomPlayerLayout::Controls => player.progress_row.upcast_ref(),
+            BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
+                player.action_buttons.upcast_ref()
+            }
         };
         if player.volume_button.parent().as_ref() != Some(volume_host) {
             remove_from_parent(&player.volume_button);
@@ -2153,18 +2138,18 @@ impl crate::player::PlayerUi {
                         .put(&player.volume_button, 0.0, 0.0);
                     BOTTOM_PLAYER_SIDE_BUTTON_SIZE
                 }
-                BottomPlayerLayout::Controls { .. } => {
+                BottomPlayerLayout::Controls => {
                     player.progress_row.prepend(&player.volume_button);
                     BOTTOM_PLAYER_SEEK_BUTTON_SIZE
                 }
-                BottomPlayerLayout::Desktop => {
+                BottomPlayerLayout::Desktop | BottomPlayerLayout::Compact => {
                     player.action_buttons.prepend(&player.volume_button);
                     BOTTOM_PLAYER_ACTION_BUTTON_SIZE
                 }
             };
             player.volume_button.set_size_request(size, size);
         }
-        let controls = matches!(layout, BottomPlayerLayout::Controls { .. });
+        let controls = matches!(layout, BottomPlayerLayout::Controls);
         let favorite_host: &gtk::Widget = if controls {
             player.progress_row.upcast_ref()
         } else {
@@ -2185,12 +2170,43 @@ impl crate::player::PlayerUi {
         }
     }
 
-    /// The seek bar shows the waveform when one is ready, except in the strip, which keeps the
-    /// plain bar.
+    /// The compact layout moves the seek bar out from under its buttons to the bar's top edge,
+    /// thin, full width and without the times.
+    fn place_bottom_player_progress(&self, compact: bool) {
+        let player = &self.views.player_controls;
+        player.elapsed.set_visible(!compact);
+        player.duration.set_visible(!compact);
+        // The waveform's height would hold the plain bar open.
+        player.progress_stack.set_vhomogeneous(!compact);
+        player.progress_row.set_valign(if compact {
+            gtk::Align::Start
+        } else {
+            gtk::Align::Center
+        });
+        let on_edge = player.progress_row.parent().as_ref() == Some(player.edge.upcast_ref());
+        if on_edge == compact {
+            return;
+        }
+        if compact {
+            player.transport.remove(&player.progress_row);
+            player.progress_row.add_css_class("edge");
+            player.edge.add_overlay(&player.progress_row);
+        } else {
+            player.edge.remove_overlay(&player.progress_row);
+            player.progress_row.remove_css_class("edge");
+            player.transport.append(&player.progress_row);
+        }
+    }
+
+    /// The seek bar shows the waveform when one is ready, except in the strip and the compact
+    /// layout's edge, which keep the plain bar.
     fn show_bottom_player_seekbar(&self) {
         let controls = &self.views.player_controls;
         if controls.waveform_key.borrow().is_some()
-            && controls.layout.get() != BottomPlayerLayout::Strip
+            && !matches!(
+                controls.layout.get(),
+                BottomPlayerLayout::Strip | BottomPlayerLayout::Compact
+            )
         {
             controls
                 .progress_stack
@@ -2343,11 +2359,11 @@ mod tests {
         assert!(identity_width >= super::BOTTOM_PLAYER_IDENTITY_MIN_WIDTH);
         let off = crate::player::MiniPlayer::Off;
         assert_eq!(
-            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH - 1, 600, false, off),
-            super::BottomPlayerLayout::Controls { cover: true }
+            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH - 1, false, off),
+            super::BottomPlayerLayout::Compact
         );
         assert_eq!(
-            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH, 600, false, off),
+            super::bottom_player_layout(super::BOTTOM_PLAYER_NARROW_WIDTH, false, off),
             super::BottomPlayerLayout::Desktop
         );
     }

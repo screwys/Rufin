@@ -21,13 +21,17 @@ pub struct SelectedPlaybackState {
 pub const MINI_PLAYER_MAX_WIDTH: i32 = 360;
 /// Window content shorter than this shows only the mini player.
 pub const MINI_PLAYER_MAX_HEIGHT: i32 = 240;
+/// The short mini player shows the cover beside the details only with this much room above the
+/// strip.
+pub const MINI_PLAYER_PANE_MIN_HEIGHT: i32 = 80;
 
 /// When the window is too small for pages, it shows only playback: the mini player.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MiniPlayer {
     #[default]
     Off,
-    /// Short windows show the bar alone, with the cover beside the controls when it fits.
+    /// Short windows show the cover beside the details over the bar's strip, or the strip alone
+    /// when there is no room.
     Short,
     /// Narrow, tall windows show the cover above the bar.
     Tall,
@@ -92,23 +96,19 @@ impl PlayerUi {
         if self.mini.replace(mini) == mini {
             return;
         }
-        let tall = mini == MiniPlayer::Tall;
-        self.views.fullscreen_player.mini.set(tall);
+        self.views.fullscreen_player.mini.set(mini);
         // The mini player only plays: no menus, drags or fullscreen from the cover.
         self.views
             .player_controls
             .cover
             .area
             .set_can_target(mini == MiniPlayer::Off);
-        // Alone in a short window, the bar keeps to the bottom of it.
-        self.views
-            .player_controls
-            .root
-            .set_vexpand(mini == MiniPlayer::Short);
-        if tall && !self.fullscreen_player_visible() {
+        // The mini players show the fullscreen player as the window's content.
+        let mini_content = mini != MiniPlayer::Off;
+        if mini_content && !self.fullscreen_player_visible() {
             self.fullscreen_for_mini.set(true);
             self.show_fullscreen_player(false);
-        } else if !tall && self.fullscreen_for_mini.replace(false) {
+        } else if !mini_content && self.fullscreen_for_mini.replace(false) {
             self.hide_fullscreen_player(None, false);
         } else {
             self.refresh_fullscreen_mode();
