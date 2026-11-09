@@ -95,7 +95,7 @@ pub async fn files(
                         let path = base.path().expect("local playlist path");
                         let Some(location) = library::playlist_locator(
                             &entry.locator,
-                            path.parent().unwrap_or(Path::new(".")),
+                            &library::playlist_base(&path),
                         ) else {
                             return Ok(());
                         };
@@ -130,13 +130,20 @@ pub async fn files(
                     return Ok(());
                 }
                 let mut item = entry.to_entry(0).track;
-                let known_media = item.media_uri == file.uri()
+                // A local file keeps the library's identity, whichever grant opened it.
+                let media_uri = file
+                    .path()
+                    .and_then(|path| {
+                        url::Url::from_file_path(sources::local_media_identity_path(&path)).ok()
+                    })
+                    .map_or_else(|| file.uri().to_string(), String::from);
+                let known_media = item.media_uri == media_uri
                     && item
                         .metadata
                         .source_format
                         .as_deref()
                         .is_some_and(|format| !format.trim().is_empty());
-                item.media_uri = file.uri().to_string();
+                item.media_uri = media_uri;
                 if item.metadata.title.is_empty() {
                     item.metadata.title = display_name(&file);
                 }
@@ -186,6 +193,13 @@ pub async fn files(
                             relative_path: display_name(&file),
                             access_uri: uri,
                         }))
+                        .map_err(|error| error.to_string())?;
+                } else if let Some(locator) = file
+                    .path()
+                    .and_then(|path| sources::local_access_locator(&item.media_uri, &path))
+                {
+                    runtime
+                        .block_on(catalog.upsert_local_locator(&locator))
                         .map_err(|error| error.to_string())?;
                 }
                 items.push(item);
@@ -291,9 +305,9 @@ fn read_playlist(
     if is_hls(&bytes) {
         return Ok(None);
     }
-    let playlist =
-        PlaylistFile::read_as(Cursor::new(bytes), Path::new(base.uri().as_str()), format)
-            .map_err(|error| error.to_string())?;
+    let file = base.path().unwrap_or_else(|| base.uri().as_str().into());
+    let playlist = PlaylistFile::read_as(Cursor::new(bytes), &file, format)
+        .map_err(|error| error.to_string())?;
     Ok(Some((base, playlist)))
 }
 

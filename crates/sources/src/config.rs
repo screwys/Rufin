@@ -234,15 +234,16 @@ impl SourceConfiguration {
         Some(url.into())
     }
 
+    /// The configured local folder grants; none for other sources.
+    pub fn local_roots(&self) -> Vec<PathBuf> {
+        crate::file::local::LocalSourceConfig::from_configuration(self)
+            .map(|config| config.roots)
+            .unwrap_or_default()
+    }
+
     /// Identify a selected file inside one of the configured local folder grants.
     pub fn local_file_location(&self, path: &std::path::Path) -> Option<(String, PathBuf)> {
-        if !self.is_local() {
-            return None;
-        }
-        let roots = crate::file::local::LocalSourceConfig::from_configuration(self)
-            .ok()?
-            .roots;
-        crate::file::local::local_file_location(&roots, path)
+        crate::file::local::local_file_location(&self.local_roots(), path)
     }
 
     /// Resolve an observed playlist file to this device's source access path.

@@ -127,7 +127,7 @@ pub use lyrics::LyricsCacheRow;
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,
-    playlist_host_path, playlist_locator,
+    playlist_base, playlist_host_path, playlist_locator,
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
