@@ -1,7 +1,7 @@
 {
   "app-id": "io.github.screwys.Rufin",
   "runtime": "org.gnome.Platform",
-  "runtime-version": "50",
+  "runtime-version": "51",
   "sdk": "org.gnome.Sdk",
   "sdk-extensions": [
     "org.freedesktop.Sdk.Extension.rust-stable"
@@ -128,8 +128,8 @@
       "sources": [
         {
           "type": "archive",
-          "url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.26.11.tar.xz",
-          "sha256": "110fb82795f0e569b1e27b12ab9699d35c7762e1ff4db95335d6ac8d1442af3d"
+          "url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.6.tar.xz",
+          "sha256": "6636f2c2289ceda52c4aba971338c81e2b5780d3381bd3673c1c116ec87587c3"
         }
       ]
     },
