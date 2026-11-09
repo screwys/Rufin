@@ -8,6 +8,13 @@ import androidx.compose.ui.graphics.colorspace.ColorSpaces
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
+import io.github.screwys.rufin.R
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import io.github.screwys.rufin.ui.LocalShowDownloadedBadges
@@ -39,8 +46,25 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
         LocalShowDownloadedBadges provides preferences.showDownloadedBadges,
         LocalReduceMotion provides preferences.reduceMotion) {
         // Menus and small surfaces take a mobile rounding, not the 4 dp default.
-        MaterialTheme(colorScheme = scheme, shapes = Shapes(extraSmall = RoundedCornerShape(12.dp)), content = content)
+        MaterialTheme(colorScheme = scheme, shapes = Shapes(extraSmall = RoundedCornerShape(12.dp)), typography = RufinTypography,
+            content = content)
     }
+}
+
+/** GTK's Adwaita Sans, one variable file for every weight, as the desktop and the web set their text. */
+private val AdwaitaSans = FontFamily(listOf(FontWeight.Light, FontWeight.Normal, FontWeight.Medium, FontWeight.SemiBold,
+    FontWeight.Bold, FontWeight.ExtraBold, FontWeight.Black).map { weight ->
+    Font(R.font.adwaita_sans, weight, variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)))
+})
+
+/** Material's sizes in Adwaita Sans, without the letter spacing Material adds for Roboto, as GTK sets none. */
+private val RufinTypography = Typography().run {
+    fun TextStyle.sans() = copy(fontFamily = AdwaitaSans, letterSpacing = 0.sp)
+    Typography(displayLarge = displayLarge.sans(), displayMedium = displayMedium.sans(), displaySmall = displaySmall.sans(),
+        headlineLarge = headlineLarge.sans(), headlineMedium = headlineMedium.sans(), headlineSmall = headlineSmall.sans(),
+        titleLarge = titleLarge.sans(), titleMedium = titleMedium.sans(), titleSmall = titleSmall.sans(),
+        bodyLarge = bodyLarge.sans(), bodyMedium = bodyMedium.sans(), bodySmall = bodySmall.sans(),
+        labelLarge = labelLarge.sans(), labelMedium = labelMedium.sans(), labelSmall = labelSmall.sans())
 }
 
 @Composable
@@ -60,9 +84,9 @@ internal fun resolveThemeScheme(resolver: ThemeColors, defaults: ColorScheme, sy
     val foreground = resolver.named("view-fg-color") ?: defaults.onSurface
     val card = (resolver.named("card-bg-color") ?: defaults.surfaceContainer).compositeOver(surface)
     val accent = if (systemAccent) defaults.primary else resolver.named("accent-bg-color") ?: defaults.primary
-    val accentContainer = accent.copy(alpha = .16f).compositeOver(surface)
-    // As Material You's tonal surfaces: boxes take a little of the accent, more the higher they sit,
-    // instead of the shared theme's neutral greys.
+    val accentContainer = accent.copy(alpha = .22f).compositeOver(surface)
+    // As Material You's tonal surfaces (Navic's): boxes, bars and menus take the accent's hue, more the
+    // higher they sit, instead of the shared theme's neutral greys.
     fun tinted(color: Color, amount: Float) = accent.copy(alpha = amount).compositeOver(color)
     return defaults.copy(
         primary = accent, onPrimary = if (systemAccent) defaults.onPrimary else resolver.named("accent-fg-color") ?: defaults.onPrimary,
@@ -72,9 +96,9 @@ internal fun resolveThemeScheme(resolver: ThemeColors, defaults: ColorScheme, sy
         onSurfaceVariant = foreground.copy(alpha = .78f),
         background = window, onBackground = resolver.named("window-fg-color") ?: foreground,
         surface = surface, onSurface = foreground,
-        surfaceContainer = tinted(card, .05f), surfaceContainerLow = window,
-        surfaceContainerHigh = tinted(resolver.named("dialog-bg-color") ?: card, .08f),
-        surfaceContainerHighest = tinted(resolver.named("popover-bg-color") ?: card, .11f),
+        surfaceContainer = tinted(card, .08f), surfaceContainerLow = window,
+        surfaceContainerHigh = tinted(resolver.named("dialog-bg-color") ?: card, .12f),
+        surfaceContainerHighest = tinted(resolver.named("popover-bg-color") ?: card, .16f),
         error = resolver.named("error-color") ?: defaults.error,
         errorContainer = resolver.named("error-bg-color") ?: defaults.errorContainer,
         onErrorContainer = resolver.named("error-fg-color") ?: defaults.onErrorContainer,

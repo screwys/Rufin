@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.ui.ChoiceChip
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
@@ -116,9 +118,8 @@ internal fun DetailContent(
             .distinctUntilChanged().collect(onScrolled)
     }
     if (summary == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (page.loading) CircularProgressIndicator() else Text(translate("This isn't available"))
-        }
+        if (page.loading) PageLoading()
+        else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(translate("This isn't available")) }
         return
     }
     val route = page.location.route
@@ -537,10 +538,11 @@ internal fun FieldRow(
             val value = projected.row.fields.firstOrNull { it.id == field.id }?.text.orEmpty()
             when (field.id) {
                 LibraryField.IMAGE -> if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
+                // Compact actions, so the title keeps the width.
                 LibraryField.TOOLS -> if (member != null) PlaylistDragHandle(member, detailColumn(field.id))
-                    else PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) }, detailColumn(field.id))
-                LibraryField.FAVORITE -> IconButton({ favorite(projected) }, detailColumn(field.id)) {
-                    RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(24.dp),
+                    else PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) }, detailColumn(field.id).height(36.dp), iconSize = 20.dp)
+                LibraryField.FAVORITE -> IconButton({ favorite(projected) }, detailColumn(field.id).height(36.dp)) {
+                    RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(20.dp),
                         if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 }
                 LibraryField.ROW_INDEX -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center,
@@ -573,7 +575,7 @@ private fun RowScope.detailColumn(id: LibraryField, imageSize: Dp = 48.dp): Modi
     LibraryField.DURATION -> Modifier.width(44.dp)
     LibraryField.YEAR -> Modifier.width(40.dp)
     LibraryField.IMAGE -> Modifier.width(imageSize)
-    LibraryField.TOOLS, LibraryField.FAVORITE -> Modifier.width(48.dp)
+    LibraryField.TOOLS, LibraryField.FAVORITE -> Modifier.width(36.dp)
     LibraryField.TITLE, LibraryField.TITLE_MERGED -> Modifier.weight(1f)
     else -> Modifier.weight(.65f)
 }

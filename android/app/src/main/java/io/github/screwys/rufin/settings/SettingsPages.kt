@@ -1,5 +1,9 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.ui.PageLoading
+
+import io.github.screwys.rufin.ui.RufinSlider
+
 import io.github.screwys.rufin.ui.ChoiceChip
 
 
@@ -86,14 +90,12 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
                         color = if (enabled) colors.onSecondaryContainer else colors.onSurface.copy(alpha = .38f))
                 }
             }
-            Slider(draft.toFloat(), {
+            RufinSlider(draft.toFloat(), {
                 draft = java.math.BigDecimal.valueOf(step).multiply(java.math.BigDecimal.valueOf(round(it.toDouble() / step)))
                     .toDouble().coerceIn(range)
             }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = displayValue },
                 enabled = enabled, valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
                 steps = if (continuous) 0 else ((range.endInclusive - range.start) / step).roundToInt().minus(1).coerceAtLeast(0),
-                colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
-                    disabledActiveTickColor = Color.Transparent, disabledInactiveTickColor = Color.Transparent),
                 onValueChangeFinished = { save(if (integer) draft.toInt() else draft) })
             marks?.invoke()
         }
@@ -109,7 +111,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
     }
     val state = preferences.applicationSettings
-    if (state == null) { Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }; return }
+    if (state == null) { PageLoading(); return }
     SettingsPage {
         when (destination) {
             MoreDestination.General -> {
@@ -164,17 +166,4 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
         }
     }
 
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun SettingsSelection(title: String, selected: String, options: List<Pair<String, String>>, select: (String) -> Unit) {
-    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (id, name) -> ChoiceChip(selected == id, { select(id) }, label = { Text(name) }) }
-        }
-    }
-    }
 }

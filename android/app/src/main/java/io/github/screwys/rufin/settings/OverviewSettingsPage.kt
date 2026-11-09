@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.ui.PageLoading
+
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,7 +15,7 @@ import io.github.screwys.rufin.core.translate
 internal fun OverviewSettingsPage(preferences: PreferencesConnection) {
     val settings = preferences.applicationSettings?.activityOverview
     if (settings == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        PageLoading()
         return
     }
     SettingsPage {

@@ -1,5 +1,13 @@
 package io.github.screwys.rufin.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
+import androidx.compose.foundation.verticalScroll
+
+import androidx.compose.foundation.rememberScrollState
+
+import io.github.screwys.rufin.ui.SegmentedPill
+
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
@@ -47,33 +55,39 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
     }
 }
 
+/** A setting that takes one of `options`. A few short ones are a pill select in the row; more, or longer
+ *  ones, open a sheet of rows with the picked one highlighted, as GTK marks it. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun <T> PreferenceChoice(title: String, selected: T, options: List<Pair<T, String>>,
-    preview: (@Composable (T) -> Unit)? = null, enabled: (T) -> Boolean = { true },
-    trailingAction: (@Composable () -> Unit)? = null, select: (T) -> Unit,
+    preview: (@Composable (T) -> Unit)? = null, enabled: (T) -> Boolean = { true }, select: (T) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    SettingsRow(
-        title,
-        summary = options.find { it.first == selected }?.second ?: selected.toString(),
-        leading = preview?.let { { it(selected) } },
-        trailing = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                trailingAction?.invoke()
-                RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp))
-            }
-        },
-        modifier = Modifier.clickable { expanded = !expanded },
-    )
-    if (expanded) AlertDialog(onDismissRequest = { expanded = false }, title = { Text(title) }, text = {
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-            items(options, key = { it.first.toString() }) { (id, name) ->
-                ListItem(headlineContent = { Text(name) },
-                    leadingContent = preview?.let { { it(id) } },
-                    trailingContent = { RadioButton(selected == id, null) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.selectable(selected == id, enabled = enabled(id), role = Role.RadioButton) { select(id); expanded = false })
+    val active = options.any { enabled(it.first) }
+    if (preview == null && options.size in 2..3 && options.all { it.second.length <= 12 && enabled(it.first) == active }) {
+        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (active) 1f else .38f))
+                SegmentedPill(options.map { it.first }, selected, select, Modifier.fillMaxWidth(), equal = true, enabled = active) { id, _ ->
+                    Text(options.first { it.first == id }.second, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                }
             }
         }
-    }, confirmButton = { TextButton({ expanded = false }) { Text(translate("Cancel")) } })
+        return
+    }
+    var open by remember { mutableStateOf(false) }
+    SettingsRow(title, summary = options.find { it.first == selected }?.second ?: selected.toString(),
+        leading = preview?.let { { it(selected) } },
+        trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp)) },
+        modifier = Modifier.clickable(enabled = active) { open = true })
+    if (open) ModalBottomSheet({ open = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+            SettingsGroup(title) {
+                options.forEach { (id, name) ->
+                    val picked = id == selected
+                    SettingsRow(name, selected = picked, leading = preview?.let { { it(id) } }, modifier = Modifier.selectable(picked, enabled = enabled(id), role = Role.RadioButton) { select(id); open = false })
+                }
+            }
+        }
+    }
 }

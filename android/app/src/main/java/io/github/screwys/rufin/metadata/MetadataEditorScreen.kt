@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.metadata
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.ui.ChoiceChip
 
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
@@ -96,7 +98,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, item: MetadataItemId?,
                             0 -> MetadataFields(connection, state, editable, item is MetadataItemId.Track)
                             1 -> MetadataArtwork(connection, state, editable) { import.launch(arrayOf("image/*")) }
                         }
-                    } else if (connection.failure == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    } else if (connection.failure == null) PageLoading()
                 }
             }
         }

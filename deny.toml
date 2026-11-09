@@ -12,6 +12,7 @@ ignore = [
     { id = "RUSTSEC-2026-0451", reason = "vodozemac 0.11.1 and earlier leave Olm root and chain keys in freed memory. Rufin uses only vodozemac SAS for Connect pairing and never creates Olm sessions. 0.11.2 needs curve25519-dalek 5.0.0, which conflicts with the =5.0.0-rc.1 pin of smb -> sspi; remove when smb moves to an sspi without that pin." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
     { id = "RUSTSEC-2026-0441", reason = "smb 0.12 pins sspi 0.21, which pulls async-dnssd -> pin-utils on macOS only. Maintenance advisory with no successor release of async-dnssd; remove when smb moves to an sspi without async-dnssd." },
+    { id = "RUSTSEC-2026-0459", reason = "SQLite before 3.54 can read stale memory from a crafted database and -wal pair. sqlx-sqlite 0.9.0 caps libsqlite3-sys below 0.38, and the fixed SQLite ships in 0.39; Rufin opens only its own Store and cache files. Remove when sqlx accepts libsqlite3-sys 0.39." },
 ]
 
 [licenses]

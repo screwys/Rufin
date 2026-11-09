@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -30,7 +32,7 @@ import io.github.screwys.rufin.ui.RufinIcon
 internal fun ThemeSettingsPage(preferences: PreferencesConnection) {
     val settings = preferences.state
     if (settings == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        PageLoading()
         return
     }
     val systemDark = isSystemInDarkTheme()

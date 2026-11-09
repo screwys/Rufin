@@ -5,6 +5,7 @@ import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.ToolButton
 import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.settings.LocalTranslationRevision
 import io.github.screwys.rufin.settings.LocalReduceMotion
@@ -93,7 +94,9 @@ private enum class PlayerSurface { LYRICS, VISUALIZER }
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConnection, onNavigate: (io.github.screwys.rufin.shared.rufin_core.Route, String, String?) -> Unit, onMore: () -> Unit,
-    onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit, tiny: Boolean, onClose: () -> Unit) {
+    onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit, tiny: Boolean,
+    /** A pull down moves the player by each move, then says whether it went far enough to close it. */
+    onPull: (Float) -> Unit, onPullEnd: (Boolean) -> Unit, onClose: () -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     val scope = rememberCoroutineScope()
     var surface by remember { mutableStateOf<PlayerSurface?>(null) }
@@ -132,6 +135,8 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val bottom by animateColorAsState(stops?.get(2) ?: base.surface, colourTime, label = "playerBottom")
     val accent by animateColorAsState(stops?.let { lerp(it[0], Color.White, .62f) } ?: base.primary, colourTime, label = "playerAccent")
     val onAccent by animateColorAsState(stops?.get(2) ?: base.onPrimary, colourTime, label = "playerOnAccent")
+    // Play keeps the app's accent over the cover's colours, as the queue's Play does.
+    val play = IconButtonDefaults.filledIconButtonColors(containerColor = base.primary, contentColor = base.onPrimary)
     val scheme = if (stops == null) base.copy(surfaceContainerHigh = base.secondaryContainer, primary = accent, onPrimary = onAccent)
         // Its menus and sheets take a darker shade of the cover too, so their white text reads.
         else base.copy(surface = stops[1], onSurface = io.github.screwys.rufin.browse.OnBand,
@@ -153,7 +158,6 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             before to after
         }.getOrDefault(null to null)
     }
-    val verticalOffset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
     // A pull down closes the lyrics or the visualizer back to the player as it closes the player.
     val surfaceOffset = remember { Animatable(0f) }
@@ -198,21 +202,23 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     LaunchedEffect(surface) { if (surface != PlayerSurface.LYRICS) lyricsSelection = null }
     BackHandler { if (lyricsSelection != null) finishSelection(false) else if (surface != null) surface = null else onClose() }
     MaterialTheme(colorScheme = scheme) {
-    Surface(Modifier.fillMaxSize().graphicsLayer { translationY = verticalOffset.value }
+    Surface(Modifier.fillMaxSize()
         .drawBehind { drawRect(Brush.verticalGradient(listOf(top, bottom))) }
         .pointerInput(surface, threshold, reduceMotion) {
+            // The lyrics or the visualizer follow the finger down; the player itself goes with the shell.
             val open = surface != null
-            val offset = if (open) surfaceOffset else verticalOffset
             var distance = 0f
             detectVerticalDragGestures(onDragStart = { distance = 0f }, onVerticalDrag = { change, amount ->
-                distance = (distance + amount).coerceAtLeast(0f)
+                val next = (distance + amount).coerceAtLeast(0f)
                 change.consume()
-                scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { offset.snapTo(distance) }
+                if (open) scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { surfaceOffset.snapTo(next) }
+                else onPull(next - distance)
+                distance = next
             }, onDragEnd = {
-                if (open) releaseSurface(distance)
-                else if (distance > threshold) onClose()
-                else scope.launch { verticalOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) }
-            }, onDragCancel = { scope.launch { offset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
+                if (open) releaseSurface(distance) else onPullEnd(distance > threshold)
+            }, onDragCancel = {
+                if (open) scope.launch { surfaceOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } else onPullEnd(false)
+            })
         }.pointerInput(surface, threshold, reduceMotion, lyricsEnabled, visualizerEnabled) {
             // Over the player a swipe changes the track; over the lyrics and the visualizer it moves between them.
             val shown = surface
@@ -278,7 +284,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 trackOffset.value, neighbours) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
                                 PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp)) { navigation = it }
-                                PlayerControls(player, Modifier.fillMaxWidth())
+                                PlayerControls(player, Modifier.fillMaxWidth(), play)
                             }
                             if (tiny) Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
                                 .graphicsLayer { translationX = trackOffset.value }, verticalArrangement = Arrangement.Center,
@@ -286,7 +292,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 // Title, seekbar and transport only; the format chips would push the transport off screen.
                                 PlayerMetadata(player, Modifier.fillMaxWidth()) { navigation = it }
                                 Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
-                                PlayerTransport(player)
+                                PlayerTransport(player, play)
                             }
                             // Wide panes keep the lyrics, or the visualizer, beside the player.
                             else if (maxWidth >= 600.dp && maxWidth <= maxHeight * 1.6f && (lyricsEnabled || visualizerEnabled)) Row(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -330,17 +336,17 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         }
                         Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp)) { PlayerProgress(player) }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                            PlayerFooterButton("rufin-speaker-front-symbolic", "Output", { output = true })
+                            ToolButton("rufin-speaker-front-symbolic", "Output") { output = true }
                             Spacer(Modifier.weight(1f))
                             PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous,
                                 Modifier.size(48.dp), enabled = player.currentId != null, iconSize = 24.dp, glyph = true)
                             Spacer(Modifier.width(12.dp))
-                            PlayerPlayPause(player)
+                            PlayerPlayPause(player, play)
                             Spacer(Modifier.width(12.dp))
                             PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next,
                                 Modifier.size(48.dp), enabled = player.playback?.queue?.canNext == true, iconSize = 24.dp, glyph = true)
                             Spacer(Modifier.weight(1f))
-                            PlayerFooterButton("rufin-queue-symbolic", "Queue", { queue = true })
+                            ToolButton("rufin-queue-symbolic", "Queue") { queue = true }
                         }
                     }
                 }
@@ -442,24 +448,15 @@ private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onShar
             }
         }
         Row {
-            PlayerFooterButton("rufin-share-symbolic", "Share", onShare)
+            ToolButton("rufin-share-symbolic", "Share", action = onShare)
             when (view) {
-                PlayerSurface.LYRICS -> PlayerFooterButton("rufin-text-center-symbolic", "Lyrics") { onView(view) }
-                PlayerSurface.VISUALIZER -> PlayerFooterButton("rufin-sound-symbolic", "Visualizer") { onView(view) }
+                PlayerSurface.LYRICS -> ToolButton("rufin-text-center-symbolic", "Lyrics") { onView(view) }
+                PlayerSurface.VISUALIZER -> ToolButton("rufin-sound-symbolic", "Visualizer") { onView(view) }
                 null -> Unit
             }
-            PlayerFooterButton("rufin-mixer-sliders-symbolic", "Settings", onSettings)
-            PlayerFooterButton("rufin-queue-symbolic", "Queue", onQueue)
+            ToolButton("rufin-mixer-sliders-symbolic", "Settings", action = onSettings)
+            ToolButton("rufin-queue-symbolic", "Queue", action = onQueue)
         }
-    }
-}
-
-@Composable
-private fun PlayerFooterButton(icon: String, label: String, action: () -> Unit) {
-    FilledTonalIconButton(action, Modifier.padding(horizontal = 2.dp).size(36.dp), shape = RoundedCornerShape(10.dp),
-        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MaterialTheme.colorScheme.onSurface)) {
-        RufinIcon(icon, translate(label), Modifier.size(18.dp), glyph = true)
     }
 }
 
@@ -523,13 +520,13 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
 private data class PlayerMetadataText(val uri: String?, val title: String, val artist: String, val album: String)
 
 @Composable
-private fun PlayerControls(player: PlayerConnection, modifier: Modifier) {
+private fun PlayerControls(player: PlayerConnection, modifier: Modifier, play: IconButtonColors) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         PlayerSourceInfo(player)
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
         Spacer(Modifier.height(16.dp))
-        PlayerTransport(player)
+        PlayerTransport(player, play)
     }
 }
 
@@ -638,7 +635,7 @@ private data class PlayerTransportState(val shuffle: Boolean, val repeat: QueueR
     val desiredPlaying: Boolean, val canPrevious: Boolean, val canNext: Boolean)
 
 @Composable
-private fun PlayerTransport(player: PlayerConnection) {
+private fun PlayerTransport(player: PlayerConnection, play: IconButtonColors) {
     val transport by remember(player) { derivedStateOf {
         player.playback?.let { PlayerTransportState(it.controls.shuffleEnabled, it.controls.repeatMode, it.transport.desiredPlaying, it.transport.current != null, it.queue.canNext) }
     } }
@@ -653,7 +650,7 @@ private fun PlayerTransport(player: PlayerConnection) {
                 Modifier.size(48.dp), enabled = current.canPrevious, iconSize = 24.dp, glyph = true)
         }
         Box(Modifier.weight(1.25f), contentAlignment = Alignment.Center) {
-            PlayerPlayPause(player)
+            PlayerPlayPause(player, play)
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next,
@@ -668,15 +665,13 @@ private fun PlayerTransport(player: PlayerConnection) {
 }
 
 @Composable
-private fun PlayerPlayPause(player: PlayerConnection) {
+private fun PlayerPlayPause(player: PlayerConnection, play: IconButtonColors) {
     val playing by remember(player) { derivedStateOf { player.playback?.transport?.desiredPlaying == true } }
     // The box is the button's size, so the ring just outside it does not move the layout.
     Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-        if (player.refilling) RefillSpinner(72.dp, MaterialTheme.colorScheme.primary)
-        // Play takes the accent, at the size of the transport, not oversized.
-        FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary)) {
+        if (player.refilling) RefillSpinner(72.dp, play.containerColor)
+        // Play is an accent circle at the size of the transport, not oversized.
+        FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape, colors = play) {
             Crossfade(playing, animationSpec = tween(if (LocalReduceMotion.current) 0 else 140), label = "fullPlayerTransport") { active ->
                 RufinIcon(if (active) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
                     translate(if (active) "Pause" else "Play"), Modifier.size(28.dp), glyph = true)
@@ -685,9 +680,12 @@ private fun PlayerPlayPause(player: PlayerConnection) {
     }
 }
 
-// Matches the desktop refill ring: a thin faint track and a round arc.
+// Matches the desktop refill ring: a thin faint track and a round arc. It shows once a refill lasts half
+// a second, so the short wait of an ordinary start or seek never flashes it.
 @Composable
 internal fun RefillSpinner(size: Dp, color: Color = LocalContentColor.current) {
-    CircularProgressIndicator(Modifier.requiredSize(size).semantics { contentDescription = translate("Loading...") },
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(500); shown = true }
+    if (shown) CircularProgressIndicator(Modifier.requiredSize(size).semantics { contentDescription = translate("Loading...") },
         color, 3.dp, color.copy(alpha = .15f), StrokeCap.Round)
 }

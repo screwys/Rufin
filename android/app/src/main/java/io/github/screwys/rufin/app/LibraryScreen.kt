@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.ui.ChoiceChip
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
@@ -100,6 +102,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
@@ -115,6 +118,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -132,6 +136,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import io.github.screwys.rufin.ui.pageMotion
+import io.github.screwys.rufin.ui.showPage
 import io.github.screwys.rufin.core.AndroidRouteDescriptor
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -160,11 +165,15 @@ private class DetailBarState {
     var finding by mutableStateOf(false)
 }
 
+/** The feedback toast, `bottom` above the navigation bar: its own window, so it shows over sheets too, and
+ *  no bigger than its card, so it never takes the taps meant for the bar under it. */
 @Composable
-internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
+internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection, bottom: androidx.compose.ui.unit.Dp) {
     val feedback = model.feedback ?: return
-    androidx.compose.ui.window.Popup(alignment = Alignment.BottomCenter, properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
-        Surface(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 20.dp).widthIn(max = 360.dp),
+    val lift = with(LocalDensity.current) { (bottom + 8.dp).roundToPx() + WindowInsets.navigationBars.getBottom(this) }
+    androidx.compose.ui.window.Popup(alignment = Alignment.BottomCenter, offset = androidx.compose.ui.unit.IntOffset(0, -lift),
+        properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
+        Surface(Modifier.padding(horizontal = 16.dp).widthIn(max = 360.dp),
             shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 4.dp) {
             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 feedback.artworkIdentity?.let { identity ->
@@ -188,10 +197,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val label: (String) -> String = ::translate
     val browse = model.browse
     val player = rememberPlayerConnection(model)
-    FeedbackToast(model, player)
     val connectState = model.connect.state
     if (model.connect.operationActive && connectState != null && connectState.pairing == null && (connectState.connecting || model.connect.visibleError != null)) {
         BackHandler { model.connect.dismissOperation() }
+        FeedbackToast(model, player, 0.dp)
         ConnectProgressScreen(model)
         return
     }
@@ -265,7 +274,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val moreDestination = moreStack.last()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    fun closeDrawer() { scope.launch { drawer.close() } }
+    // Closes once the page the drawer picked has composed, so building that page never uses up the slide.
+    fun closeDrawer() { scope.launch { withFrameNanos { }; drawer.close() } }
     fun openMore(destination: MoreDestination) {
         moreStack = generateSequence(destination) { it.parent }.toList().reversed()
         browse.section = AppSection.More
@@ -322,16 +332,19 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         else { browse.chooseRoot(id); browse.section = AppSection.Browse }
         closeDrawer()
     }
+    // Reads the routes and the section when a tab is picked, not when it was made: the dock can keep a
+    // reference from a composition before the routes loaded.
     fun selectTab(selected: ShellTab) {
         leaveInput()
         when (selected) {
             ShellTab.Home -> { browse.chooseRoot("Home"); browse.section = AppSection.Browse }
             ShellTab.Library -> {
-                val root = libraryRoot?.takeIf { id -> libraryRoutes.any { it.id == id } } ?: libraryRoutes.firstOrNull()?.id
+                val routes = sidebarRoutes(browse).filter { it.id != "Home" }
+                val root = libraryRoot?.takeIf { id -> routes.any { it.id == id } } ?: routes.firstOrNull()?.id
                 if (root != null) { browse.chooseRoot(root); browse.section = AppSection.Browse }
             }
             ShellTab.Search -> {
-                if (tab == ShellTab.Search) focusSearch++ else { browse.searchText = ""; browse.section = AppSection.Search }
+                if (browse.section == AppSection.Search) focusSearch++ else { browse.searchText = ""; browse.section = AppSection.Search }
             }
             ShellTab.Saved -> browse.section = AppSection.Pins
         }
@@ -349,16 +362,18 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     // Short screens start folded, also when a flip phone closes onto its cover screen.
     val dockedState = rememberSaveable(short) { mutableStateOf(short) }
     var docked by dockedState
+    // How far the player is up: the finger moves it from the mini player and down from its top, and it
+    // settles open or closed with a spring.
     val reveal = remember { androidx.compose.animation.core.Animatable(if (fullPlayer) 1f else 0f) }
-    LaunchedEffect(fullPlayer) {
-        reveal.animateTo(if (fullPlayer) 1f else 0f, if (reduceMotion) tween(0)
-            else androidx.compose.animation.core.spring(dampingRatio = .86f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow))
+    val settle: androidx.compose.animation.core.AnimationSpec<Float> = if (reduceMotion) tween(0)
+        else androidx.compose.animation.core.spring(dampingRatio = .86f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)
+    LaunchedEffect(fullPlayer) { reveal.animateTo(if (fullPlayer) 1f else 0f, settle) }
+    fun settlePlayer(open: Boolean) {
+        if (open != fullPlayer) fullPlayer = open else scope.launch { reveal.animateTo(if (open) 1f else 0f, settle) }
     }
     val screenHeight = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
     val onReveal: (Float) -> Unit = { delta -> scope.launch { reveal.snapTo((reveal.value - delta / screenHeight).coerceIn(0f, 1f)) } }
-    val onRevealEnd: (Boolean) -> Unit = { opened ->
-        if (opened || reveal.value > .25f) fullPlayer = true else scope.launch { reveal.animateTo(0f) }
-    }
+    val onRevealEnd: (Boolean) -> Unit = { opened -> settlePlayer(opened || reveal.value > .25f) }
     val density = LocalDensity.current
     // Made again with the state it writes: a change of screen height makes a new one.
     val dockScroll = remember(density, dockedState) {
@@ -390,6 +405,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         docked -> 72.dp
         else -> 64.dp + if (hasMedia) 60.dp else 0.dp
     }
+    // Over the player it clears the player's own buttons at the bottom.
+    FeedbackToast(model, player, if (fullPlayer) 64.dp else dockHeight)
     val sidebarActions = remember(browse) {
         SidebarActions(route = { selectRoute(it) }, saved = { item ->
             browse.section = AppSection.Browse; browse.open(item); closeDrawer()
@@ -421,8 +438,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }
     Box(Modifier.weight(1f).fillMaxHeight()) {
         CompositionLocalProvider(LocalPlayerBottomPadding provides dockHeight, LocalTinyScreen provides tiny) {
-        Column(Modifier.fillMaxSize()) {
-            if (!overlay) ShellTopBar(browse, moreDestination, searchExpanded, searchFocus, phone,
+        // In one pane the route roots carry this bar, so it moves with its page instead of shifting the page beside it.
+        val pageBar = browse.section == AppSection.Browse && !split
+        val shellBar: @Composable () -> Unit = {
+            ShellTopBar(browse, moreDestination, searchExpanded, searchFocus, phone,
                 onMenu = { scope.launch { drawer.open() } },
                 onBack = { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) else selectTab(ShellTab.Home) },
                 onSearch = { if (searchExpanded) leaveInput() else { searchExpanded = true; focusSearch++ } },
@@ -454,6 +473,15 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 if (browse.section == AppSection.Pins) PlayerIconButton("rufin-document-edit-symbolic", "Select", { selectingPins = !selectingPins },
                     selected = selectingPins)
             }
+        }
+        // Home's bar is clear over the band at rest. Once the page moves under it, it draws the band where the
+        // band stood, unchanged to the eye, so the cover never passes behind its text; past the band it fades
+        // to the page's colour.
+        val homeBand = remember { mutableStateOf<HomeBandLook?>(null) }
+        val overBand = homeOffset <= with(density) { 160.dp.toPx() }
+        val homeBar by animateColorAsState(if (overBand) Color.Transparent else MaterialTheme.colorScheme.surface, label = "homeBar")
+        Column(Modifier.fillMaxSize()) {
+            if (!overlay && !pageBar) shellBar()
             val refreshState = rememberPullToRefreshState()
             val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
                 it.sourceId == model.sources?.selectedSourceId
@@ -498,17 +526,23 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         }, contentKey = { it.location ?: if (it.root == "Home") "Home" else "Library" },
                     ) { visible ->
                         val location = visible.location
-                        if (location == null) rootContent(visible.root, visible.root == browse.rootId)
-                        else DetailPane(model, browse, player, location, visible.depth, detailPages[location], detailState, barHeight,
+                        val shown = visible.root == browse.rootId
+                        if (location != null) DetailPane(model, browse, player, location, visible.depth, detailPages[location], detailState, barHeight,
                             !fullPlayer && browse.details.lastOrNull() === location, { menu = it }, { playlist = it }, { sortPage = it; sort = true })
-                    }
-                    val homeBar by animateColorAsState(if (homeOffset > with(density) { 160.dp.toPx() }) MaterialTheme.colorScheme.surface
-                        else Color.Transparent, label = "homeBar")
-                    val overBand = homeOffset <= with(density) { 160.dp.toPx() }
-                    if (browse.rootId == "Home" && !browse.detail) OverlayBar(homeBar, onBand = overBand) {
-                        if (phone) PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", { scope.launch { drawer.open() } })
-                        Text(label("Home"), Modifier.weight(1f).padding(start = if (phone) 2.dp else 16.dp), maxLines = 1,
-                            style = MaterialTheme.typography.titleLarge)
+                        else if (visible.root == "Home") Box(Modifier.fillMaxSize()) {
+                            CompositionLocalProvider(LocalHomeBand provides homeBand) { rootContent(visible.root, shown) }
+                            OverlayBar(homeBar, onBand = overBand, modifier = Modifier.drawBehind {
+                                if (homeOffset > 0f) homeBand.value?.let { band -> drawBand(band.stops, band.size) }
+                            }) {
+                                if (phone) PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", { scope.launch { drawer.open() } })
+                                Text(label("Home"), Modifier.weight(1f).padding(start = if (phone) 2.dp else 16.dp), maxLines = 1,
+                                    style = MaterialTheme.typography.titleLarge)
+                                PlayerIconButton("rufin-random-symbolic", "Play random", { random = true })
+                            }
+                        } else if (pageBar) Column(Modifier.fillMaxSize()) {
+                            shellBar()
+                            Box(Modifier.weight(1f)) { rootContent(visible.root, shown) }
+                        } else rootContent(visible.root, shown)
                     }
                 } else Box(Modifier.fillMaxSize()) {
                     when (browse.section) {
@@ -524,7 +558,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 }
                 // The spinner follows the pull only; the refresh's progress is the toast's.
                 if (canRefresh) PullToRefreshDefaults.Indicator(state = refreshState, isRefreshing = false,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = if (overlay) barHeight else 0.dp))
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = if (overlay || pageBar) barHeight else 0.dp))
             }
         }
         }
@@ -573,18 +607,22 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     }
     }
-    // The player rises with the finger from the mini player and settles with a spring.
-    if (fullPlayer || reveal.value > 0f) Box(Modifier.fillMaxSize().graphicsLayer {
-        translationY = (1f - reveal.value) * size.height
-        alpha = (reveal.value * 3f).coerceAtMost(1f)
-    }) {
-        PlayerScreen(player, preferences, onSettings = { destination -> fullPlayer = false; openMore(destination) }, onNavigate = { route, title, _ ->
-            fullPlayer = false
-            browse.section = AppSection.Browse
-            browse.openRoute(route, title)
-        }, onMore = {
-            player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { playerMenu = BrowseItem(it, 0UL, null) } }
-        }, tiny = tiny) { fullPlayer = false }
+    // The player rises with the finger from the mini player and settles with a spring; while it is up,
+    // the page under it is shaded.
+    if (fullPlayer || reveal.value > 0f) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .75f)))
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            translationY = (1f - reveal.value) * size.height
+            alpha = (reveal.value * 3f).coerceAtMost(1f)
+        }) {
+            PlayerScreen(player, preferences, onSettings = { destination -> fullPlayer = false; openMore(destination) }, onNavigate = { route, title, _ ->
+                fullPlayer = false
+                browse.section = AppSection.Browse
+                browse.openRoute(route, title)
+            }, onMore = {
+                player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { playerMenu = BrowseItem(it, 0UL, null) } }
+            }, tiny = tiny, onPull = onReveal, onPullEnd = { close -> settlePlayer(!close) }) { fullPlayer = false }
+        }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
@@ -680,9 +718,7 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
     onSelect: (String) -> Unit,
 ) {
     if (browse.library == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(Modifier.semantics { contentDescription = translate("Loading...") })
-        }
+        PageLoading()
         return
     }
     if (model.sources?.sources?.isEmpty() == true && root !in listOf("History", "Playlists", "SmartPlaylists")) {
@@ -713,8 +749,10 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
     }
     val index = routes.indexOfFirst { it.id == root }.coerceAtLeast(0)
     val pager = rememberPagerState(index) { routes.size }
+    val fade = remember { androidx.compose.animation.core.Animatable(1f) }
+    val reduceMotion = LocalReduceMotion.current
     // A tab, the sidebar or the Library tab picks the page; a swipe picks the route.
-    LaunchedEffect(index) { if (pager.currentPage != index) pager.animateScrollToPage(index) }
+    LaunchedEffect(index) { if (pager.currentPage != index) pager.showPage(index, fade, reduceMotion) }
     LaunchedEffect(pager, routes) {
         snapshotFlow { pager.settledPage }.collect { settled ->
             routes.getOrNull(settled)?.id?.let { id -> if (browse.rootId != "Home" && browse.rootId != id) browse.chooseRoot(id) }
@@ -724,7 +762,8 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
         val position = remember { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
         if (tiny) RouteDots(routes.size, position.value)
         else BrowseRouteTabs(routes, index, position, onSelect)
-        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { routes[it].id }, beyondViewportPageCount = 0) { shown ->
+        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth().graphicsLayer { alpha = fade.value }, key = { routes[it].id },
+            beyondViewportPageCount = 0) { shown ->
             page(routes[shown], active && shown == index)
         }
     }
@@ -811,8 +850,9 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
 
 /** A bar over a band: the status bar inset, then 56 dp of controls. */
 @Composable
-private fun OverlayBar(color: Color, inset: Boolean = true, onBand: Boolean = false, content: @Composable RowScope.() -> Unit) {
-    Surface(Modifier.fillMaxWidth(), color = color, contentColor = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface) {
+private fun OverlayBar(color: Color, inset: Boolean = true, onBand: Boolean = false, modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit) {
+    Surface(modifier.fillMaxWidth(), color = color, contentColor = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface) {
         Row(Modifier.then(if (inset) Modifier.statusBarsPadding() else Modifier).height(56.dp).fillMaxWidth().padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically, content = content)
     }
@@ -840,9 +880,14 @@ private fun PhoneDock(tab: ShellTab?, docked: Boolean, hasMedia: Boolean, player
             // A slimmer bar than Material's 80 dp, as Spotify's.
             val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             NavigationBar(Modifier.fillMaxWidth().height(64.dp + inset)) {
+                // The picked tab takes the accent, its label a heavier weight, as Navic's bar does.
+                val colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primaryContainer)
                 ShellTab.entries.forEach { entry ->
-                    NavigationBarItem(tab == entry, { onTab(entry) },
-                        icon = { RufinIcon(entry.icon, null, Modifier.size(24.dp)) }, label = { Text(translate(entry.title)) })
+                    val picked = tab == entry
+                    NavigationBarItem(picked, { onTab(entry) }, colors = colors,
+                        icon = { RufinIcon(entry.icon, null, Modifier.size(24.dp)) },
+                        label = { Text(translate(entry.title), fontWeight = if (picked) FontWeight.Bold else FontWeight.Medium) })
                 }
             }
         }
@@ -904,7 +949,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     val rows = page.pages.collectAsLazyPagingItems()
     if (!(page.summary != null && location.route.showsReleases) && page.homeSections.isEmpty() && rows.itemSnapshotList.items.isEmpty() &&
         (page.loading || rows.loadState.refresh is LoadState.Loading)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        PageLoading()
         return
     }
     val summary = page.summary

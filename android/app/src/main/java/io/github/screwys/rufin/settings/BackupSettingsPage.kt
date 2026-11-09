@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.settings
 
+import io.github.screwys.rufin.ui.PageLoading
+
 import io.github.screwys.rufin.shared.rufin_core.BackupFrequency
 
 import android.app.Activity
@@ -23,7 +25,7 @@ import kotlinx.coroutines.withContext
 internal fun BackupSettingsPage(model: RufinConnection, preferences: PreferencesConnection) {
     val settings = preferences.applicationSettings?.backup
     if (settings == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        PageLoading()
         return
     }
     var enable by remember { mutableStateOf(false) }

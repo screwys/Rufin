@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.connect
 
+import io.github.screwys.rufin.ui.RufinSlider
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -85,7 +87,7 @@ internal fun ConnectDeviceControls(device: Device, connect: ConnectConnection, d
                 } }
             }
             Text(translate("Volume"), style = MaterialTheme.typography.titleSmall)
-            Slider(volume, { volume = it }, onValueChangeFinished = {
+            RufinSlider(volume, { volume = it }, onValueChangeFinished = {
                 connect.action(ConnectAction.Control(device.id, ConnectControl.Volume(volume.toDouble())))
             }, enabled = enabled)
             Spacer(Modifier.height(16.dp))

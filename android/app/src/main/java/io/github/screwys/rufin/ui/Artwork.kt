@@ -42,7 +42,9 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
     val identity = remember(bridge, binding, player.artworkGeneration) { bridge?.artworkIdentity(binding.toByteArray()) }
         ?: return Cover.Pending
     return key(identity) {
-        val cached = remember(bridge, pixels) { player.artworkCache.peek(identity, pixels) }
+        // A smaller copy already read, such as the grid's for a detail page's cover, shows at once
+        // while this size decodes, so the cover never passes through a plain tile or the preview.
+        val cached = remember(bridge, pixels) { player.artworkCache.nearest(identity, pixels) }
         val loaded by produceState(cached?.let { Cover(it, false) } ?: Cover.Pending, bridge, pixels, binding) {
             if (cached != null) value = Cover(cached, false)
             if (bridge != null && pixels > 0) {
@@ -95,6 +97,11 @@ internal class ArtworkCache {
 
     fun peek(identity: String, pixels: Int): PlayerArtwork? = synchronized(decoded) {
         decoded.get(Key(identity, pixels)) ?: sizes[identity]?.ceilingEntry(pixels)?.value?.let(decoded::get)
+    }
+
+    /** `peek`'s copy, or else the largest smaller one. */
+    fun nearest(identity: String, pixels: Int): PlayerArtwork? = synchronized(decoded) {
+        peek(identity, pixels) ?: sizes[identity]?.floorEntry(pixels)?.value?.let(decoded::get)
     }
 
     suspend fun load(player: AndroidPlayer, identity: String, binding: ByteArray, pixels: Int): PlayerArtwork? {

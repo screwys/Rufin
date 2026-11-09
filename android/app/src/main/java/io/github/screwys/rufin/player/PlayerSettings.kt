@@ -1,8 +1,11 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.RufinSlider
+
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.PagerTabIndicator
+import io.github.screwys.rufin.ui.showPage
 import androidx.activity.compose.BackHandler
 import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsPage
@@ -27,6 +30,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -65,6 +70,7 @@ internal fun PlayerSettingsScreen(player: PlayerConnection, onClose: () -> Unit)
     val settledPage by remember { derivedStateOf { pager.settledPage } }
     val selectedPage by remember { derivedStateOf { pager.targetPage } }
     LaunchedEffect(settledPage) { visited = visited + settledPage }
+    val fade = remember { Animatable(1f) }
     val scope = rememberCoroutineScope()
     val reduceMotion = LocalReduceMotion.current
     BackHandler(onBack = onClose)
@@ -76,11 +82,11 @@ internal fun PlayerSettingsScreen(player: PlayerConnection, onClose: () -> Unit)
             }
             PrimaryTabRow(selectedPage, containerColor = Color.Transparent, indicator = { PagerTabIndicator(pager) }) {
                 PlayerSettingsPage.entries.forEachIndexed { index, page ->
-                    Tab(selectedPage == index, { scope.launch { if (reduceMotion) pager.scrollToPage(index) else pager.animateScrollToPage(index) } },
+                    Tab(selectedPage == index, { scope.launch { pager.showPage(index, fade, reduceMotion) } },
                         text = { Text(translate(page.title), maxLines = 1) })
                 }
             }
-            HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.Top,
+            HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f).graphicsLayer { alpha = fade.value }, verticalAlignment = Alignment.Top,
                 beyondViewportPageCount = PlayerSettingsPage.entries.size - 1) { index ->
                 Box(Modifier.fillMaxSize()) {
                     if (index in visited) CompositionLocalProvider(LocalPlayerBottomPadding provides 0.dp) {
@@ -385,8 +391,7 @@ private fun VisualizerSettings(player: PlayerConnection) {
             Text(translate("Bar count"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Text(bars.toInt().toString(), style = MaterialTheme.typography.labelLarge)
         }
-        Slider(bars, { bars = it }, valueRange = 8f..256f, steps = 247,
-            colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
+        RufinSlider(bars, { bars = it }, valueRange = 8f..256f, steps = 247,
             onValueChangeFinished = { change { setVisualizerBarCount(bars.toUInt()) } },
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = translate("Bar count"); stateDescription = bars.toInt().toString() })
         SliderMarks(8f..256f, listOf(8f, 64f, 128f, 192f, 256f))

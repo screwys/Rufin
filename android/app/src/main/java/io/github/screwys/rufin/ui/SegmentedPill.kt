@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
@@ -38,7 +39,7 @@ import io.github.screwys.rufin.settings.LocalReduceMotion
  *  segments scroll sideways when they are wider than the track. */
 @Composable
 internal fun <T> SegmentedPill(options: List<T>, selected: T, onSelect: (T) -> Unit, modifier: Modifier = Modifier,
-    equal: Boolean = false, scroll: ScrollState? = null, segment: @Composable (T, Boolean) -> Unit) {
+    equal: Boolean = false, scroll: ScrollState? = null, enabled: Boolean = true, segment: @Composable (T, Boolean) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val reduceMotion = LocalReduceMotion.current
     val bounds = remember { mutableStateMapOf<Int, Pair<Float, Float>>() }
@@ -55,7 +56,7 @@ internal fun <T> SegmentedPill(options: List<T>, selected: T, onSelect: (T) -> U
         progress.animateTo(1f, if (reduceMotion) tween(0) else spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow))
     }
     val pill = scheme.inverseSurface
-    Box(modifier.clip(CircleShape).background(scheme.onSurface.copy(alpha = .1f)).padding(4.dp)) {
+    Box(modifier.alpha(if (enabled) 1f else .38f).clip(CircleShape).background(scheme.onSurface.copy(alpha = .1f)).padding(4.dp)) {
     Box(Modifier.clip(CircleShape).then(if (scroll != null && !equal) Modifier.horizontalScroll(scroll) else Modifier)) {
         Row(Modifier.then(if (equal) Modifier.fillMaxWidth() else Modifier).selectableGroup().drawBehind {
             val to = bounds[index] ?: return@drawBehind
@@ -73,7 +74,7 @@ internal fun <T> SegmentedPill(options: List<T>, selected: T, onSelect: (T) -> U
                 Box(Modifier.then(if (equal) Modifier.weight(1f) else Modifier)
                     .onPlaced { bounds[index] = it.positionInParent().x to it.size.width.toFloat() }
                     .clip(CircleShape).semantics { this.selected = picked; role = Role.Tab }
-                    .clickable { onSelect(option) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    .clickable(enabled = enabled) { onSelect(option) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center) {
                     CompositionLocalProvider(LocalContentColor provides content) { segment(option, picked) }
                 }

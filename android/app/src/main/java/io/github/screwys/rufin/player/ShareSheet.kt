@@ -69,6 +69,8 @@ import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.CoverShape
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SegmentedPill
+import io.github.screwys.rufin.ui.showPage
+import androidx.compose.animation.core.Animatable
 import io.github.screwys.rufin.ui.rememberArtwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -155,6 +157,7 @@ internal fun ShareSheet(player: PlayerConnection, subject: ShareSubject, initial
     val lines = selection.mapNotNull { document?.lines?.getOrNull(it)?.let(::lyricsShareText) }
     val kinds = listOfNotNull(ShareKind.SONG, ShareKind.LYRICS.takeIf { lines.isNotEmpty() }, ShareKind.LINK.takeIf { subject.share != null })
     val pager = rememberPagerState(kinds.indexOf(initial).coerceAtLeast(0)) { kinds.size }
+    val fade = remember { Animatable(1f) }
     val link = remember { LinkChoices() }
     val layers = listOf(rememberGraphicsLayer(), rememberGraphicsLayer())
     val artwork = rememberArtwork(subject.artwork, player, with(LocalDensity.current) { 320.dp.roundToPx() })
@@ -171,7 +174,7 @@ internal fun ShareSheet(player: PlayerConnection, subject: ShareSubject, initial
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             // The other card peeks in beside the one shown and grows as it comes in.
-            HorizontalPager(pager, Modifier.fillMaxWidth().widthIn(max = 480.dp), contentPadding = PaddingValues(horizontal = 44.dp),
+            HorizontalPager(pager, Modifier.fillMaxWidth().widthIn(max = 480.dp).graphicsLayer { alpha = fade.value }, contentPadding = PaddingValues(horizontal = 44.dp),
                 pageSpacing = 12.dp, verticalAlignment = Alignment.CenterVertically) { page ->
                 val away = ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
                 val scaled = Modifier.graphicsLayer {
@@ -187,7 +190,7 @@ internal fun ShareSheet(player: PlayerConnection, subject: ShareSubject, initial
             }
             Spacer(Modifier.height(20.dp))
             if (kinds.size > 1) SegmentedPill(kinds, shown, { kind ->
-                scope.launch { if (reduceMotion) pager.scrollToPage(kinds.indexOf(kind)) else pager.animateScrollToPage(kinds.indexOf(kind)) }
+                scope.launch { pager.showPage(kinds.indexOf(kind), fade, reduceMotion) }
             }, Modifier.fillMaxWidth().padding(horizontal = 32.dp), equal = true) { kind, _ ->
                 Text(when (kind) { ShareKind.SONG -> translate(subject.card); ShareKind.LYRICS -> translate("Lyrics")
                     ShareKind.LINK -> translate("Link") }, style = MaterialTheme.typography.titleSmall)

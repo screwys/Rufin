@@ -7,6 +7,8 @@ use gtk::{glib, graphene, prelude::*, subclass::prelude::*};
 // the transport row never grows when it appears.
 const OUTSET: f32 = 4.0;
 const LINE: f64 = 3.5;
+// A refill shorter than this, as an ordinary start or seek has, never shows the ring.
+const SHOW_AFTER: std::time::Duration = std::time::Duration::from_millis(500);
 
 mod imp {
     use super::*;
@@ -14,6 +16,7 @@ mod imp {
     #[derive(Default)]
     pub struct RefillRing {
         pub(super) tick: RefCell<Option<gtk::TickCallbackId>>,
+        pub(super) pending: RefCell<Option<glib::SourceId>>,
     }
 
     #[glib::object_subclass]
@@ -91,6 +94,26 @@ impl RefillRing {
         ring.set_can_target(false);
         ring.set_visible(false);
         ring
+    }
+
+    /// Shows the ring once a refill has lasted long enough to notice, and hides it when it ends.
+    pub fn set_refilling(&self, refilling: bool) {
+        let pending = &self.imp().pending;
+        if !refilling {
+            if let Some(source) = pending.take() {
+                source.remove();
+            }
+            self.set_visible(false);
+        } else if !self.is_visible() && pending.borrow().is_none() {
+            let ring = self.downgrade();
+            let source = glib::timeout_add_local_once(SHOW_AFTER, move || {
+                if let Some(ring) = ring.upgrade() {
+                    ring.imp().pending.take();
+                    ring.set_visible(true);
+                }
+            });
+            pending.replace(Some(source));
+        }
     }
 }
 

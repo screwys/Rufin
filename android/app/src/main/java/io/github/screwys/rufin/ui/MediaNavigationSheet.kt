@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -34,18 +33,17 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { value = Result.failure(error) }
     }
+    // The sheet opens once its links are read, at its full height, instead of growing from a spinner.
+    val result = loaded ?: return
     ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        val resolved = loaded?.getOrNull()
+        val resolved = result.getOrNull()
         val links = resolved?.artistLinks.orEmpty().map { "Artist" to it } + resolved?.albumLinks.orEmpty().map { "Album" to it }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            if (loaded == null) item {
-                Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            }
-            else loaded?.exceptionOrNull()?.let { failure -> item {
+            result.exceptionOrNull()?.let { failure -> item {
                 ErrorRow(failure, translate("Close"), onDismiss)
             } }
-            if (loaded?.isSuccess == true && links.isEmpty() && resolved?.sourceLink == null) item {
+            if (result.isSuccess && links.isEmpty() && resolved?.sourceLink == null) item {
                 Text(translate("No results"), Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
             }
             itemsIndexed(links, key = { index, (_, link) -> "$index:${link.route}" }) { _, (kind, link) ->

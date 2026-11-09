@@ -29,6 +29,23 @@ let lyricsDocument = null;
 let activeLine = -1;
 
 let coverRequest = null;
+// The ring around Play shows once a refill lasts half a second, as GTK's does; an ordinary
+// start or seek is over before then.
+let refillTimer = null;
+
+function showRefill(refilling) {
+  const ring = $("play-pause").lastElementChild;
+  if (!refilling) {
+    clearTimeout(refillTimer);
+    refillTimer = null;
+    ring.hidden = true;
+  } else if (ring.hidden && refillTimer === null) {
+    refillTimer = setTimeout(() => {
+      refillTimer = null;
+      ring.hidden = false;
+    }, 500);
+  }
+}
 
 function showPlayback(value) {
   if (
@@ -59,7 +76,7 @@ function showPlayback(value) {
     playing ? tr("Pause") : tr("Play"),
   );
   setIcon($("play-pause").firstElementChild, playing ? "rufin-media-playback-pause-symbolic" : "rufin-media-playback-start-symbolic");
-  $("play-pause").lastElementChild.hidden = !value?.refilling;
+  showRefill(!!value?.refilling);
   $("shuffle").setAttribute("aria-pressed", String(value?.shuffle || false));
   $("repeat").setAttribute(
     "aria-pressed",
