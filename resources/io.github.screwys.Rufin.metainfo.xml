@@ -105,21 +105,11 @@
       <description>
         <p>A patch release for icon/layout issues in Android and some other fixes.</p>
         <ul>
-          <li>Added instructions for Gentoo ebuild, thanks [kariga](https://git.fumo.pet/kariga)</li>
-        </ul>
-        <ul>
+          <li>Added instructions for Gentoo ebuild, thanks kariga</li>
           <li>Fixed some file scanning edge cases for local sources such as artist splitting and album recognization</li>
-        </ul>
-        <ul>
           <li>Better integration with Android media widget</li>
-        </ul>
-        <ul>
           <li>Polishes tablet, foldable and TV layouts</li>
-        </ul>
-        <ul>
-          <li>Fixed a context menu popoper issue, thanks [kariga](https://git.fumo.pet/kariga)</li>
-        </ul>
-        <ul>
+          <li>Fixed a context menu popoper issue, thanks kariga</li>
           <li>Added Indonesian translations</li>
         </ul>
       </description>
