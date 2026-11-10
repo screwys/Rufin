@@ -241,28 +241,11 @@ jobs:
             "$COPR_BUILD_ID"
           mkdir -p dist/release
           x86_rpm_path=
-          check_rpmlint() {
-            local rpm_path="$1"
-            local output
-            local unexpected_errors
-            if output="$(rpmlint "$rpm_path" 2>&1)"; then
-              printf '%s\n' "$output"
-              return
-            fi
-            printf '%s\n' "$output"
-            unexpected_errors="$(
-              printf '%s\n' "$output" \
-                | grep -F ': E: ' \
-                | grep -vF 'E: incorrect-locale-subdir /usr/share/locale/zh_Hant/LC_MESSAGES/rufin.mo' \
-                || true
-            )"
-            if [[ -n "$unexpected_errors" ]] \
-              || ! grep -Fq \
-                'E: incorrect-locale-subdir /usr/share/locale/zh_Hant/LC_MESSAGES/rufin.mo' \
-                <<<"$output"; then
-              exit 1
-            fi
-          }
+          # Catalogs keep Weblate's script-coded names (zh_Hans, zh_Hant), which rpmlint rejects.
+          rpmlint_config="$(mktemp --suffix .toml)"
+          cat > "$rpmlint_config" <<'EOF'
+          Filters = ['incorrect-locale-subdir /usr/share/locale/[a-z]+_[A-Z][a-z]{3}/LC_MESSAGES/rufin\.mo']
+          EOF
           for arch in x86_64 aarch64; do
             mapfile -t rpm_paths < <(
               find "dist/copr/fedora-${FEDORA}-${arch}" \
@@ -276,7 +259,7 @@ jobs:
             install_root="$(mktemp -d)"
             rpm2cpio "$rpm_path" | cpio -idm --quiet -D "$install_root"
             cargo run --locked -p xtask -- verify package-layout "$install_root" /usr
-            check_rpmlint "$rpm_path"
+            rpmlint -c "$rpmlint_config" "$rpm_path"
             cp "$rpm_path" dist/release/
             if [[ "$arch" == x86_64 ]]; then
               x86_rpm_path="$rpm_path"
