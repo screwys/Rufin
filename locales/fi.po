@@ -2394,6 +2394,11 @@ msgstr ""
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Sivupalkin tietueet"
+
 msgid "Library"
 msgstr "Kirjasto"
 
