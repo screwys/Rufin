@@ -369,4 +369,7 @@ function init() {
     });
 }
 
-export { init, openPreferences };
+// Shows the stored settings on every control that names one, outside Preferences too.
+const showSettings = async () => show(await api("/preferences"));
+
+export { init, openPreferences, showSettings };

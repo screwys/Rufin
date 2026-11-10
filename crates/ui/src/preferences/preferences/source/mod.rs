@@ -21,6 +21,9 @@ pub struct SourceState {
     pub discovery_running: Cell<bool>,
     pub discovery_started: Cell<bool>,
     pub discovery_provider: Cell<rufin_core::runtime::source::DiscoveryProvider>,
+    /// What the source list's search found; `None` until the first search ends.
+    pub found_servers: RefCell<Option<Vec<rufin_core::runtime::source::FoundServer>>>,
+    pub finding_servers: Cell<bool>,
     pub add_server: RefCell<Option<login::SourceSetupViewHandle>>,
     pub refresh_feedback_generation: Rc<Cell<u64>>,
 }

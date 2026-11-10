@@ -463,12 +463,20 @@ class RufinService : MediaSessionService() {
         }
     }.await()
 
+    /** The permission the local network needs on this Android version, where it needs one. */
+    private val localNetworkPermission get() = when {
+        Build.VERSION.SDK_INT >= 37 -> android.Manifest.permission.ACCESS_LOCAL_NETWORK
+        Build.VERSION.SDK_INT >= 36 -> android.Manifest.permission.NEARBY_WIFI_DEVICES
+        else -> null
+    }
+
+    /** Whether the local network can be searched without asking the user first. */
+    fun hasLocalNetworkAccess() = localNetworkPermission?.let {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    } != false
+
     suspend fun requestLocalNetworkAccess(): Boolean = scope.async {
-        val permission = when {
-            Build.VERSION.SDK_INT >= 37 -> android.Manifest.permission.ACCESS_LOCAL_NETWORK
-            Build.VERSION.SDK_INT >= 36 -> android.Manifest.permission.NEARBY_WIFI_DEVICES
-            else -> null
-        }
+        val permission = localNetworkPermission
         val granted = permission == null || requestPermission(permission)
         if (granted) multicastLock?.let { if (!it.isHeld) it.acquire() }
         granted

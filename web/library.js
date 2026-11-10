@@ -29,7 +29,7 @@ import {
   shareAction,
 } from "./menus.js";
 
-import { sources, updateSources } from "./sources.js";
+import { openWelcome, sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
 import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
@@ -348,7 +348,7 @@ function empty(title, description, action) {
     node.append(
       button(
         tr("Add Source"),
-        () => $("source-dialog").showModal(),
+        openWelcome,
         null,
         "primary",
       ),

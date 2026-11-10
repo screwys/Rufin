@@ -57,6 +57,13 @@ pub(super) fn settings_group(
 }
 
 impl SourceSetupFlow for Flow {
+    fn prefill(&self, server: &FoundServer) {
+        let mut local = self.local.borrow_mut();
+        local.name = server.name.clone();
+        local.url = server.address.clone();
+        self.draft.borrow_mut().manual = true;
+    }
+
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         let (scroller, content, _, _) = setup_scaffold(shell, context, self.presentation);
         content.append(&self.form(shell, Some(context), None));
@@ -89,8 +96,18 @@ impl Flow {
         let source_id = saved.map(|s| s.source.id.clone());
         let host = credential_host(&self.local, true, None);
         manual_host.append(&host.widget);
+        // A found server arrives with its address, so typing starts at the username.
+        if saved.is_none() && !host.name.text().is_empty() && host.username.text().is_empty() {
+            let focused = Cell::new(false);
+            host.username.connect_map(move |username| {
+                if !focused.replace(true) {
+                    username.grab_focus();
+                }
+            });
+        }
         host.rows.remove(&host.cert_verify);
         options.add(&host.cert_verify);
+        set_required(&username, &tr("Username or email"), true);
         manual.set_visible(emby);
         quick_connect.set_visible(!emby);
         connect.set_visible(saved.is_none());

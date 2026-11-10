@@ -1028,20 +1028,31 @@ fn join_profile(shell: &Rc<Shell>, parent: &adw::Dialog, invitation: String) {
     let shell = shell.clone();
     let parent = parent.clone();
     gtk::glib::spawn_future_local(async move {
-        let resource = "preferences/connect-components.ui";
-        let builder = crate::ui_resource::builder(resource);
-        let dialog: adw::AlertDialog =
-            crate::ui_resource::object(&builder, resource, "replace_confirmation");
-        if dialog.choose_future(Some(&parent)).await == "join" {
-            run(
-                &shell,
-                Action::Join {
-                    invitation,
-                    replace: true,
-                },
-            );
-        }
+        join_after_confirmation(&shell, &parent, invitation).await;
     });
+}
+
+/// Asks before replacing this device's data, then joins; whether the user went ahead.
+pub(super) async fn join_after_confirmation(
+    shell: &Rc<Shell>,
+    parent: &adw::Dialog,
+    invitation: String,
+) -> bool {
+    let resource = "preferences/connect-components.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::AlertDialog =
+        crate::ui_resource::object(&builder, resource, "replace_confirmation");
+    let join = dialog.choose_future(Some(parent)).await == "join";
+    if join {
+        run(
+            shell,
+            Action::Join {
+                invitation,
+                replace: true,
+            },
+        );
+    }
+    join
 }
 
 fn render_devices(

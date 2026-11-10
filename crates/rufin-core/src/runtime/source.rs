@@ -232,6 +232,27 @@ pub enum DiscoveryStatus {
     Failed(String),
 }
 
+/// A server that answered on the local network, with the source kind that adds it.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct FoundServer {
+    pub kind: String,
+    pub name: String,
+    pub address: String,
+}
+
+/// The user's music folder, and whether this process can read it. A sandbox knows the path
+/// without having the folder, and the system's folder dialog then grants it.
+pub fn music_folder() -> Option<(std::path::PathBuf, bool)> {
+    let user_dirs = directories::UserDirs::new()?;
+    let folder = user_dirs
+        .audio_dir()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| user_dirs.home_dir().join("Music"));
+    let readable = std::fs::read_dir(&folder).is_ok();
+    Some((folder, readable))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DiscoveryUpdate {
