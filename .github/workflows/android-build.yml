@@ -94,7 +94,8 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: android/.toolchains/gstreamer-1.28.7
-          key: gstreamer-android-arm64-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
+          # Holds every ABI, so PR checks keep the entry releases restore from.
+          key: gstreamer-android-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
 
       - name: Cache Android plugin sources
         if: matrix.check == 'build'

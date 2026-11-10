@@ -9,6 +9,8 @@ use crate::process::{command_stdout, repo_root};
 
 const GSTREAMER_VERSION: &str = "1.28.7";
 const GSTREAMER_SHA256: &str = "fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da";
+// Every download unpacks all ABIs, so a cached SDK serves arm64 checks and releases alike.
+const GSTREAMER_ARCHITECTURES: [&str; 3] = ["arm64", "armv7", "x86_64"];
 const ABIS: [&str; 3] = ["arm64-v8a", "armeabi-v7a", "x86_64"];
 
 pub(crate) fn run(args: Vec<String>) -> Result<()> {
@@ -132,7 +134,7 @@ fn build(root: &Path, distribution: &str, abi: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn download_gstreamer(destination: &Path, architectures: &[&str]) -> Result<()> {
+fn download_gstreamer(destination: &Path) -> Result<()> {
     println!("Downloading GStreamer {GSTREAMER_VERSION} Android SDK…");
     fs::create_dir_all(destination)?;
     let temporary = tempfile::tempdir_in(destination)?;
@@ -165,9 +167,9 @@ fn download_gstreamer(destination: &Path, architectures: &[&str]) -> Result<()> 
             .arg(&archive)
             .arg("-C")
             .arg(temporary.path())
-            .args(architectures),
+            .args(GSTREAMER_ARCHITECTURES),
     )?;
-    for arch in architectures {
+    for arch in GSTREAMER_ARCHITECTURES {
         let target = destination.join(arch);
         if target.exists() {
             fs::remove_dir_all(&target)?;
@@ -262,7 +264,7 @@ fn toolchain<'a>(root: &Path, abis: &'a str) -> Result<(Toolchain, Vec<Target<'a
             )
             .into());
         }
-        download_gstreamer(&gst, &missing)?;
+        download_gstreamer(&gst)?;
     }
     let ndk = sdk.join("ndk/29.0.14206865");
     let compiler_dir = ndk.join("toolchains/llvm/prebuilt").join(host).join("bin");
