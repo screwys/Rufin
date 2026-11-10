@@ -90,14 +90,20 @@ rufin --headless --listen
 
 | | |
 |:---:|:---:|
-| ![Artist details](resources/screenshots/artist_detail.png) | ![Genres](resources/screenshots/genres.png) |
-| **Artist details** | **Genres** |
-| ![Smart playlists](resources/screenshots/smart_playlists.png) | ![Playback settings](resources/screenshots/playback_settings.png) |
-| **Smart playlists** | **Playback settings** |
-| ![Fullscreen player](resources/screenshots/fullscreen_player.png) | ![Visualizer settings](resources/screenshots/visualizer_settings.png) |
-| **Fullscreen player** | **Visualizer settings** |
-| ![Integrations](resources/screenshots/integrations.png) | ![Playlist settings](resources/screenshots/playlist_settings.png) |
-| **Integrations** | **Playlist settings** |
+| ![Home](resources/screenshots/Rufin.png) | ![Artist details](resources/screenshots/artist_detail.png) |
+| **Home** | **Artist details** |
+| ![Artists](resources/screenshots/artists.png) | ![Compact sidebar](resources/screenshots/compact_sidebar.png) |
+| **Artists** | **Compact sidebar** |
+| ![Fullscreen player](resources/screenshots/fullscreen_player.png) | ![Smart playlists](resources/screenshots/smart_playlists.png) |
+| **Fullscreen player** | **Smart playlists** |
+| ![Playlist settings](resources/screenshots/playlist_settings.png) | ![Metadata editor](resources/screenshots/edit_metadata.png) |
+| **Playlist settings** | **Metadata editor** |
+| ![Metadata lookup](resources/screenshots/edit_metadata_lookup.png) | ![Lyrics editor](resources/screenshots/edit_metadata_lyrics.png) |
+| **Metadata lookup** | **Lyrics editor** |
+| ![Equalizer](resources/screenshots/equalizer_settings.png) | ![Customize display](resources/screenshots/customize_display.png) |
+| **Equalizer** | **Customize display** |
+| ![Rearrangeable layout](resources/screenshots/reorder_sidebar.png) | ![Integrations](resources/screenshots/integrations.png) |
+| **Rearrangeable layout** | **Integrations** |
 
 # Installation
 
