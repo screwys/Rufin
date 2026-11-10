@@ -1,8 +1,7 @@
 package io.github.screwys.rufin.app
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,9 +11,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +53,8 @@ internal class SidebarActions(
     val search: (() -> Unit)? = null,
 )
 
-/** The full sidebar: the ☰ menu, the source, Home and the routes, and the Saved entries. */
+/** The full sidebar: the general search where no bottom bar offers it, the ☰ menu, the source, Home and the
+ *  routes, and the Saved entries. */
 @Composable
 internal fun Sidebar(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection,
     saved: BrowsePage, actions: SidebarActions, modifier: Modifier = Modifier,
@@ -56,6 +63,17 @@ internal fun Sidebar(model: RufinConnection, browse: BrowseConnection, player: P
     var sourceMenu by remember { mutableStateOf(false) }
     val rows = saved.pages.collectAsLazyPagingItems()
     LazyColumn(modifier.fillMaxHeight().widthIn(max = 320.dp), contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 16.dp)) {
+        actions.search?.let { search -> item {
+            Surface(search, Modifier.fillMaxWidth().padding(bottom = 6.dp).height(44.dp), shape = RoundedCornerShape(22.dp),
+                color = if (browse.section == AppSection.Search) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest) {
+                Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(translate("Search"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } }
         item {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(translate("Library"), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -90,11 +108,6 @@ internal fun Sidebar(model: RufinConnection, browse: BrowseConnection, player: P
                     manage = { actions.more(MoreDestination.Library) }, add = actions.addSource, width = rowWidth.takeIf { it > 0.dp })
             }
         }
-        actions.search?.let { search -> item {
-            val searching = browse.section == AppSection.Search
-            NavigationDrawerItem(label = { Text(translate("Search")) }, selected = searching, onClick = search,
-                icon = { RufinIcon("rufin-search-symbolic", null, Modifier.size(22.dp)) }, modifier = Modifier.height(48.dp))
-        } }
         items(sidebarRoutes(browse), key = { it.id }) { route ->
             val selected = browse.section == AppSection.Browse && browse.rootId == route.id
             NavigationDrawerItem(label = { Text(route.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, selected = selected,
@@ -132,24 +145,52 @@ private fun SavedRow(item: BrowseItem, player: PlayerConnection, open: () -> Uni
     }
 }
 
-/** The compact icon sidebar of medium widths: ☰ opens the full one; then the routes, Search and Saved. */
+/** The compact icon sidebar of foldable widths: ☰ opens the full one; then Search, Home and the routes, each
+ *  with its name, and Saved with its entries' covers under it. */
 @Composable
-internal fun SidebarRail(browse: BrowseConnection, expand: () -> Unit, route: (String) -> Unit, search: () -> Unit, saved: () -> Unit) {
-    // Icons, the selected one labelled; a long route list scrolls rather than crowding.
-    NavigationRail(Modifier.fillMaxHeight(), header = { PlayerIconButton("rufin-open-menu-symbolic", "Expand sidebar", expand) }) {
-        Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-            val searching = browse.section == AppSection.Search
-            NavigationRailItem(searching, search, icon = { RufinIcon("rufin-search-symbolic", translate("Search"), Modifier.size(24.dp)) },
-                label = { Text(translate("Search")) }, alwaysShowLabel = false, modifier = Modifier.semantics { selected = searching })
-            sidebarRoutes(browse).forEach { item ->
-                val selected = browse.section == AppSection.Browse && browse.rootId == item.id
-                NavigationRailItem(selected, { route(item.id) },
-                    icon = { RufinIcon(if (selected) item.selectedIconName else item.iconName, item.title, Modifier.size(24.dp)) },
-                    label = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, alwaysShowLabel = false)
+internal fun SidebarRail(browse: BrowseConnection, player: PlayerConnection, saved: BrowsePage, expand: () -> Unit,
+    route: (String) -> Unit, search: () -> Unit, onSaved: () -> Unit, openSaved: (BrowseItem) -> Unit) {
+    val rows = saved.pages.collectAsLazyPagingItems()
+    val pixels = with(LocalDensity.current) { 48.dp.roundToPx() }
+    Surface(Modifier.fillMaxHeight().width(84.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.statusBarsPadding().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            PlayerIconButton("rufin-open-menu-symbolic", "Expand sidebar", expand)
+            // A long list scrolls, and fades out at the bottom edge.
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(Brush.verticalGradient(0f to Color.Black, .88f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+                }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(top = 6.dp, bottom = 40.dp)) {
+                item { RailItem("rufin-search-symbolic", translate("Search"), browse.section == AppSection.Search, search) }
+                items(sidebarRoutes(browse), key = { it.id }) { item ->
+                    val selected = browse.section == AppSection.Browse && browse.rootId == item.id
+                    RailItem(if (selected) item.selectedIconName else item.iconName, item.title, selected) { route(item.id) }
+                }
+                item { HorizontalDivider(Modifier.width(40.dp).padding(vertical = 2.dp)) }
+                item { RailItem("rufin-bookmark-symbolic", translate("Saved"), browse.section == AppSection.Pins, onSaved) }
+                items(rows.itemCount) { index ->
+                    rows[index]?.let { item ->
+                        Artwork(rememberArtwork(item.row.artworkIdentity, player, pixels), Modifier.size(48.dp).clip(CoverShape)
+                            .clickable(onClickLabel = item.row.title) { openSaved(item) }.semantics { contentDescription = item.row.title })
+                    }
+                }
             }
-            val showingSaved = browse.section == AppSection.Pins
-            NavigationRailItem(showingSaved, saved, icon = { RufinIcon("rufin-bookmark-symbolic", translate("Saved"), Modifier.size(24.dp)) },
-                label = { Text(translate("Saved")) }, alwaysShowLabel = false)
         }
+    }
+}
+
+@Composable
+private fun RailItem(icon: String, label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(Modifier.width(84.dp).selectable(selected, role = Role.Tab, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        // The picked one takes the accent, as the desktop's compact sidebar does; no bubble.
+        Box(Modifier.size(52.dp, 30.dp), contentAlignment = Alignment.Center) {
+            RufinIcon(icon, null, Modifier.size(22.dp),
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(label, Modifier.padding(start = 4.dp, end = 4.dp, top = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

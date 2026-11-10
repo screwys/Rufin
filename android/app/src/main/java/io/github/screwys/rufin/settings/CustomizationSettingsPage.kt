@@ -45,7 +45,7 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
                     preview = { id -> BrowseSwipeAction.entries.find { it.name == id }?.let { RufinIcon(it.icon, null, Modifier.size(24.dp)) } },
                     select = { preferences.selectSwipeAction(false, it) })
             }
-            SettingsExpander(translate("Sidebar Items")) {
+            SettingsExpander(translate("Library Items")) {
                 RouteSettingsPage(browse, embedded = true)
             }
             SettingsExpander(translate("Home Blocks")) {

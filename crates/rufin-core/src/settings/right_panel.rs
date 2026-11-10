@@ -37,7 +37,7 @@ impl Default for RightPanelSettings {
         Self {
             order: SidebarPanel::ALL.to_vec(),
             queue_visible: true,
-            combined: true,
+            combined: false,
             lyrics_height: None,
             visualizer_height: None,
         }
@@ -110,6 +110,8 @@ mod tests {
         assert_eq!(settings.visible_panels(false, false), [Queue]);
         settings.queue_visible = false;
         assert!(settings.visible_panels(false, false).is_empty());
+        assert_eq!(settings.visible_panels(true, true), [Lyrics, Visualizer]);
+        settings.combined = true;
         assert_eq!(settings.visible_panels(true, true), [Lyrics]);
         settings.combined = false;
         assert_eq!(settings.visible_panels(true, true), [Lyrics, Visualizer]);
@@ -127,7 +129,10 @@ mod tests {
     #[test]
     fn moving_combined_panel_keeps_the_separate_visualizer_position() {
         use SidebarPanel::*;
-        let mut settings = RightPanelSettings::default();
+        let mut settings = RightPanelSettings {
+            combined: true,
+            ..Default::default()
+        };
         assert!(settings.move_panel(Lyrics, -1, true, true));
         assert_eq!(settings.visible_panels(true, true), [Lyrics, Queue]);
         settings.combined = false;

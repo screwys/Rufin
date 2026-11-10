@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.focusRing
 import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
@@ -86,10 +87,16 @@ import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 
 private enum class PlayerSurface { LYRICS, VISUALIZER }
+
+/** What the pane beside a wide player shows. */
+private enum class PlayerPane(val title: String) { LYRICS("Lyrics"), VISUALIZER("Visualizer"), QUEUE("Queue") }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -125,6 +132,14 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
     val combined = lyricsEnabled && visualizerEnabled && application.rightPanel.combined
+    // Foldables, tablets and TVs: the player keeps to the left, and a pane beside it holds the lyrics, the
+    // visualizer or the queue, so the cover is never stretched to fill a wide screen.
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val wide = !tiny && configuration.screenWidthDp >= 600 && configuration.screenHeightDp >= 480
+    val panes = listOfNotNull(PlayerPane.LYRICS.takeIf { lyricsEnabled }, PlayerPane.VISUALIZER.takeIf { visualizerEnabled && !combined },
+        PlayerPane.QUEUE)
+    var pickedPane by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(PlayerPane.LYRICS) }
+    val pane = pickedPane.takeIf { it in panes } ?: panes.first()
     // With the dynamic background on, the player takes its cover's colours (the band's dark stops),
     // white content, boxes a shade darker than the background (as Navic's) and a pastel of the
     // cover for Play; off, the theme's, its boxes in the secondary container.
@@ -196,7 +211,9 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     LaunchedEffect(lyricsEnabled, visualizerEnabled) {
         if (surface == PlayerSurface.LYRICS && !lyricsEnabled && lyricsSelection == null || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
     }
-    LaunchedEffect(surface, combined, player.playback?.controls?.playbackOutput) { player.visualizer(surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined) }
+    val visualizing = surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined ||
+        wide && surface == null && (pane == PlayerPane.VISUALIZER || pane == PlayerPane.LYRICS && combined)
+    LaunchedEffect(visualizing, player.playback?.controls?.playbackOutput) { player.visualizer(visualizing) }
     DisposableEffect(player) { onDispose { player.visualizer(false) } }
     LaunchedEffect(player.currentId) { shareLines = null; lyricsSelection = null }
     LaunchedEffect(surface) { if (surface != PlayerSurface.LYRICS) lyricsSelection = null }
@@ -259,7 +276,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                     translationY = surfaceOffset.value
                     alpha = 1f - (surfaceOffset.value / size.height * 1.5f).coerceIn(0f, .6f)
                 }).safeDrawingPadding()) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val header: @Composable () -> Unit = { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         val picked = lyricsSelection.takeIf { visible == PlayerSurface.LYRICS }
                         if (picked != null) PlayerIconButton("rufin-window-close-symbolic", "Cancel", { finishSelection(false) })
                         else PlayerIconButton("rufin-go-down-symbolic", "Close", { if (visible == null) onClose() else surface = null })
@@ -276,11 +293,14 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         else if (picked != null) PlayerIconButton("rufin-object-select-symbolic", "Done", { finishSelection(true) }, enabled = picked.isNotEmpty())
                         else if (visible == PlayerSurface.LYRICS) LyricsActions(player)
                         else Spacer(Modifier.size(48.dp))
-                    }
+                    } }
+                    // Beside the pane the bar sits over the player's own column, and the pane takes the full height.
+                    if (visible != null || !wide) header()
                     if (visible == null) {
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                             val viewportHeight = maxHeight
-                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled, it.clipToBounds(),
+                            // The line under the cover is the phone's; beside the pane the lyrics show in full.
+                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled && !wide, it.clipToBounds(),
                                 trackOffset.value, neighbours) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
                                 PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp)) { navigation = it }
@@ -294,17 +314,43 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
                                 PlayerTransport(player, play)
                             }
-                            // Wide panes keep the lyrics, or the visualizer, beside the player.
-                            else if (maxWidth >= 600.dp && maxWidth <= maxHeight * 1.6f && (lyricsEnabled || visualizerEnabled)) Row(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                            else if (wide) Row(Modifier.fillMaxSize().padding(start = 8.dp, end = 16.dp)) {
                                 Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    content(Modifier.weight(1f).fillMaxWidth())
-                                    controls()
+                                    header()
+                                    content(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp))
+                                    Column(Modifier.padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) { controls() }
+                                    PlayerActions(player, { output = true }, { sharing = ShareKind.SONG }, null, {}, { settings = true }, null)
                                 }
-                                Spacer(Modifier.width(24.dp))
-                                Box(Modifier.weight(1f).fillMaxHeight().padding(vertical = 8.dp)) {
-                                    if (visualizerEnabled && (!lyricsEnabled || combined)) VisualizerView(player, Modifier.matchParentSize(),
-                                        if (combined) player.settings?.visualizer?.appearance?.fullscreenLyricsOpacity?.toFloat() ?: 1f else 1f)
-                                    if (lyricsEnabled) LyricsPanel(player, lyricsScroll)
+                                Spacer(Modifier.width(16.dp))
+                                Surface(Modifier.weight(1.15f).fillMaxHeight().padding(top = 8.dp, bottom = 16.dp), shape = RoundedCornerShape(24.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                                    Column {
+                                        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            panes.forEach { entry ->
+                                                Surface({ pickedPane = entry }, Modifier.focusRing(RoundedCornerShape(16.dp)), shape = RoundedCornerShape(16.dp),
+                                                    color = if (entry == pane) MaterialTheme.colorScheme.onSurface.copy(alpha = .14f) else Color.Transparent,
+                                                    contentColor = if (entry == pane) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) {
+                                                    Text(translate(entry.title), Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                                        style = MaterialTheme.typography.labelLarge)
+                                                }
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                            if (pane == PlayerPane.LYRICS) LyricsActions(player) else Spacer(Modifier.height(48.dp))
+                                        }
+                                        Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp).clipToBounds()) {
+                                            when (pane) {
+                                                PlayerPane.LYRICS -> {
+                                                    if (combined) VisualizerView(player, Modifier.matchParentSize(),
+                                                        player.settings?.visualizer?.appearance?.fullscreenLyricsOpacity?.toFloat() ?: 1f)
+                                                    LyricsPanel(player, lyricsScroll)
+                                                }
+                                                PlayerPane.VISUALIZER -> VisualizerView(player, Modifier.matchParentSize())
+                                                PlayerPane.QUEUE -> CompositionLocalProvider(LocalToolIconSize provides 20.dp) {
+                                                    PlayerQueue(player, Modifier.fillMaxSize(), nowPlaying = false, onNavigate = onNavigate)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             // Cover beside the controls only when each half has room for the transport.
                             } else if (maxWidth > maxHeight && maxWidth >= 600.dp) Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -321,7 +367,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                                 controls()
                             }
                         }
-                        PlayerActions(player, { output = true }, { sharing = ShareKind.SONG },
+                        if (!wide) PlayerActions(player, { output = true }, { sharing = ShareKind.SONG },
                             // Lyrics, or the visualizer while the lyrics are hidden.
                             if (lyricsEnabled) PlayerSurface.LYRICS else PlayerSurface.VISUALIZER.takeIf { visualizerEnabled },
                             { surface = it }, { settings = true }, { queue = true })
@@ -430,10 +476,11 @@ private fun PlayerContext(player: PlayerConnection, modifier: Modifier) {
     }
 }
 
-/** The output pill on the left; Share, Lyrics (or the visualizer), Settings and Queue on the right. */
+/** The output pill on the left; Share, Lyrics (or the visualizer), Settings and Queue on the right. Beside
+ *  a wide player's pane, which holds the lyrics, the visualizer and the queue, only Share and Settings. */
 @Composable
 private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onShare: () -> Unit, view: PlayerSurface?,
-    onView: (PlayerSurface) -> Unit, onSettings: () -> Unit, onQueue: () -> Unit) {
+    onView: (PlayerSurface) -> Unit, onSettings: () -> Unit, onQueue: (() -> Unit)?) {
     val routes = player.service?.outputs?.routes?.collectAsState()?.value.orEmpty()
     val outputName = routes.firstOrNull { it.selected }?.name ?: translate("Audio output")
     // The pill gives way to the buttons when they leave it no room.
@@ -455,7 +502,7 @@ private fun PlayerActions(player: PlayerConnection, onOutput: () -> Unit, onShar
                 null -> Unit
             }
             ToolButton("rufin-mixer-sliders-symbolic", "Settings", action = onSettings)
-            ToolButton("rufin-queue-symbolic", "Queue", action = onQueue)
+            onQueue?.let { ToolButton("rufin-queue-symbolic", "Queue", action = it) }
         }
     }
 }
@@ -508,7 +555,7 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
                 val state = player.playback
                 state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
-            IconButton(player::favorite, Modifier.size(48.dp)) {
+            IconButton(player::favorite, Modifier.size(48.dp).focusRing(CircleShape)) {
                 RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     translate("Favorite current track"), Modifier.size(24.dp),
                     if (favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, glyph = true)
@@ -580,6 +627,7 @@ private fun PlayerProgress(player: PlayerConnection) {
     val inactiveWaveform = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
     val thumbWidth = if (waveform.isEmpty()) 14.dp else 2.dp
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     Column(Modifier.fillMaxWidth()) {
         Slider(value = displayedPosition.toFloat().coerceIn(0f, duration.coerceAtLeast(1f)),
             onValueChange = { dragging = true; seeking = it }, onValueChangeFinished = {
@@ -618,7 +666,16 @@ private fun PlayerProgress(player: PlayerConnection) {
                     }
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(24.dp).layout { measurable, constraints ->
+            // Left and right seek; up and down leave the seekbar, so a D-pad reaches what is above and below it.
+            modifier = Modifier.fillMaxWidth().height(24.dp).focusRing(RoundedCornerShape(12.dp)).onPreviewKeyEvent { event ->
+                val direction = when (event.key) {
+                    androidx.compose.ui.input.key.Key.DirectionUp -> androidx.compose.ui.focus.FocusDirection.Up
+                    androidx.compose.ui.input.key.Key.DirectionDown -> androidx.compose.ui.focus.FocusDirection.Down
+                    else -> return@onPreviewKeyEvent false
+                }
+                if (event.type == androidx.compose.ui.input.key.KeyEventType.KeyDown) focusManager.moveFocus(direction)
+                true
+            }.layout { measurable, constraints ->
                 // Extend the slider's thumb inset so the track spans the same width as the timestamps.
                 val inset = thumbWidth.roundToPx()
                 val placeable = measurable.measure(constraints.offset(horizontal = inset))
@@ -671,7 +728,7 @@ private fun PlayerPlayPause(player: PlayerConnection, play: IconButtonColors) {
     Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
         if (player.refilling) RefillSpinner(72.dp, play.containerColor)
         // Play is an accent circle at the size of the transport, not oversized.
-        FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape, colors = play) {
+        FilledIconButton(player::togglePlayback, Modifier.size(64.dp).focusRing(CircleShape), shape = CircleShape, colors = play) {
             Crossfade(playing, animationSpec = tween(if (LocalReduceMotion.current) 0 else 140), label = "fullPlayerTransport") { active ->
                 RufinIcon(if (active) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
                     translate(if (active) "Pause" else "Play"), Modifier.size(28.dp), glyph = true)

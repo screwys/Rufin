@@ -24,6 +24,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.Bundle
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -31,10 +32,17 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.MediaStyleNotificationHelper
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
+import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.playback.*
 import io.github.screwys.rufin.shared.library.QueueRepeatMode
 import io.github.screwys.rufin.core.AndroidStorage
@@ -85,6 +93,50 @@ class RufinService : MediaSessionService() {
 
     inner class Connection : Binder() { val service get() = this@RufinService }
 
+    // The system's media controls (the notification, the lock screen, a tablet's media widget) show
+    // Favorite and Shuffle beside the transport, each in its current state. Android's own widget has room
+    // for two buttons beside previous, play and next; Repeat and Auto DJ follow for the surfaces that
+    // list more (Android Auto, a watch).
+    private val favoriteCommand = SessionCommand("io.github.screwys.rufin.FAVORITE", Bundle.EMPTY)
+    private val shuffleCommand = SessionCommand("io.github.screwys.rufin.SHUFFLE", Bundle.EMPTY)
+    private val repeatCommand = SessionCommand("io.github.screwys.rufin.REPEAT", Bundle.EMPTY)
+    private val autoDjCommand = SessionCommand("io.github.screwys.rufin.AUTO_DJ", Bundle.EMPTY)
+    private fun mediaButtons(state: AndroidPlaybackUpdate?) = listOf(
+        CommandButton.Builder(if (state?.favorite == true) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
+            .setDisplayName(translate("Favorite")).setSessionCommand(favoriteCommand).build(),
+        CommandButton.Builder(if (state?.controls?.shuffleEnabled == true) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF)
+            .setDisplayName(translate("Shuffle")).setSessionCommand(shuffleCommand).build(),
+        CommandButton.Builder(when (state?.controls?.repeatMode) {
+            QueueRepeatMode.ALL -> CommandButton.ICON_REPEAT_ALL
+            QueueRepeatMode.ONE -> CommandButton.ICON_REPEAT_ONE
+            else -> CommandButton.ICON_REPEAT_OFF
+        }).setDisplayName(translate("Repeat")).setSessionCommand(repeatCommand).build(),
+        CommandButton.Builder(CommandButton.ICON_UNDEFINED).setCustomIconResId(R.drawable.rufin_auto_dj_symbolic)
+            .setDisplayName(translate("Auto DJ")).setSessionCommand(autoDjCommand).build())
+    private val sessionCallback = object : MediaSession.Callback {
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+            MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(
+                MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(favoriteCommand).add(shuffleCommand)
+                    .add(repeatCommand).add(autoDjCommand).build()).build()
+        override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, command: SessionCommand,
+            args: Bundle): ListenableFuture<SessionResult> {
+            val state = playback.value
+            val uri = state?.transport?.current?.id?.mediaUri
+            scope.launch(Dispatchers.IO) {
+                try {
+                    if (command == shuffleCommand && state != null) setShuffle(!state.controls.shuffleEnabled)
+                    else if (command == repeatCommand) transport().cycleRepeat()
+                    else if (command == autoDjCommand) transport().toggleAutoDj()
+                    else if (command == favoriteCommand && uri != null) core().source().let { source ->
+                        try { source.setFavoriteWithResult(FavoriteTarget.Track(uri), !state.favorite) } finally { source.destroy() }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w("Rufin", "Media control failed", error) }
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && playback.value?.controls?.playbackOutput is PlaybackOutput.Local) pause()
@@ -105,8 +157,9 @@ class RufinService : MediaSessionService() {
             .setNotificationId(NOTIFICATION_PLAYBACK)
             .setChannelId(CHANNEL_PLAYBACK)
             .setChannelName(R.string.app_name)
-            .build())
-        session = MediaSession.Builder(this, nativePlayer).setSessionActivity(activityIntent).build()
+            .build().apply { setSmallIcon(R.drawable.rufin_cover_fallback_symbolic) })
+        session = MediaSession.Builder(this, nativePlayer).setSessionActivity(activityIntent)
+            .setCallback(sessionCallback).setMediaButtonPreferences(mediaButtons(null)).build()
         addSession(session)
         audioFocus = AndroidAudioFocus(this, ::playingLocally,
             pause = { playbackOwner?.pause() },
@@ -255,6 +308,9 @@ class RufinService : MediaSessionService() {
                     val previous = mutablePlayback.value
                     nativePlayer.update(state)
                     mutablePlayback.value = state
+                    if (previous?.favorite != state.favorite || previous?.controls?.shuffleEnabled != state.controls.shuffleEnabled ||
+                        previous?.controls?.repeatMode != state.controls.repeatMode)
+                        session.setMediaButtonPreferences(mediaButtons(state))
                     if (state.controls.playbackOutput !is PlaybackOutput.Local || state.transport.state == TransportStatus.STOPPED || state.transport.state == TransportStatus.FAILED) {
                         audioFocus.abandon()
                     }
@@ -378,7 +434,7 @@ class RufinService : MediaSessionService() {
             val current = playback.value
             if (!alreadyOngoing) {
                 val notification = NotificationCompat.Builder(this, CHANNEL_PLAYBACK)
-                    .setSmallIcon(androidx.media3.session.R.drawable.media3_notification_small_icon)
+                    .setSmallIcon(R.drawable.rufin_cover_fallback_symbolic)
                     .setContentTitle(nativePlayer.mediaMetadata.title?.takeIf { it.isNotEmpty() } ?: getString(R.string.app_name))
                     .setContentText(nativePlayer.mediaMetadata.artist)
                     .setContentIntent(activityIntent)

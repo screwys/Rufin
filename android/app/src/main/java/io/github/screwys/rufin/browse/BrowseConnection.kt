@@ -80,11 +80,14 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var library by mutableStateOf<AndroidLibrary?>(null)
         private set
     var visiblePage by mutableStateOf<BrowsePage?>(null)
+    /** The pages on screen: one, or a list and the detail beside it. */
+    val shownPages = mutableStateListOf<BrowsePage>()
     /** The holder of Search's results and recent searches. */
     private val search = ShownRows(this, scope)
     /** `item` showing the changes committed since the surface that holds it read it. */
     @Composable
-    fun shown(item: BrowseItem): BrowseItem = (if (item.searchResult) search else visiblePage)?.shown(item) ?: item
+    fun shown(item: BrowseItem): BrowseItem = (if (item.searchResult) search
+        else shownPages.lastOrNull { item.view != null && it.pageView === item.view } ?: visiblePage)?.shown(item) ?: item
     var labelsVersion by mutableIntStateOf(0)
         private set
     var artistAlbumsRevision by mutableIntStateOf(0)
@@ -123,7 +126,13 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
         val library: AndroidLibrary?, val changes: Int, val submission: Int, val rereads: Int)
 
+    /** Enter was pressed on the search: the page shows one category's results in full, under tabs, instead
+     *  of a few of each. */
+    var searchSubmitted by mutableStateOf(false)
+    var searchCategory by mutableStateOf(CollectionCategory.TRACKS)
+
     fun submitSearch() {
+        searchSubmitted = true
         if (searchMode == SearchMode.LYRICS) searchSubmission++
     }
 

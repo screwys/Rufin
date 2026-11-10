@@ -80,7 +80,11 @@ internal fun LyricsPanel(player: PlayerConnection, state: LazyListState, selecti
     Box(Modifier.fillMaxSize()) {
         when {
             current?.loading == true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-            current?.instrumental == true -> Text(translate("Instrumental"), Modifier.align(Alignment.Center))
+            current?.instrumental == true -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                RufinIcon("rufin-audio-x-generic-symbolic", null, Modifier.size(36.dp), LocalContentColor.current.copy(alpha = .55f))
+                Text(translate("Instrumental"))
+            }
             document == null -> Text(translate("No lyrics available."), Modifier.align(Alignment.Center))
             else -> LyricsDocumentView(player, current, document, preferences, state, selection, onSelect)
         }

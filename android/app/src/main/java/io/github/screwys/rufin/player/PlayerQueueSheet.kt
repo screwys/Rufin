@@ -62,6 +62,23 @@ import kotlinx.coroutines.launch
 internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
     onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
 ) {
+    // A sheet that opens half-way and pulls up to the full height.
+    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        containerColor = MaterialTheme.colorScheme.background) {
+        PlayerQueue(player, Modifier.fillMaxSize().navigationBarsPadding(), onActivated = onDismiss, onNavigate = onNavigate)
+    }
+}
+
+/** The queue: its tools, the playing track pinned on top where no player shows it beside the queue, and the
+ *  rows. A sheet on phones; a pane beside the library and in the player on wide screens. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+internal fun PlayerQueue(player: PlayerConnection, modifier: Modifier = Modifier, nowPlaying: Boolean = true,
+    /** A row was picked to play. */
+    onActivated: () -> Unit = {},
+    onNavigate: (Route, String, String?) -> Unit = { route, title, _ -> player.model.browse.openRoute(route, title) },
+) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -89,7 +106,10 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
     var dragHeight by remember { mutableIntStateOf(0) }
     var dragDistance by remember { mutableFloatStateOf(0f) }
     var dragRow by remember { mutableStateOf<QueueRow?>(null) }
-    var released by remember { mutableStateOf<ULong?>(null) }
+    // The dropped row settles into its place by its index: its position, the rows' key, changes with the move.
+    var releasedIndex by remember { mutableStateOf<Int?>(null) }
+    // From a drop until the moved queue is shown, rows take their new keys without sliding to them.
+    var reordered by remember { mutableStateOf(false) }
     val releaseOffset = remember { Animatable(0f) }
     var dragScroll by remember { mutableFloatStateOf(0f) }
     var initialized by remember { mutableStateOf(false) }
@@ -118,7 +138,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
             haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
         }
     }
-    fun close() = onDismiss()
+    fun close() = onActivated()
     fun openMenu(row: QueueRow) {
         player.model.browse.library?.trackItem(row.track())?.let { menu = row to BrowseItem(it, 0UL, null) }
     }
@@ -136,6 +156,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
             }
             pages = replacement
             dragRow = null
+            // Two frames: the first lays the rows out under their new keys.
+            if (reordered) launch { withFrameNanos { }; withFrameNanos { }; reordered = false }
             if (!initialized && filter.isEmpty()) {
                 val index = player.playback?.queue?.currentIndex?.let { (it - minOf(it, page.windowOffset)).coerceAtMost(Int.MAX_VALUE.toULong()).toInt() } ?: 0
                 list.scrollToItem(index.coerceIn(0, (page.total.toInt() - 1).coerceAtLeast(0)))
@@ -165,7 +187,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
         val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == position.toLong() } ?: return
         dragged = position; dragIndex = info.index; dragOrigin = info.index
         dragTop = info.offset.toFloat(); dragHeight = info.size
-        dragDistance = 0f; dragRow = row; released = null
+        dragDistance = 0f; dragRow = row; releasedIndex = null
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
     }
     fun dragBy(amount: Float) {
@@ -189,8 +211,10 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
         val moved = dragOrigin != dragIndex
         dragScroll = 0f
         if (id != null) scope.launch {
+            val index = dragIndex
             releaseOffset.snapTo(offset)
-            released = id
+            releasedIndex = index
+            reordered = moved
             val settling = launch {
                 releaseOffset.animateTo(0f, if (reduceMotion) tween(0)
                     else spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 1f))
@@ -200,137 +224,145 @@ internal fun PlayerQueueSheet(player: PlayerConnection, onDismiss: () -> Unit,
             catch (error: Exception) { player.reportError(error) }
             finally { dragged = null }
             settling.join()
-            if (released == id) released = null
+            if (releasedIndex == index) releasedIndex = null
         }
     }
-    // A sheet that opens half-way and pulls up to the full height: the playing track pinned on top,
-    // the queue, and Auto DJ at the bottom.
-    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-        containerColor = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-            val total = player.playback?.queue?.total ?: 0UL
-            if (selecting) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                PlayerIconButton("rufin-window-close-symbolic", "Done", { selecting = false; picked = emptySet() })
-                Text(translate("{count} selected").replace("{count}", picked.size.toString()), Modifier.weight(1f).padding(start = 4.dp),
-                    style = MaterialTheme.typography.titleMedium)
-                val first = picked.minOrNull()
-                val last = picked.maxOrNull()
-                PlayerIconButton("rufin-go-up-symbolic", "Move up", {
-                    val from = first ?: return@PlayerIconButton
-                    val chosen = picked.sorted()
-                    scope.launch { player.moveQueue(chosen, from - 1UL) }
-                    picked = (0 until chosen.size).map { from - 1UL + it.toULong() }.toSet()
-                }, enabled = first != null && first > 0UL)
-                PlayerIconButton("rufin-go-down-symbolic", "Move down", {
-                    val to = last ?: return@PlayerIconButton
-                    val chosen = picked.sorted()
-                    scope.launch { player.moveQueue(chosen, to + 1UL, after = true) }
-                    val start = to + 2UL - chosen.size.toULong()
-                    picked = (0 until chosen.size).map { start + it.toULong() }.toSet()
-                }, enabled = last != null && last + 1UL < total)
-                PlayerIconButton("rufin-user-trash-symbolic", "Remove from Queue", {
-                    player.removeQueue(picked.toList()); picked = emptySet()
-                }, enabled = picked.isNotEmpty())
-            } else Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier) {
+        val total = player.playback?.queue?.total ?: 0UL
+        if (selecting) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            PlayerIconButton("rufin-window-close-symbolic", "Done", { selecting = false; picked = emptySet() })
+            Text(translate("{count} selected").replace("{count}", picked.size.toString()), Modifier.weight(1f).padding(start = 4.dp),
+                style = MaterialTheme.typography.titleMedium)
+            val first = picked.minOrNull()
+            val last = picked.maxOrNull()
+            PlayerIconButton("rufin-go-up-symbolic", "Move up", {
+                val from = first ?: return@PlayerIconButton
+                val chosen = picked.sorted()
+                scope.launch { player.moveQueue(chosen, from - 1UL) }
+                picked = (0 until chosen.size).map { from - 1UL + it.toULong() }.toSet()
+            }, enabled = first != null && first > 0UL)
+            PlayerIconButton("rufin-go-down-symbolic", "Move down", {
+                val to = last ?: return@PlayerIconButton
+                val chosen = picked.sorted()
+                scope.launch { player.moveQueue(chosen, to + 1UL, after = true) }
+                val start = to + 2UL - chosen.size.toULong()
+                picked = (0 until chosen.size).map { start + it.toULong() }.toSet()
+            }, enabled = last != null && last + 1UL < total)
+            PlayerIconButton("rufin-user-trash-symbolic", "Remove from Queue", {
+                player.removeQueue(picked.toList()); picked = emptySet()
+            }, enabled = picked.isNotEmpty())
+        } else Row(Modifier.fillMaxWidth().padding(start = if (nowPlaying) 4.dp else 8.dp, end = if (nowPlaying) 4.dp else 8.dp, top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            val filled = (player.playback?.queue?.total ?: 0UL) > 0UL
+            val tool = if (nowPlaying) Modifier else Modifier.size(40.dp)
+            val searchTool: @Composable () -> Unit = {
+                PlayerIconButton("rufin-search-symbolic", "Search", { searchVisible = !searchVisible; if (!searchVisible) search = "" },
+                    tool, selected = searchVisible)
+            }
+            val createTool: @Composable () -> Unit = {
+                PlayerIconButton("rufin-playlists-symbolic", "Create a playlist from queue", { create = true }, tool, enabled = filled)
+            }
+            val selectTool: @Composable () -> Unit = { PlayerIconButton("rufin-document-edit-symbolic", "Select", { selecting = true }, tool, enabled = filled) }
+            val clearTool: @Composable () -> Unit = { PlayerIconButton("rufin-user-trash-symbolic", "Clear queue", { clear = true }, tool, enabled = filled) }
+            // The sheet names the queue and counts it, then its tools. The pane beside a page is the desktop's:
+            // one row of tools, no title, in the desktop's order; Select, which the desktop needs no button for, ends it.
+            if (nowPlaying) {
                 Column(Modifier.weight(1f).padding(start = 16.dp)) {
                     Text(translate("Queue"), style = MaterialTheme.typography.titleLarge)
                     Text(remember(player.playback?.queue?.total, translation) { player.playback?.queue?.total?.let(::trackCountText).orEmpty() },
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                // The queue's tools, shown directly.
-                val filled = (player.playback?.queue?.total ?: 0UL) > 0UL
-                PlayerIconButton("rufin-search-symbolic", "Search", { searchVisible = !searchVisible; if (!searchVisible) search = "" },
-                    selected = searchVisible)
-                PlayerIconButton("rufin-list-add-symbolic", "New Playlist", { create = true }, enabled = filled)
-                PlayerIconButton("rufin-document-edit-symbolic", "Select", { selecting = true }, enabled = filled)
-                PlayerIconButton("rufin-user-trash-symbolic", "Clear queue", { clear = true }, enabled = filled)
+                searchTool(); createTool(); selectTool(); clearTool()
+            } else {
+                createTool(); clearTool(); searchTool()
+                Spacer(Modifier.weight(1f))
+                selectTool()
             }
-            QueueNowPlaying(player)
-            if (searchVisible) OutlinedTextField(search, { search = it }, singleLine = true,
-                label = { Text(translate("Search")) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 8.dp))
-            LazyColumn(Modifier.fillMaxWidth().weight(1f), state = list,
-                contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (first == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
-                else if (count == 0) item { Text(translate("Your queue is empty."), Modifier.padding(24.dp)) }
-                items(count, key = { index -> rowAt(index)?.position()?.toLong() ?: "queue:$index" }) { index ->
-                    val row = rowAt(index)
-                    if (row == null) Spacer(Modifier.height(72.dp))
-                    else {
-                        val position = remember(row) { row.position() }
-                        val metadata = remember(row) { row.track().metadata }
-                        val isDragging = dragged == position && released != position
-                        val isReleased = released == position
-                        val placement = if (reduceMotion || isDragging || isReleased) Modifier
-                            else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
-                        val dismiss = rememberSwipeToDismissBoxState()
-                        val shape = RoundedCornerShape(topStart = if (index == 0) 16.dp else 4.dp,
-                            topEnd = if (index == 0) 16.dp else 4.dp, bottomStart = if (index == count - 1) 16.dp else 4.dp,
-                            bottomEnd = if (index == count - 1) 16.dp else 4.dp)
-                        Box(Modifier.padding(horizontal = 12.dp).then(placement)
-                            .zIndex(if (isDragging || isReleased) 1f else 0f).graphicsLayer {
-                                translationY = if (isDragging) {
-                                    val top = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.offset ?: 0
-                                    dragTop + dragDistance - top
-                                } else if (isReleased) releaseOffset.value else 0f
+        }
+        if (nowPlaying) QueueNowPlaying(player)
+        if (searchVisible) OutlinedTextField(search, { search = it }, singleLine = true,
+            label = { Text(translate("Search")) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 8.dp))
+        LazyColumn(Modifier.fillMaxWidth().weight(1f), state = list,
+            contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (first == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
+            else if (count == 0) item { Text(translate("Your queue is empty."), Modifier.padding(24.dp)) }
+            items(count, key = { index -> rowAt(index)?.position()?.toLong() ?: "queue:$index" }) { index ->
+                val row = rowAt(index)
+                if (row == null) Spacer(Modifier.height(72.dp))
+                else {
+                    val position = remember(row) { row.position() }
+                    val metadata = remember(row) { row.track().metadata }
+                    val isReleased = releasedIndex == index
+                    val isDragging = dragged == position && !isReleased
+                    val placement = if (reduceMotion || isDragging || isReleased || reordered) Modifier
+                        else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+                    val dismiss = rememberSwipeToDismissBoxState()
+                    val shape = RoundedCornerShape(topStart = if (index == 0) 16.dp else 4.dp,
+                        topEnd = if (index == 0) 16.dp else 4.dp, bottomStart = if (index == count - 1) 16.dp else 4.dp,
+                        bottomEnd = if (index == count - 1) 16.dp else 4.dp)
+                    Box(Modifier.padding(horizontal = 12.dp).then(placement)
+                        .zIndex(if (isDragging || isReleased) 1f else 0f).graphicsLayer {
+                            translationY = if (isDragging) {
+                                val top = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.offset ?: 0
+                                dragTop + dragDistance - top
+                            } else if (isReleased) releaseOffset.value else 0f
+                        }) {
+                        SwipeToDismissBox(state = dismiss, gesturesEnabled = dragged == null,
+                            onDismiss = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                scope.launch {
+                                    dismiss.snapTo(SwipeToDismissBoxValue.Settled)
+                                    player.removeQueue(position)
+                                }
+                            },
+                            backgroundContent = {
+                                Box(Modifier.fillMaxSize().clip(shape).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp)) {
+                                    RufinIcon("rufin-user-trash-symbolic", translate("Remove from Queue"), Modifier.size(24.dp)
+                                        .align(if (dismiss.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd),
+                                        MaterialTheme.colorScheme.onErrorContainer)
+                                }
                             }) {
-                            SwipeToDismissBox(state = dismiss, gesturesEnabled = dragged == null,
-                                onDismiss = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    scope.launch {
-                                        dismiss.snapTo(SwipeToDismissBoxValue.Settled)
-                                        player.removeQueue(position)
+                            Surface(shape = shape, shadowElevation = if (isDragging) 8.dp else 0.dp) {
+                                val current = position == currentIndex
+                                ListItem(headlineContent = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        if (current && player.playback?.transport?.desiredPlaying == true) PlayingIndicator()
+                                        Text(metadata.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            color = if (current && player.playback?.transport?.desiredPlaying == true) MaterialTheme.colorScheme.secondary else LocalContentColor.current)
                                     }
                                 },
-                                backgroundContent = {
-                                    Box(Modifier.fillMaxSize().clip(shape).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp)) {
-                                        RufinIcon("rufin-user-trash-symbolic", translate("Remove from Queue"), Modifier.size(24.dp)
-                                            .align(if (dismiss.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd),
-                                            MaterialTheme.colorScheme.onErrorContainer)
-                                    }
-                                }) {
-                                Surface(shape = shape, shadowElevation = if (isDragging) 8.dp else 0.dp) {
-                                    val current = position == currentIndex
-                                    ListItem(headlineContent = {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            if (current && player.playback?.transport?.desiredPlaying == true) PlayingIndicator()
-                                            Text(metadata.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                                color = if (current && player.playback?.transport?.desiredPlaying == true) MaterialTheme.colorScheme.secondary else LocalContentColor.current)
-                                        }
-                                    },
-                                        supportingContent = { Text(listOf(metadata.artist, metadata.album).filter(String::isNotBlank).joinToString(" · "),
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                        leadingContent = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                            if (selecting) io.github.screwys.rufin.browse.SelectionMark(position in picked)
-                                            QueueSheetCover(row, player)
-                                        } },
-                                        // The handle drags at once; a hold anywhere on the row does too.
-                                        trailingContent = { RufinIcon("rufin-list-drag-handle-symbolic", translate("Drag to reorder"), Modifier.size(20.dp)
+                                    supportingContent = { Text(listOf(metadata.artist, metadata.album).filter(String::isNotBlank).joinToString(" · "),
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    leadingContent = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        if (selecting) io.github.screwys.rufin.browse.SelectionMark(position in picked)
+                                        QueueSheetCover(row, player)
+                                    } },
+                                    // The handle drags at once; a hold anywhere on the row does too.
+                                    trailingContent = { RufinIcon("rufin-list-drag-handle-symbolic", translate("Drag to reorder"), Modifier.size(20.dp)
+                                        .pointerInput(row) {
+                                            detectDragGestures(onDragStart = { startDrag(position, row) },
+                                                onDrag = { change, amount -> change.consume(); dragBy(amount.y) },
+                                                onDragEnd = { finishDrag() }, onDragCancel = { cancelDrag() })
+                                        }, MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    colors = ListItemDefaults.colors(
+                                        containerColor = if (position in picked) MaterialTheme.colorScheme.secondaryContainer
+                                            else if (current) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerLow,
+                                        headlineColor = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface),
+                                    modifier = Modifier.semantics { contentDescription = translate("Hold to reorder") }
                                             .pointerInput(row) {
-                                                detectDragGestures(onDragStart = { startDrag(position, row) },
-                                                    onDrag = { change, amount -> change.consume(); dragBy(amount.y) },
-                                                    onDragEnd = { finishDrag() }, onDragCancel = { cancelDrag() })
-                                            }, MaterialTheme.colorScheme.onSurfaceVariant) },
-                                        colors = ListItemDefaults.colors(
-                                            containerColor = if (position in picked) MaterialTheme.colorScheme.secondaryContainer
-                                                else if (current) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainerLow,
-                                            headlineColor = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface),
-                                        modifier = Modifier.semantics { contentDescription = translate("Hold to reorder") }
-                                                .pointerInput(row) {
-                                                    detectDragGesturesAfterLongPress(onDragStart = { startDrag(position, row) },
-                                                        onDrag = { change, amount -> change.consume(); dragBy(amount.y) }, onDragEnd = {
-                                                        // A hold that did not move opens the track's menu.
-                                                        if (dragOrigin == dragIndex && kotlin.math.abs(dragDistance) < 12f) {
-                                                            cancelDrag(); openMenu(row)
-                                                        } else finishDrag()
-                                                    }, onDragCancel = { cancelDrag() })
-                                                }.clickable {
-                                                    if (selecting) picked = if (position in picked) picked - position else picked + position
-                                                    else { player.activateQueue(position); close() }
-                                                })
-                                }
+                                                detectDragGesturesAfterLongPress(onDragStart = { startDrag(position, row) },
+                                                    onDrag = { change, amount -> change.consume(); dragBy(amount.y) }, onDragEnd = {
+                                                    // A hold that did not move opens the track's menu.
+                                                    if (dragOrigin == dragIndex && kotlin.math.abs(dragDistance) < 12f) {
+                                                        cancelDrag(); openMenu(row)
+                                                    } else finishDrag()
+                                                }, onDragCancel = { cancelDrag() })
+                                            }.clickable {
+                                                if (selecting) picked = if (position in picked) picked - position else picked + position
+                                                else { player.activateQueue(position); close() }
+                                            })
                             }
                         }
                     }

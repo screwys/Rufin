@@ -3,6 +3,7 @@ package io.github.screwys.rufin.player
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.focusRing
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
@@ -43,16 +44,20 @@ import androidx.compose.ui.unit.Dp
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.settings.LocalReduceMotion
 
+/** The size of the icons in a surface's bars and tools: a tablet's page bars, sidebar and queue pane share
+ *  one, smaller than a phone's. */
+internal val LocalToolIconSize = compositionLocalOf { 24.dp }
+
 @Composable
 internal fun PlayerIconButton(
     icon: String, label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
     enabled: Boolean = true, selected: Boolean = false,
-    iconSize: Dp = 24.dp,
+    iconSize: Dp = LocalToolIconSize.current,
     glyph: Boolean = false,
 ) {
     val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else LocalContentColor.current,
         animationSpec = tween(if (LocalReduceMotion.current) 0 else 180), label = "playerActionTint")
-    IconButton(onClick, modifier, enabled, colors = IconButtonDefaults.iconButtonColors(contentColor = tint)) {
+    IconButton(onClick, modifier.focusRing(androidx.compose.foundation.shape.CircleShape), enabled, colors = IconButtonDefaults.iconButtonColors(contentColor = tint)) {
         RufinIcon(icon, translate(label), Modifier.size(iconSize), glyph = glyph)
     }
 }
@@ -66,6 +71,8 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
     modifier: Modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp), compact: Boolean = false,
     /** A drag up follows the finger into the player: each move, then whether it opened. */
     onReveal: ((Float) -> Unit)? = null, onRevealEnd: ((Boolean) -> Unit)? = null,
+    /** A tablet's floats over the page, centred. */
+    floating: Boolean = false,
 ) {
     val media by remember(player) { derivedStateOf {
         player.playback?.let { current -> current.transport.current?.id?.mediaUri?.let { uri ->
@@ -74,14 +81,9 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
         } }
     } }
     val current = media ?: return
-    val width = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
-    // Beyond 840 dp the player is a bar like GTK's; on foldable widths output moves left and
-    // favorite right of play and skip, without the seek line.
-    if (!compact && width >= 840) {
-        PlayerBar(player, current.playing, current.duration, onOpen, onOutput, modifier)
-        return
-    }
-    val foldable = !compact && width >= 600
+    // On foldable and tablet widths the bar holds the transport: output, previous, Play in the accent, next, favorite.
+    val tablet = floating
+    val foldable = !compact && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
     val reduceMotion = LocalReduceMotion.current
     val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
     val background by animateColorAsState(
@@ -91,7 +93,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
     val (swipe, offset) = rememberTrackSwipe(player)
     Surface(
-        modifier.widthIn(max = 600.dp).fillMaxWidth()
+        modifier.fillMaxWidth()
             .then(swipe)
             .pointerInput(threshold, onOpen, onReveal) {
                 var distance = 0f
@@ -100,15 +102,15 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     onDragEnd = { onRevealEnd?.invoke(distance < -threshold) ?: run { if (distance < -threshold) onOpen() } },
                     onDragCancel = { distance = 0f; onRevealEnd?.invoke(false) })
             }.clickable(interactionSource = null, indication = null, onClick = onOpen),
-        shape = RoundedCornerShape(if (compact) 28.dp else 16.dp), color = background, contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(if (compact) 28.dp else if (tablet) 22.dp else 16.dp), color = background,
+        contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = if (tablet) 8.dp else 0.dp,
     ) {
         Column {
             // The bar hugs its 48 dp cover; docked, a 40 dp cover keeps clear of the pill's rounded ends.
-            Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+            Row(Modifier.heightIn(min = if (tablet) 68.dp else 56.dp).padding(horizontal = if (tablet) 10.dp else 8.dp, vertical = 4.dp),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                if (foldable) PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
                 // The cover stays and cross-fades; the title slides with the finger inside its own faded area.
-                CoverCrossfade(artwork, Modifier.size(if (compact) 40.dp else 48.dp))
+                CoverCrossfade(artwork, Modifier.size(if (compact) 40.dp else if (tablet) 52.dp else 48.dp))
                 AnimatedContent(current.title to current.subtitle, Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)
                     .trackSlide(offset.value),
                     transitionSpec = { (slideInHorizontally(tween(if (reduceMotion) 0 else 180)) { it / 3 } + fadeIn(tween(if (reduceMotion) 0 else 180))) togetherWith
@@ -128,19 +130,21 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                         "Favorite current track", player::favorite, selected = favorite)
                 }
-                IconButton(player::togglePlayback) {
-                    if (player.refilling) RefillSpinner(34.dp)
-                    RufinIcon(if (current.playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
-                        translate(if (current.playing) "Pause" else "Play"), Modifier.size(24.dp))
-                }
                 if (foldable) {
+                    PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
+                    PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous)
+                    BarPlay(player, current.playing)
                     PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next)
                     val favorite = player.favorite
                     PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                         "Favorite current track", player::favorite, selected = favorite)
+                } else IconButton(player::togglePlayback) {
+                    if (player.refilling) RefillSpinner(34.dp)
+                    RufinIcon(if (current.playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
+                        translate(if (current.playing) "Pause" else "Play"), Modifier.size(24.dp))
                 }
             }
-            if (current.duration > 0UL && !foldable) MiniProgress(player, current.duration, player.playback?.transport?.state == io.github.screwys.rufin.shared.playback.TransportStatus.PLAYING)
+            if (current.duration > 0UL) MiniProgress(player, current.duration, player.playback?.transport?.state == io.github.screwys.rufin.shared.playback.TransportStatus.PLAYING)
         }
     }
 }
@@ -209,42 +213,36 @@ private fun MiniProgress(player: PlayerConnection, duration: ULong, playing: Boo
     )
 }
 
-/** The player bar of wide screens, as GTK's: the track on the left, the transport and its
- *  progress in the middle, output and favorite on the right. */
+/** The playing track on a TV, in the page's bar: it opens the player, which holds the transport. */
 @Composable
-private fun PlayerBar(player: PlayerConnection, playing: Boolean, duration: ULong, onOpen: () -> Unit, onOutput: () -> Unit, modifier: Modifier) {
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 52.dp.roundToPx() })
-    Surface(modifier.fillMaxWidth().clickable(interactionSource = null, indication = null, onClick = onOpen), shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer, contentColor = MaterialTheme.colorScheme.onSurface) {
-        Row(Modifier.height(76.dp).padding(horizontal = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Row(Modifier.weight(1f), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Artwork(artwork, Modifier.size(52.dp).clip(CoverShape))
-                Column(Modifier.padding(start = 12.dp)) {
-                    Text(player.currentItem?.metadata?.title.orEmpty(), Modifier.basicMarquee(), maxLines = 1, fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.bodyLarge)
-                    Text(player.currentItem?.metadata?.artist.orEmpty(), Modifier.basicMarquee(), maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+internal fun NowPlayingChip(player: PlayerConnection, onOpen: () -> Unit) {
+    val metadata = player.currentItem?.metadata ?: return
+    val playing = player.playback?.transport?.desiredPlaying == true
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 32.dp.roundToPx() })
+    Surface(onOpen, Modifier.padding(end = 8.dp).focusRing(RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(Modifier.height(48.dp).padding(start = 8.dp, end = 14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CoverCrossfade(artwork, Modifier.size(32.dp))
+            Column(Modifier.widthIn(max = 180.dp)) {
+                Text(metadata.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(metadata.artist, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Column(Modifier.weight(1.3f), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous)
-                    FilledIconButton(player::togglePlayback, Modifier.size(44.dp)) {
-                        RufinIcon(if (playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
-                            translate(if (playing) "Pause" else "Play"), Modifier.size(22.dp))
-                    }
-                    PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next)
-                }
-                if (duration > 0UL) Box(Modifier.widthIn(max = 420.dp).padding(top = 2.dp)) {
-                    MiniProgress(player, duration, player.playback?.transport?.state == io.github.screwys.rufin.shared.playback.TransportStatus.PLAYING)
-                }
-            }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
-                val favorite = player.favorite
-                PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                    "Favorite current track", player::favorite, selected = favorite)
-            }
+            RufinIcon(if (playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic", null, Modifier.size(18.dp))
+        }
+    }
+}
+
+/** Play on the foldable's and the tablet's players: the accent circle, the refill ring around it. */
+@Composable
+private fun BarPlay(player: PlayerConnection, playing: Boolean) {
+    Box(Modifier.size(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        if (player.refilling) RefillSpinner(50.dp, MaterialTheme.colorScheme.primary)
+        FilledIconButton(player::togglePlayback, Modifier.size(44.dp).focusRing(androidx.compose.foundation.shape.CircleShape)) {
+            RufinIcon(if (playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
+                translate(if (playing) "Pause" else "Play"), Modifier.size(22.dp))
         }
     }
 }

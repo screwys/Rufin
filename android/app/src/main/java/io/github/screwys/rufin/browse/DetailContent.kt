@@ -57,6 +57,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.focusRing
+import io.github.screwys.rufin.ui.ListScrollbar
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -237,6 +239,8 @@ internal fun DetailContent(
                 }
             }
         }
+        // Every page shows where it is, beside a list or alone.
+        ListScrollbar(state, Modifier.align(Alignment.CenterEnd).padding(top = LocalOverlayBarHeight.current, bottom = LocalPlayerBottomPadding.current))
     }
 }
 
@@ -350,7 +354,8 @@ private fun DetailHeader(
     val heading: @Composable () -> Unit = {
         BrowseTitle(item, maxLines = 1, style = title, marquee = true, showDownloadBadge = false)
         if (item.row.albumRow != null && summary.artistText.isNotBlank()) {
-            val linkColor = MaterialTheme.colorScheme.onSurface
+            // On the band it is the band's text colour, under the cover the page's.
+            val linkColor = LocalContentColor.current
             val credited = buildAnnotatedString {
                 append(summary.artistText)
                 summary.artistLinks.forEach { artist ->
@@ -379,9 +384,13 @@ private fun DetailHeader(
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val wide = maxWidth >= 560.dp
-        val coverTop = (bar - 28.dp).coerceAtLeast(16.dp)
-        val cover = if (wide) ((maxWidth - 32.dp) * .3f).coerceIn(164.dp, 224.dp) else (maxWidth - 32.dp).coerceAtMost(216.dp)
-        val band = if (wide) bar + 128.dp else coverTop + cover * .54f
+        // Beside its list a narrow page keeps the cover small beside the title, over the band's edge; the
+        // centred cover is one pane's.
+        val compact = !wide && LocalBesideList.current
+        val coverTop = if (compact) bar + 4.dp else (bar - 28.dp).coerceAtLeast(16.dp)
+        val cover = if (wide) ((maxWidth - 32.dp) * .3f).coerceIn(164.dp, 224.dp)
+            else if (compact) (if (maxWidth >= 370.dp) 112.dp else 100.dp) else (maxWidth - 32.dp).coerceAtMost(216.dp)
+        val band = if (wide) bar + 128.dp else coverTop + cover * if (compact) .78f else .54f
         val coverBox: @Composable () -> Unit = {
             Box(Modifier.size(cover).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f),
                 spotColor = Color.Black.copy(alpha = .4f)).pointerInput(item.row.key) { detectTapGestures(onLongPress = { onMenu(item) }) }) {
@@ -410,6 +419,18 @@ private fun DetailHeader(
                     if (summary.genres.isNotEmpty()) GenreChips(summary.genres, false, onOpenRoute)
                 }
                 Spacer(Modifier.height(18.dp))
+                buttons(false)
+            }
+        } else if (compact) Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                coverBox()
+                Column(Modifier.weight(1f).height(band - coverTop - 10.dp), verticalArrangement = Arrangement.Bottom) {
+                    CompositionLocalProvider(LocalContentColor provides OnBand) { heading() }
+                }
+            }
+            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                facts(false)
+                if (summary.genres.isNotEmpty()) GenreChips(summary.genres, false, onOpenRoute)
                 buttons(false)
             }
         } else Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
@@ -515,6 +536,21 @@ private fun DetailCover(artwork: Cover, modifier: Modifier,
 
 /** A list row showing the fields its list shows, as columns. */
 @OptIn(ExperimentalFoundationApi::class)
+/** The page is open beside the list it was picked from. */
+internal val LocalBesideList = compositionLocalOf { false }
+
+/** The route of the page open beside a list, whose row shows as picked. */
+internal val LocalSelectedRoute = compositionLocalOf<io.github.screwys.rufin.shared.rufin_core.Route?> { null }
+
+/** A list row: picked while its page is open beside the list, ringed while a D-pad or keyboard is on it. */
+@Composable
+internal fun Modifier.pickedRow(item: BrowseItem): Modifier {
+    val picked = item.row.route != null && item.row.route == LocalSelectedRoute.current
+    return clip(RoundedCornerShape(8.dp))
+        .background(if (picked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+        .focusRing(RoundedCornerShape(8.dp))
+}
+
 @Composable
 internal fun FieldRow(
     item: BrowseItem, player: PlayerConnection, showImage: Boolean, fields: List<AndroidSortField>,
@@ -530,7 +566,7 @@ internal fun FieldRow(
     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
     BrowseSwipeActions(item, allowSwipe) {
     val member = item.row.playlistFolderMember
-    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrop(item, player.model)
+    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrop(item, player.model).pickedRow(item)
         .combinedClickable(onClick = { activate(item) }, onLongClick = { menu(projected) })
         .padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -545,8 +581,9 @@ internal fun FieldRow(
                     RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(20.dp),
                         if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 }
-                LibraryField.ROW_INDEX -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodySmall)
+                // One line whatever the count: four digits fit, longer ones run into the gap beside them.
+                LibraryField.ROW_INDEX -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center, maxLines = 1, softWrap = false,
+                    overflow = TextOverflow.Visible, style = MaterialTheme.typography.bodySmall)
                 LibraryField.TITLE_MERGED -> Row(detailColumn(field.id), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
@@ -571,7 +608,7 @@ internal fun FieldRow(
 }
 
 private fun RowScope.detailColumn(id: LibraryField, imageSize: Dp = 48.dp): Modifier = when (id) {
-    LibraryField.ROW_INDEX -> Modifier.width(28.dp)
+    LibraryField.ROW_INDEX -> Modifier.width(34.dp)
     LibraryField.DURATION -> Modifier.width(44.dp)
     LibraryField.YEAR -> Modifier.width(40.dp)
     LibraryField.IMAGE -> Modifier.width(imageSize)

@@ -126,7 +126,10 @@ import androidx.compose.ui.semantics.setProgress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, page: BrowsePage? = browse.visiblePage) {
+internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, page: BrowsePage? = browse.visiblePage,
+    /** The page shows as the rows beside an opened page: Rows is its layout until Grid is picked, and the
+     *  rows carry no fields to size or arrange. */
+    beside: Boolean = false) {
     val options = page?.options
     val selected = options?.sort ?: page?.sortSelection?.sortKey
     val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options.descending
@@ -177,23 +180,24 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
                         }
                     } else (options?.displaySettings ?: page?.displaySettings)?.let { display ->
                         // A list with one layout has no choice to offer.
-                        if (display.layouts.size > 1) DisplayChoices("Layout", display.layouts, display.layout, { translate(when (it) {
+                        if (display.layouts.size > 1) DisplayChoices("Layout", if (beside) display.layouts - LibraryLayout.DETAIL else display.layouts,
+                            if (beside) LibraryLayout.ROW else display.layout, { translate(when (it) {
                             LibraryLayout.ROW -> "Rows"; LibraryLayout.GRID -> "Grid"; LibraryLayout.DETAIL -> "Detail"
                         }) }) { layout ->
-                            page?.chooseDisplay(layout, display.size, display.gridSpacing)
+                            page?.chooseDisplay(layout, display.size, display.gridSpacing, layoutPicked = true)
                         }
-                        DisplayChoices("Size", DisplaySize.entries, display.size, { translate(when (it) {
+                        if (!beside) DisplayChoices("Size", DisplaySize.entries, display.size, { translate(when (it) {
                             DisplaySize.COMPACT -> "Compact"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Large"
                         }) }) { size ->
                             page?.chooseDisplay(display.layout, size, display.gridSpacing)
                         }
-                        if (display.layout == LibraryLayout.GRID) DisplayChoices("Grid spacing", DisplaySize.entries, display.gridSpacing, { translate(when (it) {
+                        if (display.layout == LibraryLayout.GRID && !beside) DisplayChoices("Grid spacing", DisplaySize.entries, display.gridSpacing, { translate(when (it) {
                             DisplaySize.COMPACT -> "Small"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Wide"
                         }) }) { spacing ->
                             page?.chooseDisplay(display.layout, display.size, spacing)
                         }
                         // The fields as Home's blocks: a handle drags the shown ones into order, a switch shows or hides one.
-                        if (display.fieldChoices.isNotEmpty()) SettingsGroup(display.fieldsTitle) {
+                        if (display.fieldChoices.isNotEmpty() && !beside) SettingsGroup(display.fieldsTitle) {
                             SettingsReorderRows(display.fieldChoices.map { SettingsReorderItem(it.id.name, it.title, it.shown, it.shown, it.canToggle) },
                                 onReorder = { _, id, target, after -> page?.reorderField(LibraryField.valueOf(id), LibraryField.valueOf(target), after) },
                                 onToggle = { id, shown -> page?.showField(LibraryField.valueOf(id), shown) })
