@@ -940,8 +940,8 @@ fn format_metainfo_release(version: &str, release_date: &str, notes: &str) -> St
                 list.push(item);
             }
         } else if line.trim().is_empty() {
+            // Blank lines between bullets keep one list; the next paragraph ends it.
             flush_paragraph(&mut paragraph, &mut blocks);
-            flush_list(&mut list, &mut blocks);
         } else {
             flush_list(&mut list, &mut blocks);
             let item = strip_issue_refs(line);
