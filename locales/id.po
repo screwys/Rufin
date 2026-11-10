@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-10 04:21+0000\n"
+"PO-Revision-Date: 2026-11-10 09:04+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
 "\n"
@@ -230,160 +230,165 @@ msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
 msgid "1 day"
-msgstr ""
+msgstr "1 hari"
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 jam"
 
 msgid "1 month"
-msgstr ""
+msgstr "1 bulan"
 
 msgid "1 week"
-msgstr ""
+msgstr "1 minggu"
 
 msgid "1 year"
-msgstr ""
+msgstr "1 tahun"
 
 msgid "10 bands"
-msgstr ""
+msgstr "10 pita"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 jam"
 
+#, fuzzy
 msgid "128 kbps"
-msgstr ""
+msgstr "128 kbps"
 
 msgid "18 bands"
-msgstr ""
+msgstr "18 pita"
 
+#, fuzzy
 msgid "192 kbps"
-msgstr ""
+msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 jam"
 
+#, fuzzy
 msgid "256 kbps"
-msgstr ""
+msgstr "256 kbps"
 
 msgid "31 bands"
-msgstr ""
+msgstr "31 pita"
 
+#, fuzzy
 msgid "320 kbps"
-msgstr ""
+msgstr "320 kbps"
 
 msgid "5 Latest Albums"
-msgstr ""
+msgstr "5 Album Terbaru"
 
 msgid "6 hours"
-msgstr ""
+msgstr "6 jam"
 
 msgid "A new update is available, restart to apply"
-msgstr ""
+msgstr "Pembaruan tersedia, mulai ulang untuk menerapkan"
 
+#, fuzzy
 msgid "A"
-msgstr ""
+msgstr "A"
 
 msgid "API key (Subsonic)"
-msgstr ""
+msgstr "Kunci API (Subsonic)"
 
 msgid "API key"
-msgstr ""
+msgstr "Kunci API"
 
 msgid "API keys"
-msgstr ""
+msgstr "Kunci API"
 
 msgid "About Rufin"
-msgstr ""
+msgstr "Tentang Rufin"
 
 msgid "Absolute"
-msgstr ""
+msgstr "Absolut"
 
 msgid "Accent color"
-msgstr ""
+msgstr "Warna aksen"
 
 msgid "Access denied"
-msgstr ""
+msgstr "Akses ditolak"
 
 msgid "Access token"
-msgstr ""
+msgstr "Token akses"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Aksesibilitas"
 
 msgid "Actions"
-msgstr ""
+msgstr "Tindakan"
 
 msgid "Activity"
-msgstr ""
+msgstr "Aktivitas"
 
 msgid "Add Manually"
-msgstr ""
+msgstr "Tambahkan manual"
 
 msgid "Add Rule"
-msgstr ""
+msgstr "Tambah aturan"
 
 msgid "Add Source"
-msgstr ""
+msgstr "Tambah sumber"
 
 msgid "Add a matching server prefix"
-msgstr ""
+msgstr "Tambahkan awalan yang sesuai dengan server"
 
 msgid "Add a music folder"
-msgstr ""
+msgstr "Tambahkan folder musik"
 
 msgid "Add a music source to start listening."
-msgstr ""
+msgstr "Tambahkan sumber musik agar bisa mulai mendengarkan."
 
 msgid "Add a new source"
-msgstr ""
+msgstr "Tambah sumber baru"
 
 msgid "Add a source to configure downloads."
-msgstr ""
+msgstr "Tambahkan sumber untuk mengatur unduhan."
 
 msgid "Add a title"
-msgstr ""
+msgstr "Tambahkan judul"
 
 msgid "Add band"
-msgstr ""
+msgstr "Tambah pita"
 
 msgid "Add current"
 msgstr ""
 
 msgid "Add folder"
-msgstr ""
+msgstr "Tambah folder"
 
 msgid "Add image"
-msgstr ""
+msgstr "Tambah gambar"
 
 msgid "Add music"
-msgstr ""
+msgstr "Tambah musik"
 
 msgid "Add to Favorites"
-msgstr ""
+msgstr "Tambahkan ke Favorit"
 
 msgid "Add to Playlist"
-msgstr ""
+msgstr "Tambahkan ke Playlist"
 
 msgid "Add to Saved"
 msgstr ""
 
 msgid "Add to folder"
-msgstr ""
+msgstr "Tambahkan ke folder"
 
 msgid "Add to library"
 msgstr ""
 
 msgid "Add tracks when fewer than this many remain"
-msgstr ""
+msgstr "Tambah lagu saat sisa kurang dari jumlah ini"
 
 msgid "Add"
-msgstr ""
+msgstr "Tambah"
 
 msgid "Added to"
-msgstr ""
+msgstr "Ditambahkan ke"
 
 msgid "Album Artists"
-msgstr ""
+msgstr "Artis Album"
 
 msgid "Album artist sort"
 msgstr ""
