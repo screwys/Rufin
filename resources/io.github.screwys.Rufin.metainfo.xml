@@ -28,7 +28,7 @@
       <li>Downloads with automatic rules and transcoding</li>
       <li>Playlists across sources, and smart playlists built on metadata and listening activity</li>
       <li>Synced lyrics with karaoke mode, Japanese readings, search/edit/automatically save lyrics</li>
-      <li>Metadata and artwork editor with bulk edits, audio fingerprint calculation & lookup</li>
+      <li>Metadata and artwork editor with bulk edits, audio fingerprint calculation &amp; lookup</li>
       <li>Last.fm, Libre.fm, ListenBrainz and Discord Rich Presence integrations</li>
       <li>Casting to UPnP and Chromecast, a Web UI and an HTTP API for scripts</li>
       <li>Custom themes, a mini player, fullscreen visualizer and an extensive keyboard shortcuts catalog</li>
@@ -38,39 +38,59 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
-      <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/genres.png</image>
+      <caption>Browse artists</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artists.png</image>
     </screenshot>
     <screenshot>
-      <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/smart_playlists.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playback_settings.png</image>
+      <caption>Use the compact sidebar</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/compact_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
-      <caption>Configure the visualizer</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/visualizer_settings.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Configure integrations</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/integrations.png</image>
+      <caption>Create smart playlists</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playlist_settings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Edit metadata of several tracks</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Look up metadata on MusicBrainz</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata_lookup.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Find and sync lyrics</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata_lyrics.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Tune the equalizer</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/equalizer_settings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Customize how lists look</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/customize_display.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Rearrange the sidebar and the visualizer, queue and lyrics panes</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/reorder_sidebar.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Configure integrations</caption>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/integrations.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
