@@ -157,6 +157,34 @@ nix run github:screwys/Rufin/main
 nix run github:screwys/Rufin/vX.Y.Z
 ```
 
+## Gentoo
+Rufin is available in [karioverlay](https://git.fumo.pet/kariga/karioverlay) repository for gentoo.
+
+⚠️ If you find any issues with the gentoo ebuild, please contant the repository mainteiner.
+
+First make sure you have `app-eselect/eselect-repository` installed.
+```bash
+emerge --ask app-eselect/eselect-repository
+```
+After that enable and sync it by commands below.
+```bash
+sudo eselect repository add karioverlay git https://git.fumo.pet/kariga/karioverlay
+sudo emaint sync -r karioverlay
+```
+
+To emerge rufin, you will need to edit your `/etc/portage/package.accept_keywords`. Choose one of the options.
+```
+media-sound/rufin ~amd64 (Emerge from source code of latest stable version)
+```
+```
+media-sound/rufin ** (Emerge from last git commit)
+```
+
+Finally, emerge the `media-sound/rufin` package.
+```bash
+emerge -av media-sound/rufin
+```
+
 ## Windows
 
 Download the .exe from [GitHub Releases](https://github.com/screwys/Rufin/releases/latest).
