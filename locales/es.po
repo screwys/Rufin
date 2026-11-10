@@ -194,6 +194,16 @@ msgstr ""
 "compartir la URL del proveedor con el renderizador"
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -384,6 +394,11 @@ msgstr "Acciones"
 
 msgid "Activity"
 msgstr "Actividad"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "Añadir Regla"
 
 msgid "Add Rule"
 msgstr "Añadir Regla"
@@ -585,6 +600,9 @@ msgstr "Álbumes del artista"
 msgid "Artist name"
 msgstr "Nombre del artista"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr "Radio del artista"
 
@@ -614,6 +632,11 @@ msgstr "Almacenamiento de arte"
 
 msgid "Artwork"
 msgstr "Portada"
+
+#, fuzzy
+#| msgid "Guest / public access"
+msgid "Asks for music access"
+msgstr "Invitado / Acceso público"
 
 msgid "Audio effects"
 msgstr ""
@@ -902,10 +925,21 @@ msgstr ""
 msgid "Choose playback output"
 msgstr "Elige una salida de reproducción"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr "Elegir si guardar las descargas completadas."
 
 msgid "Choose"
+msgstr "Elegir"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "Elegir"
 
 msgid "Circular spectrum"
@@ -1937,6 +1971,9 @@ msgstr "Adelante"
 msgid "Found Servers"
 msgstr "Servidores encontrados"
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr "Límite de cuadros por segundo"
 
@@ -2187,6 +2224,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Unirse al perfil"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr "Unirse"
 
@@ -2346,7 +2386,7 @@ msgstr "Cargando..."
 
 #, fuzzy
 #| msgid "Server Address Override (optional)"
-msgid "Local Address (optional)"
+msgid "Local Address"
 msgstr "Sustitución de la dirección del servidor (opcional)"
 
 msgid "Local File Access"
@@ -2433,6 +2473,9 @@ msgstr ""
 
 msgid "Lyrics background opacity"
 msgstr "Opacidad del fondo de las letras"
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
+msgstr ""
 
 msgid "Lyrics loaded"
 msgstr "Letras cargadas"
@@ -2620,8 +2663,18 @@ msgstr "Carpeta de música"
 msgid "Music access permission was denied"
 msgstr "Se denegó el permiso de acceso a la música"
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "Carpeta de música"
+
 msgid "Music folders on the Rufin machine"
 msgstr "Carpetas de música en la máquina de Rufin"
+
+#, fuzzy
+#| msgid "Music on this device"
+msgid "Music on this phone"
+msgstr "Música en este dispositivo"
 
 msgid "Music"
 msgstr "Música"
@@ -2933,9 +2986,6 @@ msgstr "Apagar"
 msgid "Offline"
 msgstr "Sin conexión"
 
-msgid "On this device"
-msgstr "En este dispositivo"
-
 msgid "On"
 msgstr "Encendido"
 
@@ -2951,6 +3001,9 @@ msgstr ""
 
 msgid "One path per line"
 msgstr "Una ruta por línea"
+
+msgid "Online Lookups"
+msgstr ""
 
 msgid "Only fill missing information"
 msgstr ""
@@ -3333,9 +3386,6 @@ msgstr "Anterior"
 msgid "Privacy & Security"
 msgstr "Privacidad y seguridad"
 
-msgid "Privacy and Security"
-msgstr "Privacidad y seguridad"
-
 msgid "Private mode is off"
 msgstr "El modo privado esta desactivado"
 
@@ -3505,9 +3555,6 @@ msgstr "Recargar"
 
 msgid "Remote lyrics"
 msgstr "Letras remotas"
-
-msgid "Remote"
-msgstr "Remoto"
 
 msgid "Remove All Downloads"
 msgstr "Quitar todas las descargas"
@@ -3858,6 +3905,11 @@ msgstr "Buscar ajustes"
 msgid "Search queue"
 msgstr "Buscar en cola"
 
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Search this network"
+msgstr "Buscar ilustración"
+
 msgid "Search unavailable"
 msgstr "Búsqueda no disponible"
 
@@ -3966,7 +4018,9 @@ msgstr "Septiembre del {year}"
 msgid "Server Actions"
 msgstr "Acciones del servidor"
 
-msgid "Server Address Override (optional)"
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Server Address Override"
 msgstr "Sustitución de la dirección del servidor (opcional)"
 
 msgid "Server Address"
@@ -3995,17 +4049,11 @@ msgstr "El descubrimiento de servidor falló: {error}"
 msgid "Server is unreachable"
 msgstr "No se puede localizar el servidor"
 
-msgid "Server lyrics are off in private mode"
-msgstr "Las letras se desactivan en modo privado"
-
 msgid "Server prefix doesn't match"
 msgstr "El prefijo del servidor no concuerda"
 
 msgid "Server"
 msgstr "Servidor"
-
-msgid "Servers"
-msgstr "Servidores"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Establecer el tipo de actividad de Discord en \"Escuchando\""
@@ -4103,6 +4151,9 @@ msgstr "Mostrar/Ocultar barra derecha"
 msgid "Showcase"
 msgstr "Destacados"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Aleatorio"
 
@@ -4161,6 +4212,9 @@ msgstr "Saltar transición suave en el mismo álbum"
 #| msgid "Only unplayed tracks"
 msgid "Skip unplayable tracks"
 msgstr "Solo pistas no reproducidas"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr "Pizarra"
@@ -4254,6 +4308,11 @@ msgstr "Linea de espectro"
 #| msgid "Spectrum line"
 msgid "Spectrum"
 msgstr "Linea de espectro"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Start Listening"
+msgstr "ListenBrainz"
 
 msgid "Start minimized"
 msgstr "Inicio minimizado"
@@ -4543,6 +4602,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "Encender modo privado"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr "Escribe para buscar o crear una lista de reproducción nueva"
 
@@ -4696,7 +4758,9 @@ msgstr ""
 "Usa las letras sincronizadas si están disponibles o las recupera desde "
 "internet"
 
-msgid "Verification Code (optional)"
+#, fuzzy
+#| msgid "Verification Code (optional)"
+msgid "Verification Code"
 msgstr "Código de verificación (opcional)"
 
 msgid "Verify server certificate"
@@ -4767,6 +4831,15 @@ msgstr "Semanalmente"
 msgid "Weighting"
 msgstr ""
 
+#, fuzzy
+#| msgctxt "Windows installer"
+#| msgid "Welcome to Rufin Setup"
+msgid "Welcome to Rufin"
+msgstr "Bienvenido al instalador de Rufin"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr "Ancho"
 
@@ -4793,6 +4866,9 @@ msgstr "Amarillo"
 
 msgid "Yes"
 msgstr "Sí"
+
+msgid "Your library is ready"
+msgstr ""
 
 msgid "Your music belongs here"
 msgstr "Tu música pertenece aquí"
@@ -5042,6 +5118,21 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
 
+#~ msgid "On this device"
+#~ msgstr "En este dispositivo"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "Privacidad y seguridad"
+
+#~ msgid "Remote"
+#~ msgstr "Remoto"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr "Las letras se desactivan en modo privado"
+
+#~ msgid "Servers"
+#~ msgstr "Servidores"
+
 #~ msgid "Artwork cache cleared"
 #~ msgstr "La caché de portadas se ha vaciado"
 
@@ -5272,9 +5363,6 @@ msgstr "Bienvenido al instalador de Rufin"
 
 #~ msgid "Media available"
 #~ msgstr "Medios disponibles"
-
-#~ msgid "Music on this device"
-#~ msgstr "Música en este dispositivo"
 
 #~ msgid "Preparing smaller media"
 #~ msgstr "Preparando medios mas pequeños"

@@ -141,6 +141,16 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -296,6 +306,9 @@ msgid "Actions"
 msgstr ""
 
 msgid "Activity"
+msgstr ""
+
+msgid "Add Manually"
 msgstr ""
 
 msgid "Add Rule"
@@ -481,6 +494,9 @@ msgstr ""
 msgid "Artist name"
 msgstr ""
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr ""
 
@@ -509,6 +525,9 @@ msgid "Artwork storage"
 msgstr ""
 
 msgid "Artwork"
+msgstr ""
+
+msgid "Asks for music access"
 msgstr ""
 
 msgid "Audio effects"
@@ -759,10 +778,19 @@ msgstr ""
 msgid "Choose playback output"
 msgstr ""
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
+msgstr ""
+
+msgid "Choose..."
 msgstr ""
 
 msgid "Circular spectrum"
@@ -1691,6 +1719,9 @@ msgstr ""
 msgid "Found Servers"
 msgstr ""
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr ""
 
@@ -1928,6 +1959,9 @@ msgstr ""
 msgid "Join profile"
 msgstr ""
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr ""
 
@@ -2075,7 +2109,7 @@ msgstr ""
 msgid "Loading..."
 msgstr ""
 
-msgid "Local Address (optional)"
+msgid "Local Address"
 msgstr ""
 
 msgid "Local File Access"
@@ -2156,6 +2190,9 @@ msgid "Low shelf"
 msgstr ""
 
 msgid "Lyrics background opacity"
+msgstr ""
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
 
 msgid "Lyrics loaded"
@@ -2326,7 +2363,13 @@ msgstr ""
 msgid "Music access permission was denied"
 msgstr ""
 
+msgid "Music folder"
+msgstr ""
+
 msgid "Music folders on the Rufin machine"
+msgstr ""
+
+msgid "Music on this phone"
 msgstr ""
 
 msgid "Music"
@@ -2623,9 +2666,6 @@ msgstr ""
 msgid "Offline"
 msgstr ""
 
-msgid "On this device"
-msgstr ""
-
 msgid "On"
 msgstr ""
 
@@ -2639,6 +2679,9 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "One path per line"
+msgstr ""
+
+msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
@@ -3004,9 +3047,6 @@ msgstr ""
 msgid "Privacy & Security"
 msgstr ""
 
-msgid "Privacy and Security"
-msgstr ""
-
 msgid "Private mode is off"
 msgstr ""
 
@@ -3167,9 +3207,6 @@ msgid "Reload"
 msgstr ""
 
 msgid "Remote lyrics"
-msgstr ""
-
-msgid "Remote"
 msgstr ""
 
 msgid "Remove All Downloads"
@@ -3489,6 +3526,9 @@ msgstr ""
 msgid "Search queue"
 msgstr ""
 
+msgid "Search this network"
+msgstr ""
+
 msgid "Search unavailable"
 msgstr ""
 
@@ -3585,7 +3625,7 @@ msgstr ""
 msgid "Server Actions"
 msgstr ""
 
-msgid "Server Address Override (optional)"
+msgid "Server Address Override"
 msgstr ""
 
 msgid "Server Address"
@@ -3612,16 +3652,10 @@ msgstr ""
 msgid "Server is unreachable"
 msgstr ""
 
-msgid "Server lyrics are off in private mode"
-msgstr ""
-
 msgid "Server prefix doesn't match"
 msgstr ""
 
 msgid "Server"
-msgstr ""
-
-msgid "Servers"
 msgstr ""
 
 msgid "Set the Discord activity type to Listening"
@@ -3717,6 +3751,9 @@ msgstr ""
 msgid "Showcase"
 msgstr ""
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr ""
 
@@ -3772,6 +3809,9 @@ msgid "Skip same-album crossfade"
 msgstr ""
 
 msgid "Skip unplayable tracks"
+msgstr ""
+
+msgid "Skip"
 msgstr ""
 
 msgid "Slate"
@@ -3853,6 +3893,9 @@ msgid "Spectrum line"
 msgstr ""
 
 msgid "Spectrum"
+msgstr ""
+
+msgid "Start Listening"
 msgstr ""
 
 msgid "Start minimized"
@@ -4119,6 +4162,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr ""
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr ""
 
@@ -4260,7 +4306,7 @@ msgstr ""
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 
-msgid "Verification Code (optional)"
+msgid "Verification Code"
 msgstr ""
 
 msgid "Verify server certificate"
@@ -4329,6 +4375,12 @@ msgstr ""
 msgid "Weighting"
 msgstr ""
 
+msgid "Welcome to Rufin"
+msgstr ""
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr ""
 
@@ -4354,6 +4406,9 @@ msgid "Yellow"
 msgstr ""
 
 msgid "Yes"
+msgstr ""
+
+msgid "Your library is ready"
 msgstr ""
 
 msgid "Your music belongs here"

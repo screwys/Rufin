@@ -155,6 +155,16 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -325,6 +335,11 @@ msgstr "Palvelimen toiminnot"
 
 msgid "Activity"
 msgstr "Aktiviteetti"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "Lisää sääntö"
 
 msgid "Add Rule"
 msgstr "Lisää sääntö"
@@ -539,6 +554,9 @@ msgstr "Esittäjät"
 msgid "Artist name"
 msgstr "Esittäjän nimi"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr ""
 
@@ -578,6 +596,9 @@ msgstr "Salaisuuden tallennustila"
 
 msgid "Artwork"
 msgstr "Kuvitus"
+
+msgid "Asks for music access"
+msgstr ""
 
 msgid "Audio effects"
 msgstr ""
@@ -863,10 +884,21 @@ msgstr ""
 msgid "Choose playback output"
 msgstr "Valitse toiston ulostulo"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
+msgstr "Valitse"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "Valitse"
 
 msgid "Circular spectrum"
@@ -1999,6 +2031,9 @@ msgstr ""
 msgid "Found Servers"
 msgstr "Löydetyt palvelimet"
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr ""
 
@@ -2260,6 +2295,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Kotiprofiili"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr "Liity"
 
@@ -2427,7 +2465,7 @@ msgstr "Tallennetaan..."
 
 #, fuzzy
 #| msgid "Verification Code (optional)"
-msgid "Local Address (optional)"
+msgid "Local Address"
 msgstr "Vahvistuskoodi (valinnainen)"
 
 msgid "Local File Access"
@@ -2512,6 +2550,9 @@ msgid "Low shelf"
 msgstr ""
 
 msgid "Lyrics background opacity"
+msgstr ""
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
 
 msgid "Lyrics loaded"
@@ -2700,8 +2741,18 @@ msgstr "Musiikkikansio"
 msgid "Music access permission was denied"
 msgstr ""
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "Musiikkikansio"
+
 msgid "Music folders on the Rufin machine"
 msgstr ""
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Music on this phone"
+msgstr "Tällä laitteella"
 
 #, fuzzy
 #| msgid "My music"
@@ -3046,9 +3097,6 @@ msgstr ""
 msgid "Offline"
 msgstr ""
 
-msgid "On this device"
-msgstr "Tällä laitteella"
-
 msgid "On"
 msgstr ""
 
@@ -3062,6 +3110,9 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "One path per line"
+msgstr ""
+
+msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
@@ -3477,9 +3528,6 @@ msgstr "Edellinen"
 msgid "Privacy & Security"
 msgstr "Tietosuoja ja turvallisuus"
 
-msgid "Privacy and Security"
-msgstr "Tietosuoja ja turvallisuus"
-
 msgid "Private mode is off"
 msgstr "Yksityinen tila on pois päältä"
 
@@ -3673,9 +3721,6 @@ msgstr "Lataa uudelleen"
 
 msgid "Remote lyrics"
 msgstr "Etäsanoitukset"
-
-msgid "Remote"
-msgstr ""
 
 msgid "Remove All Downloads"
 msgstr "Poista kaikki lataukset"
@@ -4045,6 +4090,11 @@ msgid "Search queue"
 msgstr ""
 
 #, fuzzy
+#| msgid "Show artwork"
+msgid "Search this network"
+msgstr "Näytä kuvitus"
+
+#, fuzzy
 #| msgid "Search is unavailable"
 msgid "Search unavailable"
 msgstr "Haku ei ole saatavilla"
@@ -4154,8 +4204,10 @@ msgstr ""
 msgid "Server Actions"
 msgstr "Palvelimen toiminnot"
 
-msgid "Server Address Override (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Server Address"
+msgid "Server Address Override"
+msgstr "Palvelimen osoite"
 
 msgid "Server Address"
 msgstr "Palvelimen osoite"
@@ -4183,17 +4235,11 @@ msgstr ""
 msgid "Server is unreachable"
 msgstr ""
 
-msgid "Server lyrics are off in private mode"
-msgstr "Palvelimen sanoitukset eivät ole käytössä yksityistilassa"
-
 msgid "Server prefix doesn't match"
 msgstr ""
 
 msgid "Server"
 msgstr "Palvelin"
-
-msgid "Servers"
-msgstr "Palvelimet"
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
@@ -4304,6 +4350,9 @@ msgstr "Näytä/piilota oikea sivupalkki"
 msgid "Showcase"
 msgstr "Esittelyssä"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Satunnaistoisto"
 
@@ -4370,6 +4419,9 @@ msgstr "Ohita saman albumin ristihäivytys"
 #| msgid "Only played tracks"
 msgid "Skip unplayable tracks"
 msgstr "Vain toistetut kappaleet"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr ""
@@ -4463,6 +4515,11 @@ msgstr ""
 
 msgid "Spectrum"
 msgstr ""
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Start Listening"
+msgstr "ListenBrainz"
 
 msgid "Start minimized"
 msgstr "Käynnistä pienennettynä"
@@ -4778,6 +4835,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "Ota yksityistila käyttöön"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr "Kirjoita hakeaksesi tai luodaksesi uuden soittolistan"
 
@@ -4949,7 +5009,9 @@ msgstr "Käyttäjätunnus"
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 
-msgid "Verification Code (optional)"
+#, fuzzy
+#| msgid "Verification Code (optional)"
+msgid "Verification Code"
 msgstr "Vahvistuskoodi (valinnainen)"
 
 msgid "Verify server certificate"
@@ -5026,6 +5088,15 @@ msgstr "Viikottain"
 msgid "Weighting"
 msgstr ""
 
+#, fuzzy
+#| msgctxt "Windows installer"
+#| msgid "Welcome to Rufin Setup"
+msgid "Welcome to Rufin"
+msgstr "Tervetuloa Rufinin asennukseen"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr ""
 
@@ -5054,6 +5125,9 @@ msgstr "Keltainen"
 
 msgid "Yes"
 msgstr "Kyllä"
+
+msgid "Your library is ready"
+msgstr ""
 
 msgid "Your music belongs here"
 msgstr "Musiikkisi kuuluu tänne"
@@ -5297,6 +5371,18 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
 
+#~ msgid "On this device"
+#~ msgstr "Tällä laitteella"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "Tietosuoja ja turvallisuus"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr "Palvelimen sanoitukset eivät ole käytössä yksityistilassa"
+
+#~ msgid "Servers"
+#~ msgstr "Palvelimet"
+
 #, fuzzy
 #~| msgid "No folder selected"
 #~ msgid "Artwork cache cleared"
@@ -5514,11 +5600,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~| msgid "Search is unavailable"
 #~ msgid "Media available"
 #~ msgstr "Haku ei ole saatavilla"
-
-#, fuzzy
-#~| msgid "On this device"
-#~ msgid "Music on this device"
-#~ msgstr "Tällä laitteella"
 
 #, fuzzy
 #~| msgid "Preparing library..."
