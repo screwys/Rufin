@@ -377,6 +377,45 @@ async fn write_track_membership(
     Ok(())
 }
 
+/// Moves the user's favorite and rating from one URI to others; what another holds already
+/// stays.
+pub(super) async fn move_user_state(
+    write: &mut Write<'_>,
+    previous: &str,
+    current: &[&str],
+) -> LibraryResult<()> {
+    let mut states = Vec::<super::write::StateRow>::new();
+    for current in current {
+        states.extend(
+            sqlx::query_as::<_, super::write::StateRow>(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO user_state(media_uri,favorite,rating,changed_at)
+                SELECT ?2,favorite,rating,changed_at FROM user_state WHERE media_uri=?1
+                ON CONFLICT(media_uri) DO UPDATE SET
+                    favorite=COALESCE(user_state.favorite,excluded.favorite),
+                    rating=COALESCE(user_state.rating,excluded.rating)
+                WHERE (user_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
+                   OR (user_state.rating IS NULL AND excluded.rating IS NOT NULL){}",
+                super::write::STATE_RETURNING
+            )))
+            .bind(previous)
+            .bind(current)
+            .fetch_all(write.connection().await?)
+            .await?,
+        );
+    }
+    states.extend(
+        sqlx::query_as::<_, super::write::StateRow>(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM user_state WHERE media_uri=?1{}",
+            super::write::STATE_DELETED
+        )))
+        .bind(previous)
+        .fetch_all(write.connection().await?)
+        .await?,
+    );
+    write.states_changed(states);
+    Ok(())
+}
+
 /// A track's source, the source's object id and the track's object id.
 async fn track_identity(
     write: &mut Write<'_>,
@@ -602,30 +641,7 @@ pub(super) async fn merge_local_file_uris_on(
             write.rekey(old_key, current_key);
             merged = true;
         }
-        let mut states: Vec<super::write::StateRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO user_state(media_uri,favorite,rating,changed_at)
-            SELECT ?2,favorite,rating,changed_at FROM user_state WHERE media_uri=?1
-            ON CONFLICT(media_uri) DO UPDATE SET
-                favorite=COALESCE(user_state.favorite,excluded.favorite),
-                rating=COALESCE(user_state.rating,excluded.rating)
-            WHERE (user_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
-               OR (user_state.rating IS NULL AND excluded.rating IS NOT NULL){}",
-            super::write::STATE_RETURNING
-        )))
-        .bind(previous)
-        .bind(current)
-        .fetch_all(write.connection().await?)
-        .await?;
-        states.extend(
-            sqlx::query_as::<_, super::write::StateRow>(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM user_state WHERE media_uri=?1{}",
-                super::write::STATE_DELETED
-            )))
-            .bind(previous)
-            .fetch_all(write.connection().await?)
-            .await?,
-        );
-        write.states_changed(states);
+        move_user_state(write, previous, &[current]).await?;
         sqlx::query("UPDATE listens SET media_uri=?2 WHERE media_uri=?1")
             .bind(previous)
             .bind(current)

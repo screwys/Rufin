@@ -601,18 +601,21 @@ fn set_text(tag: &mut Tag, key: ItemKey, value: Option<&str>) {
     }
 }
 
+/// The value with the previous name replaced where it stands; the other names and separators
+/// stay as written.
 fn replace_name(value: &str, previous: &str, replacement: &str) -> String {
-    super::media::split_names(value)
-        .into_iter()
-        .map(|name| {
-            if name.eq_ignore_ascii_case(previous.trim()) {
-                replacement.to_string()
-            } else {
-                name
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
+    let mut replaced = String::new();
+    let mut rest = 0;
+    for name in super::media::name_parts(value) {
+        if name.eq_ignore_ascii_case(previous.trim()) {
+            let start = name.as_ptr() as usize - value.as_ptr() as usize;
+            replaced.push_str(value.get(rest..start).unwrap_or_default());
+            replaced.push_str(replacement);
+            rest = start + name.len();
+        }
+    }
+    replaced.push_str(value.get(rest..).unwrap_or_default());
+    replaced
 }
 
 pub(crate) fn project_edit(
@@ -766,10 +769,7 @@ pub(crate) fn scope_values(
                 let entries = if scope_key == "title" {
                     super::media::split_names(text)
                 } else {
-                    text.split([';', '/'])
-                        .map(str::trim)
-                        .map(str::to_string)
-                        .collect()
+                    super::media::name_parts(text).map(str::to_string).collect()
                 };
                 values.insert(
                     scope_key.into(),
@@ -798,9 +798,7 @@ fn artist_values(current: &str, names: &[String], selected: &str, value: Option<
     if names.len() == 1 {
         return value.unwrap_or_default().to_string();
     }
-    let mut values = current
-        .split([';', '/'])
-        .map(str::trim)
+    let mut values = super::media::name_parts(current)
         .map(str::to_string)
         .collect::<Vec<_>>();
     if values.len() < names.len() {
