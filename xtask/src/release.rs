@@ -931,8 +931,6 @@ fn format_metainfo_release(version: &str, release_date: &str, notes: &str) -> St
     let mut paragraph = Vec::new();
     let mut list = Vec::new();
 
-    // AppStream descriptions carry no links, and a plaintext URL fails validation.
-    let notes = strip_markdown_links(notes);
     for line in notes.lines() {
         let line = line.trim_end();
         if let Some(item) = line.trim_start().strip_prefix("- ") {
@@ -982,28 +980,6 @@ fn flush_list(list: &mut Vec<String>, blocks: &mut Vec<String>) {
         blocks.push(format!("          <li>{}</li>\n", xml_escape(&item)));
     }
     blocks.push("        </ul>\n".to_owned());
-}
-
-/// Replaces Markdown links `[text](url)` with their text.
-fn strip_markdown_links(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut rest = input;
-    while let Some(open) = rest.find('[') {
-        let after = &rest[open + 1..];
-        if let Some((text, tail)) = after.split_once("](")
-            && !text.contains(['[', ']', '\n'])
-            && let Some(close) = tail.find(')')
-        {
-            output.push_str(&rest[..open]);
-            output.push_str(text);
-            rest = &tail[close + 1..];
-            continue;
-        }
-        output.push_str(&rest[..=open]);
-        rest = after;
-    }
-    output.push_str(rest);
-    output
 }
 
 fn strip_issue_refs(input: &str) -> String {
