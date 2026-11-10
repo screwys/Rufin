@@ -1,13 +1,17 @@
 include(FetchContent)
 
-# The mobile SDK omits these plugins. Build their unchanged upstream sources.
+# The mobile SDK omits these plugins. Build their unchanged upstream sources. The archives
+# stay in the toolchain directory, so new build directories and CI reuse them.
+set(rufin_downloads "${CMAKE_CURRENT_LIST_DIR}/../.toolchains/downloads")
 FetchContent_Declare(rufin_libbs2b
     URL https://downloads.sourceforge.net/project/bs2b/libbs2b/3.1.0/libbs2b-3.1.0.tar.gz
     URL_HASH SHA256=6aaafd81aae3898ee40148dd1349aab348db9bfae9767d0e66e0b07ddd4b2528
+    DOWNLOAD_DIR "${rufin_downloads}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_Declare(rufin_gst_bad
     URL https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz
     URL_HASH SHA256=dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe
+    DOWNLOAD_DIR "${rufin_downloads}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(rufin_libbs2b rufin_gst_bad)
 
@@ -25,6 +29,7 @@ target_link_libraries(RufinBs2b PRIVATE GStreamer::api_audio m)
 FetchContent_Declare(rufin_chromaprint
     URL https://github.com/acoustid/chromaprint/archive/refs/tags/v1.6.0.tar.gz
     URL_HASH SHA256=65bfce4a35b2e673dbcda917b6aa577e2f145cf805243d19e6a50fea2a520c2a
+    DOWNLOAD_DIR "${rufin_downloads}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 block()
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
