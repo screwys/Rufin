@@ -20,9 +20,6 @@ concurrency:
   group: flatpak-${{ inputs.upload_release_tag || github.ref }}
   cancel-in-progress: true
 
-env:
-  BUNDLE_NAME: io.github.screwys.Rufin.flatpak
-
 jobs:
   validate:
     name: Validate release target
@@ -62,16 +59,17 @@ jobs:
       artifact-metadata: write
 
     steps:
-      - name: Download workflow artifact
+      - name: Download workflow artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: ${{ env.BUNDLE_NAME }}
+          pattern: io.github.screwys.Rufin-*.flatpak
+          merge-multiple: true
           path: dist
 
-      - name: Attest Flatpak bundle
+      - name: Attest Flatpak bundles
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: dist/${{ env.BUNDLE_NAME }}
+          subject-path: dist/io.github.screwys.Rufin-*.flatpak
 
       - name: Upload release asset
         env:
@@ -80,6 +78,7 @@ jobs:
         run: |
           gh release upload \
             "$RELEASE_TAG" \
-            "dist/$BUNDLE_NAME" \
+            dist/io.github.screwys.Rufin-x86_64.flatpak \
+            dist/io.github.screwys.Rufin-aarch64.flatpak \
             --clobber \
             --repo "$GITHUB_REPOSITORY"

@@ -27,13 +27,21 @@ concurrency:
 
 env:
   APP_ID: io.github.screwys.Rufin
-  BUNDLE_NAME: io.github.screwys.Rufin.flatpak
   RUNTIME_REPO_URL: https://flathub.org/repo/flathub.flatpakrepo
 
 jobs:
   bundle:
-    name: Build Flatpak bundle
-    runs-on: ubuntu-latest
+    name: Build Flatpak ${{ matrix.architecture }} bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        # aarch64 builds run only for releases.
+        include: ${{ fromJSON(inputs.release_tag != ''
+          && '[{"architecture":"x86_64","runner":"ubuntu-24.04"},{"architecture":"aarch64","runner":"ubuntu-24.04-arm"}]'
+          || '[{"architecture":"x86_64","runner":"ubuntu-24.04"}]') }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      BUNDLE_NAME: io.github.screwys.Rufin-${{ matrix.architecture }}.flatpak
 
     steps:
       - name: Install Flatpak tooling
@@ -61,18 +69,19 @@ jobs:
           persist-credentials: false
 
       - name: Verify signed release tag
-        if: inputs.verify_signed_tag
+        if: matrix.architecture == 'x86_64' && inputs.verify_signed_tag
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
 
       - name: Validate release metadata
-        if: inputs.release_tag != '' && !inputs.verify_signed_tag
+        if: matrix.architecture == 'x86_64' && inputs.release_tag != '' && !inputs.verify_signed_tag
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: cargo run --locked -p xtask -- verify release-metadata "$RELEASE_TAG"
 
       - name: Check Cargo sources
+        if: matrix.architecture == 'x86_64'
         run: cargo run --locked -p xtask -- generate flatpak-sources --check
 
       - name: Build Flatpak bundle
