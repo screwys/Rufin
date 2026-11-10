@@ -26,6 +26,9 @@ internal fun RufinIcon(
         scaleY = resource.glyphScale
         translationX = resource.glyphX * size.width
         translationY = resource.glyphY * size.height
-    } else modifier
+    // On a canvas wider than the 16 px grid the body is the grid's size: drawn that much larger, it matches
+    // the icons beside it, and what the canvas holds around it (a sparkle, a stem) reaches past the box.
+    } else if (resource.canvas != 1f) modifier.graphicsLayer { scaleX = resource.canvas; scaleY = resource.canvas }
+    else modifier
     Icon(painterResource(resource.drawable), contentDescription, placement, tint)
 }

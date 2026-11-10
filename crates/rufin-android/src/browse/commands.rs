@@ -130,13 +130,17 @@ impl AndroidLibrary {
         route: Route,
         category: CollectionCategory,
         layout: LibraryLayout,
+        // The layout itself was picked, not carried along with a size or spacing change.
+        layout_picked: bool,
         size: DisplaySize,
         grid_spacing: DisplaySize,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
         let key = library_list_key(&route, category);
         self.settings
             .update_library_list_settings(key, |settings| {
-                settings.layout = layout;
+                if layout_picked {
+                    settings.choose_layout(layout);
+                }
                 settings.display.size = size;
                 settings.display.grid_spacing = grid_spacing;
             })

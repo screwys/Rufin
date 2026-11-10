@@ -460,6 +460,21 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     icons(root, &generated)
 }
 
+/// The width an SVG declares on its root element, in its own units; 16 where it declares none.
+fn svg_width(svg: &str) -> f32 {
+    svg.find("<svg")
+        .and_then(|start| {
+            let tag = &svg[start..start + svg[start..].find('>')?];
+            let value = &tag[tag.find(" width=\"")? + 8..];
+            let digits: String = value
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            digits.parse().ok()
+        })
+        .unwrap_or(16.0)
+}
+
 fn icons(root: &Path, generated: &Path) -> Result<()> {
     let mut paths = fs::read_dir(root.join("resources/icons/hicolor/scalable/actions"))?
         .map(|entry| entry.map(|entry| entry.path()))
@@ -469,7 +484,7 @@ fn icons(root: &Path, generated: &Path) -> Result<()> {
         root.join("resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"),
     );
     let mut mapping = String::from(
-        "package io.github.screwys.rufin\n\ninternal data class RufinIconResource(val drawable: Int, val glyphScale: Float, val glyphX: Float, val glyphY: Float)\n\ninternal val rufinIconResources = mapOf(\n",
+        "package io.github.screwys.rufin\n\ninternal data class RufinIconResource(val drawable: Int, val glyphScale: Float, val glyphX: Float, val glyphY: Float, val canvas: Float)\n\ninternal val rufinIconResources = mapOf(\n",
     );
     for path in paths {
         if path.extension().is_none_or(|extension| extension != "svg") {
@@ -555,8 +570,11 @@ fn icons(root: &Path, generated: &Path) -> Result<()> {
                 (height as f32 - (top + bottom) as f32) / (2.0 * span),
             )
         };
+        // An icon drawn on more than the 16 px grid keeps its body at the grid's size and its extras in
+        // the margin; drawn `canvas` times its box, the body matches the icons beside it.
+        let canvas = svg_width(&fs::read_to_string(&path)?) / 16.0;
         mapping.push_str(&format!(
-            "    \"{name}\" to RufinIconResource(R.drawable.{resource}, {scale:.6}f, {x:.6}f, {y:.6}f),\n"
+            "    \"{name}\" to RufinIconResource(R.drawable.{resource}, {scale:.6}f, {x:.6}f, {y:.6}f, {canvas:.6}f),\n"
         ));
     }
     mapping.push_str(")\n");

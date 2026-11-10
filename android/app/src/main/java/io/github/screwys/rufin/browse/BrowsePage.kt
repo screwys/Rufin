@@ -135,10 +135,11 @@ internal class BrowsePage(
             options.descending = direction
         }
     }
-    fun chooseDisplay(layout: LibraryLayout, size: DisplaySize, spacing: DisplaySize) = connection.runAction {
+    /** `layoutPicked`: the layout itself was picked, not carried along with a size or spacing. */
+    fun chooseDisplay(layout: LibraryLayout, size: DisplaySize, spacing: DisplaySize, layoutPicked: Boolean = false) = connection.runAction {
         val previous = (options.displaySettings ?: displaySettings)?.layout
         val display = withContext(Dispatchers.IO) {
-            browse.library?.setBrowseDisplay(location.route, options.category, layout, size, spacing)
+            browse.library?.setBrowseDisplay(location.route, options.category, layout, layoutPicked, size, spacing)
         } ?: return@runAction
         showDisplay(display, previous != display.layout)
     }
@@ -374,6 +375,8 @@ private class BrowsePagingSource(
 
 
 internal val AndroidBrowseDisplay.layout get() = settings.layout
+/** Grid was picked for the list: large screens then keep it one pane instead of rows beside the opened page. */
+internal val AndroidBrowseDisplay.gridPicked get() = settings.layout == LibraryLayout.GRID && settings.layoutChosen
 internal val AndroidBrowseDisplay.size get() = settings.display.size
 internal val AndroidBrowseDisplay.gridSpacing get() = settings.display.gridSpacing
 internal val AndroidBrowseDisplay.showHeader get() = settings.display.showHeader

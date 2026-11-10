@@ -432,11 +432,11 @@ impl CatalogUi {
                 }
                 let state = *state.borrow();
                 shell.update_library_list_settings(state.key, |settings| {
-                    settings.layout = if state.include_detail {
+                    settings.choose_layout(if state.include_detail {
                         next_layout(state.key, settings.layout)
                     } else {
                         next_row_grid_layout(settings.layout)
-                    };
+                    });
                     layout_mode.set(settings.layout);
                 });
             });
@@ -567,7 +567,7 @@ impl CatalogUi {
                     return;
                 }
                 if settings.update_library_list_settings(key, |settings| {
-                    settings.layout = layout;
+                    settings.choose_layout(layout);
                 }) {
                     changed();
                 }

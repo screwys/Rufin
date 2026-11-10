@@ -43,6 +43,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
+import io.github.screwys.rufin.ui.focusRing
 import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -54,7 +58,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -88,9 +91,6 @@ import io.github.screwys.rufin.core.AndroidHomeSectionKind
 import io.github.screwys.rufin.shared.library.Row as LibraryRow
 import io.github.screwys.rufin.shared.rufin_core.playsContext
 import kotlinx.coroutines.launch
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.key
 import io.github.screwys.rufin.core.AndroidBrowseRow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
@@ -173,13 +173,15 @@ internal fun BrowseContent(
                     .distinctUntilChanged().collect(onScrolled)
             }
             Box(Modifier.fillMaxSize()) {
+            val pane = LocalListPane.current
             Column(Modifier.fillMaxSize().padding(end = indexInset)) {
-                if (fields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.fields.isNotEmpty() && it.displaySettings?.showHeader != false })
+                if (!pane && fields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.fields.isNotEmpty() && it.displaySettings?.showHeader != false })
                     FieldHeader(fields, displaySize)
             LazyColumn(Modifier.fillMaxWidth().weight(1f), state = state, contentPadding = PaddingValues(bottom = 8.dp + LocalPlayerBottomPadding.current)) {
                 items(items.itemCount, key = items.itemKey(::browseItemKey)) { index ->
                     val item = items[index]
-                    if (item == null) Spacer(Modifier.fillMaxWidth().height(60.dp))
+                    if (item == null) Spacer(Modifier.fillMaxWidth().height(if (pane) 52.dp else 60.dp))
+                    else if (pane) PaneRow(item, player, onActivate, onMenu)
                     else if (item.row.row is LibraryRow.AlbumHeading) HomeShowcase(item, player, onActivate, onMenu, onFavorite,
                         { shuffled -> onPlayItem(item, shuffled) }, onRadio)
                     else if (item.row.fields.isNotEmpty()) {
@@ -200,6 +202,8 @@ internal fun BrowseContent(
                     val position = labels.firstOrNull { it.title == letter }?.index ?: onLetterPosition(letter)
                     position?.let { state.scrollToItem(it.toInt()) }
                 } }
+            // Sorted by something without letters, the list beside a page still shows where it is.
+            else if (pane) io.github.screwys.rufin.ui.ListScrollbar(state, Modifier.align(Alignment.CenterEnd))
             }
         }
     }
@@ -391,13 +395,36 @@ private fun HomeContent(
     }
 }
 
+/** The list of a split view, beside the page picked from it: its entries show as slim rows whatever fields
+ *  and layout the list is set to. */
+internal val LocalListPane = compositionLocalOf { false }
+
+/** A row of the list beside a page: the cover and the names. A hold opens the menu; the numbers, the
+ *  favorite and ⋮ of a full-width row are the page's. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PaneRow(item: BrowseItem, player: PlayerConnection, onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit) {
+    val shown = favoriteItem(player.model, item)
+    val artwork = rememberBrowseArtwork(item, player, 40.dp)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(52.dp).playlistFolderDrop(item, player.model).pickedRow(item)
+        .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(shown) }).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        BrowseCover(item, artwork, Modifier.size(40.dp).clip(CoverShape))
+        Column(Modifier.weight(1f)) {
+            BrowseTitle(shown, maxLines = 1, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), player = player)
+            if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 /** A row in a Home block (a track or a genre): cover, title and its line, and ⋯ for its menu. */
 @Composable
 private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     line: String) {
     val shown = favoriteItem(player.model, item)
     val artwork = rememberBrowseArtwork(item, player, 56.dp)
-    Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
+    Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(56.dp).clip(CoverShape))
         Column(Modifier.weight(1f)) {
@@ -433,19 +460,21 @@ private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu
             pager.scrollToPage(1)
         }
     }
-    androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth()
-        .onPreviewKeyEvent { event ->
-            // D-pad left and right step the showcase where there is no swipe.
-            if (event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            val target = when (event.key) {
-                androidx.compose.ui.input.key.Key.DirectionLeft -> 0
-                androidx.compose.ui.input.key.Key.DirectionRight -> 2
-                else -> return@onPreviewKeyEvent false
-            }
-            scope.launch { pager.animateScrollToPage(target) }
-            true
-        }, key = { shown[it].row.key + it }) { page ->
-        HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio, page == 1)
+    // Where there is no swipe: a D-pad moves among the band's buttons, and past the first or the last of
+    // them it steps the showcase. The three pages stay composed and keep their place when a step changes
+    // their albums, so the button the D-pad is on keeps the focus; the pages beside it take none.
+    val step: (Int) -> Unit = { target -> scope.launch { pager.animateScrollToPage(target) } }
+    androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth().focusProperties { onExit = {
+        val target = when (requestedFocusDirection) {
+            androidx.compose.ui.focus.FocusDirection.Left -> 0
+            androidx.compose.ui.focus.FocusDirection.Right -> 2
+            else -> null
+        }
+        if (target != null) { cancelFocusChange(); step(target) }
+    } }.focusGroup(), beyondViewportPageCount = 2) { page ->
+        Box(Modifier.focusProperties { onEnter = { if (page != 1) { cancelFocusChange(); step(page) } } }.focusGroup()) {
+            HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio, page == 1)
+        }
     }
 }
 
@@ -506,7 +535,7 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
 internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
     val container = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)
     val content = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Row(Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(container)
+    Row(Modifier.height(40.dp).focusRing(RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(container)
         .combinedClickable(onClick = onClick, onLongClick = onLongClick,
             onLongClickLabel = onLongClick?.let { translate("{action} (Shuffle)").replace("{action}", translate(label)) })
         .padding(start = 14.dp, end = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -517,7 +546,7 @@ internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick
 
 @Composable
 internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current) {
-    Box(Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape)
+    Box(Modifier.size(40.dp).focusRing(androidx.compose.foundation.shape.CircleShape).clip(androidx.compose.foundation.shape.CircleShape)
         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center) {
         RufinIcon(icon, translate(label), Modifier.size(20.dp), tint)
@@ -529,7 +558,7 @@ internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tin
 internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shuffle: (() -> Unit)? = null,
     tint: Color = LocalContentColor.current,
 ) {
-    Box(Modifier.size(48.dp).combinedClickable(onClick = action, onLongClick = shuffle,
+    Box(Modifier.size(48.dp).focusRing(androidx.compose.foundation.shape.CircleShape).combinedClickable(onClick = action, onLongClick = shuffle,
         onLongClickLabel = if (shuffle == null) null else translate("{action} (Shuffle)").replace("{action}", translate(label))), contentAlignment = Alignment.Center) {
         RufinIcon(icon, translate(label), Modifier.size(24.dp), tint, glyph = true)
     }
@@ -681,7 +710,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !oneLine) {
-        Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).combinedClickable(onClick = { onActivate(item) },
+        Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).focusRing(CoverShape).combinedClickable(onClick = { onActivate(item) },
             onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
@@ -794,7 +823,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     val artwork = rememberBrowseArtwork(item, player, imageSize)
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (displaySize == DisplaySize.COMPACT) 48.dp else 64.dp)
-        .playlistFolderDrop(item, player.model)
+        .playlistFolderDrop(item, player.model).pickedRow(item)
         .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))

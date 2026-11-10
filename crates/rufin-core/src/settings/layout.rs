@@ -322,6 +322,11 @@ pub struct LibraryListSettings {
     #[serde(default)]
     pub display: DisplaySettings,
     pub layout: LibraryLayout,
+    /// The layout was picked for this list, not left at its default. Until it is, a client whose own
+    /// default differs by window size shows that: Android lists pages as rows beside the opened page
+    /// on large screens.
+    #[serde(default)]
+    pub layout_chosen: bool,
     pub row_fields: Vec<LibraryField>,
     pub grid_fields: Vec<LibraryField>,
     pub detail_track_fields: Vec<LibraryField>,
@@ -340,6 +345,7 @@ impl LibraryListSettings {
         Self {
             display: DisplaySettings::default(),
             layout: key.default_layout(),
+            layout_chosen: false,
             row_fields: default_row_fields(key),
             grid_fields: default_grid_fields(key),
             detail_track_fields: default_detail_track_fields(),
@@ -347,6 +353,12 @@ impl LibraryListSettings {
             descending: default_descending(key),
             layout_version: LIBRARY_LIST_LAYOUT_VERSION,
         }
+    }
+
+    /// Picks `layout` for the list.
+    pub fn choose_layout(&mut self, layout: LibraryLayout) {
+        self.layout = layout;
+        self.layout_chosen = true;
     }
 
     pub fn sanitize(&mut self, key: LibraryListKey) {
