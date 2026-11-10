@@ -6,6 +6,9 @@
   "nix": {
     "enabled": true
   },
+  "cargo": {
+    "ignorePaths": ["packaging/linux/**"]
+  },
   "dependencyDashboard": false,
   "semanticCommits": "enabled",
   "semanticCommitType": "deps",
@@ -17,11 +20,15 @@
   "prHourlyLimit": 0,
   "packageRules": [
     {
-      "description": "Regenerate Flatpak cargo sources after Rust dependency updates.",
+      "description": "Regenerate the Linux Cargo workspace and Flatpak cargo sources after Rust dependency updates.",
       "matchManagers": ["cargo"],
       "postUpgradeTasks": {
         "commands": ["cargo run --locked -p xtask -- generate flatpak-sources"],
-        "fileFilters": ["packaging/flatpak/cargo-sources.json"],
+        "fileFilters": [
+          "packaging/flatpak/cargo-sources.json",
+          "packaging/linux/Cargo.toml",
+          "packaging/linux/Cargo.lock"
+        ],
         "executionMode": "branch"
       }
     }
