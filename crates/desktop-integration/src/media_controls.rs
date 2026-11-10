@@ -1179,43 +1179,69 @@ mod windows {
 }
 
 #[cfg(target_os = "macos")]
+// objc2 generates every MediaPlayer method as `unsafe fn`.
+#[allow(unsafe_code)]
 mod macos {
     use std::cell::RefCell;
+    use std::ptr::NonNull;
     use std::rc::Rc;
+    use std::sync::Arc;
 
+    use block2::RcBlock;
     use gio::prelude::FileExt;
-    use mediaplayer::{
-        Artwork, CommandToken, HandlerStatus, NowPlayingInfo, NowPlayingInfoCenter,
-        NowPlayingMediaType, PlaybackState, RemoteCommandCenter, RepeatType, ShuffleType,
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{AnyThread, Message};
+    use objc2_app_kit::NSImage;
+    use objc2_foundation::{NSMutableDictionary, NSNumber, NSSize, NSString};
+    use objc2_media_player::{
+        MPChangePlaybackPositionCommandEvent, MPChangeRepeatModeCommandEvent,
+        MPChangeShuffleModeCommandEvent, MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle,
+        MPMediaItemPropertyArtist, MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration,
+        MPMediaItemPropertyTitle, MPNowPlayingInfoCenter, MPNowPlayingInfoMediaType,
+        MPNowPlayingInfoPropertyDefaultPlaybackRate, MPNowPlayingInfoPropertyElapsedPlaybackTime,
+        MPNowPlayingInfoPropertyMediaType, MPNowPlayingInfoPropertyPlaybackRate,
+        MPNowPlayingPlaybackState, MPRemoteCommand, MPRemoteCommandCenter, MPRemoteCommandEvent,
+        MPRemoteCommandHandlerStatus, MPRepeatType, MPShuffleType,
     };
     use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode};
+    use rufin_core::playback::PlaybackOwner;
 
     pub struct MediaControls {
-        center: NowPlayingInfoCenter,
+        center: Retained<MPNowPlayingInfoCenter>,
         state: RefCell<MediaState>,
-        _commands: Vec<CommandToken>,
+        _commands: Vec<CommandHandler>,
     }
 
-    #[derive(Default)]
     struct MediaState {
         title: String,
         artist: String,
         album: String,
         duration_millis: u64,
         position_millis: u64,
-        playback: PlaybackState,
-        artwork: Option<Artwork>,
+        playback: MPNowPlayingPlaybackState,
+        artwork: Option<Retained<MPMediaItemArtwork>>,
         current: bool,
     }
 
     impl MediaControls {
         pub fn start(
-            transport: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+            transport: Arc<PlaybackOwner>,
             _open_uri: impl Fn(&str) + 'static,
         ) -> Rc<Self> {
             Rc::new(Self {
-                center: NowPlayingInfoCenter::default_center(),
-                state: RefCell::new(MediaState::default()),
+                // SAFETY: the shared center is always available.
+                center: unsafe { MPNowPlayingInfoCenter::defaultCenter() },
+                state: RefCell::new(MediaState {
+                    title: String::new(),
+                    artist: String::new(),
+                    album: String::new(),
+                    duration_millis: 0,
+                    position_millis: 0,
+                    playback: MPNowPlayingPlaybackState::Unknown,
+                    artwork: None,
+                    current: false,
+                }),
                 _commands: install_commands(transport),
             })
         }
@@ -1271,58 +1297,86 @@ mod macos {
         }
 
         fn publish(&self) {
-            let (info, artwork, playback) = {
-                let state = self.state.borrow();
-                let rate = if state.playback == PlaybackState::Playing {
-                    1.0
-                } else {
-                    0.0
-                };
-                let info = NowPlayingInfo::new()
-                    .title(&state.title)
-                    .artist(&state.artist)
-                    .album_title(&state.album)
-                    .playback_duration(state.duration_millis as f64 / 1_000.0)
-                    .elapsed_playback_time(state.position_millis as f64 / 1_000.0)
-                    .playback_rate(rate)
-                    .default_playback_rate(1.0)
-                    .media_type(NowPlayingMediaType::Audio);
-                (info, state.artwork.clone(), state.playback)
+            let state = self.state.borrow();
+            let rate = if state.playback == MPNowPlayingPlaybackState::Playing {
+                1.0
+            } else {
+                0.0
             };
-            self.center
-                .set_now_playing_info_with_artwork(&info, artwork.as_ref());
-            self.center.set_playback_state(playback);
+            let info = NSMutableDictionary::<NSString, AnyObject>::new();
+            let text = |key: &NSString, value: &str| info.insert(key, &NSString::from_str(value));
+            let number = |key: &NSString, value: f64| info.insert(key, &NSNumber::new_f64(value));
+            // SAFETY: the keys are MediaPlayer's constants and each value has the type its
+            // key documents.
+            unsafe {
+                text(MPMediaItemPropertyTitle, &state.title);
+                text(MPMediaItemPropertyArtist, &state.artist);
+                text(MPMediaItemPropertyAlbumTitle, &state.album);
+                number(
+                    MPMediaItemPropertyPlaybackDuration,
+                    state.duration_millis as f64 / 1_000.0,
+                );
+                number(
+                    MPNowPlayingInfoPropertyElapsedPlaybackTime,
+                    state.position_millis as f64 / 1_000.0,
+                );
+                number(MPNowPlayingInfoPropertyPlaybackRate, rate);
+                number(MPNowPlayingInfoPropertyDefaultPlaybackRate, 1.0);
+                info.insert(
+                    MPNowPlayingInfoPropertyMediaType,
+                    &NSNumber::new_usize(MPNowPlayingInfoMediaType::Audio.0),
+                );
+                if let Some(artwork) = &state.artwork {
+                    info.insert(MPMediaItemPropertyArtwork, artwork);
+                }
+                self.center.setNowPlayingInfo(Some(&info));
+                self.center.setPlaybackState(state.playback);
+            }
         }
 
         fn clear(&self) {
             self.state.borrow_mut().current = false;
             disable_commands();
-            self.center.set_playback_state(PlaybackState::Stopped);
-            self.center.clear();
+            // SAFETY: both setters take plain values.
+            unsafe {
+                self.center
+                    .setPlaybackState(MPNowPlayingPlaybackState::Stopped);
+                self.center.setNowPlayingInfo(None);
+            }
         }
     }
 
-    fn playback_state(playback: &PlaybackView) -> PlaybackState {
+    fn playback_state(playback: &PlaybackView) -> MPNowPlayingPlaybackState {
         match playback.transport.effective_state() {
             playback::TransportStatus::Playing | playback::TransportStatus::Buffering => {
-                PlaybackState::Playing
+                MPNowPlayingPlaybackState::Playing
             }
             playback::TransportStatus::Resolving | playback::TransportStatus::Paused => {
-                PlaybackState::Paused
+                MPNowPlayingPlaybackState::Paused
             }
             playback::TransportStatus::Stopped | playback::TransportStatus::Failed => {
-                PlaybackState::Stopped
+                MPNowPlayingPlaybackState::Stopped
             }
         }
     }
 
-    fn load_artwork(uri: String) -> Option<Artwork> {
+    fn load_artwork(uri: String) -> Option<Retained<MPMediaItemArtwork>> {
         let path = gio::File::for_uri(&uri).path()?;
-        Artwork::from_path(path.to_str()?).ok()
+        let image =
+            NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path.to_str()?))?;
+        let size = image.size();
+        let request = RcBlock::new(move |_: NSSize| NonNull::from(&*image));
+        // SAFETY: the artwork copies the block, which owns the image it hands out.
+        Some(unsafe {
+            MPMediaItemArtwork::initWithBoundsSize_requestHandler(
+                MPMediaItemArtwork::alloc(),
+                size,
+                &request,
+            )
+        })
     }
 
     fn update_commands(playback: &PlaybackView) {
-        let commands = RemoteCommandCenter::shared();
         let has_current = playback.transport.current.is_some();
         let has_active_run = playback
             .transport
@@ -1336,132 +1390,168 @@ mod macos {
         let can_go_next =
             has_current && (playback.queue.can_next || playback.controls.auto_dj_enabled);
 
-        commands.play_command().set_enabled(has_current);
-        commands.pause_command().set_enabled(has_active_run);
-        commands.stop_command().set_enabled(has_active_run);
-        commands
-            .toggle_play_pause_command()
-            .set_enabled(has_current);
-        commands.next_track_command().set_enabled(can_go_next);
-        commands.previous_track_command().set_enabled(has_current);
-        commands
-            .change_playback_position_command()
-            .set_enabled(has_current && playback.transport.can_seek);
+        // SAFETY: the shared command center is always available and its setters take plain
+        // values.
+        unsafe {
+            let commands = MPRemoteCommandCenter::sharedCommandCenter();
+            commands.playCommand().setEnabled(has_current);
+            commands.pauseCommand().setEnabled(has_active_run);
+            commands.stopCommand().setEnabled(has_active_run);
+            commands.togglePlayPauseCommand().setEnabled(has_current);
+            commands.nextTrackCommand().setEnabled(can_go_next);
+            commands.previousTrackCommand().setEnabled(has_current);
+            commands
+                .changePlaybackPositionCommand()
+                .setEnabled(has_current && playback.transport.can_seek);
 
-        let repeat = commands.change_repeat_mode_command();
-        repeat.set_enabled(has_current);
-        repeat.set_current_repeat_type(repeat_type(playback.controls.repeat_mode));
-        let shuffle = commands.change_shuffle_mode_command();
-        shuffle.set_enabled(has_current);
-        shuffle.set_current_shuffle_type(if playback.controls.shuffle_enabled {
-            ShuffleType::Items
-        } else {
-            ShuffleType::Off
-        });
+            let repeat = commands.changeRepeatModeCommand();
+            repeat.setEnabled(has_current);
+            repeat.setCurrentRepeatType(repeat_type(playback.controls.repeat_mode));
+            let shuffle = commands.changeShuffleModeCommand();
+            shuffle.setEnabled(has_current);
+            shuffle.setCurrentShuffleType(if playback.controls.shuffle_enabled {
+                MPShuffleType::Items
+            } else {
+                MPShuffleType::Off
+            });
+        }
     }
 
     fn disable_commands() {
-        let commands = RemoteCommandCenter::shared();
-        commands.play_command().set_enabled(false);
-        commands.pause_command().set_enabled(false);
-        commands.stop_command().set_enabled(false);
-        commands.toggle_play_pause_command().set_enabled(false);
-        commands.next_track_command().set_enabled(false);
-        commands.previous_track_command().set_enabled(false);
-        commands
-            .change_playback_position_command()
-            .set_enabled(false);
-        commands.change_repeat_mode_command().set_enabled(false);
-        commands.change_shuffle_mode_command().set_enabled(false);
-    }
-
-    const fn repeat_type(repeat: QueueRepeatMode) -> RepeatType {
-        match repeat {
-            QueueRepeatMode::Off => RepeatType::Off,
-            QueueRepeatMode::One => RepeatType::One,
-            QueueRepeatMode::All => RepeatType::All,
+        // SAFETY: as in `update_commands`.
+        unsafe {
+            let commands = MPRemoteCommandCenter::sharedCommandCenter();
+            commands.playCommand().setEnabled(false);
+            commands.pauseCommand().setEnabled(false);
+            commands.stopCommand().setEnabled(false);
+            commands.togglePlayPauseCommand().setEnabled(false);
+            commands.nextTrackCommand().setEnabled(false);
+            commands.previousTrackCommand().setEnabled(false);
+            commands.changePlaybackPositionCommand().setEnabled(false);
+            commands.changeRepeatModeCommand().setEnabled(false);
+            commands.changeShuffleModeCommand().setEnabled(false);
         }
     }
 
-    const fn repeat_mode(repeat: RepeatType) -> QueueRepeatMode {
+    const fn repeat_type(repeat: QueueRepeatMode) -> MPRepeatType {
         match repeat {
-            RepeatType::Off => QueueRepeatMode::Off,
-            RepeatType::One => QueueRepeatMode::One,
-            RepeatType::All => QueueRepeatMode::All,
+            QueueRepeatMode::Off => MPRepeatType::Off,
+            QueueRepeatMode::One => MPRepeatType::One,
+            QueueRepeatMode::All => MPRepeatType::All,
         }
     }
 
-    fn install_commands(
-        transport: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-    ) -> Vec<CommandToken> {
-        let commands = RemoteCommandCenter::shared();
-        vec![
-            commands.on_play(command(&transport, TransportCommand::Play)),
-            commands.on_pause(command(&transport, TransportCommand::Pause)),
-            commands.on_stop(command(&transport, TransportCommand::Stop)),
-            commands.on_toggle_play_pause(command(&transport, TransportCommand::Toggle)),
-            commands.on_next_track(command(&transport, TransportCommand::Next)),
-            commands.on_previous_track(command(&transport, TransportCommand::Previous)),
-            commands.on_change_playback_position({
-                let transport = transport.clone();
-                move |event| {
-                    if let Some(position) = event.position
-                        && position.is_finite()
-                        && position >= 0.0
-                    {
-                        transport.seek_millis((position * 1_000.0).min(u64::MAX as f64) as u64);
+    const fn repeat_mode(repeat: MPRepeatType) -> Option<QueueRepeatMode> {
+        match repeat {
+            MPRepeatType::Off => Some(QueueRepeatMode::Off),
+            MPRepeatType::One => Some(QueueRepeatMode::One),
+            MPRepeatType::All => Some(QueueRepeatMode::All),
+            _ => None,
+        }
+    }
+
+    /// A handler registered on a remote command, removed again on drop.
+    struct CommandHandler {
+        command: Retained<MPRemoteCommand>,
+        target: Retained<AnyObject>,
+    }
+
+    impl Drop for CommandHandler {
+        fn drop(&mut self) {
+            // SAFETY: `target` is what `addTargetWithHandler` returned for this command.
+            unsafe { self.command.removeTarget(Some(&self.target)) };
+        }
+    }
+
+    fn handle(
+        command: &MPRemoteCommand,
+        handler: impl Fn(&MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus + Send + Sync + 'static,
+    ) -> CommandHandler {
+        let block = RcBlock::new(move |event: NonNull<MPRemoteCommandEvent>| {
+            // SAFETY: MediaPlayer passes an event that is valid for the call.
+            handler(unsafe { event.as_ref() })
+        });
+        // SAFETY: the command copies the block, which owns the handler, so a delivery that
+        // is already running keeps it alive after the target is removed.
+        let target = unsafe { command.addTargetWithHandler(&block) };
+        CommandHandler {
+            command: command.retain(),
+            target,
+        }
+    }
+
+    fn position_time(event: &MPRemoteCommandEvent) -> Option<f64> {
+        let event = event.downcast_ref::<MPChangePlaybackPositionCommandEvent>()?;
+        // SAFETY: a plain property read.
+        Some(unsafe { event.positionTime() })
+    }
+
+    fn repeat_event(event: &MPRemoteCommandEvent) -> Option<QueueRepeatMode> {
+        let event = event.downcast_ref::<MPChangeRepeatModeCommandEvent>()?;
+        // SAFETY: a plain property read.
+        repeat_mode(unsafe { event.repeatType() })
+    }
+
+    fn shuffle_event(event: &MPRemoteCommandEvent) -> Option<MPShuffleType> {
+        let event = event.downcast_ref::<MPChangeShuffleModeCommandEvent>()?;
+        // SAFETY: a plain property read.
+        Some(unsafe { event.shuffleType() })
+    }
+
+    fn install_commands(transport: Arc<PlaybackOwner>) -> Vec<CommandHandler> {
+        let transport_command = |command: &MPRemoteCommand, action: fn(&PlaybackOwner)| {
+            let transport = transport.clone();
+            handle(command, move |_| {
+                action(&transport);
+                MPRemoteCommandHandlerStatus::Success
+            })
+        };
+        // SAFETY: the shared command center is always available.
+        unsafe {
+            let commands = MPRemoteCommandCenter::sharedCommandCenter();
+            vec![
+                transport_command(&commands.playCommand(), PlaybackOwner::play),
+                transport_command(&commands.pauseCommand(), PlaybackOwner::pause),
+                transport_command(&commands.stopCommand(), PlaybackOwner::stop),
+                transport_command(
+                    &commands.togglePlayPauseCommand(),
+                    PlaybackOwner::play_pause,
+                ),
+                transport_command(&commands.nextTrackCommand(), PlaybackOwner::next),
+                transport_command(&commands.previousTrackCommand(), PlaybackOwner::previous),
+                handle(&commands.changePlaybackPositionCommand(), {
+                    let transport = transport.clone();
+                    move |event| {
+                        if let Some(position) = position_time(event)
+                            && position.is_finite()
+                            && position >= 0.0
+                        {
+                            transport.seek_millis((position * 1_000.0).min(u64::MAX as f64) as u64);
+                        }
+                        MPRemoteCommandHandlerStatus::Success
                     }
-                    HandlerStatus::Success
-                }
-            }),
-            commands.on_change_repeat_mode({
-                let transport = transport.clone();
-                move |event| {
-                    let Some(repeat) = event.repeat_type else {
-                        return HandlerStatus::CommandFailed;
-                    };
-                    transport.set_repeat(repeat_mode(repeat));
-                    HandlerStatus::Success
-                }
-            }),
-            commands.on_change_shuffle_mode({
-                let transport = transport.clone();
-                move |event| {
-                    let Some(shuffle) = event.shuffle_type else {
-                        return HandlerStatus::CommandFailed;
-                    };
-                    transport.set_shuffle(shuffle != ShuffleType::Off);
-                    HandlerStatus::Success
-                }
-            }),
-        ]
-    }
-
-    #[derive(Clone, Copy)]
-    enum TransportCommand {
-        Play,
-        Pause,
-        Stop,
-        Toggle,
-        Next,
-        Previous,
-    }
-
-    fn command(
-        transport: &std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-        command: TransportCommand,
-    ) -> impl FnMut(mediaplayer::CommandEvent) -> HandlerStatus + Send + 'static {
-        let transport = transport.clone();
-        move |_| {
-            match command {
-                TransportCommand::Play => transport.play(),
-                TransportCommand::Pause => transport.pause(),
-                TransportCommand::Stop => transport.stop(),
-                TransportCommand::Toggle => transport.play_pause(),
-                TransportCommand::Next => transport.next(),
-                TransportCommand::Previous => transport.previous(),
-            }
-            HandlerStatus::Success
+                }),
+                handle(&commands.changeRepeatModeCommand(), {
+                    let transport = transport.clone();
+                    move |event| {
+                        let Some(repeat) = repeat_event(event) else {
+                            return MPRemoteCommandHandlerStatus::CommandFailed;
+                        };
+                        transport.set_repeat(repeat);
+                        MPRemoteCommandHandlerStatus::Success
+                    }
+                }),
+                handle(&commands.changeShuffleModeCommand(), {
+                    let transport = transport.clone();
+                    move |event| {
+                        let Some(shuffle) = shuffle_event(event) else {
+                            return MPRemoteCommandHandlerStatus::CommandFailed;
+                        };
+                        transport.set_shuffle(shuffle != MPShuffleType::Off);
+                        MPRemoteCommandHandlerStatus::Success
+                    }
+                }),
+            ]
         }
     }
 
@@ -1476,7 +1566,7 @@ mod macos {
                 QueueRepeatMode::One,
                 QueueRepeatMode::All,
             ] {
-                assert_eq!(repeat_mode(repeat_type(repeat)), repeat);
+                assert_eq!(repeat_mode(repeat_type(repeat)), Some(repeat));
             }
         }
     }

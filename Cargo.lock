@@ -197,12 +197,6 @@ name = "app-identity"
 version = "0.17.0"
 
 [[package]]
-name = "apple-cf"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa8973cd8c3dffc5266a7c4a60825f71e54d4b741ba103115727c9d67a98bb06"
-
-[[package]]
 name = "apple-native-keyring-store"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1712,17 +1706,20 @@ name = "desktop-integration"
 version = "0.17.0"
 dependencies = [
  "app-identity",
- "apple-cf",
  "artwork",
  "async-channel",
  "blake3",
+ "block2",
  "gio",
  "glib",
  "ksni",
  "library",
  "localization",
- "mediaplayer",
  "mpris-server",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-media-player",
  "playback",
  "rufin-core",
  "tempfile",
@@ -1837,16 +1834,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
-]
-
-[[package]]
-name = "doom-fish-utils"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f"
-dependencies = [
- "crossbeam-queue",
- "futures-util",
 ]
 
 [[package]]
@@ -4718,17 +4705,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mediaplayer"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707f1ad053bddf7646f6a525a0b2c74cff23676a792e050b2d58e38c733467fb"
-dependencies = [
- "apple-cf",
- "doom-fish-utils",
- "libc",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5575,6 +5551,20 @@ dependencies = [
  "libc",
  "objc2",
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-media-player"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85f2a98483f6e76313cb85a5a185eaa3cda86a177b13a8852d56cbd0085bf635"
+dependencies = [
+ "bitflags 2.13.1",
+ "block2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
 ]
 
 [[package]]

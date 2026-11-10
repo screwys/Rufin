@@ -47,9 +47,7 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 allow = []
-deny = [
-    { crate = "apple-cf:>=0.8,<0.10", reason = "mediaplayer 0.4.3 still constructs the pre-0.8 CGRect layout" },
-]
+deny = []
 skip = [
     { crate = "core-foundation@0.9.4", reason = "pulled by system-configuration via hyper-util while rustls-platform-verifier uses core-foundation 0.10" },
     { crate = "getrandom@0.2.17", reason = "pulled by redox_users through directories; direct randomness uses getrandom 0.4" },

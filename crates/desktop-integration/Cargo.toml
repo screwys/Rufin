@@ -41,9 +41,11 @@ windows = { workspace = true, features = [
 winsafe.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# mediaplayer 0.4.3 uses the CGRect layout provided through apple-cf 0.6.
-apple-cf.workspace = true
-mediaplayer.workspace = true
+block2.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+objc2-media-player.workspace = true
 
 [dev-dependencies]
 library.workspace = true
