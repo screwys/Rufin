@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.sources
 
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,7 +32,7 @@ internal class SourceWelcome(val preferences: PreferencesConnection, val player:
 /** The source list: what was found first, then every kind. The first run opens on it with a greeting. */
 @Composable
 internal fun SourceChoices(model: RufinConnection, setup: SourceSetupConnection, welcome: SourceWelcome?, modifier: Modifier,
-    added: () -> Unit, skip: () -> Unit) {
+    chooseFolder: (Uri?) -> Unit, added: () -> Unit, skip: () -> Unit) {
     val next: @Composable () -> Unit = { RufinIcon("rufin-go-next-symbolic", null) }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -46,9 +48,13 @@ internal fun SourceChoices(model: RufinConnection, setup: SourceSetupConnection,
             TextButton(skip, Modifier.align(Alignment.TopEnd)) { Text(translate("Skip")) }
         } }
         item { SettingsGroup(translate("Found")) {
-            SettingsRow(translate("Music on this phone"), summary = translate("Asks for music access"),
+            // A folder grant lists every file, so lyrics and CUE sheets beside the music are read;
+            // the media library holds audio only. The picker opens on the shared Music folder.
+            SettingsRow(translate("Music on this phone"), summary = translate("Choose a local music folder"),
                 leading = { RufinIcon("rufin-folder-music-symbolic", null) },
-                trailing = { FilledTonalButton({ setup.music(added) }, enabled = !setup.working) { Text(translate("Add")) } })
+                trailing = { FilledTonalButton({
+                    chooseFolder(DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Music"))
+                }, enabled = !setup.working) { Text(translate("Add")) } })
             val found = setup.found
             if (found == null) SettingsRow(translate("Search this network"),
                 summary = translate(if (welcome != null) "Servers and other Rufin devices" else "Jellyfin, Emby and Plex servers"),
