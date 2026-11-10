@@ -527,9 +527,6 @@ msgstr ""
 msgid "Artwork"
 msgstr ""
 
-msgid "Asks for music access"
-msgstr ""
-
 msgid "Audio effects"
 msgstr ""
 

@@ -636,11 +636,6 @@ msgstr "Хранилище обложек"
 msgid "Artwork"
 msgstr "Обложка"
 
-#, fuzzy
-#| msgid "Guest / public access"
-msgid "Asks for music access"
-msgstr "Гостевой / публичный доступ"
-
 msgid "Audio effects"
 msgstr ""
 
@@ -5167,6 +5162,11 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#, fuzzy
+#~| msgid "Guest / public access"
+#~ msgid "Asks for music access"
+#~ msgstr "Гостевой / публичный доступ"
 
 #~ msgid "On this device"
 #~ msgstr "На этом устройстве"

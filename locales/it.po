@@ -617,9 +617,6 @@ msgstr "Copertina"
 msgid "Artwork"
 msgstr "Copertina"
 
-msgid "Asks for music access"
-msgstr ""
-
 msgid "Audio effects"
 msgstr ""
 
