@@ -123,7 +123,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                         })
                 }
                 } }
-            } else if (form.kind == null) SourceChoices(model, setup, welcome, Modifier.weight(1f), added, close)
+            } else if (form.kind == null) SourceChoices(model, setup, welcome, Modifier.weight(1f), chooseFolder::launch, added, close)
             else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (form.offersHalfStarSetting) SourceRatingSettings(setup)
                 SettingsGroup {
