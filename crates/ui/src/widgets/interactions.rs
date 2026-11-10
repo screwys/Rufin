@@ -718,11 +718,14 @@ fn keep_parent_grab_for_nested_native_menus_from(container: &gtk::Widget) {
                 .property::<Option<gtk::Popover>>("popover")
                 .and_then(|popover| popover.downcast::<gtk::PopoverMenu>().ok())
         {
-            // Keep the parent menu's modal grab while its native child is open.
-            nested_popover.set_autohide(false);
             nested_popover.set_width_request(CONTEXT_MENU_MAX_WIDTH);
-            if !widget.has_css_class(NATIVE_MENU_PARENT_GRAB_CLASS) {
+            // Before GTK 4.24 (GTK !9895) closing an autohide child drops the parent menu's
+            // grab, so those versions keep submenus non-modal.
+            if gtk::check_version(4, 24, 0).is_some()
+                && !widget.has_css_class(NATIVE_MENU_PARENT_GRAB_CLASS)
+            {
                 widget.add_css_class(NATIVE_MENU_PARENT_GRAB_CLASS);
+                nested_popover.set_autohide(false);
                 nested_popover.connect_map(|popover| {
                     // Non-modal submenus must still close the previous sibling on arrow navigation.
                     if let Some(parent) = popover
