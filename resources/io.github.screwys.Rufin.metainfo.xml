@@ -38,59 +38,59 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse artists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/artists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/artists.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the compact sidebar</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/compact_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/compact_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/playlist_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit metadata of several tracks</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/edit_metadata.png</image>
     </screenshot>
     <screenshot>
       <caption>Look up metadata on MusicBrainz</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata_lookup.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/edit_metadata_lookup.png</image>
     </screenshot>
     <screenshot>
       <caption>Find and sync lyrics</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata_lyrics.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/edit_metadata_lyrics.png</image>
     </screenshot>
     <screenshot>
       <caption>Tune the equalizer</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/equalizer_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/equalizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize how lists look</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/customize_display.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Rearrange the sidebar and the visualizer, queue and lyrics panes</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/reorder_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/reorder_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/integrations.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.1/resources/screenshots/integrations.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -101,6 +101,29 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.17.1" date="2026-11-10">
+      <description>
+        <p>A patch release for icon/layout issues in Android and some other fixes.</p>
+        <ul>
+          <li>Added instructions for Gentoo ebuild, thanks [kariga](https://git.fumo.pet/kariga)</li>
+        </ul>
+        <ul>
+          <li>Fixed some file scanning edge cases for local sources such as artist splitting and album recognization</li>
+        </ul>
+        <ul>
+          <li>Better integration with Android media widget</li>
+        </ul>
+        <ul>
+          <li>Polishes tablet, foldable and TV layouts</li>
+        </ul>
+        <ul>
+          <li>Fixed a context menu popoper issue, thanks [kariga](https://git.fumo.pet/kariga)</li>
+        </ul>
+        <ul>
+          <li>Added Indonesian translations</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-11-10">
       <description>
         <p>Been a long while! After 2 months of work, the Android app is finally done. It is a standalone native player with a phone-first interface built with Jetpack Compose, and it runs the same Rust core as the desktop app, so sources, playback and library features are shared. You can install it via Obtainium. Since this is the first released version, there might be some rough spots. Rufin Connect is also rebuilt to go with it, and I want to improve both based on feedback. This release also includes a large backend rewrite, which makes the app faster and lighter on resources.</p>

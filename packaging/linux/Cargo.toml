@@ -4,7 +4,7 @@ exclude = ["crates/rufin-android", "xtask"]
 resolver = "3"
 
 [workspace.package]
-version = "0.17.0"
+version = "0.17.1"
 authors = ["screwy <me@screwy.dev>"]
 edition = "2024"
 license = "GPL-3.0-or-later"
