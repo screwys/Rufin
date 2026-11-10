@@ -138,6 +138,7 @@
       "buildsystem": "simple",
       "build-commands": [
         "install -Dm644 cargo/config .cargo/config.toml",
+        "cp packaging/linux/Cargo.toml packaging/linux/Cargo.lock .",
         "cargo fetch --locked --offline --manifest-path Cargo.toml --verbose",
         "cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/app -DRUFIN_BUILD_IDENTITY=stable -DRUFIN_CARGO_FROZEN=ON",
         "cmake --build build-cmake --target rufin",
