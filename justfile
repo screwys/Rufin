@@ -470,9 +470,10 @@ _build-flatpak:
     build_dir="${work_root}/build"
     repository_dir="${work_root}/repo"
     state_dir="${work_root}/state"
-    bundle_path="${artifact_root}/io.github.screwys.Rufin.flatpak"
+    bundle_name="io.github.screwys.Rufin-$(flatpak --default-arch).flatpak"
+    bundle_path="${artifact_root}/${bundle_name}"
     temporary_bundle_path="${bundle_path}.new"
-    work_bundle_path="${work_root}/io.github.screwys.Rufin.flatpak"
+    work_bundle_path="${work_root}/${bundle_name}"
     manifest="${repo_root}/packaging/flatpak/io.github.screwys.Rufin.json"
     runtime_repo_url=https://flathub.org/repo/flathub.flatpakrepo
     declare -a builder_args=()
