@@ -38,59 +38,59 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse artists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/artists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/artists.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the compact sidebar</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/compact_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/compact_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/playlist_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit metadata of several tracks</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata.png</image>
     </screenshot>
     <screenshot>
       <caption>Look up metadata on MusicBrainz</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata_lookup.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata_lookup.png</image>
     </screenshot>
     <screenshot>
       <caption>Find and sync lyrics</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/edit_metadata_lyrics.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/edit_metadata_lyrics.png</image>
     </screenshot>
     <screenshot>
       <caption>Tune the equalizer</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/equalizer_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/equalizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize how lists look</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/customize_display.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Rearrange the sidebar and the visualizer, queue and lyrics panes</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/reorder_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/reorder_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.16.6/resources/screenshots/integrations.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.17.0/resources/screenshots/integrations.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -101,6 +101,49 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.17.0" date="2026-11-10">
+      <description>
+        <p>Been a long while! After 2 months of work, the Android app is finally done. It is a standalone native player with a phone-first interface built with Jetpack Compose, and it runs the same Rust core as the desktop app, so sources, playback and library features are shared. You can install it via Obtainium. Since this is the first released version, there might be some rough spots. Rufin Connect is also rebuilt to go with it, and I want to improve both based on feedback. This release also includes a large backend rewrite, which makes the app faster and lighter on resources.</p>
+        <ul>
+          <li>Rufin Connect can now stream your local library to another device. Adding a device is faster, and Connect performs better overall.</li>
+          <li>Preferences gets a new look: a sidebar with more categories, including Storage, where you can see and manage the space the cache uses.</li>
+          <li>The equalizer gets a new layout. You can choose a graphic equalizer with 10, 18 or 31 bands or a parametric one, save presets per device, and import AutoEQ/APO files. Crossfeed is also added.</li>
+          <li>The visualizer gets more settings and better preset management.</li>
+          <li>A sleep timer is added.</li>
+          <li>You can share the server link of a track from the context menu. On Android, you can also share the song or selected lyrics as a card.</li>
+          <li>A Details dialog is added for tracks, albums and artists.</li>
+          <li>Metadata editing now works on a selection. The tracks you selected are listed on the side of the editor, so you can move between them without closing it. You can also look tags up on MusicBrainz and AcoustID, with fingerprints calculated on your device.</li>
+          <li>Playlists and smart playlists can be organized into folders.</li>
+          <li>Search can now find tracks by their lyrics. This works by reading lyrics Rufin has already cached, and you can enable automatic lyrics download to keep the cache up-to-date.</li>
+          <li>Rufin now has a mini player, and the window now adapts down to phone sizes.</li>
+          <li>You can choose a starting page instead of Home.</li>
+          <li>Sorting tracks by artist or album artist now orders albums by year and tracks by disc and track number.</li>
+          <li>There is a new &quot;Use sort tags&quot; setting, off by default. Artists and albums sort by their name unless you enable it.</li>
+          <li>Context menu actions now apply to everything you selected, so you can do batch actions.</li>
+          <li>&quot;Go to&quot; gets folder and server destinations.</li>
+          <li>Deleted built-in smart playlists such as Most Skipped no longer come back.</li>
+          <li>You can now set the public address and the local address of a music server separately.</li>
+          <li>Playback status, including pauses and seeks, is now reported to Navidrome/OpenSubsonic servers.</li>
+          <li>Loaded lyrics are exposed over MPRIS with xesam:asText, so external tools and shell extensions can show them.</li>
+          <li>Web UI is refined to match the GTK desktop after the recent changes, and it also can show preferences and metadata editing.</li>
+          <li>Cover corners are less rounded and match the pane radius, so less of the artwork gets cut.</li>
+          <li>Download transcoding is configurable now. This also fixes transcoded downloads from Jellyfin failing as unauthorized.</li>
+          <li>Flatpak runtime is updated to GNOME 51.</li>
+          <li>Fixed album and artist radios not using the server mixes, so AudioMuse-AI works for them as well.</li>
+          <li>Fixed Jellyfin tracks not using their own cover when distinct covers are enabled, thanks to @luniiya.</li>
+          <li>Fixed an issue with editing a server address failing silently when the password was not entered again.</li>
+          <li>Fixed an issue with some track names being duplicated.</li>
+          <li>Fixed Plex refreshes failing on titles with invalid Unicode. Those tracks are imported regardless now.</li>
+          <li>Fixed buttons turning all white under some system theme overrides.</li>
+          <li>Fixed the release date missing in the album grid for local files.</li>
+          <li>Fixed the Playlists route appearing empty in some cases.</li>
+          <li>Fixed imported playlists not finding existing tracks in Flatpak.</li>
+          <li>Fixed empty slots on Home reacting to hover, thanks to @PonyLucky.</li>
+          <li>Replaced the misaligned repeat and shuffle icons.</li>
+          <li>And several other smaller fixes and improvements.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.16.6" date="2026-09-29">
       <description>
         <p>A quick patch for flatpak.</p>

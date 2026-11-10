@@ -3,7 +3,7 @@ members = ["crates/*", "xtask"]
 resolver = "3"
 
 [workspace.package]
-version = "0.16.6"
+version = "0.17.0"
 authors = ["screwy <me@screwy.dev>"]
 edition = "2024"
 license = "GPL-3.0-or-later"
