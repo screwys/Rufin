@@ -274,14 +274,11 @@ fn lofty_track(
         .unwrap_or_else(|| file_title(path));
     let album = tag_string(tag, |tag| tag.album().map(|value| value.to_string()))
         .unwrap_or_else(|| folder_album(path));
-    let artist = tag_string(tag, |tag| tag.artist().map(|value| value.to_string()))
-        .unwrap_or_else(|| "Unknown Artist".to_string());
-    let album_artist = tag
-        .and_then(|tag| tag.get_string(ItemKey::AlbumArtist))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| artist.clone());
+    let artist =
+        joined_values(tag, ItemKey::TrackArtist).unwrap_or_else(|| "Unknown Artist".to_string());
+    let tagged_album_artist = joined_values(tag, ItemKey::AlbumArtist);
+    let album_artist_tagged = tagged_album_artist.is_some();
+    let album_artist = tagged_album_artist.unwrap_or_else(|| artist.clone());
     let artists = credits(
         &artist_names(tag, &artist),
         tag_mbids(tag, ItemKey::MusicBrainzArtistId),
@@ -363,14 +360,16 @@ fn lofty_track(
         album_artists,
         genres: tag_references(
             "genre",
-            tag.and_then(|tag| tag.genre().map(|value| split_names(&value)))
-                .unwrap_or_default(),
+            tag_values_optional(tag, ItemKey::Genre)
+                .iter()
+                .flat_map(|value| split_values(value))
+                .collect(),
         ),
         moods: tag_references(
             "mood",
             tag_values_optional(tag, ItemKey::Mood)
-                .into_iter()
-                .flat_map(|value| split_names(&value))
+                .iter()
+                .flat_map(|value| split_values(value))
                 .collect(),
         ),
         source_loudness: native_gain(
@@ -388,7 +387,13 @@ fn lofty_track(
     let user_rating = tag
         .and_then(|tag| tag.ratings().next())
         .map(|rating| (rating.rating() as u8) * 2);
-    scanned_track(path, metadata, user_rating, local_artwork)
+    scanned_track(
+        path,
+        metadata,
+        album_artist_tagged,
+        user_rating,
+        local_artwork,
+    )
 }
 
 fn lofty_duration_seconds(tagged_file: &lofty::file::TaggedFile) -> u32 {
@@ -437,6 +442,7 @@ fn discovered_track(
     let artist = metadata
         .artist
         .unwrap_or_else(|| "Unknown Artist".to_string());
+    let album_artist_tagged = metadata.album_artist.is_some();
     let album_artist = metadata.album_artist.unwrap_or_else(|| artist.clone());
     let clean = |values: Vec<String>| {
         values
@@ -512,21 +518,17 @@ fn discovered_track(
         moods: tag_references("mood", metadata.moods),
         ..Default::default()
     };
-    scanned_track(path, metadata, None, local_artwork)
+    scanned_track(path, metadata, album_artist_tagged, None, local_artwork)
 }
 
 fn scanned_track(
     path: &Path,
     metadata: library::TrackMetadata,
+    album_artist_tagged: bool,
     user_rating: Option<u8>,
     local_artwork: Option<LocalImageRef>,
 ) -> ScannedTrack {
-    let album_id = album_id(
-        &metadata.album_artists,
-        &metadata.album,
-        metadata.musicbrainz_album_id.as_deref(),
-        None,
-    );
+    let album_id = album_id(&metadata, album_artist_tagged, path, None);
     ScannedTrack {
         track: library::TrackObservation {
             metadata,
@@ -655,59 +657,97 @@ pub(crate) fn cue_track_id(cue_path: &Path, track_number: u16) -> String {
     )
 }
 
+/// An album is its MusicBrainz release, or else its title in its folder with its tagged album
+/// artists: same-titled albums in other folders stay apart, and the tracks of a compilation
+/// without an album artist stay one album. A cue sheet's album is its sheet's.
 pub(crate) fn album_id(
-    album_artists: &[library::ArtistCredit],
-    album: &str,
-    musicbrainz_album_id: Option<&str>,
+    metadata: &library::TrackMetadata,
+    album_artist_tagged: bool,
+    path: &Path,
     cue_path: Option<&Path>,
 ) -> String {
-    let credits = album_artists
+    let credits = metadata
+        .album_artists
         .iter()
+        .filter(|_| album_artist_tagged)
         .map(|credit| credit.object_id.as_str())
         .collect::<Vec<_>>()
         .join("\u{1f}");
-    let name = normalized_identity(album);
+    let name = normalized_identity(&metadata.album);
+    let release = metadata.musicbrainz_album_id.as_deref();
     let identity = if let Some(cue_path) = cue_path {
         format!(
             "{credits}:{name}:cue:{}:{}",
             cue_path.to_string_lossy(),
-            musicbrainz_album_id.unwrap_or_default()
+            release.unwrap_or_default()
         )
-    } else if let Some(musicbrainz_album_id) = musicbrainz_album_id {
-        format!("musicbrainz:{musicbrainz_album_id}")
+    } else if let Some(release) = release {
+        format!("musicbrainz:{release}")
     } else {
-        format!("{credits}:{name}")
+        format!("{credits}:{name}:{}", album_folder(path).to_string_lossy())
     };
     local_id("album", &identity)
 }
 
+/// The folder an album's files share: a disc folder such as CD1 or Disc 2 is its parent's.
+fn album_folder(path: &Path) -> &Path {
+    let folder = path.parent().unwrap_or(Path::new(""));
+    let disc = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            ["cd", "disc", "disk"].iter().any(|prefix| {
+                name.strip_prefix(prefix).is_some_and(|number| {
+                    let number = number.trim_start_matches([' ', '-', '_', '.']);
+                    !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            })
+        });
+    match folder.parent() {
+        Some(parent) if disc => parent,
+        _ => folder,
+    }
+}
+
+/// An artist is its name; its MusicBrainz id is metadata, so tracks tagged with and without it
+/// credit one artist.
 pub(crate) fn artist_credit(
     name: String,
     musicbrainz_artist_id: Option<&str>,
 ) -> library::ArtistCredit {
-    let musicbrainz_artist_id = musicbrainz_artist_id.and_then(clean_mbid);
-    let id = musicbrainz_artist_id
-        .as_deref()
-        .map(|mbid| format!("local:artist:musicbrainz:{mbid}"))
-        .unwrap_or_else(|| local_id("artist", &normalized_identity(&name)));
     library::ArtistCredit {
-        object_id: id,
+        object_id: local_id("artist", &normalized_identity(&name)),
         sort_text: Some(name.to_lowercase()),
         name,
-        musicbrainz_artist_id,
+        musicbrainz_artist_id: musicbrainz_artist_id.and_then(clean_mbid),
     }
 }
 
+/// The names in one credit value, untrimmed parts included: `;` and a spaced ` / ` separate
+/// them, so a name keeps its own slash, as AC/DC does.
+pub(crate) fn name_parts(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(';')
+        .flat_map(|part| part.split(" / "))
+        .map(str::trim)
+}
+
 pub(crate) fn split_names(value: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    for value in value
+    name_parts(value)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// The values in one genre, mood or id value, which `;` and `/` separate.
+fn split_values(value: &str) -> Vec<String> {
+    value
         .split([';', '/'])
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        values.push(value.to_string());
-    }
-    values
+        .map(ToString::to_string)
+        .collect()
 }
 
 pub(crate) fn local_id(kind: &str, value: &str) -> String {
@@ -746,10 +786,21 @@ fn tag_mbid(tag: &Tag, key: ItemKey) -> Option<String> {
         .find_map(|value| clean_mbid(&value))
 }
 
+/// Every value of a tag, joined as several names are written.
+fn joined_values(tag: Option<&Tag>, key: ItemKey) -> Option<String> {
+    let values = tag_values_optional(tag, key);
+    let values = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.join("; "))
+}
+
 fn tag_mbids(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
     tag_values_optional(tag, key)
         .into_iter()
-        .flat_map(|value| split_names(&value))
+        .flat_map(|value| split_values(&value))
         .filter_map(|value| clean_mbid(&value))
         .collect()
 }
