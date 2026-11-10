@@ -11947,16 +11947,6 @@
         "dest-filename": ".cargo-checksum.json"
     },
     {
-      "dest-filename": "Cargo.toml",
-      "path": "../linux/Cargo.toml",
-      "type": "file"
-    },
-    {
-      "dest-filename": "Cargo.lock",
-      "path": "../linux/Cargo.lock",
-      "type": "file"
-    },
-    {
         "type": "inline",
         "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n",
         "dest": "cargo",

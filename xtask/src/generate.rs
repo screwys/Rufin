@@ -174,16 +174,6 @@ fn generate_cargo_sources(root: &Path, lock: &str) -> Result<String> {
         }
     }
 
-    for name in ["Cargo.toml", "Cargo.lock"] {
-        append_source(
-            &mut output,
-            serde_json::json!({
-                "type": "file", "path": format!("../linux/{name}"),
-                "dest-filename": name
-            }),
-        )?;
-    }
-
     let config = if git_packages.is_empty() {
         "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n".to_owned()
     } else {
