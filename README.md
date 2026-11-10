@@ -83,8 +83,8 @@ rufin --headless --listen
 
 ## 🖥️ Interface
 
-- **Desktop**: layouts that adapt from a wide window down to a mini player, fullscreen player with visualizer, waveform seekbar, themes including custom ones, and an extensive keyboard shortcuts catalog.
-- **Android**: a phone-first interface on the same core built with Jetpack Compose
+- **Desktop**: layouts that adapt from a wide window down to a mini player, fullscreen player with visualizer, themes including custom ones, and an extensive keyboard shortcuts catalog.
+- **Android**: same core built with Jetpack Compose, is also reliable in multiple layouts beyond the regular vertical screen: landscape mode, foldables, tablets, and TVs. 
 
 # Screenshots
 
