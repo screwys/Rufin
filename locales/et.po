@@ -2174,6 +2174,11 @@ msgstr "Vanem versioon"
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Külgpaani objektid"
+
 msgid "Library"
 msgstr "Meediumikogu"
 

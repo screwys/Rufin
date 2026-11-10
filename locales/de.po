@@ -2187,6 +2187,11 @@ msgstr "Legacy"
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Seitenleisten-Einträge"
+
 msgid "Library"
 msgstr "Bibliothek"
 

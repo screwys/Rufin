@@ -2191,6 +2191,11 @@ msgstr "Hérité"
 msgid "Less"
 msgstr "Moins"
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Éléments de la barre latérale"
+
 msgid "Library"
 msgstr "Bibliothčque"
 

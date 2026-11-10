@@ -2502,6 +2502,11 @@ msgstr "Stará verze"
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Položky postranního panelu"
+
 msgid "Library"
 msgstr "Knihovna"
 

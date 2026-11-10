@@ -2335,6 +2335,11 @@ msgstr "Устаревшая версия"
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "Элементы боковой панели"
+
 msgid "Library"
 msgstr "Библиотека"
 

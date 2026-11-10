@@ -2441,6 +2441,11 @@ msgstr ""
 msgid "Less"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Library Items"
+msgstr "側邊欄項目"
+
 msgid "Library"
 msgstr "媒體庫"
 
