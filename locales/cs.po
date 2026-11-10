@@ -154,6 +154,16 @@ msgstr ""
 "s rendererem"
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -330,6 +340,11 @@ msgstr "Akce serveru"
 
 msgid "Activity"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "Přidat pravidlo"
 
 msgid "Add Rule"
 msgstr "Přidat pravidlo"
@@ -552,6 +567,9 @@ msgstr "Alba interpretů"
 msgid "Artist name"
 msgstr "Jméno interpreta"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr "Rádio interpereta"
 
@@ -590,6 +608,9 @@ msgid "Artwork storage"
 msgstr "Tajné úložiště"
 
 msgid "Artwork"
+msgstr ""
+
+msgid "Asks for music access"
 msgstr ""
 
 msgid "Audio effects"
@@ -917,10 +938,21 @@ msgstr ""
 msgid "Choose playback output"
 msgstr "Vyberte výstup přehrávání"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
+msgstr "Vyberte"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "Vyberte"
 
 msgid "Circular spectrum"
@@ -2095,6 +2127,9 @@ msgstr "Vpřed"
 msgid "Found Servers"
 msgstr "Nalezené servery"
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr ""
 
@@ -2362,6 +2397,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Uložené zdroje"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr ""
 
@@ -2533,8 +2571,10 @@ msgstr "Načítání složek..."
 msgid "Loading..."
 msgstr "Ukládání..."
 
-msgid "Local Address (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Local Folders"
+msgid "Local Address"
+msgstr "Místní složky"
 
 msgid "Local File Access"
 msgstr "Přístup k místním souborům"
@@ -2625,6 +2665,9 @@ msgid "Low shelf"
 msgstr ""
 
 msgid "Lyrics background opacity"
+msgstr ""
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
 
 msgid "Lyrics loaded"
@@ -2825,8 +2868,18 @@ msgstr "Hudební složka"
 msgid "Music access permission was denied"
 msgstr ""
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "Hudební složka"
+
 msgid "Music folders on the Rufin machine"
 msgstr ""
+
+#, fuzzy
+#| msgid "This device"
+msgid "Music on this phone"
+msgstr "Toto zařízení"
 
 #, fuzzy
 #| msgid "All Music"
@@ -3186,11 +3239,6 @@ msgstr "Vypnuto"
 msgid "Offline"
 msgstr ""
 
-#, fuzzy
-#| msgid "This device"
-msgid "On this device"
-msgstr "Toto zařízení"
-
 msgid "On"
 msgstr ""
 
@@ -3204,6 +3252,9 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "One path per line"
+msgstr ""
+
+msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
@@ -3645,9 +3696,6 @@ msgstr "Předchozí"
 msgid "Privacy & Security"
 msgstr "Soukromí a bezpečnost"
 
-msgid "Privacy and Security"
-msgstr "Soukromí a bezpečnost"
-
 msgid "Private mode is off"
 msgstr "Soukromý režim je vypnutý"
 
@@ -3843,11 +3891,6 @@ msgstr ""
 
 msgid "Remote lyrics"
 msgstr "Vzdálené texty skladeb"
-
-#, fuzzy
-#| msgid "Remove"
-msgid "Remote"
-msgstr "Odebrat"
 
 msgid "Remove All Downloads"
 msgstr "Odstranit všechny stažené soubory"
@@ -4236,6 +4279,11 @@ msgid "Search queue"
 msgstr "Fronta vyhledávání"
 
 #, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search this network"
+msgstr "Hledat Texty"
+
+#, fuzzy
 #| msgid "This isn't available"
 msgid "Search unavailable"
 msgstr "Toto není dostupné"
@@ -4357,8 +4405,10 @@ msgstr ""
 msgid "Server Actions"
 msgstr "Akce serveru"
 
-msgid "Server Address Override (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Server Address"
+msgid "Server Address Override"
+msgstr "Adresa serveru"
 
 msgid "Server Address"
 msgstr "Adresa serveru"
@@ -4386,17 +4436,11 @@ msgstr "Server se nepodařilo nalézt: {error}"
 msgid "Server is unreachable"
 msgstr "Server je nedostupný"
 
-msgid "Server lyrics are off in private mode"
-msgstr "V soukromém režimu nejsou texty skladeb ze serveru k dispozici"
-
 msgid "Server prefix doesn't match"
 msgstr "Prefix serveru se neshoduje"
 
 msgid "Server"
 msgstr "Server"
-
-msgid "Servers"
-msgstr "Servery"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
@@ -4511,6 +4555,9 @@ msgstr "Zobrazit/skrýt pravý postranní panel"
 msgid "Showcase"
 msgstr "Nejlepší"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Promíchání"
 
@@ -4573,6 +4620,9 @@ msgstr "Přeskočení prolínání mezi skladbami na stejném albu"
 #| msgid "Only unplayed tracks"
 msgid "Skip unplayable tracks"
 msgstr "Pouze nepřehrané skladby"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr "Šedá"
@@ -4668,6 +4718,11 @@ msgstr ""
 
 msgid "Spectrum"
 msgstr ""
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Start Listening"
+msgstr "ListenBrainz"
 
 msgid "Start minimized"
 msgstr "Spustit v minimalizovaném režimu"
@@ -4989,6 +5044,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "Zapnout soukromý režim"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr "Zadejte text pro vyhledání nebo vytvořte nový playlist"
 
@@ -5168,8 +5226,10 @@ msgstr "Uživatelské jméno"
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 
-msgid "Verification Code (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Verification Code"
+msgstr "Režim přechodu"
 
 msgid "Verify server certificate"
 msgstr "Ověřit certifikát serveru"
@@ -5245,6 +5305,14 @@ msgstr ""
 msgid "Weighting"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Welcome to Rufin"
+msgstr "Spojení"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr ""
 
@@ -5273,6 +5341,9 @@ msgstr "Žlutá"
 
 msgid "Yes"
 msgstr "Ano"
+
+msgid "Your library is ready"
+msgstr ""
 
 msgid "Your music belongs here"
 msgstr ""
@@ -5518,6 +5589,25 @@ msgid "Welcome to Rufin Setup"
 msgstr ""
 
 #, fuzzy
+#~| msgid "This device"
+#~ msgid "On this device"
+#~ msgstr "Toto zařízení"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "Soukromí a bezpečnost"
+
+#, fuzzy
+#~| msgid "Remove"
+#~ msgid "Remote"
+#~ msgstr "Odebrat"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr "V soukromém režimu nejsou texty skladeb ze serveru k dispozici"
+
+#~ msgid "Servers"
+#~ msgstr "Servery"
+
+#, fuzzy
 #~| msgid "No folder selected"
 #~ msgid "Artwork cache cleared"
 #~ msgstr "Nebyla vybrána žádná složka"
@@ -5757,11 +5847,6 @@ msgstr ""
 #~| msgid "This isn't available"
 #~ msgid "Media available"
 #~ msgstr "Toto není dostupné"
-
-#, fuzzy
-#~| msgid "This device"
-#~ msgid "Music on this device"
-#~ msgstr "Toto zařízení"
 
 #, fuzzy
 #~| msgid "Preparing library..."

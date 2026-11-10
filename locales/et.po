@@ -196,6 +196,16 @@ msgstr ""
 "pärit meedium läbi selle seadme"
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -381,6 +391,11 @@ msgstr "Tegevused"
 
 msgid "Activity"
 msgstr "Tegevus"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "Lisa reegel"
 
 msgid "Add Rule"
 msgstr "Lisa reegel"
@@ -569,6 +584,9 @@ msgstr "Esitaja üksiaksjad"
 msgid "Artist name"
 msgstr "Esitaja nimi"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr "Esitajapõhine raadio"
 
@@ -598,6 +616,11 @@ msgstr "Kaanepildi salvestusruum"
 
 msgid "Artwork"
 msgstr "Kaanepildid"
+
+#, fuzzy
+#| msgid "Guest / public access"
+msgid "Asks for music access"
+msgstr "Avalik ligipääs, sh külalistele"
 
 msgid "Audio effects"
 msgstr "Heliefektid"
@@ -852,10 +875,21 @@ msgstr ""
 msgid "Choose playback output"
 msgstr "Vali taasesituse väljund"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr "Vali, kas soovid allalaaditus sisu alles jätta."
 
 msgid "Choose"
+msgstr "Vali"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "Vali"
 
 msgid "Circular spectrum"
@@ -1800,6 +1834,9 @@ msgstr "Edasi"
 msgid "Found Servers"
 msgstr "Leitud serverid"
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr "Kaadrisageduse piirang"
 
@@ -2042,6 +2079,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Liitumisprofiil"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr "Liitu"
 
@@ -2195,7 +2235,7 @@ msgstr "Laadin…"
 
 #, fuzzy
 #| msgid "Server Address Override (optional)"
-msgid "Local Address (optional)"
+msgid "Local Address"
 msgstr "Serveri aadressi asendus (kui soovid)"
 
 msgid "Local File Access"
@@ -2279,6 +2319,9 @@ msgstr "Madalate sageduste filter"
 
 msgid "Lyrics background opacity"
 msgstr "Laulusõnade tausta läbipaistmatus"
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
+msgstr ""
 
 msgid "Lyrics loaded"
 msgstr "Laulusõnad on laaditud"
@@ -2453,8 +2496,18 @@ msgstr "Muusikafailide kaust"
 msgid "Music access permission was denied"
 msgstr "Ligipääs muusikale on keelatud"
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "Muusikafailide kaust"
+
 msgid "Music folders on the Rufin machine"
 msgstr "Muusikakaustad arvutis, kus Rufin asub"
+
+#, fuzzy
+#| msgid "Music on this device"
+msgid "Music on this phone"
+msgstr "Muusika selles seadmes"
 
 msgid "Music"
 msgstr "Muusika"
@@ -2756,9 +2809,6 @@ msgstr "Väljas"
 msgid "Offline"
 msgstr "Pole võrgus"
 
-msgid "On this device"
-msgstr "Selles seadmes"
-
 msgid "On"
 msgstr "Sees"
 
@@ -2773,6 +2823,11 @@ msgstr "Üks kausta asukoht rea kohta; terve kogumiku kaasamiseks jäta tühjaks
 
 msgid "One path per line"
 msgstr "Üks asukoht rea kohta"
+
+#, fuzzy
+#| msgid "Lookup"
+msgid "Online Lookups"
+msgstr "Tuvastus"
 
 msgid "Only fill missing information"
 msgstr "Täida vaid puuduv teave"
@@ -3143,9 +3198,6 @@ msgstr "Eelmine"
 msgid "Privacy & Security"
 msgstr "Privaatsus ja turvalisus"
 
-msgid "Privacy and Security"
-msgstr "Privaatsus ja turvalisus"
-
 msgid "Private mode is off"
 msgstr "Privaatne režiim on lülitatud välja"
 
@@ -3307,9 +3359,6 @@ msgstr "Laadi uuesti"
 
 msgid "Remote lyrics"
 msgstr "Laulusõnad kaugserverist"
-
-msgid "Remote"
-msgstr "Kaugseade"
 
 msgid "Remove All Downloads"
 msgstr "Eemalda kõik allalaadimised"
@@ -3632,6 +3681,11 @@ msgstr "Otsingu eelistused"
 msgid "Search queue"
 msgstr "Otsi esitusjärjekorrast"
 
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Search this network"
+msgstr "Otsi kaanepilte"
+
 msgid "Search unavailable"
 msgstr "Otsing pole saadaval"
 
@@ -3732,7 +3786,9 @@ msgstr "September {year}"
 msgid "Server Actions"
 msgstr "Serveri tegevused"
 
-msgid "Server Address Override (optional)"
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Server Address Override"
 msgstr "Serveri aadressi asendus (kui soovid)"
 
 msgid "Server Address"
@@ -3761,17 +3817,11 @@ msgstr "Serveri leidmine ei õnnestunud: {error}"
 msgid "Server is unreachable"
 msgstr "Server pole leitav"
 
-msgid "Server lyrics are off in private mode"
-msgstr "Serverist laaditavad laulusõnad pole privaatses režiimis kasutatavad"
-
 msgid "Server prefix doesn't match"
 msgstr "Serveri prefiks ei klapi"
 
 msgid "Server"
 msgstr "Server"
-
-msgid "Servers"
-msgstr "Serverid"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Märgi Discordis tegevuseks kuulamine (Listening)"
@@ -3866,6 +3916,9 @@ msgstr "Kuva/peida parempoolne külgriba"
 msgid "Showcase"
 msgstr "Esiletõstetud"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Sega lood"
 
@@ -3922,6 +3975,9 @@ msgstr "Ära kasuta risthajutamist sama albumi lugude vahel"
 
 msgid "Skip unplayable tracks"
 msgstr "Jäta esitamatud lood vahele"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr "Paekarva"
@@ -4005,6 +4061,11 @@ msgstr "Spektrijoon"
 
 msgid "Spectrum"
 msgstr "Spekter"
+
+#, fuzzy
+#| msgid "Listening"
+msgid "Start Listening"
+msgstr "Kuulan"
 
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
@@ -4284,6 +4345,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "Lülita privaatne režiim sisse"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr "Sisesta otsimiseks või uue esitusloendi loomiseks"
 
@@ -4433,7 +4497,9 @@ msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 "Kasutab saadavolevaid laulusõnu karaoke jaoks või laadib nad internetist"
 
-msgid "Verification Code (optional)"
+#, fuzzy
+#| msgid "Verification Code (optional)"
+msgid "Verification Code"
 msgstr "Kinnituskood (kui soovid lisada)"
 
 msgid "Verify server certificate"
@@ -4502,6 +4568,15 @@ msgstr "Iganädalaselt"
 msgid "Weighting"
 msgstr "Osakaalud"
 
+#, fuzzy
+#| msgctxt "Windows installer"
+#| msgid "Welcome to Rufin Setup"
+msgid "Welcome to Rufin"
+msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr "Lai"
 
@@ -4528,6 +4603,11 @@ msgstr "Kollane"
 
 msgid "Yes"
 msgstr "Jah"
+
+#, fuzzy
+#| msgid "Cached library ready"
+msgid "Your library is ready"
+msgstr "Puhverdatud meediakogu on valmis"
 
 msgid "Your music belongs here"
 msgstr "Sinu muusika kuulub siia"
@@ -4764,6 +4844,22 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
+#~ msgid "On this device"
+#~ msgstr "Selles seadmes"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "Privaatsus ja turvalisus"
+
+#~ msgid "Remote"
+#~ msgstr "Kaugseade"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr ""
+#~ "Serverist laaditavad laulusõnad pole privaatses režiimis kasutatavad"
+
+#~ msgid "Servers"
+#~ msgstr "Serverid"
+
 #~ msgid "Artwork cache cleared"
 #~ msgstr "Kaanepiltide puhver on tühjendatud"
 
@@ -4996,9 +5092,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Media available"
 #~ msgstr "Meedium on saadaval"
-
-#~ msgid "Music on this device"
-#~ msgstr "Muusika selles seadmes"
 
 #~ msgid "Preparing smaller media"
 #~ msgstr "Valmistan väiksemat meediumi ette"
@@ -5270,9 +5363,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Cached library data will appear here as sync pages finish."
 #~ msgstr "Puhverdatud kirjed ilmuvad siia pärast sünkroonimise lõppu."
-
-#~ msgid "Cached library ready"
-#~ msgstr "Puhverdatud meediakogu on valmis"
 
 #~ msgid "Caching library artwork..."
 #~ msgstr "Meediakogu pildid on puhverdamisel…"

@@ -179,6 +179,16 @@ msgstr ""
 "atskaņotāja URL adresēm"
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -363,6 +373,11 @@ msgstr "Darbības"
 
 msgid "Activity"
 msgstr "Aktivitāte"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "Pievienot noteikumu"
 
 msgid "Add Rule"
 msgstr "Pievienot noteikumu"
@@ -577,6 +592,9 @@ msgstr "Izpildītāja albumi"
 msgid "Artist name"
 msgstr "Izpildītāja nosaukums"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr "Izpildītāja radio"
 
@@ -614,6 +632,11 @@ msgstr "Slēptā krātuve"
 
 msgid "Artwork"
 msgstr "Attēls"
+
+#, fuzzy
+#| msgid "Guest / public access"
+msgid "Asks for music access"
+msgstr "Viesis / publiska piekļuve"
 
 msgid "Audio effects"
 msgstr ""
@@ -908,10 +931,21 @@ msgstr ""
 msgid "Choose playback output"
 msgstr "Izvēlēties atskaņošanas izvadi"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
+msgstr "Izvēlēties"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "Izvēlēties"
 
 msgid "Circular spectrum"
@@ -2035,6 +2069,9 @@ msgstr "Pārtīt uz priekšu"
 msgid "Found Servers"
 msgstr "Atrasti serveri"
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr ""
 
@@ -2298,6 +2335,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "Sākums Profils"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr ""
 
@@ -2468,7 +2508,7 @@ msgstr "Ielādē..."
 
 #, fuzzy
 #| msgid "Server Address Override (optional)"
-msgid "Local Address (optional)"
+msgid "Local Address"
 msgstr "Servera adreses pārrakstīšana (pēc izvēles)"
 
 msgid "Local File Access"
@@ -2560,6 +2600,9 @@ msgstr ""
 
 msgid "Lyrics background opacity"
 msgstr "Tekstu fona caurspīdīgums"
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
+msgstr ""
 
 msgid "Lyrics loaded"
 msgstr "Teksti ir ielādēti"
@@ -2747,8 +2790,18 @@ msgstr "Mūzikas mape"
 msgid "Music access permission was denied"
 msgstr ""
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "Mūzikas mape"
+
 msgid "Music folders on the Rufin machine"
 msgstr "Mūzikas mapes Rufin ierīcē"
+
+#, fuzzy
+#| msgid "On this device"
+msgid "Music on this phone"
+msgstr "Šajā ierīcē"
 
 #, fuzzy
 #| msgid "My music"
@@ -3086,9 +3139,6 @@ msgstr "Izslēgts"
 msgid "Offline"
 msgstr ""
 
-msgid "On this device"
-msgstr "Šajā ierīcē"
-
 msgid "On"
 msgstr "Ieslēgt"
 
@@ -3103,6 +3153,9 @@ msgstr "Viena mape vienā rindā; atstājiet tukšu, lai iekļautu visu kolekcij
 
 msgid "One path per line"
 msgstr "Viena ceļa adrese katrā rindā"
+
+msgid "Online Lookups"
+msgstr ""
 
 msgid "Only fill missing information"
 msgstr ""
@@ -3505,9 +3558,6 @@ msgstr "Iepriekšējais"
 msgid "Privacy & Security"
 msgstr "Privātums un drošība"
 
-msgid "Privacy and Security"
-msgstr "Privātums un drošība"
-
 msgid "Private mode is off"
 msgstr "Privātais režīms ir izslēgts"
 
@@ -3691,9 +3741,6 @@ msgstr "Pārlādēt"
 
 msgid "Remote lyrics"
 msgstr "Attālināti teksti"
-
-msgid "Remote"
-msgstr "Attālināts"
 
 msgid "Remove All Downloads"
 msgstr "Dzēst visas lejupielādes"
@@ -4058,6 +4105,11 @@ msgid "Search queue"
 msgstr "Meklēt rindā"
 
 #, fuzzy
+#| msgid "Show artwork"
+msgid "Search this network"
+msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
 #| msgid "Search is unavailable"
 msgid "Search unavailable"
 msgstr "Meklēšana nav pieejama"
@@ -4167,7 +4219,9 @@ msgstr ""
 msgid "Server Actions"
 msgstr "Servera darbības"
 
-msgid "Server Address Override (optional)"
+#, fuzzy
+#| msgid "Server Address Override (optional)"
+msgid "Server Address Override"
 msgstr "Servera adreses pārrakstīšana (pēc izvēles)"
 
 msgid "Server Address"
@@ -4196,17 +4250,11 @@ msgstr "Servera meklēšana neizdevās: {error}"
 msgid "Server is unreachable"
 msgstr "Serveris nav pieejams"
 
-msgid "Server lyrics are off in private mode"
-msgstr "Privātajā režīmā servera tekstu atskaņošana ir izslēgta"
-
 msgid "Server prefix doesn't match"
 msgstr "Servera prefikss neatbilst"
 
 msgid "Server"
 msgstr "Serveris"
-
-msgid "Servers"
-msgstr "Serveri"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Iestatīt Discord aktivitātes veidu uz Klausīšanās"
@@ -4313,6 +4361,9 @@ msgstr "Rādīt/paslēpt labo sānu joslu"
 msgid "Showcase"
 msgstr "Izceltie"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Jaukta secība"
 
@@ -4375,6 +4426,9 @@ msgstr "Izlaist pāreju starp dziesmām no viena un tā paša albuma"
 #| msgid "Only unplayed tracks"
 msgid "Skip unplayable tracks"
 msgstr "Tikai neatskaņotās dziesmas"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr "Pelēks"
@@ -4470,6 +4524,11 @@ msgstr "Spektra līnija"
 #| msgid "Spectrum line"
 msgid "Spectrum"
 msgstr "Spektra līnija"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Start Listening"
+msgstr "ListenBrainz"
 
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
@@ -4792,6 +4851,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "Ieslēgt privāto režīmu"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr "Ierakstiet, lai meklētu vai izveidotu jaunu atskaņošanas sarakstu"
 
@@ -4954,7 +5016,9 @@ msgstr "Lietotājvārds"
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr "Izmanto pieejamos karaoke tekstus vai lejupielādē tos no interneta"
 
-msgid "Verification Code (optional)"
+#, fuzzy
+#| msgid "Verification Code (optional)"
+msgid "Verification Code"
 msgstr "Verifikācijas kods (pēc izvēles)"
 
 msgid "Verify server certificate"
@@ -5029,6 +5093,15 @@ msgstr "Nedēļā"
 msgid "Weighting"
 msgstr ""
 
+#, fuzzy
+#| msgctxt "Windows installer"
+#| msgid "Welcome to Rufin Setup"
+msgid "Welcome to Rufin"
+msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr ""
 
@@ -5057,6 +5130,11 @@ msgstr "Dzeltens"
 
 msgid "Yes"
 msgstr "Jā"
+
+#, fuzzy
+#| msgid "Cached library ready"
+msgid "Your library is ready"
+msgstr "Kešotā bibliotēka ir gatava"
 
 msgid "Your music belongs here"
 msgstr "Šeit ir paredzēts jūsu mūzikas atskaņošanai"
@@ -5319,6 +5397,21 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
+#~ msgid "On this device"
+#~ msgstr "Šajā ierīcē"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "Privātums un drošība"
+
+#~ msgid "Remote"
+#~ msgstr "Attālināts"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr "Privātajā režīmā servera tekstu atskaņošana ir izslēgta"
+
+#~ msgid "Servers"
+#~ msgstr "Serveri"
+
 #, fuzzy
 #~| msgid "folders selected"
 #~ msgid "Artwork cache cleared"
@@ -5544,11 +5637,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~| msgid "Artist unavailable"
 #~ msgid "Media available"
 #~ msgstr "Izpildītājs nav pieejams"
-
-#, fuzzy
-#~| msgid "On this device"
-#~ msgid "Music on this device"
-#~ msgstr "Šajā ierīcē"
 
 #, fuzzy
 #~| msgid "Preparing library..."
@@ -5823,9 +5911,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgstr ""
 #~ "Kešotie bibliotēkas dati parādīsies šeit, kad sinhronizācijas lapas tiks "
 #~ "pabeigtas."
-
-#~ msgid "Cached library ready"
-#~ msgstr "Kešotā bibliotēka ir gatava"
 
 #~ msgid "Caching library artwork..."
 #~ msgstr "Kešo albumu vāciņus…"

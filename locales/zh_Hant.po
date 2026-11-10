@@ -147,6 +147,16 @@ msgid ""
 msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
 
 msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -317,6 +327,11 @@ msgstr "收藏"
 
 msgid "Activity"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add Manually"
+msgstr "新增規則"
 
 msgid "Add Rule"
 msgstr "新增規則"
@@ -535,6 +550,9 @@ msgstr "藝人專輯"
 msgid "Artist name"
 msgstr "藝人名稱"
 
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+
 msgid "Artist radio"
 msgstr "藝人電台"
 
@@ -573,6 +591,9 @@ msgid "Artwork storage"
 msgstr "私密儲存空間"
 
 msgid "Artwork"
+msgstr ""
+
+msgid "Asks for music access"
 msgstr ""
 
 msgid "Audio effects"
@@ -888,10 +909,21 @@ msgstr "選擇一個或多個資料夾掃描，並直接由此電腦播放"
 msgid "Choose playback output"
 msgstr "選擇播放裝置"
 
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+
 msgid "Choose whether to keep the completed downloads."
 msgstr ""
 
 msgid "Choose"
+msgstr "選擇"
+
+#, fuzzy
+#| msgid "Choose"
+msgid "Choose..."
 msgstr "選擇"
 
 msgid "Circular spectrum"
@@ -2044,6 +2076,9 @@ msgstr "前進"
 msgid "Found Servers"
 msgstr ""
 
+msgid "Found"
+msgstr ""
+
 msgid "Frame rate limit"
 msgstr ""
 
@@ -2305,6 +2340,9 @@ msgstr "Jellyfin"
 msgid "Join profile"
 msgstr "變更敏感存儲空間"
 
+msgid "Join to copy its sources and sign-ins"
+msgstr ""
+
 msgid "Join"
 msgstr ""
 
@@ -2470,8 +2508,10 @@ msgstr "資料夾載入中..."
 msgid "Loading..."
 msgstr "正在儲存..."
 
-msgid "Local Address (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Local Folders"
+msgid "Local Address"
+msgstr "本地資料夾"
 
 msgid "Local File Access"
 msgstr ""
@@ -2558,6 +2598,9 @@ msgid "Low shelf"
 msgstr ""
 
 msgid "Lyrics background opacity"
+msgstr ""
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
 
 msgid "Lyrics loaded"
@@ -2758,8 +2801,18 @@ msgstr "音樂資料夾"
 msgid "Music access permission was denied"
 msgstr ""
 
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Music folder"
+msgstr "音樂資料夾"
+
 msgid "Music folders on the Rufin machine"
 msgstr ""
+
+#, fuzzy
+#| msgid "This device"
+msgid "Music on this phone"
+msgstr "此裝置"
 
 #, fuzzy
 #| msgid "All Music"
@@ -3114,11 +3167,6 @@ msgstr "關閉"
 msgid "Offline"
 msgstr ""
 
-#, fuzzy
-#| msgid "This device"
-msgid "On this device"
-msgstr "此裝置"
-
 msgid "On"
 msgstr ""
 
@@ -3132,6 +3180,9 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "One path per line"
+msgstr ""
+
+msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
@@ -3565,9 +3616,6 @@ msgstr "上一首"
 msgid "Privacy & Security"
 msgstr "隱私與安全"
 
-msgid "Privacy and Security"
-msgstr "隱私與安全"
-
 msgid "Private mode is off"
 msgstr "無痕模式已關閉"
 
@@ -3753,11 +3801,6 @@ msgstr ""
 
 msgid "Remote lyrics"
 msgstr "遠端歌詞"
-
-#, fuzzy
-#| msgid "Remove"
-msgid "Remote"
-msgstr "移除"
 
 msgid "Remove All Downloads"
 msgstr "移除所有下載內容"
@@ -4136,6 +4179,11 @@ msgid "Search queue"
 msgstr "搜尋佇列"
 
 #, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search this network"
+msgstr "搜尋歌詞"
+
+#, fuzzy
 #| msgid "Artist name"
 msgid "Search unavailable"
 msgstr "藝人名稱"
@@ -4255,7 +4303,7 @@ msgstr ""
 msgid "Server Actions"
 msgstr ""
 
-msgid "Server Address Override (optional)"
+msgid "Server Address Override"
 msgstr ""
 
 msgid "Server Address"
@@ -4284,16 +4332,10 @@ msgstr ""
 msgid "Server is unreachable"
 msgstr ""
 
-msgid "Server lyrics are off in private mode"
-msgstr "在無痕模式中伺服器歌詞會被關閉"
-
 msgid "Server prefix doesn't match"
 msgstr ""
 
 msgid "Server"
-msgstr ""
-
-msgid "Servers"
 msgstr ""
 
 msgid "Set the Discord activity type to Listening"
@@ -4407,6 +4449,9 @@ msgstr "顯示/隱藏右側邊欄"
 msgid "Showcase"
 msgstr "展示櫃"
 
+msgid "Shows what you are playing on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "隨機播放"
 
@@ -4469,6 +4514,9 @@ msgstr ""
 #| msgid "Only unplayed tracks"
 msgid "Skip unplayable tracks"
 msgstr "僅未播放過的曲目"
+
+msgid "Skip"
+msgstr ""
 
 msgid "Slate"
 msgstr ""
@@ -4564,6 +4612,11 @@ msgstr ""
 
 msgid "Spectrum"
 msgstr ""
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Start Listening"
+msgstr "ListenBrainz"
 
 msgid "Start minimized"
 msgstr ""
@@ -4877,6 +4930,9 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr "開啟無痕模式"
 
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+
 msgid "Type to search or create a new playlist"
 msgstr ""
 
@@ -5046,8 +5102,10 @@ msgstr "使用者名稱"
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 
-msgid "Verification Code (optional)"
-msgstr ""
+#, fuzzy
+#| msgid "Notifications"
+msgid "Verification Code"
+msgstr "通知"
 
 msgid "Verify server certificate"
 msgstr "驗證伺服器的憑證"
@@ -5117,6 +5175,14 @@ msgstr ""
 msgid "Weighting"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Welcome to Rufin"
+msgstr "連接"
+
+msgid "While your library loads"
+msgstr ""
+
 msgid "Wide"
 msgstr ""
 
@@ -5145,6 +5211,9 @@ msgstr "黃色"
 
 msgid "Yes"
 msgstr "是"
+
+msgid "Your library is ready"
+msgstr ""
 
 msgid "Your music belongs here"
 msgstr ""
@@ -5366,6 +5435,22 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "On this device"
+#~ msgstr "此裝置"
+
+#~ msgid "Privacy and Security"
+#~ msgstr "隱私與安全"
+
+#, fuzzy
+#~| msgid "Remove"
+#~ msgid "Remote"
+#~ msgstr "移除"
+
+#~ msgid "Server lyrics are off in private mode"
+#~ msgstr "在無痕模式中伺服器歌詞會被關閉"
 
 #, fuzzy
 #~| msgid "No folder selected"
@@ -5593,11 +5678,6 @@ msgstr ""
 #~| msgid "Artist name"
 #~ msgid "Media available"
 #~ msgstr "藝人名稱"
-
-#, fuzzy
-#~| msgid "This device"
-#~ msgid "Music on this device"
-#~ msgstr "此裝置"
 
 #, fuzzy
 #~| msgid "Preparing library..."
