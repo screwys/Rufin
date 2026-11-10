@@ -170,8 +170,7 @@ Version History on the latest release.
 Homebrew Cask is the primary macOS installation:
 
 ```bash
-brew tap screwys/tap
-brew install --cask rufin
+brew install --cask screwys/tap/rufin
 ```
 
 You can turn on **Automatic updates** in General preferences to have
