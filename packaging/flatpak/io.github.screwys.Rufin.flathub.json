@@ -150,7 +150,7 @@
           "type": "git",
           "url": "https://github.com/screwys/Rufin.git",
           "tag": "v0.17.1",
-          "commit": "1fc2f59b13d2a0d3eee1868873c135bac54a84aa"
+          "commit": "a815dee2f580925c47054aee2b504b1a13dfa9f5"
         },
         "cargo-sources.json"
       ]
