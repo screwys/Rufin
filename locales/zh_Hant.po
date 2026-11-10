@@ -593,9 +593,6 @@ msgstr "私密儲存空間"
 msgid "Artwork"
 msgstr ""
 
-msgid "Asks for music access"
-msgstr ""
-
 msgid "Audio effects"
 msgstr ""
 

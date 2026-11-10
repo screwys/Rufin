@@ -628,11 +628,6 @@ msgstr "Stockage des illustrations"
 msgid "Artwork"
 msgstr "Illustration"
 
-#, fuzzy
-#| msgid "Guest / public access"
-msgid "Asks for music access"
-msgstr "Accès invité / public"
-
 msgid "Audio effects"
 msgstr "Effets audio"
 
@@ -4875,6 +4870,11 @@ msgstr "L'option de mise ŕ jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#, fuzzy
+#~| msgid "Guest / public access"
+#~ msgid "Asks for music access"
+#~ msgstr "Accès invité / public"
 
 #~ msgid "On this device"
 #~ msgstr "Sur cet appareil"

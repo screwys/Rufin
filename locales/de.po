@@ -625,11 +625,6 @@ msgstr "Cover-Speicher"
 msgid "Artwork"
 msgstr "Cover"
 
-#, fuzzy
-#| msgid "Guest / public access"
-msgid "Asks for music access"
-msgstr "Gast-/öffentlicher Zugriff"
-
 msgid "Audio effects"
 msgstr "Audioeffekte"
 
@@ -4871,6 +4866,11 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#, fuzzy
+#~| msgid "Guest / public access"
+#~ msgid "Asks for music access"
+#~ msgstr "Gast-/öffentlicher Zugriff"
 
 #~ msgid "On this device"
 #~ msgstr "Auf diesem Gerät"

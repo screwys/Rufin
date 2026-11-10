@@ -633,11 +633,6 @@ msgstr "Slēptā krātuve"
 msgid "Artwork"
 msgstr "Attēls"
 
-#, fuzzy
-#| msgid "Guest / public access"
-msgid "Asks for music access"
-msgstr "Viesis / publiska piekļuve"
-
 msgid "Audio effects"
 msgstr ""
 
@@ -5401,6 +5396,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Guest / public access"
+#~ msgid "Asks for music access"
+#~ msgstr "Viesis / publiska piekļuve"
 
 #~ msgid "On this device"
 #~ msgstr "Šajā ierīcē"

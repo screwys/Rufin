@@ -597,9 +597,6 @@ msgstr "Salaisuuden tallennustila"
 msgid "Artwork"
 msgstr "Kuvitus"
 
-msgid "Asks for music access"
-msgstr ""
-
 msgid "Audio effects"
 msgstr ""
 
