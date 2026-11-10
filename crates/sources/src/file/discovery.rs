@@ -343,8 +343,7 @@ fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) ->
     } else {
         join_tag_values(artists.clone())
     };
-    let album_artist = tags
-        .string::<gst::tags::AlbumArtist>()
+    let album_artist = join_tag_values(tags.strings::<gst::tags::AlbumArtist>())
         .or_else(|| tags.extended(&["albumartist", "album_artist"]))
         .or_else(|| is_asf.then(|| artists.get(1).cloned()).flatten());
     let track_number = tags

@@ -155,6 +155,9 @@ pub(crate) struct Touched {
     pub(crate) albums: BTreeSet<i64>,
     pub(crate) artists: BTreeSet<i64>,
     pub(crate) tags: BTreeSet<i64>,
+    /// Albums and artists that tracks left, each with where those tracks went.
+    pub(crate) left_albums: BTreeMap<i64, BTreeSet<i64>>,
+    pub(crate) left_artists: BTreeMap<i64, BTreeSet<i64>>,
 }
 
 /// The kinds providers name in completion and removal.
@@ -679,6 +682,33 @@ async fn track_page(
         {
             touched.albums.insert(album.raw());
         }
+        if let Some(before) = &candidate.before {
+            if let (Some(old), Some(new)) = (before.album, track.album)
+                && old != new
+            {
+                touched
+                    .left_albums
+                    .entry(old.raw())
+                    .or_default()
+                    .insert(new.raw());
+            }
+            let credited = |track: &Track| {
+                track
+                    .artists
+                    .iter()
+                    .chain(&track.album_artists)
+                    .map(|artist| artist.raw())
+                    .collect::<BTreeSet<_>>()
+            };
+            let (old, new) = (credited(before), credited(&track));
+            for artist in old.difference(&new) {
+                touched
+                    .left_artists
+                    .entry(*artist)
+                    .or_default()
+                    .extend(new.difference(&old));
+            }
+        }
         match &candidate.before {
             Some(_) => {
                 touched.tracks.insert(track.key.raw());
@@ -998,6 +1028,63 @@ pub(crate) async fn resolve(write: &mut Write<'_>, touched: &mut Touched) -> Lib
         albums.extend(tagged);
     }
     super::albums::resolve(write, &albums).await?;
+    hand_on(write, touched).await
+}
+
+/// An album or artist every current track left hands the user's favorite and rating to where
+/// they went, as a moved track does, so a scan or edit that names it anew keeps them. Where
+/// they went to several, the ones with its name take them, or else all do.
+async fn hand_on(write: &mut Write<'_>, touched: &Touched) -> LibraryResult<()> {
+    let mut moves = Vec::new();
+    for (old, targets) in &touched.left_albums {
+        let Some(old) = write.get::<Album>(*old).await? else {
+            continue;
+        };
+        let empty: bool = sqlx::query_scalar(
+            "SELECT NOT EXISTS(SELECT 1 FROM tracks WHERE album_key=?1 AND indexed=1)",
+        )
+        .bind(old.key.raw())
+        .fetch_one(write.connection().await?)
+        .await?;
+        if empty {
+            let mut uris = Vec::new();
+            for target in targets {
+                uris.extend(write.get::<Album>(*target).await?.map(|album| album.uri));
+            }
+            moves.push((old.uri, uris));
+        }
+    }
+    for (old, targets) in &touched.left_artists {
+        let Some(old) = write.get::<Artist>(*old).await? else {
+            continue;
+        };
+        let empty: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM track_links link JOIN tracks track USING(track_key) WHERE link.role IN(0,1) AND link.target=?1 AND track.indexed=1) AND NOT EXISTS(SELECT 1 FROM album_links link WHERE link.role=0 AND link.target=?1 AND EXISTS(SELECT 1 FROM tracks track WHERE track.album_key=link.album_key AND track.indexed=1))")
+            .bind(old.key.raw())
+            .fetch_one(write.connection().await?)
+            .await?;
+        if !empty {
+            continue;
+        }
+        let mut artists = Vec::new();
+        for target in targets {
+            artists.extend(write.get::<Artist>(*target).await?);
+        }
+        let named = |artist: &Artist| {
+            artist
+                .metadata
+                .name
+                .eq_ignore_ascii_case(&old.metadata.name)
+        };
+        if artists.iter().any(named) {
+            artists.retain(named);
+        }
+        let uris = artists.into_iter().map(|artist| artist.uri).collect();
+        moves.push((old.uri, uris));
+    }
+    for (old, new) in moves.into_iter().filter(|(_, new)| !new.is_empty()) {
+        let new = new.iter().map(String::as_str).collect::<Vec<_>>();
+        super::files::move_user_state(write, &old, &new).await?;
+    }
     Ok(())
 }
 
@@ -2664,5 +2751,59 @@ mod tests {
                 && links.tags.is_empty()
                 && links.folders.is_empty()
         }));
+    }
+
+    /// A scan that names an album and an artist anew hands the user's favorites on.
+    #[tokio::test]
+    async fn renamed_album_and_artist_keep_user_favorites() {
+        use crate::FavoriteTarget;
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(directory.path().join("library.sqlite3"))
+            .await
+            .unwrap();
+        catalog
+            .reconcile_source(&SourceId::new("source"), "subsonic", "Source")
+            .await
+            .unwrap();
+        let batch = |album: &str, artist: &str| {
+            let credit = ArtistCredit {
+                object_id: artist.into(),
+                name: "A".into(),
+                ..Default::default()
+            };
+            let mut row = track("t1", "One");
+            row.album_object_id = Some(album.into());
+            row.metadata.artists = vec![credit.clone()];
+            row.metadata.album_artists = vec![credit];
+            CatalogBatch {
+                tracks: vec![row],
+                ..Default::default()
+            }
+        };
+        let album = |object| FavoriteTarget::Album(entity_uri("source", "album", object));
+        let artist = |object| FavoriteTarget::Artist(entity_uri("source", "artist", object));
+        let mut observation = catalog.observe("source").await.unwrap();
+        observation.start_observation().await.unwrap();
+        observation
+            .apply_catalog(&batch("al1", "a1"), true)
+            .await
+            .unwrap();
+        catalog
+            .set_favorite(&album("al1"), true, false)
+            .await
+            .unwrap();
+        catalog
+            .set_favorite(&artist("a1"), true, false)
+            .await
+            .unwrap();
+        observation
+            .apply_catalog(&batch("al2", "a2"), true)
+            .await
+            .unwrap();
+        assert!(catalog.favorite(&album("al2")).await.unwrap());
+        assert!(catalog.favorite(&artist("a2")).await.unwrap());
+        assert!(!catalog.favorite(&album("al1")).await.unwrap());
+        assert!(!catalog.favorite(&artist("a1")).await.unwrap());
+        assert_reloads(&catalog).await;
     }
 }

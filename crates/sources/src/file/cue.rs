@@ -328,21 +328,20 @@ pub(crate) fn cue_track(
         .performer
         .clone()
         .unwrap_or_else(|| album_artist.clone());
-    let album_artists = media::split_names(&album_artist)
+    track.metadata.album_artists = media::split_names(&album_artist)
         .into_iter()
         .map(|name| media::artist_credit(name, None))
-        .collect::<Vec<_>>();
+        .collect();
     track.metadata.artists = media::split_names(&track.metadata.artist)
         .into_iter()
         .map(|name| media::artist_credit(name, None))
         .collect();
     track.album_object_id = Some(media::album_id(
-        &album_artists,
-        &track.metadata.album,
-        track.metadata.musicbrainz_album_id.as_deref(),
+        &track.metadata,
+        true,
+        cue_path,
         Some(cue_path),
     ));
-    track.metadata.album_artists = album_artists;
     track.metadata.title = cue
         .title
         .clone()
