@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use library::ArtistView;
-use localization::{album_count_text, msgid, track_count_text};
+use localization::{album_count_text, msgid, tr, track_count_text};
 
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
@@ -588,10 +588,7 @@ fn artist_subroute_header(
         PRIMARY_ROUTE_MARGIN_START,
     );
     let header = DetailShowcaseView::new(&artist.row.name);
-    let kind = localized_label(kind_text);
-    kind.add_css_class("detail-artist");
-    kind.set_xalign(0.0);
-    header.append_detail(&kind);
+    header.set_detail(&tr(kind_text));
     header.take_band_colours_from(
         shell,
         artist

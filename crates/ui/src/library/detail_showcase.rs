@@ -58,7 +58,13 @@ mod showcase_imp {
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
-        pub details: TemplateChild<gtk::Box>,
+        pub detail_fade: TemplateChild<crate::widgets::edge_fade::TextFade>,
+        #[template_child]
+        pub detail_slide: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
+        pub detail_viewport: TemplateChild<gtk::Viewport>,
+        #[template_child]
+        pub detail: TemplateChild<gtk::Label>,
         #[template_child]
         pub below: TemplateChild<gtk::Box>,
         #[template_child]
@@ -290,6 +296,7 @@ impl DetailShowcaseView {
         let view: Self = glib::Object::new();
         let imp = view.imp();
         crate::widgets::text_slide::install(&imp.title_slide, &imp.title_viewport, &*imp.title);
+        crate::widgets::text_slide::install(&imp.detail_slide, &imp.detail_viewport, &*imp.detail);
         // The facts slide as the title does when they are wider than the room.
         crate::widgets::text_slide::install(&imp.facts_slide, &imp.facts_viewport, &*imp.summary);
         imp.band_stops.set(::artwork::showcase_band(&[], 0, 0, 0));
@@ -375,10 +382,12 @@ impl DetailShowcaseView {
         self.refit();
     }
 
-    /// Adds a line under the title: an album's artist, or the sub-page an artist's band heads.
-    pub fn append_detail(&self, child: &impl IsA<gtk::Widget>) {
-        self.imp().details.set_visible(true);
-        self.imp().details.append(child);
+    /// Shows `text` under the title: an album's artist, or the sub-page an artist's band heads.
+    pub fn set_detail(&self, text: &str) -> gtk::Label {
+        let imp = self.imp();
+        imp.detail.set_text(text);
+        imp.detail_fade.set_visible(true);
+        imp.detail.clone()
     }
 
     /// Adds a fact after the summary's: an artist's album and track counts.
@@ -833,7 +842,9 @@ impl DetailShowcaseView {
         } else {
             imp.names.add_css_class("detail-on-band");
         }
-        imp.title.set_xalign(if layout.stacked { 0.5 } else { 0.0 });
+        let text_align = if layout.stacked { 0.5 } else { 0.0 };
+        imp.title.set_xalign(text_align);
+        imp.detail.set_xalign(text_align);
         // Under it the facts, links, genres and buttons are centred too.
         let along = if layout.stacked {
             gtk::Align::Center
@@ -848,11 +859,7 @@ impl DetailShowcaseView {
         imp.external_links.set_hexpand(!layout.stacked);
         imp.genre_row.set_halign(along);
         imp.actions.set_halign(along);
-        imp.details.set_halign(if layout.stacked {
-            gtk::Align::Center
-        } else {
-            gtk::Align::Fill
-        });
+        imp.detail.set_halign(along);
         imp.body.set_orientation(if layout.stacked {
             gtk::Orientation::Vertical
         } else {

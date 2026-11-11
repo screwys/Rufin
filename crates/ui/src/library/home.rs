@@ -822,15 +822,8 @@ fn home_showcase_page(
         Some((source, drag_album.title.clone()))
     });
 
-    let (artist_scroll, artist) = crate::widgets::text_slide::new_label();
-    artist.set_text(&album.artist);
-    artist.add_css_class("detail-artist");
-    artist.set_xalign(0.0);
-    artist.set_halign(gtk::Align::Start);
-    artist.set_width_request(1);
-    artist.set_width_chars(1);
+    let artist = view.set_detail(&album.artist);
     DetailLinkBinding::new(&artist, shell.route_navigation()).bind(album_row_artist_links(&album));
-    view.append_detail(&artist_scroll);
     view.replace_summary(&[
         (
             "rufin-x-office-calendar-symbolic",
