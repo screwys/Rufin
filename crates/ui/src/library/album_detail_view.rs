@@ -77,16 +77,9 @@ impl CatalogUi {
                 .map(|genre| (genre.name.as_str(), genre.genre_key)),
         );
 
-        let (scroll, artist) = crate::widgets::text_slide::new_label();
-        artist.set_text(&album.metadata.artist);
-        artist.add_css_class("detail-artist");
-        artist.set_xalign(0.0);
-        artist.set_halign(gtk::Align::Start);
-        artist.set_width_request(1);
-        artist.set_width_chars(1);
+        let artist = showcase_view.set_detail(&album.metadata.artist);
         let artist_links = DetailLinkBinding::new(&artist, self.route_navigation());
         artist_links.bind(album_artist_links(&album));
-        showcase_view.append_detail(&scroll);
 
         let play_controller = self.products.playback.clone();
         let play_rows = rows.clone();
