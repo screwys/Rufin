@@ -161,7 +161,20 @@ async function cover(node, uri, signal, preview = null) {
   const identity = JSON.stringify(query);
   let fullReady = node.dataset.coverIdentity === identity && node.dataset.coverFull === "true";
   covers.get(node)?.dispose();
-  if (!fullReady && preview && node.querySelector("img")?.getAttribute("src") !== preview) {
+  let request, pixels = 0;
+  const entry = { url: null, identity, pixels: 0, dispose };
+  // A page read again shows the same covers on new nodes: each takes the picture the node it
+  // replaced loaded, rather than showing it again from the preview.
+  const replaced = !fullReady && [...covers].find(([other, shown]) => !other.isConnected && shown.url && shown.identity === identity)?.[1];
+  if (replaced) {
+    [entry.url, entry.pixels, pixels, fullReady] = [replaced.url, replaced.pixels, replaced.pixels, true];
+    replaced.url = null;
+    replaced.dispose();
+    const image = el("img");
+    image.alt = "";
+    image.src = entry.url;
+    node.replaceChildren(image);
+  } else if (!fullReady && preview && node.querySelector("img")?.getAttribute("src") !== preview) {
     const image = el("img");
     image.alt = "";
     image.src = preview;
@@ -171,8 +184,6 @@ async function cover(node, uri, signal, preview = null) {
   }
   node.dataset.coverIdentity = identity;
   node.dataset.coverFull = String(fullReady);
-  let request, pixels = 0;
-  const entry = { url: null, dispose };
   const resize = new ResizeObserver(() => {
     const size = physicalSize();
     if (!query.original && size > pixels) run(() => load(size));
@@ -181,15 +192,20 @@ async function cover(node, uri, signal, preview = null) {
     const bounds = node.getBoundingClientRect();
     return Math.max(1, Math.ceil(Math.max(bounds.width, bounds.height) * devicePixelRatio));
   }
-  function dispose() {
+  // An aborted page stops loading its covers but keeps their pictures, which the page read
+  // again in its place takes over; releaseCovers lets go of the ones nothing took.
+  function stop() {
     request?.abort();
     resize.disconnect();
-    signal.removeEventListener("abort", dispose);
+  }
+  function dispose() {
+    stop();
+    signal.removeEventListener("abort", stop);
     if (entry.url) URL.revokeObjectURL(entry.url);
     if (covers.get(node) === entry) covers.delete(node);
   }
   async function load(size) {
-    pixels = size;
+    pixels = entry.pixels = size;
     request?.abort();
     request = new AbortController();
     const requestSignal = AbortSignal.any([signal, request.signal]);
@@ -218,8 +234,9 @@ async function cover(node, uri, signal, preview = null) {
     }
   }
   covers.set(node, entry);
-  signal.addEventListener("abort", dispose, { once: true });
+  signal.addEventListener("abort", stop, { once: true });
   resize.observe(node);
+  if (replaced && (query.original || physicalSize() <= pixels)) return true;
   return load(physicalSize());
 }
 
@@ -247,7 +264,7 @@ async function coverGroup(node, query, count, signal, previews = []) {
 
 // GTK's shell sizes (crates/ui/src/shell/shell/layout.rs, player/bottom.rs and player/mod.rs).
 const RAIL = 72, GAP = 8, MIN_MAIN = 450, MIN_LEFT = 210, MAX_LEFT = 400, MIN_RIGHT = 250,
-  MAX_RIGHT = 500, NARROW_BAR = 642, TRANSPORT = 308, MINI_WIDTH = 360, MINI_HEIGHT = 240;
+  MAX_RIGHT = 500, NARROW_BAR = 708, TRANSPORT = 308, MINI_WIDTH = 360, MINI_HEIGHT = 240;
 const appLayout = (() => {
   try { return JSON.parse($("app").dataset.layout); } catch { return {}; }
 })();
@@ -290,20 +307,120 @@ function resolveLayout(width) {
   return { left: left.toLowerCase(), leftWidth, right, rightWidth };
 }
 
-// What the bottom bar shows at this width: its layout, the actions beside the volume and the
-// seek bar's width.
+// What the desktop row shows at this width: the actions beside the volume and the seek bar's width.
 function barLayout(width) {
   const side = (width - 16 - TRANSPORT) / 2;
   const action = (count) => 192 + 34 * count;
   return {
-    bar: width >= NARROW_BAR ? "desktop" : "controls",
-    // Auto DJ and random play keep their places while all seven buttons fit.
-    transport: width - 16 >= TRANSPORT ? "all" : "five",
     actions: side >= action(2) ? "queue" : side >= action(1) ? "favorite" : "volume",
     // A running sleep timer shows its time left where the pill fits beside every action.
     sleepLabel: side >= action(2) + 64,
     progress: Math.max(140, Math.min(140 + ((width - NARROW_BAR) * 95) / 300, width - 16 - 2 * action(0) - 72)),
   };
+}
+
+// GTK's controls_row: how many extras join the controls layout's five on its button row, a pair
+// at a time, and the gap there, narrower where the row is tight.
+function controlsRow(width) {
+  const gap = (extras) => Math.min(8, (width - 36 * (4 + extras) - 44) / (4 + extras));
+  const up = [6, 4, 2].find((extras) => gap(extras) >= 0) ?? 0;
+  return { up, gap: Math.max(0, gap(up)) };
+}
+
+// Volume, favorite and the extras sit where each layout keeps them, as GTK's
+// place_bottom_player_seek_buttons moves them: in the desktop row's actions, beside previous and
+// next in the compact layout, volume in shuffle's place on the strip, and in the controls layout
+// the first `up` on the button row and the rest at the ends of the seek bar's row.
+let placed = "";
+function placeBarButtons(bar, up) {
+  if (placed === `${bar}:${up}`) return;
+  placed = `${bar}:${up}`;
+  const row = document.querySelector(".transport-buttons");
+  const seekRow = document.querySelector(".seek-row");
+  const volumeBox = document.querySelector(".volume");
+  const extras = ["auto-dj", "random-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
+  const [dj, random, sleep, settings, volume, favorite] = extras;
+  row.prepend(dj);
+  row.append(random);
+  document.querySelector(".player-actions").prepend(sleep, settings);
+  volumeBox.prepend(favorite);
+  volumeBox.insertBefore(volume, $("volume"));
+  if (bar === "compact") {
+    row.prepend(volume);
+    row.append(favorite);
+  } else if (bar === "strip") row.prepend(volume);
+  else if (bar === "controls") {
+    const raised = (button) => extras.indexOf(button) < up;
+    const start = [sleep, volume, dj], end = [random, favorite, settings];
+    row.prepend(...start.filter(raised));
+    row.append(...end.filter(raised));
+    seekRow.prepend(...start.filter((button) => !raised(button)));
+    seekRow.append(...end.filter((button) => !raised(button)));
+  }
+}
+
+// The fullscreen player's panes, as GTK's PaneLayout: both side by side or one of them, and one at
+// a time under 800px.
+let paneLayout = "both";
+const queueHeader = document.querySelector("#right-panel > .panel-header");
+function panes(collapsed) {
+  return { both: [true, !collapsed], first: [true, false], second: [false, true] }[paneLayout];
+}
+
+function switchPane() {
+  const collapsed = $("app").clientWidth < 800;
+  paneLayout = { both: collapsed ? "second" : "first", first: "second", second: collapsed ? "first" : "both" }[paneLayout];
+  applyLayout();
+}
+
+// GTK's apply_fullscreen_responsive_layout_for_size: the panes, whether the lyrics fit under the
+// details, and the cover's size.
+function applyFullscreen(width, height) {
+  const section = $("fullscreen-player");
+  const collapsed = width < 800;
+  const single = height - 90 < 320;
+  const [first, second] = panes(collapsed);
+  const lyrics = appLayout.fullscreen_lyrics !== false && !single && first;
+  section.dataset.panes = first && second ? "both" : first ? "first" : "second";
+  section.toggleAttribute("data-lyrics", lyrics);
+  section.toggleAttribute("data-beside", lyrics || single);
+  setIcon(
+    $("fullscreen-pane").firstElementChild,
+    paneLayout === "second" ? "rufin-pane-right-focus-symbolic" : paneLayout === "first" || collapsed ? "rufin-pane-left-focus-symbolic" : "rufin-view-dual-symbolic",
+  );
+  const paneWidth = first && second ? (width - 24) / 2 : width - 16;
+  const paneHeight = height - 90 - 48;
+  section.toggleAttribute("data-without-album", single && paneHeight < 112);
+  section.toggleAttribute("data-without-meta", single && paneHeight < 140);
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, Math.floor(value)));
+  let size, hero = null;
+  if (single) size = clamp(Math.min((paneWidth - 48) * 0.4, paneHeight - 32), 48, 340);
+  else if (lyrics) {
+    hero = clamp((height - 90) * 0.42, 96, 544);
+    size = clamp(Math.min((paneWidth - 48) * 0.4, hero - 32), 48, 340);
+  } else size = clamp(Math.min(height - 90 - 228, paneWidth - 48, height * 0.5), 96, 480);
+  section.style.setProperty("--cover-size", `${size}px`);
+  section.style.setProperty("--hero-height", hero ? `${hero}px` : "auto");
+}
+
+// The queue and the lyrics move into the fullscreen player while it shows, as GTK's do.
+function openFullscreen() {
+  const section = $("fullscreen-player");
+  if (!section.hidden) return;
+  $("fullscreen-lyrics").append($("lyrics-panel"));
+  $("fullscreen-second").append(queueHeader, $("queue"));
+  $("right-panel").classList.remove("open");
+  section.hidden = false;
+  applyLayout();
+}
+
+function closeFullscreen() {
+  const section = $("fullscreen-player");
+  if (section.hidden) return;
+  section.hidden = true;
+  $("right-panel").prepend(queueHeader, $("queue"));
+  $("right-panel").append($("lyrics-panel"));
+  applyLayout();
 }
 
 function applyLayout() {
@@ -312,19 +429,30 @@ function applyLayout() {
   const mini = innerHeight < MINI_HEIGHT ? "short" : innerWidth < MINI_WIDTH ? "tall" : null;
   const layout = resolveLayout(width);
   const bar = barLayout(app.clientWidth);
+  const fullscreen = !mini && !$("fullscreen-player").hidden;
+  const narrow = !mini && app.clientWidth < NARROW_BAR;
+  // GTK's bottom_player_layout.
+  const kind = mini === "short" ? "strip" : mini || (narrow && fullscreen) ? "controls" : narrow ? "compact" : "desktop";
+  const transport = Math.max(app.clientWidth - 16, 220);
+  const row = controlsRow(transport);
+  placeBarButtons(kind, row.up);
   if (mini) app.dataset.mini = mini;
   else delete app.dataset.mini;
   $("mini-title").hidden = !mini;
   app.dataset.left = layout.left;
   app.dataset.right = layout.right ? "visible" : "hidden";
-  app.dataset.bar = mini ? "mini" : bar.bar;
+  app.dataset.bar = kind;
+  app.toggleAttribute("data-narrow", narrow);
   app.dataset.actions = bar.actions;
-  app.toggleAttribute("data-sleep-label", bar.sleepLabel);
-  app.dataset.transport = mini === "short" ? "five" : bar.transport;
+  app.toggleAttribute("data-sleep-label", kind === "desktop" && bar.sleepLabel);
+  // The controls layout's seek bar gives way to the buttons beside it.
+  app.toggleAttribute("data-seek-hidden", kind === "controls" && transport < (6 - row.up) * 34 + 132);
+  app.style.setProperty("--controls-gap", `${row.gap}px`);
   app.style.setProperty("--left-w", `${layout.leftWidth || Math.min(appLayout.preferred_left_sidebar_width || 230, MAX_LEFT)}px`);
   app.style.setProperty("--right-w", `${layout.rightWidth}px`);
   app.style.setProperty("--progress-width", `${bar.progress}px`);
   app.style.setProperty("--player-height", `${document.querySelector(".player").offsetHeight + GAP}px`);
+  if (fullscreen) applyFullscreen(app.clientWidth, app.clientHeight);
   if (layout.left !== "hidden") $("navigation").classList.remove("open");
   if (layout.right) $("right-panel").classList.remove("open");
   const sidebarLabel = tr({ full: "Collapse sidebar", compact: "Expand sidebar", hidden: "Show sidebar" }[layout.left]);
@@ -428,7 +556,7 @@ function initLayout() {
     $("main-menu").hidePopover();
     $("about-dialog").showModal();
   });
-  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["sleep-timer-button", "sleep-timer"], ["playback-settings-button", "playback-settings"]]) {
+  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["sleep-timer-button", "sleep-timer"], ["playback-settings-button", "playback-settings"], ["fullscreen-customize", "fullscreen-settings"]]) {
     $(anchor).removeAttribute("popovertarget");
     $(anchor).addEventListener("click", () => {
       if ($(popup).matches(":popover-open")) $(popup).hidePopover();
@@ -570,6 +698,9 @@ function bindHoverControls(row) {
 export {
   $,
   setLayoutSettings,
+  openFullscreen,
+  closeFullscreen,
+  switchPane,
   slideText,
   button,
   el,

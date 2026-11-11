@@ -1,6 +1,7 @@
 import { openMetadata } from "./metadata.js";
 import { tr } from "./ui.js";
 import {
+  closeFullscreen,
   releaseCovers,
   $,
   button,
@@ -308,6 +309,7 @@ function showHistory() {
 // Opens `target`: a page token or a navigation entry such as "Albums". A page
 // opened from history leaves the history as it is.
 function navigate(target, record = true) {
+  closeFullscreen();
   if (record && opened) {
     backStack.push(opened);
     if (backStack.length > 50) backStack.shift();
@@ -869,23 +871,30 @@ function loadCardCovers(host, signal) {
   );
   cards.forEach((card) => requestedCovers.add(card));
   let next = 0;
-  for (let worker = 0; worker < 4; worker++)
-    run(async () => {
-      while (next < cards.length && !signal.aborted) {
-        const card = cards[next++],
-          row = JSON.parse(card.dataset.row),
-          kind = card.dataset.kind;
-        const query = cardCover(kind, row);
-        if (query) await coverGroup(
-          card.querySelector(".cover"),
-          query,
-          row.artwork_count || 1,
-          signal,
-          row.artwork_previews,
-        );
-      }
-    });
-  releaseCovers();
+  const worker = async () => {
+    while (next < cards.length && !signal.aborted) {
+      const card = cards[next++],
+        row = JSON.parse(card.dataset.row),
+        kind = card.dataset.kind;
+      const query = cardCover(kind, row);
+      if (query) await coverGroup(
+        card.querySelector(".cover"),
+        query,
+        row.artwork_count || 1,
+        signal,
+        row.artwork_previews,
+      );
+    }
+  };
+  // The covers of the nodes these cards replaced go once every card has had the chance to
+  // take its own.
+  run(async () => {
+    try {
+      await Promise.all([worker(), worker(), worker(), worker()]);
+    } finally {
+      releaseCovers();
+    }
+  });
 }
 
 let homeObserver;

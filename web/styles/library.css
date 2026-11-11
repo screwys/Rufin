@@ -973,7 +973,7 @@
 }
 .column-row form:hover,
 .column-row.menu-open form {
-  background: var(--hover);
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 .column-row .cover-open {
   flex: 1;

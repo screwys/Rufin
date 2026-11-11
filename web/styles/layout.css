@@ -1,6 +1,6 @@
 /* The GTK shell: a top bar over panes with 8px gaps, over the bottom bar. ui.js resolves the
    sidebars as GTK does and sets data-left (full, compact, hidden), data-right (visible, hidden),
-   data-bar and data-mini; the widths come from the same settings. */
+   data-bar, data-narrow and data-mini; the widths come from the same settings. */
 #app {
   --pane: var(--sidebar);
   --pane-header-top: 12px;
@@ -112,7 +112,7 @@
   white-space: nowrap;
   font-weight: 600;
 }
-#app[data-bar="controls"] #forward {
+#app[data-narrow] #forward {
   display: none;
 }
 
@@ -161,20 +161,22 @@ nav {
   gap: 2px;
 }
 
+/* GTK's sidebar entries: a faint wash under the pointer, and the open page's icon in the accent. */
 nav :is(button, a) {
   justify-content: flex-start;
   background: transparent;
   padding: 9px 12px;
   width: 100%;
+  border-radius: 9px;
   color: var(--text);
 }
 
-nav :is(button, a)[aria-current="page"] {
-  background: var(--hover);
+nav :is(button, a):not([aria-current="page"]):hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
-nav :is(button, a):hover {
-  background: var(--hover);
+nav [aria-current="page"] .icon {
+  color: var(--accent);
 }
 
 nav .icon {
@@ -200,9 +202,8 @@ nav .icon {
 }
 
 .pin-row:hover,
-.pin-row:focus-within,
-.pin-row:has([aria-current="page"]) {
-  background: var(--hover);
+.pin-row:focus-within {
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 .pin-row .pin-open {
@@ -322,6 +323,16 @@ nav .icon {
   width: 18px;
   height: 18px;
 }
+/* The rail shows no wash: its icons brighten under the pointer instead. */
+#app[data-left="compact"] nav :is(button, a):hover {
+  background: transparent;
+}
+#app[data-left="compact"] nav :is(button, a):not([aria-current="page"]) .icon {
+  color: color-mix(in srgb, var(--window-fg-color, var(--text)) 58%, transparent);
+}
+#app[data-left="compact"] nav :is(button, a):not([aria-current="page"]):hover .icon {
+  color: var(--window-fg-color, var(--text));
+}
 #app[data-left="compact"] #pins h2,
 #app[data-left="compact"] .pin-label,
 #app[data-left="compact"] .pin-controls {
@@ -399,18 +410,18 @@ main {
   padding-top: 8px;
 }
 
-#app[data-bar="controls"] .toolbar {
+#app[data-narrow] .toolbar {
   padding: 10px 10px 12px;
   gap: 5px;
 }
-#app[data-bar="controls"] .toolbar select {
+#app[data-narrow] .toolbar select {
   max-width: 100px;
   font-size: 12px;
 }
-#app[data-bar="controls"] .toolbar .primary .icon {
+#app[data-narrow] .toolbar .primary .icon {
   display: none;
 }
-#app[data-bar="controls"] #content {
+#app[data-narrow] #content {
   padding: 0 7px 12px;
 }
 
