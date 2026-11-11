@@ -170,6 +170,12 @@ jobs:
         run: |
           cargo run --locked -p xtask -- verify packaged-playback "$LOCALAPPDATA/Programs/Rufin/bin/rufin.exe"
 
+      - name: Verify installer failure recovery
+        shell: msys2 {0}
+        run: |
+          pwsh.exe -NoProfile -File packaging/windows/check-installer.ps1 \
+            -Compiler "$(cygpath -m "$(command -v makensis)")"
+
       - name: Retain executable symbols
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
