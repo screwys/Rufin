@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 10:16+0000\n"
+"PO-Revision-Date: 2026-11-11 15:33+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
 "\n"
@@ -211,9 +211,9 @@ msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
-"Rufin akan menghitung metadata EBU R128 yang belum ada untuk seluruh koleksi "
-"musik. Proses ini bisa memakai CPU, baterai, dan data internet dalam jangka "
-"waktu lama."
+"Rufin akan menghitung metadata EBU R128 yang belum ada untuk seluruh "
+"pustaka. Proses ini bisa memakai CPU, baterai, dan data internet dalam "
+"jangka waktu lama."
 
 msgid ""
 "Some changes were saved. Close this editor and reopen it to review the "
@@ -225,8 +225,8 @@ msgstr ""
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
-"Penyimpanan sementara untuk koleksi musik sedang digunakan. Perubahan bisa "
-"hilang saat Rufin ditutup."
+"Penyimpanan pustaka sementara sedang digunakan. Perubahan bisa hilang saat "
+"Rufin ditutup."
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -283,8 +283,8 @@ msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
-"Anda mengatur Rufin untuk mengunduh secara otomatis seluruh koleksi musik "
-"Anda. Ini bisa memakan banyak data internet. Apakah anda yakin?"
+"Anda mengatur Rufin untuk mengunduh seluruh pustaka Anda secara otomatis. "
+"Ini bisa memakan banyak data internet. Apakah anda yakin?"
 
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
@@ -452,7 +452,7 @@ msgid "Add to folder"
 msgstr "Tambahkan ke folder"
 
 msgid "Add to library"
-msgstr "Tambahkan ke koleksi musik"
+msgstr "Tambahkan ke pustaka"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Tambah lagu jika sisa antrean kurang dari jumlah ini"
@@ -479,414 +479,424 @@ msgid "Album details"
 msgstr "Detail album"
 
 msgid "Album gain"
-msgstr "Penyusuaian volume album"
+msgstr "Gain album"
 
 msgid "Album peak"
-msgstr "Batas volume tertinggi album"
+msgstr "Peak album"
 
 msgid "Album radio"
-msgstr ""
+msgstr "Radio album"
 
 msgid "Album sort"
-msgstr ""
+msgstr "Urutan album"
 
 msgid "Album title"
-msgstr ""
+msgstr "Judul album"
 
 msgid "Album tracks"
-msgstr ""
+msgstr "Lagu album"
 
 msgid "Album unavailable"
-msgstr ""
+msgstr "Album tidak tersedia"
 
 msgid "Album"
-msgstr ""
+msgstr "Album"
 
 msgid "Albums"
-msgstr ""
+msgstr "Album"
 
 msgid "All Music"
-msgstr ""
+msgstr "Semua Musik"
 
 msgid "All Playlists"
-msgstr ""
+msgstr "Semua Playlist"
 
 msgid "All time"
-msgstr ""
+msgstr "Sepanjang waktu"
 
 msgid "All tracks"
-msgstr ""
+msgstr "Semua lagu"
 
 msgid "All"
-msgstr ""
+msgstr "Semua"
 
 msgid "Allow downloading"
-msgstr ""
+msgstr "Izinkan mengunduh"
 
 msgid "Allow remote connections"
 msgstr "Izinkan koneksi jarak jauh"
 
 msgid "Alternate addresses"
-msgstr ""
+msgstr "Alamat alternatif"
 
 msgid "Alternate row colors"
-msgstr ""
+msgstr "Warna baris selang-seling"
 
 msgid "Anonymous (WebDAV / SMB)"
-msgstr ""
+msgstr "Anonim (WebDAV / SMB)"
 
 msgid "Anonymous"
-msgstr ""
+msgstr "Anonim"
 
 msgid "Any genre"
-msgstr ""
+msgstr "Semua genre"
 
 msgid "Any"
-msgstr ""
+msgstr "Semua"
 
 msgid "App settings"
-msgstr ""
+msgstr "Pengaturan aplikasi"
 
 msgid "Appearance"
-msgstr ""
+msgstr "Tampilan"
 
 msgid "Appears On"
-msgstr ""
+msgstr "Muncul di"
 
 msgid "Application name"
-msgstr ""
+msgstr "Nama aplikasi"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
+msgstr "Berlaku terpisah untuk sidebar dan fullscreen"
 
 msgid "Apply Template"
-msgstr ""
+msgstr "Terapkan Template"
 
 msgid "Apply"
-msgstr ""
+msgstr "Terapkan"
 
 msgid "Approve sign-in in your browser"
-msgstr ""
+msgstr "Setujui login di browser Anda"
 
 msgid "Approve"
-msgstr ""
+msgstr "Setujui"
 
 msgid "April {year}"
-msgstr ""
+msgstr "April {year}"
 
 msgid "Artist albums"
-msgstr ""
+msgstr "Album artis"
 
 msgid "Artist details"
-msgstr ""
+msgstr "Detail artis"
 
 msgid "Artist name"
-msgstr ""
+msgstr "Nama artis"
 
 msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
-msgstr ""
+msgstr "Foto artis, sampul dan tag dari MusicBrainz, Last.fm dan Wikidata"
 
 msgid "Artist radio"
-msgstr ""
+msgstr "Radio artis"
 
 msgid "Artist sort"
-msgstr ""
+msgstr "Urutan artis"
 
 msgid "Artist tracks"
-msgstr ""
+msgstr "Lagu artis"
 
 msgid "Artist unavailable"
-msgstr ""
+msgstr "Artis tidak ditemukan"
 
 msgid "Artist"
-msgstr ""
+msgstr "Artis"
 
 msgid "Artists"
-msgstr ""
+msgstr "Artis"
 
 msgid "Artwork editing is no longer available"
-msgstr ""
+msgstr "Pengeditan sampul sudah tidak tersedia"
 
 msgid "Artwork selected"
-msgstr ""
+msgstr "Sampul dipilih"
 
 msgid "Artwork storage"
-msgstr ""
+msgstr "Penyimpanan sampul"
 
 msgid "Artwork"
-msgstr ""
+msgstr "Sampul"
 
 msgid "Audio effects"
-msgstr ""
+msgstr "Efek audio"
 
 msgid "Audio fade on play/pause"
-msgstr ""
+msgstr "Fade audio saat putar/jeda"
 
 msgid "Audio fingerprints"
-msgstr ""
+msgstr "Data pengenal audio"
 
 msgid "Audio output failed"
-msgstr ""
+msgstr "Output audio gagal"
 
 msgid "Audio output"
-msgstr ""
+msgstr "Output audio"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Pemrosesan audio tidak tersedia"
 
 msgid "Audio"
-msgstr ""
+msgstr "Audio"
 
 msgid "August {year}"
-msgstr ""
+msgstr "Agustus {year}"
 
 msgid "Authentication"
-msgstr ""
+msgstr "Autentikasi"
 
 msgid "Authorization timed out"
-msgstr ""
+msgstr "Waktu otorisasi habis"
 
 msgid "Auto DJ refill threshold"
-msgstr ""
+msgstr "Batas antrean DJ Otomatis"
 
 msgid "Auto DJ"
-msgstr ""
+msgstr "DJ Otomatis"
 
 msgid "Auto"
-msgstr ""
+msgstr "Otomatis"
 
+#, fuzzy
 msgid "AutoEQ / APO"
-msgstr ""
+msgstr "AutoEQ / APO"
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Cadangan Otomatis"
 
 msgid "Automatic headroom"
-msgstr ""
+msgstr "Batas aman audio otomatis"
 
 msgid "Automatic preamp"
-msgstr ""
+msgstr "Preamp otomatis"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Pembaruan otomatis"
 
 msgid "Automatic"
-msgstr ""
+msgstr "Otomatis"
 
+#, fuzzy
 msgid "BPM"
-msgstr ""
+msgstr "BPM"
 
 msgid "Back"
-msgstr ""
+msgstr "Kembali"
 
 msgid "Backup Folder"
-msgstr ""
+msgstr "Folder Cadangan"
 
 msgid "Backup Password"
-msgstr ""
+msgstr "Buat Kata Sandi Cadangan"
 
 msgid "Backup Settings"
-msgstr ""
+msgstr "Pengaturan Cadangan"
 
 msgid "Backup exported"
-msgstr ""
+msgstr "Cadangan diekspor"
 
 msgid "Backup failed: {error}"
-msgstr ""
+msgstr "Pencadangan gagal: {error}"
 
 msgid "Backup restored with warnings: {warnings}"
-msgstr ""
+msgstr "Pencadangan berhasil dengan peringatan: {warnings}"
 
 msgid "Backup restored"
-msgstr ""
+msgstr "Cadangan dipulihkan"
 
 msgid "Backups"
-msgstr ""
+msgstr "Cadangan"
 
 msgid "Balance"
-msgstr ""
+msgstr "Netral"
 
 msgid "Band layout"
-msgstr ""
+msgstr "Tata letak pita"
 
 msgid "Band"
-msgstr ""
+msgstr "Pita"
 
 msgid "Bands"
-msgstr ""
+msgstr "Pita"
 
 msgid "Bandwidth"
-msgstr ""
+msgstr "Lebar pita"
 
 msgid "Bar count"
-msgstr ""
+msgstr "Jumlah bar"
 
 msgid "Bar spacing (px)"
-msgstr ""
+msgstr "Jarak bar (px)"
 
 msgid "Bass"
-msgstr ""
+msgstr "Bass"
 
+#, fuzzy
 msgid "Bearer token (WebDAV)"
-msgstr ""
+msgstr "Bearer token (WebDAV)"
 
+#, fuzzy
 msgid "Bearer token"
-msgstr ""
+msgstr "Bearer token"
 
+#, fuzzy
 msgid "Bit depth"
-msgstr ""
+msgstr "Bit depth"
 
+#, fuzzy
 msgid "Bitrate"
-msgstr ""
+msgstr "Bitrate"
 
+#, fuzzy
 msgid "Bitstream"
-msgstr ""
+msgstr "Bitstream"
 
 msgid "Blue"
-msgstr ""
+msgstr "Biru"
 
 msgid "Brightness (%)"
-msgstr ""
+msgstr "Kecerahan (%)"
 
 msgid "By Lyrics"
-msgstr ""
+msgstr "Berdasarkan Lirik"
 
 msgid "By Title"
-msgstr ""
+msgstr "Berdasarkan Judul"
 
+#, fuzzy
 msgid "C"
-msgstr ""
+msgstr "C"
 
 msgid "CUE file"
-msgstr ""
+msgstr "File CUE"
 
+#, fuzzy
 msgid "Cache"
-msgstr ""
+msgstr "Cache"
 
 msgid "Cached data"
-msgstr ""
+msgstr "Data cache"
 
 msgid "Cached"
-msgstr ""
+msgstr "Tersimpan di cache"
 
 msgid "Caching Library"
-msgstr ""
+msgstr "Menyimpan cache pustaka"
 
 msgid "Caching local library..."
-msgstr ""
+msgstr "Menyimpan cache pustaka lokal..."
 
 msgid "Calculating fingerprint..."
-msgstr ""
+msgstr "Menghitung data pengenal..."
 
 msgid "Cancel download and clear downloaded items"
-msgstr ""
+msgstr "Batalkan unduhan dan hapus item yang terunduh"
 
 msgid "Cancel download"
-msgstr ""
+msgstr "Batalkan unduhan"
 
 msgid "Cancel"
-msgstr ""
+msgstr "Batalkan"
 
 msgid "Cast format"
-msgstr ""
+msgstr "Format transmisi"
 
 msgid "Casting changes apply to the next stream"
-msgstr ""
+msgstr "Perubahan siaran akan diterapkan pada pemutaran berikutnya"
 
 msgid "Casting network"
-msgstr ""
+msgstr "Jaringan siaran"
 
 msgid "Casting"
-msgstr ""
+msgstr "Penyiaran"
 
 msgid "Centered bars"
-msgstr ""
+msgstr "Bar di tengah"
 
 msgid "Certificate authority (PEM)"
-msgstr ""
+msgstr "Otoritas sertifikat (PEM)"
 
 msgid "Change Profile"
-msgstr ""
+msgstr "Ubah Profil"
 
 msgid "Change Secret Storage"
-msgstr ""
+msgstr "Ubah Penyimpanan Rahasia"
 
 msgid "Change Source"
-msgstr ""
+msgstr "Ganti Sumber"
 
 msgid "Change sort order"
-msgstr ""
+msgstr "Ubah urutan"
 
 msgid "Change"
-msgstr ""
+msgstr "Ubah"
 
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Perubahan untuk {count} lagu"
 
 msgid "Changes apply to {count} tracks"
-msgstr ""
+msgstr "Perubahan berlaku untuk {count} lagu"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Perubahan berlaku setelah Rufin dimulai ulang"
 
 msgid "Channels"
-msgstr ""
+msgstr "Saluran"
 
 msgid "Check for updates"
-msgstr ""
+msgstr "Periksa pembaruan"
 
 msgid "Choose Folder"
-msgstr ""
+msgstr "Pilih folder"
 
 msgid "Choose Server"
-msgstr ""
+msgstr "Pilih server"
 
 msgid "Choose a local music folder"
-msgstr ""
+msgstr "Pilih folder musik lokal"
 
 msgid "Choose an address"
-msgstr ""
+msgstr "Pilih alamat"
 
 msgid "Choose at least one local music folder"
-msgstr ""
+msgstr "Pilih minimal satu folder musik lokal"
 
 msgid "Choose connection"
-msgstr ""
+msgstr "Pilih koneksi"
 
 msgid "Choose folder"
-msgstr ""
+msgstr "Pilih folder"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
+"Pilih satu atau lebih folder untuk dipindai dan diputar langsung dari "
+"komputer ini"
 
 msgid "Choose playback output"
-msgstr ""
+msgstr "Pilih output pemutaran"
 
 msgid "Choose where your music is. Add more places later in Preferences."
-msgstr ""
+msgstr "Pilih lokasi musik Anda. Tambahkan lokasi lain nanti di Preferensi."
 
 msgid "Choose where your music is. Add more places later in Settings."
-msgstr ""
+msgstr "Pilih lokasi musik Anda. Tambahkan lokasi lain nanti di Pengaturan."
 
 msgid "Choose whether to keep the completed downloads."
-msgstr ""
+msgstr "Pilih apakah ingin menyimpan undahan yang telah selesai."
 
 msgid "Choose"
-msgstr ""
+msgstr "Pilih"
 
 msgid "Choose..."
-msgstr ""
+msgstr "Pilih..."
 
 msgid "Circular spectrum"
-msgstr ""
+msgstr "Spektrum lingkaran"
 
 msgid "Classical"
-msgstr ""
+msgstr "Klasik"
 
 msgid "Clear EBU R128 cache"
-msgstr ""
+msgstr "Hapus cache EBU R128"
 
 msgid "Clear Japanese dictionary"
 msgstr ""
@@ -919,7 +929,7 @@ msgid "Clear fetched lyrics for this track"
 msgstr ""
 
 msgid "Clear fingerprint cache"
-msgstr ""
+msgstr "Hapus cache data pengenal"
 
 msgid "Clear lookup cache"
 msgstr ""
@@ -1581,7 +1591,7 @@ msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr ""
 
 msgid "Entire Library"
-msgstr ""
+msgstr "Seluruh pustaka"
 
 msgid "Equalizer is controlled by the receiver"
 msgstr ""
@@ -2002,6 +2012,8 @@ msgstr ""
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+"Mengimpor file ke pustaka dan memantau perubahan pada folder yang "
+"ditambahkan."
 
 msgid "Inactive at this sample rate"
 msgstr ""
@@ -2139,10 +2151,10 @@ msgid "Less"
 msgstr ""
 
 msgid "Library Items"
-msgstr ""
+msgstr "Item Pustaka"
 
 msgid "Library"
-msgstr ""
+msgstr "Pustaka"
 
 msgid "Libre.fm scrobbling"
 msgstr ""
@@ -2231,7 +2243,7 @@ msgid "Local imports and access"
 msgstr ""
 
 msgid "Local library"
-msgstr ""
+msgstr "Pustaka lokal"
 
 msgid "Local music folder is unavailable"
 msgstr ""
@@ -3095,7 +3107,7 @@ msgid "Preferences"
 msgstr ""
 
 msgid "Preparing library..."
-msgstr ""
+msgstr "Menyiapkan pustaka..."
 
 msgid "Preserve channels"
 msgstr ""
@@ -3440,7 +3452,7 @@ msgid "Resume"
 msgstr ""
 
 msgid "Resync Library"
-msgstr ""
+msgstr "Sinkronkan Ulang Pustaka"
 
 msgid "Retry"
 msgstr ""
@@ -3724,7 +3736,7 @@ msgid "Server Address"
 msgstr ""
 
 msgid "Server Library"
-msgstr ""
+msgstr "Pustaka Server"
 
 msgid "Server Prefix"
 msgstr ""
@@ -4063,7 +4075,7 @@ msgid "Switch pane"
 msgstr ""
 
 msgid "Switching library..."
-msgstr ""
+msgstr "Mengganti pustaka..."
 
 msgid "Sync folder"
 msgstr ""
@@ -4471,7 +4483,7 @@ msgid "Welcome to Rufin"
 msgstr ""
 
 msgid "While your library loads"
-msgstr ""
+msgstr "Memuat pustaka anda"
 
 msgid "Wide"
 msgstr ""
@@ -4501,7 +4513,7 @@ msgid "Yes"
 msgstr ""
 
 msgid "Your library is ready"
-msgstr ""
+msgstr "Pustaka anda siap"
 
 msgid "Your music belongs here"
 msgstr ""
