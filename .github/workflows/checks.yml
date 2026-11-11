@@ -22,8 +22,6 @@ on:
       - '!**/*.css'
       - '!**/*.ui'
       - '!**/resources/**'
-      - '!crates/ui/**'
-      - crates/ui/Cargo.toml
       - xtask/**
       - android/**
       - .github/workflows/android-build.yml
@@ -111,7 +109,7 @@ jobs:
               case "$path" in
                 android/*|*.kt|*.kts|crates/rufin-android/*|.github/workflows/android-build.yml)
                   ;;
-                xtask/*)
+                crates/ui/*|crates/rufin/*|xtask/*)
                   add_jobs source_checks workspace
                   ;;
                 *)
@@ -162,7 +160,8 @@ jobs:
                 Cargo.lock|Cargo.toml|*/Cargo.toml)
                   add_jobs "${workspace_jobs[@]}" cargo-deny
                   ;;
-                crates/ui/*)
+                crates/ui/*|crates/rufin/*)
+                  add_jobs workspace
                   ;;
                 CMakeLists.txt|CMakePresets.json|cmake/*)
                   # Package builds otherwise run manually or for a draft release.
@@ -252,7 +251,7 @@ jobs:
 
   aur_bin:
     name: AUR rufin-bin
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_bin')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -262,7 +261,7 @@ jobs:
 
   android:
     name: Android
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'android')
     uses: ./.github/workflows/android-build.yml
     with:
@@ -270,7 +269,7 @@ jobs:
 
   aur_git:
     name: AUR rufin-git
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_git')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -280,7 +279,7 @@ jobs:
 
   rpm:
     name: RPM
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'rpm')
     uses: ./.github/workflows/rpm-source.yml
     with:
@@ -289,7 +288,7 @@ jobs:
 
   nix:
     name: Nix
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'nix')
     uses: ./.github/workflows/nix.yml
     with:
@@ -300,7 +299,7 @@ jobs:
 
   flatpak:
     name: Flatpak
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'flatpak')
     uses: ./.github/workflows/flatpak-build.yml
     with:
@@ -308,7 +307,7 @@ jobs:
 
   macos:
     name: Build macOS
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'macos')
     uses: ./.github/workflows/macos-build.yml
     with:
@@ -316,7 +315,7 @@ jobs:
 
   windows:
     name: Build Windows
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'windows')
     uses: ./.github/workflows/windows-build.yml
     with:
@@ -324,7 +323,7 @@ jobs:
 
   container:
     name: Container
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'container')
     runs-on: ubuntu-latest
 
@@ -386,7 +385,7 @@ jobs:
 
   workspace:
     name: Workspace
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace')
     runs-on: ubuntu-latest
     env:
@@ -442,29 +441,29 @@ jobs:
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo clippy --workspace --exclude ui --exclude rufin --all-targets --locked
+          cargo clippy --workspace --all-targets --locked
           --features app-identity/development
 
       - name: Run Rust tests
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo nextest run --config-file nextest.toml --workspace --exclude ui --exclude rufin --all-targets --locked
+          cargo nextest run --config-file nextest.toml --workspace --all-targets --locked
           --features app-identity/development --test-threads 4
 
       - name: Warm Rust build cache
         if: github.event_name == 'push'
         run: |
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo check --workspace --exclude ui --exclude rufin --all-targets --locked \
+            cargo check --workspace --all-targets --locked \
               --features app-identity/development
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo test --workspace --exclude ui --exclude rufin --all-targets --locked --no-run \
+            cargo test --workspace --all-targets --locked --no-run \
               --features app-identity/development
 
   workspace_macos:
     name: Workspace (macOS)
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_macos')
     runs-on: macos-15
     env:
@@ -531,7 +530,7 @@ jobs:
 
   workspace_windows:
     name: Workspace (Windows)
-    needs: [changes, cargo-deny]
+    needs: changes
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_windows')
     runs-on: windows-latest
     env:
@@ -579,7 +578,8 @@ jobs:
       - name: Configure Rust paths
         shell: msys2 {0}
         run: |
-          echo "CARGO_HOME=$(cygpath -m "$GITHUB_WORKSPACE/.local/cargo")" >> "$GITHUB_ENV"
+          # Outside the checkout: rust-cache keeps only dependencies outside the workspace root.
+          echo "CARGO_HOME=$(cygpath -m "$RUNNER_TEMP/cargo")" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
 
       - name: Install nextest

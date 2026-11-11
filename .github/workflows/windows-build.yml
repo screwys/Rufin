@@ -86,7 +86,8 @@ jobs:
       - name: Configure Rust paths
         shell: msys2 {0}
         run: |
-          echo "CARGO_HOME=$(cygpath -m "$GITHUB_WORKSPACE/.local/cargo")" >> "$GITHUB_ENV"
+          # Outside the checkout: rust-cache keeps only dependencies outside the workspace root.
+          echo "CARGO_HOME=$(cygpath -m "$RUNNER_TEMP/cargo")" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
 
       - name: Restore Rust build cache
