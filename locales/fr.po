@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 15:33+0000\n"
+"PO-Revision-Date: 2026-11-12 09:02+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -544,10 +544,8 @@ msgstr "Tous les genres"
 msgid "Any"
 msgstr "Tout"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "App icon"
-msgstr "Paramètres de l’application"
+msgstr "Icône d'application"
 
 msgid "App settings"
 msgstr "Paramètres de l’application"
@@ -992,7 +990,7 @@ msgid "Color for the active word during playback"
 msgstr "Couleur pour le mot actif pendant la lecture"
 
 msgid "Colored"
-msgstr ""
+msgstr "Coloré"
 
 msgid "Column borders"
 msgstr "Bordures des colonnes"
@@ -1103,7 +1101,7 @@ msgid "Contents"
 msgstr "Contenu"
 
 msgid "Context Menus"
-msgstr "Menus contextuels"
+msgstr "Menu contextuel"
 
 msgid "Continue from {device}"
 msgstr "Continuer depuis {device}"
@@ -1960,7 +1958,7 @@ msgid "Help"
 msgstr "Aide"
 
 msgid "Hidden"
-msgstr "Masqué"
+msgstr "Masquée"
 
 msgid "Hide sidebar"
 msgstr "Masquer la barre latérale"
@@ -4129,7 +4127,7 @@ msgid "Switching library..."
 msgstr "Changement de bibliothèque…"
 
 msgid "Symbolic"
-msgstr ""
+msgstr "Symbolique"
 
 msgid "Sync folder"
 msgstr "Synchroniser le dossier"
@@ -4296,10 +4294,8 @@ msgstr "Mode de transition"
 msgid "Translation language"
 msgstr "Langue de traduction"
 
-#, fuzzy
-#| msgid "Show tray icon"
 msgid "Tray icon"
-msgstr "Afficher l’icône dans la zone de notification"
+msgstr "Icône dans la zone de notification"
 
 msgid "Treble"
 msgstr "Aigus"
@@ -4308,7 +4304,7 @@ msgid "Troubleshooting"
 msgstr "Dépannage"
 
 msgid "Trust self-signed certificate"
-msgstr "Faire confiance au certificat auto-signé"
+msgstr "Certificat auto-signé de confiance"
 
 msgid "Tuesday"
 msgstr "Mardi"
