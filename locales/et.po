@@ -545,6 +545,11 @@ msgstr "Iga žanr"
 msgid "Any"
 msgstr "Ükspuha milline"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Rakenduse seadistused"
+
 msgid "App settings"
 msgstr "Rakenduse seadistused"
 
@@ -985,6 +990,11 @@ msgstr "Kogud"
 
 msgid "Color for the active word during playback"
 msgstr "Taasesituse ajal värvi aktiivsed sõnad"
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Kasutatavad värvid"
 
 msgid "Column borders"
 msgstr "Veergude piirjooned"
@@ -4152,6 +4162,9 @@ msgstr "Vaheta paani"
 msgid "Switching library..."
 msgstr "Vahetan meediumikogu…"
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Save in folder"
 msgid "Sync folder"
@@ -4325,6 +4338,11 @@ msgstr "Lugudevahetuse viis"
 
 msgid "Translation language"
 msgstr "Tõlke keel"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Näita süsteemisalve ikooni"
 
 msgid "Treble"
 msgstr "Kõrged"
@@ -5197,9 +5215,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Artist / Album"
 #~ msgstr "Esitaja / Album"
-
-#~ msgid "Color scheme"
-#~ msgstr "Kasutatavad värvid"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Muuda esitusloendi nime"

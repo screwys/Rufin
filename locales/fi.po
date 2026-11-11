@@ -511,6 +511,11 @@ msgstr "Mikä tahansa tyylilaji"
 msgid "Any"
 msgstr "Mikä tahansa"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Sovelluksen asetukset"
+
 msgid "App settings"
 msgstr "Sovelluksen asetukset"
 
@@ -1024,6 +1029,11 @@ msgstr "Kokoelmat"
 
 msgid "Color for the active word during playback"
 msgstr ""
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Väriteema"
 
 #, fuzzy
 #| msgid "Columns"
@@ -4623,6 +4633,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr "Vaihdetaan kirjastoa..."
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Add folder"
 msgid "Sync folder"
@@ -4815,6 +4828,11 @@ msgstr "Siirtymätila"
 
 msgid "Translation language"
 msgstr "Käännöskieli"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Näytä ilmoitusalueen kuvake"
 
 msgid "Treble"
 msgstr ""
@@ -5678,9 +5696,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~ msgstr ""
 #~ "Päivitetty Rufin versioon {version}. Käynnistä uudelleen, jotta muutokset "
 #~ "tulevat voimaan."
-
-#~ msgid "Color scheme"
-#~ msgstr "Väriteema"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Nimeä soittolista uudelleen"

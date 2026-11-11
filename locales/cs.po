@@ -524,6 +524,11 @@ msgstr "Všechny žánry"
 msgid "Any"
 msgstr ""
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Nastavení aplikace"
+
 msgid "App settings"
 msgstr "Nastavení aplikace"
 
@@ -1084,6 +1089,11 @@ msgstr "Sbírky"
 
 msgid "Color for the active word during playback"
 msgstr ""
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Schéma barev"
 
 #, fuzzy
 #| msgid "Columns"
@@ -4826,6 +4836,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr "Přepínání knihovny..."
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Remove folder"
 msgid "Sync folder"
@@ -5022,6 +5035,11 @@ msgstr "Režim přechodu"
 
 msgid "Translation language"
 msgstr "Jazyk překladu"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Zobrazit ikonu v systémové liště"
 
 #, fuzzy
 #| msgid "Full Treble"
@@ -5925,9 +5943,6 @@ msgstr ""
 
 #~ msgid "Artist / Album"
 #~ msgstr "Interpret / Album"
-
-#~ msgid "Color scheme"
-#~ msgstr "Schéma barev"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Přejmenovat Playlist"

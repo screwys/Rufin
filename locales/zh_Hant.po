@@ -509,6 +509,11 @@ msgstr "任何曲風"
 msgid "Any"
 msgstr ""
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "應用程式設定"
+
 msgid "App settings"
 msgstr "應用程式設定"
 
@@ -1053,6 +1058,11 @@ msgstr "收藏"
 
 msgid "Color for the active word during playback"
 msgstr ""
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "色彩配置"
 
 msgid "Column borders"
 msgstr ""
@@ -4718,6 +4728,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr "正在切換媒體庫..."
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Remove folder"
 msgid "Sync folder"
@@ -4910,6 +4923,9 @@ msgstr ""
 
 msgid "Translation language"
 msgstr "翻譯語言"
+
+msgid "Tray icon"
+msgstr ""
 
 msgid "Treble"
 msgstr ""
@@ -5746,9 +5762,6 @@ msgstr ""
 
 #~ msgid "Artist / Album"
 #~ msgstr "藝人 / 專輯"
-
-#~ msgid "Color scheme"
-#~ msgstr "色彩配置"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "重新命名播放清單"

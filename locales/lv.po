@@ -551,6 +551,11 @@ msgstr "Jebkurš žanrs"
 msgid "Any"
 msgstr "Jebkurš"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Lietotnes iestatījumi"
+
 msgid "App settings"
 msgstr "Lietotnes iestatījumi"
 
@@ -1071,6 +1076,11 @@ msgstr "Kolekcijas"
 
 msgid "Color for the active word during playback"
 msgstr "Krāsa aktīvajam vārdam atskaņošanas laikā"
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Krāsu shēma"
 
 #, fuzzy
 #| msgid "Columns"
@@ -4628,6 +4638,9 @@ msgstr "Pārslēgt panelī"
 msgid "Switching library..."
 msgstr "Pārslēdz bibliotēku…"
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Remove folder"
 msgid "Sync folder"
@@ -4829,6 +4842,11 @@ msgstr "Pārejas režīms"
 
 msgid "Translation language"
 msgstr "Tulkošanas valoda"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Rādīt sistēmas joslas ikonu"
 
 #, fuzzy
 #| msgid "Full Treble"
@@ -5744,9 +5762,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgstr ""
 #~ "Atjaunināts Rufin līdz versijai {version}. Lai izmaiņas stātos spēkā, "
 #~ "restartējiet programmu."
-
-#~ msgid "Color scheme"
-#~ msgstr "Krāsu shēma"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Pārdēvēt atskaņošanas sarakstu"

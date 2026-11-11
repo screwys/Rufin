@@ -454,6 +454,9 @@ msgstr ""
 msgid "Any"
 msgstr ""
 
+msgid "App icon"
+msgstr ""
+
 msgid "App settings"
 msgstr ""
 
@@ -886,6 +889,9 @@ msgid "Collections"
 msgstr ""
 
 msgid "Color for the active word during playback"
+msgstr ""
+
+msgid "Colored"
 msgstr ""
 
 msgid "Column borders"
@@ -3975,6 +3981,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr ""
 
+msgid "Symbolic"
+msgstr ""
+
 msgid "Sync folder"
 msgstr ""
 
@@ -4138,6 +4147,9 @@ msgid "Transition mode"
 msgstr ""
 
 msgid "Translation language"
+msgstr ""
+
+msgid "Tray icon"
 msgstr ""
 
 msgid "Treble"
