@@ -41,10 +41,11 @@ mod freedesktop {
         disable_private_mode_label: String,
         quit_label: String,
         private_mode: bool,
+        symbolic: bool,
     }
 
     impl RufinTray {
-        fn new(sender: Sender<TrayIntent>, private_mode: bool) -> Self {
+        fn new(sender: Sender<TrayIntent>, private_mode: bool, symbolic: bool) -> Self {
             Self {
                 sender,
                 show_label: tr("Show Rufin"),
@@ -55,6 +56,7 @@ mod freedesktop {
                 disable_private_mode_label: tr("Disable private mode"),
                 quit_label: tr("Quit"),
                 private_mode,
+                symbolic,
             }
         }
 
@@ -80,8 +82,11 @@ mod freedesktop {
             DISPLAY_NAME.to_string()
         }
 
+        // The panel tints the themed symbolic icon to match itself; a pixmap would win over it.
         fn icon_name(&self) -> String {
-            if tray_icon_pixmaps().is_empty() {
+            if self.symbolic {
+                format!("{STABLE_APP_ID}-symbolic")
+            } else if tray_icon_pixmaps().is_empty() {
                 STABLE_APP_ID.to_string()
             } else {
                 String::new()
@@ -89,13 +94,17 @@ mod freedesktop {
         }
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-            tray_icon_pixmaps().clone()
+            if self.symbolic {
+                Vec::new()
+            } else {
+                tray_icon_pixmaps().clone()
+            }
         }
 
         fn tool_tip(&self) -> ksni::ToolTip {
             ksni::ToolTip {
                 icon_name: self.icon_name(),
-                icon_pixmap: tray_icon_pixmaps().clone(),
+                icon_pixmap: self.icon_pixmap(),
                 title: self.title(),
                 description: String::new(),
             }
@@ -163,18 +172,22 @@ mod freedesktop {
     }
 
     impl Tray {
-        pub fn start(private_mode: bool) -> Result<(Self, Receiver<TrayIntent>), String> {
+        pub fn start(
+            private_mode: bool,
+            symbolic: bool,
+        ) -> Result<(Self, Receiver<TrayIntent>), String> {
             let (sender, receiver) = channel();
-            let tray = RufinTray::new(sender, private_mode);
+            let tray = RufinTray::new(sender, private_mode, symbolic);
             let handle = tray.disable_dbus_name(true).spawn().map_err(|error| {
                 format!("failed to create status notifier tray item: {error:?}")
             })?;
             Ok((Self { handle }, receiver))
         }
 
-        pub fn set_private_mode(&self, private_mode: bool) {
+        pub fn update(&self, private_mode: bool, symbolic: bool) {
             let _updated = self.handle.update(|tray| {
                 tray.private_mode = private_mode;
+                tray.symbolic = symbolic;
             });
         }
 
@@ -244,7 +257,7 @@ mod freedesktop {
         #[test]
         fn tray_use_controls() {
             let (sender, _receiver) = channel();
-            let tray = RufinTray::new(sender, false);
+            let tray = RufinTray::new(sender, false, false);
             let items = tray.menu();
             let labels = standard_items(&items)
                 .iter()
@@ -272,8 +285,8 @@ mod freedesktop {
         #[test]
         fn tray_match_state() {
             let (sender, _receiver) = channel();
-            let disabled = RufinTray::new(sender.clone(), false);
-            let enabled = RufinTray::new(sender, true);
+            let disabled = RufinTray::new(sender.clone(), false, false);
+            let enabled = RufinTray::new(sender, true, false);
 
             assert!(standard_labels(&disabled.menu()).contains(&"Enable private mode"));
             assert!(standard_labels(&enabled.menu()).contains(&"Disable private mode"));
@@ -282,7 +295,7 @@ mod freedesktop {
         #[test]
         fn tray_playback_command() {
             let (sender, receiver) = channel();
-            let mut tray = RufinTray::new(sender, false);
+            let mut tray = RufinTray::new(sender, false, false);
             let mut items = tray.menu();
 
             activate_standard_item(&mut items, &mut tray, "Play/Pause");
@@ -365,6 +378,10 @@ mod windows {
         env!("CARGO_MANIFEST_DIR"),
         "/../../resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
     ));
+    const SYMBOLIC_ICON_SVG: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
+    ));
     const SHOW_ID: &str = "rufin-tray-show";
     const PLAY_PAUSE_ID: &str = "rufin-tray-play-pause";
     const PREVIOUS_ID: &str = "rufin-tray-previous";
@@ -381,7 +398,10 @@ mod windows {
     }
 
     impl Tray {
-        pub fn start(private_mode: bool) -> Result<(Self, Receiver<TrayIntent>), String> {
+        pub fn start(
+            private_mode: bool,
+            symbolic: bool,
+        ) -> Result<(Self, Receiver<TrayIntent>), String> {
             install_event_handlers();
             let (sender, receiver) = channel();
             let menu = Menu::new();
@@ -416,7 +436,7 @@ mod windows {
                 .with_id(APP_ID)
                 .with_tooltip(DISPLAY_NAME)
                 .with_menu(Box::new(menu))
-                .with_icon(build_tray_icon()?);
+                .with_icon(build_tray_icon(symbolic)?);
             let builder = builder.with_menu_on_left_click(false);
             let icon = builder
                 .build()
@@ -431,9 +451,15 @@ mod windows {
             ))
         }
 
-        pub fn set_private_mode(&self, private_mode: bool) {
+        pub fn update(&self, private_mode: bool, symbolic: bool) {
             self.private_mode_item
                 .set_text(private_mode_label(private_mode));
+            match build_tray_icon(symbolic) {
+                Ok(icon) => {
+                    let _ = self.icon.set_icon(Some(icon));
+                }
+                Err(error) => tracing::warn!(%error),
+            }
         }
 
         pub fn shutdown(self) {
@@ -508,7 +534,10 @@ mod windows {
         })
     }
 
-    fn build_tray_icon() -> Result<tray_icon::Icon, String> {
+    fn build_tray_icon(symbolic: bool) -> Result<tray_icon::Icon, String> {
+        if symbolic {
+            return build_symbolic_tray_icon();
+        }
         let source = artwork::decode_rgba(APP_ICON_BYTES, u32::MAX)
             .map_err(|error| format!("failed to decode the tray icon: {error}"))?;
         let image = source
@@ -529,6 +558,41 @@ mod windows {
         }
         tray_icon::Icon::from_rgba(rgba, image.width(), image.height())
             .map_err(|error| format!("failed to create the tray icon: {error}"))
+    }
+
+    /// Windows draws tray icons as given, so the glyph takes the taskbar's contrast color.
+    fn build_symbolic_tray_icon() -> Result<tray_icon::Icon, String> {
+        use resvg::{tiny_skia, usvg};
+
+        let light_taskbar = matches!(
+            winsafe::HKEY::CURRENT_USER.RegGetValue(
+                Some(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+                Some("SystemUsesLightTheme"),
+                winsafe::co::RRF::RT_REG_DWORD,
+            ),
+            Ok(winsafe::RegistryValue::Dword(1))
+        );
+        let color = if light_taskbar { "#000000" } else { "#ffffff" };
+        let svg = SYMBOLIC_ICON_SVG.replacen("<svg ", &format!("<svg fill=\"{color}\" "), 1);
+        let tree = usvg::Tree::from_str(&svg, &usvg::Options::default())
+            .map_err(|error| format!("failed to parse the symbolic tray icon: {error}"))?;
+        let mut pixmap = tiny_skia::Pixmap::new(32, 32)
+            .ok_or_else(|| "failed to allocate the symbolic tray icon".to_string())?;
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::from_scale(2.0, 2.0),
+            &mut pixmap.as_mut(),
+        );
+        let rgba = pixmap
+            .pixels()
+            .iter()
+            .flat_map(|pixel| {
+                let pixel = pixel.demultiply();
+                [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()]
+            })
+            .collect();
+        tray_icon::Icon::from_rgba(rgba, 32, 32)
+            .map_err(|error| format!("failed to create the symbolic tray icon: {error}"))
     }
 
     #[cfg(test)]
@@ -576,11 +640,14 @@ mod unsupported {
     pub struct Tray;
 
     impl Tray {
-        pub fn start(_private_mode: bool) -> Result<(Self, Receiver<TrayIntent>), String> {
+        pub fn start(
+            _private_mode: bool,
+            _symbolic: bool,
+        ) -> Result<(Self, Receiver<TrayIntent>), String> {
             Err("system tray integration is unavailable on this platform".to_string())
         }
 
-        pub fn set_private_mode(&self, _private_mode: bool) {}
+        pub fn update(&self, _private_mode: bool, _symbolic: bool) {}
 
         pub fn shutdown(self) {}
     }

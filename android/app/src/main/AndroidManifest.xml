@@ -15,21 +15,41 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-    <application android:label="@string/app_name" android:icon="@drawable/app_icon" android:banner="@drawable/tv_banner" android:theme="@style/AppTheme"
+    <application android:label="@string/app_name" android:icon="@drawable/launcher_colored" android:banner="@drawable/tv_banner" android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
         <!-- Hands shared files, such as a lyrics card, to the app they are shared with. -->
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_files" />
         </provider>
-        <activity android:name=".MainActivity" android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density">
+        <activity android:name=".RufinActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density" />
+        <!-- Launcher entries, one per app icon; AppIcon keeps exactly one enabled. The colored one keeps
+             the old activity name, so home screen shortcuts survive updates. -->
+        <activity-alias android:name=".MainActivity" android:targetActivity=".RufinActivity"
+            android:exported="true" android:icon="@drawable/launcher_colored">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <activity-alias android:name=".DarkIconActivity" android:targetActivity=".RufinActivity"
+            android:exported="true" android:enabled="false" android:icon="@drawable/launcher_dark">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LightIconActivity" android:targetActivity=".RufinActivity"
+            android:exported="true" android:enabled="false" android:icon="@drawable/launcher_light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <activity android:name=".StorageRestartActivity" android:exported="false"
             android:process=":restart" android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />

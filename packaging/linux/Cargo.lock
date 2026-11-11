@@ -1676,6 +1676,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-media-player",
  "playback",
+ "resvg",
  "rufin-core",
  "tempfile",
  "tracing",

@@ -9,6 +9,8 @@ import io.github.screwys.rufin.ui.ChoiceChip
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,6 +18,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -23,7 +28,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import io.github.screwys.rufin.R
 import io.github.screwys.rufin.app.RufinConnection
+import io.github.screwys.rufin.platform.AppIcon
 import io.github.screwys.rufin.shared.rufin_core.SecretStorageMode
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.more.MoreDestination
@@ -123,6 +130,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     PreferenceChoice(translate("Starting page"), state.startingPage.name,
                         browse.routes.map { it.item.name to it.title },
                         select = { page -> preferences.changePreference { setStartingPage(SidebarRouteItem.valueOf(page)) } })
+                    AppIconChoice()
                     PreferenceChoice(translate("Update check interval"), state.releaseCheckIntervalHours.toString(),
                         listOf("1" to translate("1 hour"), "6" to translate("6 hours"), "12" to translate("12 hours"), "24" to translate("24 hours")),
                         select = { preferences.changePreference { setReleaseCheckIntervalHours(it.toUInt()) } })
@@ -166,4 +174,22 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
         }
     }
 
+}
+
+/** The launcher icon; the symbolic tiles suit phone themes that leave the colored icon as is. */
+@Composable
+private fun AppIconChoice() {
+    val context = LocalContext.current
+    val icon = remember { AppIcon.current(context) }
+    PreferenceChoice(translate("App icon"), icon,
+        listOf(AppIcon.Colored to translate("Colored"), AppIcon.Dark to translate("Dark"), AppIcon.Light to translate("Light")),
+        preview = { choice ->
+            if (choice == AppIcon.Colored) Image(painterResource(R.drawable.app_icon), null, Modifier.size(24.dp))
+            else Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).background(if (choice == AppIcon.Dark) Color(0xFF252525) else Color.White),
+                contentAlignment = Alignment.Center) {
+                // The layer pads the glyph for launcher masks; the tile shows it at launcher size.
+                Image(painterResource(if (choice == AppIcon.Dark) R.drawable.launcher_glyph_light else R.drawable.launcher_glyph_dark), null, Modifier.requiredSize(40.dp))
+            }
+        },
+        rowPreview = false, select = { if (it != icon) AppIcon.select(context, it) })
 }

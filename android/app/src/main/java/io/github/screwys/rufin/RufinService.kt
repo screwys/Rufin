@@ -148,7 +148,7 @@ class RufinService : MediaSessionService() {
         nativePlayer = RufinPlayer(this)
         outputs = AndroidOutputRoutes(this)
         libraryObserver = AndroidLibraryObserver(this) { libraryChanges.trySend(Unit) }
-        activityIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        activityIntent = PendingIntent.getActivity(this, 0, Intent(this, RufinActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         if (Build.VERSION.SDK_INT >= 26) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL_PLAYBACK, getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW))

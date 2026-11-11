@@ -459,7 +459,53 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
             &generated.join(format!("res/drawable-nodpi/external_{service}.png")),
         )?;
     }
+    launcher_icons(root, &generated)?;
     icons(root, &generated)
+}
+
+/// Layers for the adaptive launcher icons, on the 108 dp canvas at 4x: the colored icon and the
+/// symbolic glyph in each tile's color, sized to stay inside every launcher's mask.
+fn launcher_icons(root: &Path, generated: &Path) -> Result<()> {
+    let apps = root.join("resources/icons/hicolor");
+    let colored = fs::read_to_string(apps.join("scalable/apps/io.github.screwys.Rufin.svg"))?;
+    let symbolic =
+        fs::read_to_string(apps.join("symbolic/apps/io.github.screwys.Rufin-symbolic.svg"))?;
+    for (name, svg, size) in [
+        ("launcher_colored_foreground", colored, 232.0),
+        (
+            "launcher_glyph_light",
+            symbolic.replacen("<svg ", "<svg fill=\"#ffffff\" ", 1),
+            176.0,
+        ),
+        (
+            "launcher_glyph_dark",
+            symbolic.replacen("<svg ", "<svg fill=\"#252525\" ", 1),
+            176.0,
+        ),
+    ] {
+        let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())?;
+        let (width, height) = (tree.size().width(), tree.size().height());
+        let scale = size / width.max(height);
+        let mut image =
+            resvg::tiny_skia::Pixmap::new(432, 432).ok_or("Could not allocate launcher icon")?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale).post_translate(
+                (432.0 - width * scale) / 2.0,
+                (432.0 - height * scale) / 2.0,
+            ),
+            &mut image.as_mut(),
+        );
+        let png = image.encode_png()?;
+        let output = generated
+            .join("res/drawable-nodpi")
+            .join(format!("{name}.png"));
+        if fs::read(&output).ok() != Some(png.clone()) {
+            fs::create_dir_all(output.parent().ok_or("Icon output directory is missing")?)?;
+            fs::write(output, png)?;
+        }
+    }
+    Ok(())
 }
 
 /// The width an SVG declares on its root element, in its own units; 16 where it declares none.

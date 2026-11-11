@@ -28,6 +28,7 @@ mpris-server.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 async-channel.workspace = true
+resvg.workspace = true
 tray-icon.workspace = true
 windows = { workspace = true, features = [
     "Data_Xml_Dom",

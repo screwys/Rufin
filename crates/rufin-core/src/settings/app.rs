@@ -302,6 +302,8 @@ pub struct Settings {
     #[serde(default)]
     pub tray_enabled: bool,
     #[serde(default)]
+    pub symbolic_tray_icon: bool,
+    #[serde(default)]
     pub keep_running_after_close: bool,
     #[serde(default)]
     pub start_minimized: bool,
@@ -356,6 +358,7 @@ impl Default for Settings {
             downloads: Vec::new(),
             show_bottom_bar_rating: false,
             tray_enabled: false,
+            symbolic_tray_icon: false,
             keep_running_after_close: false,
             start_minimized: false,
             type_to_search_enabled: true,

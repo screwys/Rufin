@@ -447,7 +447,7 @@ pub fn import_dialog(shell: &Rc<Shell>) {
                 if affected.settings {
                     shell.appearance.apply(&shell.settings.current.borrow());
                     shell.update_layout();
-                    shell.refresh_tray_private_mode();
+                    shell.refresh_tray();
                     shell.update_media_controls();
                     shell.player_ui.render_lyrics_panel();
                 }
