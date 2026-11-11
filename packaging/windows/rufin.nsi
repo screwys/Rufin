@@ -85,6 +85,18 @@ Var UpdateWaitAttempts
 Var PurgeCache
 Var PurgeCacheCheckbox
 Var CleanupDir
+Var BackupDir
+Var DestinationBackup
+Var LegacyBackup
+Var BackupLog
+Var InventoryPath
+Var WritingPayload
+Var RestoreFailed
+Var UpdateResultPath
+Var UpdateResult
+Var PreviousVersion
+Var PreviousRegistration
+Var RegistrationStarted
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}\LICENSE"
@@ -142,68 +154,86 @@ UninstPage custom un.CachePageCreate un.CachePageLeave
 ${LABEL}_not_running:
 !macroend
 
+!macro RetiredRuntimeFiles ACTION
+    !insertmacro ${ACTION} "bin\advapi32.dll"
+    !insertmacro ${ACTION} "bin\bcrypt.dll"
+    !insertmacro ${ACTION} "bin\bcryptprimitives.dll"
+    !insertmacro ${ACTION} "bin\cfgmgr32.dll"
+    !insertmacro ${ACTION} "bin\combase.dll"
+    !insertmacro ${ACTION} "bin\comctl32.dll"
+    !insertmacro ${ACTION} "bin\comdlg32.dll"
+    !insertmacro ${ACTION} "bin\crypt32.dll"
+    !insertmacro ${ACTION} "bin\d3d11.dll"
+    !insertmacro ${ACTION} "bin\d3d12.dll"
+    !insertmacro ${ACTION} "bin\dcomp.dll"
+    !insertmacro ${ACTION} "bin\dnsapi.dll"
+    !insertmacro ${ACTION} "bin\dsound.dll"
+    !insertmacro ${ACTION} "bin\dwmapi.dll"
+    !insertmacro ${ACTION} "bin\dwrite.dll"
+    !insertmacro ${ACTION} "bin\dxgi.dll"
+    !insertmacro ${ACTION} "bin\gdi32.dll"
+    !insertmacro ${ACTION} "bin\gdiplus.dll"
+    !insertmacro ${ACTION} "bin\glu32.dll"
+    !insertmacro ${ACTION} "bin\hid.dll"
+    !insertmacro ${ACTION} "bin\imm32.dll"
+    !insertmacro ${ACTION} "bin\iphlpapi.dll"
+    !insertmacro ${ACTION} "bin\kernel32.dll"
+    !insertmacro ${ACTION} "bin\kernelbase.dll"
+    !insertmacro ${ACTION} "bin\ktmw32.dll"
+    !insertmacro ${ACTION} "bin\microsoft.internal.warppal.dll"
+    !insertmacro ${ACTION} "bin\msdmo.dll"
+    !insertmacro ${ACTION} "bin\msimg32.dll"
+    !insertmacro ${ACTION} "bin\msvcp_win.dll"
+    !insertmacro ${ACTION} "bin\msvcrt.dll"
+    !insertmacro ${ACTION} "bin\ncrypt.dll"
+    !insertmacro ${ACTION} "bin\ntdll.dll"
+    !insertmacro ${ACTION} "bin\ole32.dll"
+    !insertmacro ${ACTION} "bin\oleaut32.dll"
+    !insertmacro ${ACTION} "bin\opengl32.dll"
+    !insertmacro ${ACTION} "bin\propsys.dll"
+    !insertmacro ${ACTION} "bin\resampledmo.dll"
+    !insertmacro ${ACTION} "bin\rpcrt4.dll"
+    !insertmacro ${ACTION} "bin\sechost.dll"
+    !insertmacro ${ACTION} "bin\secur32.dll"
+    !insertmacro ${ACTION} "bin\setupapi.dll"
+    !insertmacro ${ACTION} "bin\shcore.dll"
+    !insertmacro ${ACTION} "bin\shell32.dll"
+    !insertmacro ${ACTION} "bin\shlwapi.dll"
+    !insertmacro ${ACTION} "bin\user32.dll"
+    !insertmacro ${ACTION} "bin\userenv.dll"
+    !insertmacro ${ACTION} "bin\usp10.dll"
+    !insertmacro ${ACTION} "bin\version.dll"
+    !insertmacro ${ACTION} "bin\win32u.dll"
+    !insertmacro ${ACTION} "bin\winmm.dll"
+    !insertmacro ${ACTION} "bin\wldap32.dll"
+    !insertmacro ${ACTION} "bin\ws2_32.dll"
+    !insertmacro ${ACTION} "bin\wsock32.dll"
+!macroend
+
+!macro DeleteInstalledFile PATH
+    Delete "$CleanupDir\${PATH}"
+!macroend
+
+!macro BackupInstalledFile PATH
+    StrCpy $2 "${PATH}"
+    Call BackupFile
+    IfErrors backup_close_failed
+!macroend
+
 !macro RemoveInstalledFilesFunction PREFIX
 Function ${PREFIX}RemoveInstalledFiles
     ; 0.15.0/0.15.1 shipped these Windows runtime files by mistake.
     ; Remove them independently of the inventory: an extracted upgrade can
     ; replace that inventory without removing files absent from the new bundle.
     ClearErrors
-    Delete "$CleanupDir\bin\advapi32.dll"
-    Delete "$CleanupDir\bin\bcrypt.dll"
-    Delete "$CleanupDir\bin\bcryptprimitives.dll"
-    Delete "$CleanupDir\bin\cfgmgr32.dll"
-    Delete "$CleanupDir\bin\combase.dll"
-    Delete "$CleanupDir\bin\comctl32.dll"
-    Delete "$CleanupDir\bin\comdlg32.dll"
-    Delete "$CleanupDir\bin\crypt32.dll"
-    Delete "$CleanupDir\bin\d3d11.dll"
-    Delete "$CleanupDir\bin\d3d12.dll"
-    Delete "$CleanupDir\bin\dcomp.dll"
-    Delete "$CleanupDir\bin\dnsapi.dll"
-    Delete "$CleanupDir\bin\dsound.dll"
-    Delete "$CleanupDir\bin\dwmapi.dll"
-    Delete "$CleanupDir\bin\dwrite.dll"
-    Delete "$CleanupDir\bin\dxgi.dll"
-    Delete "$CleanupDir\bin\gdi32.dll"
-    Delete "$CleanupDir\bin\gdiplus.dll"
-    Delete "$CleanupDir\bin\glu32.dll"
-    Delete "$CleanupDir\bin\hid.dll"
-    Delete "$CleanupDir\bin\imm32.dll"
-    Delete "$CleanupDir\bin\iphlpapi.dll"
-    Delete "$CleanupDir\bin\kernel32.dll"
-    Delete "$CleanupDir\bin\kernelbase.dll"
-    Delete "$CleanupDir\bin\ktmw32.dll"
-    Delete "$CleanupDir\bin\microsoft.internal.warppal.dll"
-    Delete "$CleanupDir\bin\msdmo.dll"
-    Delete "$CleanupDir\bin\msimg32.dll"
-    Delete "$CleanupDir\bin\msvcp_win.dll"
-    Delete "$CleanupDir\bin\msvcrt.dll"
-    Delete "$CleanupDir\bin\ncrypt.dll"
-    Delete "$CleanupDir\bin\ntdll.dll"
-    Delete "$CleanupDir\bin\ole32.dll"
-    Delete "$CleanupDir\bin\oleaut32.dll"
-    Delete "$CleanupDir\bin\opengl32.dll"
-    Delete "$CleanupDir\bin\propsys.dll"
-    Delete "$CleanupDir\bin\resampledmo.dll"
-    Delete "$CleanupDir\bin\rpcrt4.dll"
-    Delete "$CleanupDir\bin\sechost.dll"
-    Delete "$CleanupDir\bin\secur32.dll"
-    Delete "$CleanupDir\bin\setupapi.dll"
-    Delete "$CleanupDir\bin\shcore.dll"
-    Delete "$CleanupDir\bin\shell32.dll"
-    Delete "$CleanupDir\bin\shlwapi.dll"
-    Delete "$CleanupDir\bin\user32.dll"
-    Delete "$CleanupDir\bin\userenv.dll"
-    Delete "$CleanupDir\bin\usp10.dll"
-    Delete "$CleanupDir\bin\version.dll"
-    Delete "$CleanupDir\bin\win32u.dll"
-    Delete "$CleanupDir\bin\winmm.dll"
-    Delete "$CleanupDir\bin\wldap32.dll"
-    Delete "$CleanupDir\bin\ws2_32.dll"
-    Delete "$CleanupDir\bin\wsock32.dll"
+    !insertmacro RetiredRuntimeFiles DeleteInstalledFile
     IfErrors inventory_failed
 
     StrCpy $0 "$CleanupDir\install-files.txt"
+    !if "${PREFIX}" == ""
+        ; The installed inventory moved with the files it describes.
+        StrCpy $0 "$BackupDir\files\install-files.txt"
+    !endif
     IfFileExists "$0" inventory_ready
     ; Older releases did not record their files. Apart from the retired files
     ; above, only remove filenames present in this package.
@@ -245,23 +275,166 @@ FunctionEnd
 !insertmacro RemoveInstalledFilesFunction ""
 !insertmacro RemoveInstalledFilesFunction "un."
 
-!macro WriteRufinUninstallRegistration
+; Backup only files the installer removes or overwrites. Keep the backup on
+; the installation drive so moving files does not need another full copy.
+Function BackupFile
+    IfFileExists "$CleanupDir\$2" 0 backup_file_done
+    IfFileExists "$CleanupDir\$2\*.*" backup_file_conflict
+    ${GetParent} "$BackupDir\files\$2" $4
+    ClearErrors
+    CreateDirectory "$4"
+    FileWriteUTF16LE $BackupLog "$2$\r$\n"
+    IfErrors backup_file_done
+    Rename "$CleanupDir\$2" "$BackupDir\files\$2"
+    Return
+backup_file_conflict:
+    SetErrors
+backup_file_done:
+FunctionEnd
+
+Function BackupInventory
+    ClearErrors
+    FileOpen $1 "$InventoryPath" r
+    IfErrors backup_inventory_done
+backup_inventory_next:
+    ClearErrors
+    FileReadUTF16LE $1 $2
+    IfErrors backup_inventory_close
+    ${TrimNewLines} $2 $2
+    StrCpy $3 $2 1
+    StrCmp $3 "F" 0 backup_inventory_next
+    StrCpy $2 $2 "" 1
+    Call BackupFile
+    IfErrors backup_inventory_failed
+    Goto backup_inventory_next
+backup_inventory_close:
+    FileClose $1
+    ClearErrors
+    Return
+backup_inventory_failed:
+    FileClose $1
+    SetErrors
+backup_inventory_done:
+FunctionEnd
+
+Function BackupInstallation
+    StrCpy $BackupDir ""
+    ClearErrors
+    CreateDirectory "$CleanupDir"
+    GetTempFileName $BackupDir "$CleanupDir"
+    IfErrors backup_failed
+    Delete "$BackupDir"
+    CreateDirectory "$BackupDir"
+    FileOpen $BackupLog "$BackupDir\restore.txt" w
+    IfErrors backup_failed
+    StrCpy $InventoryPath "$CleanupDir\install-files.txt"
+    IfFileExists "$InventoryPath" 0 backup_incoming
+    Call BackupInventory
+    IfErrors backup_close_failed
+backup_incoming:
+    StrCpy $InventoryPath "$PLUGINSDIR\incoming-files.txt"
+    Call BackupInventory
+    IfErrors backup_close_failed
+    !insertmacro RetiredRuntimeFiles BackupInstalledFile
+    !insertmacro BackupInstalledFile "install-files.txt"
+    !insertmacro BackupInstalledFile "Uninstall.exe"
+    ; Released layouts before bin/rufin.exe also had these files at the root.
+    !insertmacro BackupInstalledFile "rufin.exe"
+    !insertmacro BackupInstalledFile "gspawn-win64-helper.exe"
+    !insertmacro BackupInstalledFile "gspawn-win64-helper-console.exe"
+    !insertmacro BackupInstalledFile "update-channel"
+    FileClose $BackupLog
+    ClearErrors
+    Return
+backup_close_failed:
+    FileClose $BackupLog
+backup_failed:
+    SetErrors
+FunctionEnd
+
+Function RestoreInstallation
+    StrCmp $BackupDir "" restore_done
+    ClearErrors
+    FileOpen $1 "$BackupDir\restore.txt" r
+    IfErrors restore_unreadable
+restore_next:
+    ClearErrors
+    FileReadUTF16LE $1 $2
+    IfErrors restore_close
+    ${TrimNewLines} $2 $2
+    ; A log entry can precede a failed move. Restore only files actually moved.
+    IfFileExists "$BackupDir\files\$2" 0 restore_next
+    ${GetParent} "$CleanupDir\$2" $4
+    CreateDirectory "$4"
+    Delete "$CleanupDir\$2"
+    Rename "$BackupDir\files\$2" "$CleanupDir\$2"
+    IfErrors 0 restore_next
+    StrCpy $RestoreFailed 1
+    Goto restore_next
+restore_close:
+    FileClose $1
+    StrCmp $RestoreFailed 0 0 restore_done
+    RMDir /r "$BackupDir"
+    Return
+restore_unreadable:
+    StrCpy $RestoreFailed 1
+restore_done:
+FunctionEnd
+
+Function RemoveIncomingFiles
+    ClearErrors
+    FileOpen $1 "$PLUGINSDIR\incoming-files.txt" r
+    IfErrors incoming_done
+incoming_next:
+    ClearErrors
+    FileReadUTF16LE $1 $2
+    IfErrors incoming_close
+    ${TrimNewLines} $2 $2
+    StrCpy $3 $2 1
+    StrCpy $2 $2 "" 1
+    StrCmp $3 "F" incoming_file
+    RMDir "$INSTDIR\$2"
+    Goto incoming_next
+incoming_file:
+    Delete "$INSTDIR\$2"
+    Goto incoming_next
+incoming_close:
+    FileClose $1
+    Delete "$INSTDIR\install-files.txt"
+    Delete "$INSTDIR\Uninstall.exe"
+incoming_done:
+FunctionEnd
+
+Function WriteUpdateResult
+    StrCmp $UpdateResultPath "" result_done
+    ClearErrors
+    FileOpen $0 "$UpdateResultPath.part" w
+    IfErrors result_done
+    FileWrite $0 '$UpdateResult'
+    FileClose $0
+    IfErrors result_done
+    ; Replace the pending result only once the complete JSON is on disk.
+    System::Call 'kernel32::MoveFileExW(w "$UpdateResultPath.part", w "$UpdateResultPath", i 1)'
+result_done:
+FunctionEnd
+
+!macro WriteRufinUninstallRegistration VERSION DIRECTORY
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "DisplayName" "${RUFIN_DISPLAY_NAME}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "DisplayVersion" "${RUFIN_VERSION}"
+        "DisplayVersion" "${VERSION}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "InstallLocation" "$INSTDIR"
+        "InstallLocation" "${DIRECTORY}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "DisplayIcon" "$INSTDIR\rufin.ico"
+        "DisplayIcon" "${DIRECTORY}\rufin.ico"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "Publisher" "screwy"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "URLInfoAbout" "https://github.com/screwys/Rufin"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+        "UninstallString" '$\"${DIRECTORY}\Uninstall.exe$\"'
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
+        "QuietUninstallString" '$\"${DIRECTORY}\Uninstall.exe$\" /S'
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
@@ -272,6 +445,18 @@ Function .onInit
     StrCpy $LegacyInstallOwned 0
     StrCpy $UpdateMode 0
     StrCpy $UpdateWaitAttempts 0
+    StrCpy $DestinationBackup ""
+    StrCpy $LegacyBackup ""
+    StrCpy $WritingPayload 0
+    StrCpy $RegistrationStarted 0
+    StrCpy $PreviousRegistration 0
+    ClearErrors
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "UninstallString"
+    IfErrors +2
+    StrCpy $PreviousRegistration 1
+    ReadRegStr $PreviousVersion HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "DisplayVersion"
+    StrCpy $UpdateResultPath ""
+    StrCpy $UpdateResult '{"status":"failed","version":"${RUFIN_VERSION}","message":"The Windows installer did not complete the update."}'
     ${GetParameters} $0
     ClearErrors
     ${GetOptions} $0 "/RUFINUPDATE=" $1
@@ -295,6 +480,7 @@ invalid_update_mode_silent:
 
 update_mode_enabled:
     StrCpy $UpdateMode $1
+    ${GetOptions} $0 "/RUFINRESULT=" $UpdateResultPath
 
 update_mode_done:
     !insertmacro MUI_LANGDLL_DISPLAY
@@ -352,23 +538,51 @@ invalid_destination:
 FunctionEnd
 
 Function .onInstSuccess
+    StrCpy $UpdateResult '{"status":"installed","version":"${RUFIN_VERSION}"}'
+    Call WriteUpdateResult
     StrCmp $UpdateMode 1 0 update_launch_done
     SetOutPath "$INSTDIR"
     ClearErrors
     Exec '"$INSTDIR\bin\rufin.exe"'
     IfErrors 0 update_launch_done
     SetErrorLevel 6
+    StrCpy $UpdateResult '{"status":"failed","version":"${RUFIN_VERSION}","message":"Rufin was installed, but could not restart."}'
+    Call WriteUpdateResult
 
 update_launch_done:
 FunctionEnd
 
 Function .onInstFailed
+    StrCpy $RestoreFailed 0
+    StrCmp $WritingPayload 1 0 restore_backups
+    ; Use the incoming inventory even when extraction stopped halfway through.
+    Call RemoveIncomingFiles
+restore_backups:
+    StrCpy $CleanupDir "$INSTDIR"
+    StrCpy $BackupDir "$DestinationBackup"
+    Call RestoreInstallation
+    StrCpy $CleanupDir "$LegacyInstallDir"
+    StrCpy $BackupDir "$LegacyBackup"
+    Call RestoreInstallation
+    StrCmp $RestoreFailed 0 0 restore_failed
+    StrCmp $RegistrationStarted 1 0 update_failure_report
+    StrCmp $PreviousRegistration 1 restore_registration
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}"
+    Goto update_failure_report
+restore_registration:
+    !insertmacro WriteRufinUninstallRegistration "$PreviousVersion" "$LegacyInstallDir"
+update_failure_report:
+    Call WriteUpdateResult
     StrCmp $UpdateMode 1 0 update_failure_done
     !insertmacro RequireRufinClosed \
         "$INSTDIR\bin\rufin.exe" update_failure_bin update_failure_done
     SetOutPath "$INSTDIR"
     Exec '"$INSTDIR\bin\rufin.exe"'
 
+    Return
+restore_failed:
+    StrCpy $UpdateResult '{"status":"failed","version":"${RUFIN_VERSION}","message":"Setup could not restore the previous installation. Its backup remains in the installation folder."}'
+    Call WriteUpdateResult
 update_failure_done:
 FunctionEnd
 
@@ -411,10 +625,24 @@ runtime_silent_abort:
     Abort
 
 runtime_not_running:
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\incoming-files.txt "${RUFIN_FILES_FILE}"
     SetOutPath "$TEMP"
     StrCpy $CleanupDir "$INSTDIR"
+    Call BackupInstallation
+    StrCpy $DestinationBackup "$BackupDir"
+    IfErrors runtime_cleanup_failed
+    StrCmp $LegacyInstallOwned 1 0 installation_backed_up
+    StrCpy $CleanupDir "$LegacyInstallDir"
+    Call BackupInstallation
+    StrCpy $LegacyBackup "$BackupDir"
+    IfErrors runtime_cleanup_failed
+installation_backed_up:
+    StrCpy $CleanupDir "$INSTDIR"
+    StrCpy $BackupDir "$DestinationBackup"
     Call RemoveInstalledFiles
     IfErrors runtime_cleanup_failed
+    StrCpy $WritingPayload 1
     SetOutPath "$INSTDIR"
     File /r "${RUFIN_STAGE_FILES}"
     File /oname=install-files.txt "${RUFIN_FILES_FILE}"
@@ -434,6 +662,7 @@ install_written:
 
     StrCmp $LegacyInstallOwned 1 0 legacy_install_removed
     StrCpy $CleanupDir "$LegacyInstallDir"
+    StrCpy $BackupDir "$LegacyBackup"
     Call RemoveInstalledFiles
     IfErrors runtime_cleanup_failed
     Delete "$LegacyInstallDir\rufin.exe"
@@ -447,10 +676,11 @@ install_written:
     ClearErrors
 
 legacy_install_removed:
-    DeleteRegKey HKCU "Software\${RUFIN_PROJECT_NAME}"
+    StrCpy $RegistrationStarted 1
     ClearErrors
-    !insertmacro WriteRufinUninstallRegistration
+    !insertmacro WriteRufinUninstallRegistration "${RUFIN_VERSION}" "$INSTDIR"
     IfErrors install_write_failed
+    DeleteRegKey HKCU "Software\${RUFIN_PROJECT_NAME}"
 
     CreateDirectory "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}"
     !insertmacro CreateRufinShortcut \
@@ -471,6 +701,14 @@ create_existing_desktop:
         "$INSTDIR\rufin.ico"
 
 no_existing_desktop:
+    ; All payload and registration writes succeeded. The old files can go now.
+    StrCmp $DestinationBackup "" +2
+    RMDir /r "$DestinationBackup"
+    StrCmp $LegacyBackup "" +2
+    RMDir /r "$LegacyBackup"
+    StrCpy $DestinationBackup ""
+    StrCpy $LegacyBackup ""
+    StrCpy $WritingPayload 0
 SectionEnd
 
 Function CreateDesktopShortcut
@@ -573,7 +811,7 @@ uninstall_registration_removed:
 
 uninstall_restore_registration:
     ClearErrors
-    !insertmacro WriteRufinUninstallRegistration
+    !insertmacro WriteRufinUninstallRegistration "${RUFIN_VERSION}" "$INSTDIR"
 
 uninstall_cleanup_failed:
     SetErrorLevel 5

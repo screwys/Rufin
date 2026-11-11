@@ -20,7 +20,7 @@ use std::sync::mpsc;
 use app_identity::PROJECT_NAME;
 #[cfg(target_os = "windows")]
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 #[cfg(any(target_os = "windows", test))]
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -111,7 +111,7 @@ enum UpdateUnavailable {
     NotInstalled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "lowercase", deny_unknown_fields)]
 pub enum PreviousUpdateResult {
     Installed { version: String },
@@ -206,9 +206,21 @@ impl InstalledUpdater {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(update) = prepared.as_ref() {
-                remove_file_if_present(&result_path(&self.cache_dir))
-                    .map_err(|error| error.to_string())?;
-                launch_installer(&update.installer, relaunch).map_err(|error| error.to_string())?;
+                let result = result_path(&self.cache_dir);
+                // Keep a failure result even if setup exits before its callbacks run.
+                let pending = PreviousUpdateResult::Failed {
+                    version: update.version.clone(),
+                    message: "The Windows installer did not complete the update.".to_owned(),
+                };
+                fs::write(
+                    &result,
+                    serde_json::to_vec(&pending).expect("update result"),
+                )
+                .map_err(|error| error.to_string())?;
+                if let Err(error) = launch_installer(&update.installer, relaunch, &result) {
+                    let _ = remove_file_if_present(&result);
+                    return Err(error.to_string());
+                }
                 *prepared = None;
             }
         }
@@ -261,6 +273,9 @@ enum UpdateError {
     #[error("the downloaded Windows installer did not match its published SHA-256 digest")]
     DigestMismatch,
     #[cfg(any(target_os = "windows", test))]
+    #[error("the Windows installer has no valid published SHA-256 digest")]
+    MissingDigest,
+    #[cfg(any(target_os = "windows", test))]
     #[error("the downloaded Windows installer was empty")]
     EmptyInstaller,
     #[cfg(any(target_os = "windows", test))]
@@ -285,7 +300,7 @@ struct GitHubAsset {
 }
 
 #[cfg(target_os = "windows")]
-fn launch_installer(installer: &Path, relaunch: bool) -> Result<(), UpdateError> {
+fn launch_installer(installer: &Path, relaunch: bool, result: &Path) -> Result<(), UpdateError> {
     let mut command = Command::new(installer);
     command
         .current_dir(installer.parent().expect("download directory"))
@@ -294,6 +309,11 @@ fn launch_installer(installer: &Path, relaunch: bool) -> Result<(), UpdateError>
             "/RUFINUPDATE=1"
         } else {
             "/RUFINUPDATE=2"
+        })
+        .arg({
+            let mut argument = std::ffi::OsString::from("/RUFINRESULT=");
+            argument.push(result);
+            argument
         })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -527,7 +547,7 @@ fn installer_asset_name(version: &str) -> String {
 }
 
 #[cfg(any(target_os = "windows", test))]
-fn optional_release_digest(release: &GitHubRelease, version: &str) -> Option<String> {
+fn release_digest(release: &GitHubRelease, version: &str) -> Result<String, UpdateError> {
     let expected_name = installer_asset_name(version);
     let expected_url = release_asset_url(version);
     release
@@ -536,6 +556,7 @@ fn optional_release_digest(release: &GitHubRelease, version: &str) -> Option<Str
         .find(|asset| asset.name == expected_name && asset.browser_download_url == expected_url)
         .and_then(|asset| asset.digest.as_deref())
         .and_then(parse_sha256)
+        .ok_or(UpdateError::MissingDigest)
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -572,14 +593,13 @@ fn download_installer(version: &str, update_root: &Path) -> Result<PathBuf, Upda
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(5 * 60))
         .build()?;
-    let expected_digest = client
+    let release = client
         .get(release_api_url(version))
         .timeout(Duration::from_secs(10))
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
-        .and_then(reqwest::blocking::Response::json::<GitHubRelease>)
-        .ok()
-        .and_then(|release| optional_release_digest(&release, version));
+        .and_then(reqwest::blocking::Response::json::<GitHubRelease>)?;
+    let expected_digest = release_digest(&release, version)?;
 
     let downloads = update_root.join("downloads").join(version);
     fs::create_dir_all(&downloads)?;
@@ -616,10 +636,7 @@ fn download_installer(version: &str, update_root: &Path) -> Result<PathBuf, Upda
         validate_installer_size(downloaded)?;
         output.sync_all()?;
         drop(output);
-        if expected_digest.as_deref().is_some_and(|expected| {
-            let digest = hasher.finalize();
-            lowercase_hex(&digest) != expected
-        }) {
+        if lowercase_hex(&hasher.finalize()) != expected_digest {
             return Err(UpdateError::DigestMismatch);
         }
         remove_file_if_present(&installer)?;
@@ -729,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn release_digest_is_optional_and_only_uses_the_exact_asset() {
+    fn release_digest_requires_a_valid_digest_for_the_exact_asset() {
         let digest = "a".repeat(64);
         let release: GitHubRelease = serde_json::from_value(serde_json::json!({
             "assets": [
@@ -741,7 +758,11 @@ mod tests {
             ]
         }))
         .expect("release fixture");
-        assert_eq!(optional_release_digest(&release, "1.2.3"), Some(digest));
+        assert_eq!(release_digest(&release, "1.2.3").unwrap(), digest);
+        assert!(matches!(
+            release_digest(&release, "1.2.4"),
+            Err(UpdateError::MissingDigest)
+        ));
 
         let malformed: GitHubRelease = serde_json::from_value(serde_json::json!({
             "assets": [
@@ -753,7 +774,28 @@ mod tests {
             ]
         }))
         .expect("release fixture");
-        assert_eq!(optional_release_digest(&malformed, "1.2.3"), None);
+        assert!(matches!(
+            release_digest(&malformed, "1.2.3"),
+            Err(UpdateError::MissingDigest)
+        ));
+        for digest in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!("sha256:")),
+        ] {
+            let mut asset = serde_json::json!({
+                "name": "Rufin-1.2.3-setup.exe",
+                "browser_download_url": release_asset_url("1.2.3"),
+            });
+            if let Some(digest) = digest {
+                asset["digest"] = digest;
+            }
+            let release = serde_json::from_value(serde_json::json!({"assets": [asset]})).unwrap();
+            assert!(matches!(
+                release_digest(&release, "1.2.3"),
+                Err(UpdateError::MissingDigest)
+            ));
+        }
 
         let mut hasher = Sha256::new();
         hasher.update(b"Rufin installer");
