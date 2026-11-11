@@ -2788,6 +2788,11 @@ msgstr "Notificações"
 msgid "November {year}"
 msgstr "Novembro de {year}"
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "Nova playlist"
+
 msgid "Now playing notifications"
 msgstr "Notificações de reprodução atual"
 

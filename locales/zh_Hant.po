@@ -3143,6 +3143,11 @@ msgstr "通知"
 msgid "November {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "新增播放清單"
+
 msgid "Now playing notifications"
 msgstr "正在播放通知"
 

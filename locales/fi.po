@@ -3075,6 +3075,11 @@ msgstr "Ilmoitukset"
 msgid "November {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "Uusi soittolista"
+
 msgid "Now playing notifications"
 msgstr "Nyt soi -ilmoitukset"
 

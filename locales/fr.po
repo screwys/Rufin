@@ -2771,6 +2771,11 @@ msgstr "Notifications"
 msgid "November {year}"
 msgstr "Novembre {year}"
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "Nouvelle playlist"
+
 msgid "Now playing notifications"
 msgstr "Notifications de lecture en cours"
 
@@ -3588,7 +3593,8 @@ msgstr "Identifiants enregistrés"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] "Mappage enregistré. {matched} chemin de serveur sur {total} correspond"
+msgstr[0] ""
+"Mappage enregistré. {matched} chemin de serveur sur {total} correspond"
 msgstr[1] ""
 "Mappage enregistré. {matched} chemins de serveur sur {total} correspondent"
 
@@ -4451,7 +4457,8 @@ msgid "Username"
 msgstr "Identifiant"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
-msgstr "Utilise les paroles de karaoké disponibles ou les récupère sur Internet"
+msgstr ""
+"Utilise les paroles de karaoké disponibles ou les récupère sur Internet"
 
 msgid "Verification Code"
 msgstr "Code de vérification"
