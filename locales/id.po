@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 09:25+0000\n"
+"PO-Revision-Date: 2026-11-11 09:56+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
 "\n"
@@ -283,22 +283,27 @@ msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
+"Anda mengatur Rufin untuk mengunduh secara otomatis seluruh koleksi musik "
+"Anda. Ini bisa memakan banyak data internet. Apakah anda yakin?"
 
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
+"Anda perlu menghubungkan ulang lewat aplikasi yang Anda gunakan menggunakan "
+"kunci API baru."
 
 msgid "(hold to shuffle)"
-msgstr ""
+msgstr "(tahan untuk mengacak)"
 
 msgid "+1 track"
-msgstr ""
+msgstr "+1 Lagu"
 
+#, fuzzy
 msgid "+5 min"
-msgstr ""
+msgstr "+5 min"
 
 msgid ". You only need to fill email and an application name parts"
-msgstr ""
+msgstr ". Anda hanya perlu mengisi bagian email dan nama aplikasi"
 
 msgid "1 day"
 msgstr "1 hari"
@@ -423,7 +428,7 @@ msgid "Add band"
 msgstr "Tambah pita"
 
 msgid "Add current"
-msgstr ""
+msgstr "Tambah lagu saat ini"
 
 msgid "Add folder"
 msgstr "Tambah folder"
@@ -441,13 +446,13 @@ msgid "Add to Playlist"
 msgstr "Tambahkan ke Playlist"
 
 msgid "Add to Saved"
-msgstr ""
+msgstr "Tambahkan ke Tersimpan"
 
 msgid "Add to folder"
 msgstr "Tambahkan ke folder"
 
 msgid "Add to library"
-msgstr ""
+msgstr "Tambahkan ke koleksi musik"
 
 msgid "Add tracks when fewer than this many remain"
 msgstr "Tambah lagu saat sisa kurang dari jumlah ini"
