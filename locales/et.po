@@ -2785,6 +2785,11 @@ msgstr "Teavitused"
 msgid "November {year}"
 msgstr "November {year}"
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "Uus esitusloend"
+
 msgid "Now playing notifications"
 msgstr "Tevitused hetkel esitamisel lugude kohta"
 

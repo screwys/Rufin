@@ -3215,6 +3215,11 @@ msgstr "Notifikace"
 msgid "November {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Now Playing"
+msgstr "Nový playlist"
+
 msgid "Now playing notifications"
 msgstr "Oznámení o tom, co se aktuálně přehrává"
 
