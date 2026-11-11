@@ -1,13 +1,12 @@
 use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::Result;
 use crate::generate;
 use crate::process::{
     capture_command, command_stdout, find_on_path, github_repo_from_origin, read_to_string,
-    repo_root, repo_url_from_origin, run_command, temp_path, write_string,
+    repo_root, repo_url_from_origin, run_command, write_string,
 };
 
 const FLATHUB_MANIFEST: &str = "packaging/flatpak/io.github.screwys.Rufin.flathub.json";
@@ -22,7 +21,7 @@ pub(crate) fn run(mut args: Vec<String>) -> Result<()> {
 
     match args.remove(0).as_str() {
         "prepare" => prepare(args),
-        "create-tag" => create_tag(args),
+        "notes" => notes(args),
         "update-flathub-manifest" => update_flathub_manifest(args),
         command => Err(format!("unknown release command: {command}").into()),
     }
@@ -45,10 +44,12 @@ fn prepare(args: Vec<String>) -> Result<()> {
         return Err("release notes are required".into());
     }
 
-    prepare_version(&version, notes, false)
+    prepare_version(&version, notes)?;
+    generate::flatpak_sources(false)?;
+    verify_nix_flake()
 }
 
-fn prepare_version(version: &str, notes: &str, preserve_release_entry: bool) -> Result<()> {
+fn prepare_version(version: &str, notes: &str) -> Result<()> {
     let root = repo_root()?;
     env::set_current_dir(&root)?;
     let release_date = match env::var("RELEASE_DATE") {
@@ -59,7 +60,7 @@ fn prepare_version(version: &str, notes: &str, preserve_release_entry: bool) -> 
     replace_workspace_version(version)?;
     update_rpm_spec_version(version)?;
     run_command("cargo", ["update", "--workspace", "--offline"])?;
-    update_metainfo_release(version, &release_date, notes, preserve_release_entry)?;
+    update_metainfo_release(version, &release_date, notes)?;
     update_issue_template_versions(version)?;
 
     Ok(())
@@ -151,152 +152,41 @@ fn update_flathub_manifest_path(manifest: &Path, tag: &str) -> Result<()> {
     Ok(())
 }
 
-fn create_tag(mut args: Vec<String>) -> Result<()> {
+// Prints the release notes for VERSION, which become its tag message and GitHub release text.
+fn notes(mut args: Vec<String>) -> Result<()> {
+    const USAGE: &str = "Usage: cargo run --locked -p xtask -- release notes [--base TAG] [--target REV] VERSION SUMMARY";
     let mut base_tag = String::new();
-    let mut dry_run = false;
-    let mut replace_tag = false;
-    let mut skip_flathub = false;
-
-    while !args.is_empty() {
+    let mut target = "HEAD".to_owned();
+    while args.first().is_some_and(|arg| arg.starts_with('-')) {
         match args.remove(0).as_str() {
-            "--base" => {
-                if args.is_empty() {
-                    return Err("--base requires a tag".into());
-                }
-                base_tag = normalize_tag(&args.remove(0))?;
-            }
-            "--dry-run" => dry_run = true,
-            "--replace" => replace_tag = true,
-            "--skip-flathub" => skip_flathub = true,
+            "--base" if !args.is_empty() => base_tag = normalize_tag(&args.remove(0))?,
+            "--target" if !args.is_empty() => target = args.remove(0),
             "-h" | "--help" => {
-                eprintln!(
-                    "Usage: cargo run --locked -p xtask -- release create-tag [--base TAG] [--dry-run] [--replace] [--skip-flathub] VERSION SUMMARY"
-                );
+                eprintln!("{USAGE}");
                 return Ok(());
             }
-            "--" => break,
-            arg if arg.starts_with('-') => return Err(format!("unknown option: {arg}").into()),
-            arg => {
-                args.insert(0, arg.to_owned());
-                break;
-            }
+            arg => return Err(format!("unexpected argument: {arg}\n{USAGE}").into()),
         }
     }
-
-    if args.len() != 2 {
-        return Err("release create-tag requires VERSION and SUMMARY".into());
-    }
-
-    let version = normalize_tag(&args[0])?;
-    let plain_version = version.trim_start_matches('v').to_owned();
-    let summary = args[1].clone();
+    let [version, summary] = args.as_slice() else {
+        return Err(USAGE.into());
+    };
     if summary.is_empty() {
         return Err("release notes are required".into());
     }
-
-    let root = repo_root()?;
-    env::set_current_dir(&root)?;
-
-    if !dry_run && !replace_tag && git_ref_exists(&format!("refs/tags/{version}"))? {
-        return Err(format!("tag already exists: {version}").into());
-    }
-
+    let version = normalize_tag(version)?;
+    env::set_current_dir(repo_root()?)?;
     if base_tag.is_empty() {
-        base_tag = if replace_tag && git_ref_exists(&format!("refs/tags/{version}"))? {
-            latest_release_tag_at(&format!("{version}^"))?
-        } else {
-            latest_release_tag_at("HEAD")?
-        }
-        .ok_or("could not find previous v* tag; pass --base TAG")?;
+        // A replaced release's own tag is not its base.
+        base_tag = latest_release_tag(&version, &target)?
+            .ok_or("could not find previous v* tag; pass --base TAG")?;
     }
     ensure_tag_exists(&base_tag)?;
-
-    if !dry_run && !working_tree_clean()? {
-        return Err("working tree must be clean before creating a release tag".into());
-    }
-
-    let commit_count =
-        command_stdout("git", ["rev-list", "--count", &format!("{base_tag}..HEAD")])?;
-    if commit_count.trim() == "0" {
-        return Err(format!("no commits found in range {base_tag}..HEAD").into());
-    }
-
-    let mut notes = release_notes(&base_tag, &version, &summary)?;
-    print_notes(&notes);
-    if dry_run {
-        return Ok(());
-    }
-
-    prepare_version(&plain_version, &summary, replace_tag)?;
-    generate::flatpak_sources(false)?;
-    verify_nix_flake()?;
-    if !working_tree_clean()? {
-        git_add_existing(&[
-            "Cargo.lock",
-            "Cargo.toml",
-            "README.md",
-            "resources/io.github.screwys.Rufin.metainfo.xml",
-            ".github/ISSUE_TEMPLATE/bug_report.yml",
-            "packaging/flatpak/cargo-sources.json",
-            "packaging/linux/Cargo.toml",
-            "packaging/linux/Cargo.lock",
-            RPM_SPEC,
-        ])?;
-        run_command(
-            "git",
-            [
-                "commit",
-                "-m",
-                &format!("release: publish prep for {version}"),
-            ],
-        )?;
-    }
-
-    notes = release_notes(&base_tag, &version, &summary)?;
-    print_notes(&notes);
-
-    if replace_tag && git_ref_exists(&format!("refs/tags/{version}"))? {
-        run_command("git", ["tag", "-d", &version])?;
-    }
-
-    let notes_file = temp_path("release-notes.md");
-    write_string(&notes_file, &notes)?;
-    run_command(
-        "git",
-        [
-            "tag",
-            "-s",
-            "--cleanup=verbatim",
-            &version,
-            "-F",
-            notes_file
-                .to_str()
-                .ok_or("release notes path is not valid UTF-8")?,
-        ],
-    )?;
-    let _ = std::fs::remove_file(notes_file);
-    run_command("git", ["show", &version, "--no-patch"])?;
-
-    let flathub_manifest = PathBuf::from(FLATHUB_MANIFEST);
-    if !skip_flathub && flathub_manifest.is_file() {
-        update_flathub_manifest_path(&flathub_manifest, &version)?;
-        if path_has_diff(&flathub_manifest)? {
-            run_command("git", ["add", FLATHUB_MANIFEST])?;
-            run_command(
-                "git",
-                [
-                    "commit",
-                    "-m",
-                    &format!("flatpak: update Flathub manifest for {version}"),
-                ],
-            )?;
-        }
-    }
-
+    print!("{}", release_notes(&base_tag, &version, summary, &target)?);
     Ok(())
 }
 
-fn latest_release_tag_at(revision: &str) -> Result<Option<String>> {
+fn latest_release_tag(version: &str, target: &str) -> Result<Option<String>> {
     let output = capture_command(
         "git",
         [
@@ -305,49 +195,13 @@ fn latest_release_tag_at(revision: &str) -> Result<Option<String>> {
             "--abbrev=0",
             "--match",
             "v[0-9]*",
-            revision,
+            "--exclude",
+            version,
+            target,
         ],
     )?;
-    if output.status.success() {
-        let tag = output.stdout.trim();
-        if tag.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(tag.to_owned()))
-        }
-    } else {
-        Ok(None)
-    }
-}
-
-fn git_ref_exists(ref_name: &str) -> Result<bool> {
-    let output = capture_command("git", ["rev-parse", "-q", "--verify", ref_name])?;
-    Ok(output.status.success())
-}
-
-fn working_tree_clean() -> Result<bool> {
-    let diff = Command::new("git").args(["diff", "--quiet"]).status()?;
-    let cached = Command::new("git")
-        .args(["diff", "--cached", "--quiet"])
-        .status()?;
-    Ok(diff.success() && cached.success())
-}
-
-fn path_has_diff(path: &Path) -> Result<bool> {
-    let status = Command::new("git")
-        .args(["diff", "--quiet", "--"])
-        .arg(path)
-        .status()?;
-    Ok(!status.success())
-}
-
-fn git_add_existing(paths: &[&str]) -> Result<()> {
-    for path in paths {
-        if Path::new(path).exists() {
-            run_command("git", ["add", *path])?;
-        }
-    }
-    Ok(())
+    let tag = output.stdout.trim();
+    Ok((output.status.success() && !tag.is_empty()).then(|| tag.to_owned()))
 }
 
 fn verify_nix_flake() -> Result<()> {
@@ -372,14 +226,14 @@ fn verify_nix_flake() -> Result<()> {
     )
 }
 
-fn release_notes(base_tag: &str, version: &str, summary: &str) -> Result<String> {
+fn release_notes(base_tag: &str, version: &str, summary: &str, target: &str) -> Result<String> {
     let repo_url = repo_url_from_origin()?.unwrap_or_default();
     let repo_slug = github_repo_from_origin()?.unwrap_or_default();
     if repo_url.is_empty() || repo_slug.is_empty() {
         return Err("could not determine GitHub repository from origin".into());
     }
 
-    let target_commitish = release_notes_target_commitish()?;
+    let target_commitish = release_notes_target_commitish(target)?;
     let generated =
         github_generated_release_notes(&repo_slug, base_tag, version, &target_commitish)?;
 
@@ -394,22 +248,16 @@ fn release_notes(base_tag: &str, version: &str, summary: &str) -> Result<String>
     )
 }
 
-fn print_notes(notes: &str) {
-    println!("Release notes (Markdown)");
-    println!();
-    print!("{notes}");
-}
-
 struct GeneratedReleaseNoteEntry {
     number: String,
     title: String,
     author: String,
 }
 
-fn release_notes_target_commitish() -> Result<String> {
+fn release_notes_target_commitish(target: &str) -> Result<String> {
     let log = command_stdout(
         "git",
-        ["log", "--first-parent", "--format=%H%x09%s", "HEAD"],
+        ["log", "--first-parent", "--format=%H%x09%s", target],
     )?;
     for line in log.lines() {
         let Some((commit, subject)) = line.split_once('\t') else {
@@ -864,24 +712,9 @@ fn replace_workspace_version_in_toml(input: &str, version: &str) -> Result<Strin
     }
 }
 
-fn update_metainfo_release(
-    version: &str,
-    release_date: &str,
-    notes: &str,
-    preserve_existing: bool,
-) -> Result<()> {
+fn update_metainfo_release(version: &str, release_date: &str, notes: &str) -> Result<()> {
     let path = PathBuf::from("resources/io.github.screwys.Rufin.metainfo.xml");
     let input = read_to_string(&path)?;
-    if preserve_existing {
-        let existing_version = first_metainfo_release_version(&input)?;
-        if existing_version != version {
-            return Err(format!(
-                "cannot replace {version} while MetaInfo starts with {existing_version}"
-            )
-            .into());
-        }
-        return Ok(());
-    }
     let without_existing = remove_existing_release_entries(&input, version);
     let entry = format_metainfo_release(version, release_date, notes);
     let Some(index) = without_existing.find("  <releases>\n") else {

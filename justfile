@@ -400,9 +400,26 @@ debug *args:
 fmt:
     @scripts/container run default none cargo fmt --all
 
+# Rewrite formatting and every generated file from its sources; publishing runs it before committing.
+generate:
+    @scripts/container run default none just _generate
+
+_generate:
+    @cargo fmt --all
+    @cargo run --locked -p xtask -- generate i18n-template
+    @cargo run --locked -p xtask -- generate flatpak-sources
+
+# Check the commits since BASE: whitespace, dependency policy, formatting and Clippy for the crates they touch.
+lint base="origin/main":
+    @scripts/container run default none cargo run --locked -p xtask -- lint {{ base }}
+
 # Regenerate the shared desktop and web translation template, or pass --check.
 i18n *args:
     @scripts/container run default none cargo run -p xtask -- generate i18n-template {{ args }}
+
+# Merge the template into every catalog, for a translation-sync PR.
+i18n-merge:
+    @for catalog in locales/*.po; do msgmerge --quiet --no-location --sort-by-file --update --backup=none "$catalog" locales/rufin.pot; done
 
 test *args:
     @if [[ "$*" == "android" ]]; then \

@@ -1,0 +1,179 @@
+name: Release
+run-name: Release ${{ github.ref_name }}
+
+# A pushed version tag builds every package into a draft release and publishes it once all of them
+# are there. A failed job is re-run from the run; a fix needs the tag moved, which starts over.
+on:
+  push:
+    tags:
+      - v[0-9]*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    name: Draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Checkout leaves a lightweight tag; the notes are the annotated tag's message.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [[ "$draft" != true ]]; then
+              echo "$TAG is already published; a published release cannot change." >&2
+              exit 1
+            fi
+            echo "Draft $TAG exists; continuing it."
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-from-tag
+          fi
+
+  android:
+    name: Android
+    uses: ./.github/workflows/android-build.yml
+    with:
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+      verify_signed_tag: true
+    secrets:
+      RUFIN_ANDROID_KEYSTORE_BASE64: ${{ secrets.RUFIN_ANDROID_KEYSTORE_BASE64 }}
+      RUFIN_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.RUFIN_ANDROID_KEYSTORE_PASSWORD }}
+      RUFIN_ANDROID_KEY_ALIAS: ${{ secrets.RUFIN_ANDROID_KEY_ALIAS }}
+      RUFIN_ANDROID_KEY_PASSWORD: ${{ secrets.RUFIN_ANDROID_KEY_PASSWORD }}
+
+  flatpak:
+    name: Flatpak
+    uses: ./.github/workflows/flatpak-build.yml
+    with:
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+      verify_signed_tag: true
+
+  macos:
+    name: macOS
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+      verify_signed_tag: true
+    secrets:
+      MACOS_SIGNING_CERTIFICATE_PEM_BASE64: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PEM_BASE64 }}
+      MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64: ${{ secrets.MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64 }}
+
+  windows:
+    name: Windows
+    uses: ./.github/workflows/windows-build.yml
+    with:
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+      verify_signed_tag: true
+
+  rpm:
+    name: RPM
+    uses: ./.github/workflows/rpm.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets:
+      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+
+  aur:
+    name: AUR
+    uses: ./.github/workflows/aur-build.yml
+    with:
+      package: rufin-bin
+      release_tag: ${{ github.ref_name }}
+
+  nix:
+    name: Nix
+    uses: ./.github/workflows/nix.yml
+    with:
+      ref: ${{ github.ref_name }}
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  publish:
+    name: Publish
+    needs: [draft, android, flatpak, macos, windows, rpm, aur, nix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      discussions: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: "{Rufin-android-apks,io.github.screwys.Rufin-*.flatpak,Rufin-macos-*.dmg,Rufin-setup.exe,rpm-release-*,archlinux-*}"
+          merge-multiple: true
+          path: dist
+
+      - name: Verify packages
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          for asset in \
+            "rufin-$version-archlinux-x86_64.tar.zst" \
+            io.github.screwys.Rufin-x86_64.flatpak \
+            io.github.screwys.Rufin-aarch64.flatpak \
+            Rufin-android-arm64-v8a.apk \
+            Rufin-android-armeabi-v7a.apk \
+            Rufin-android-x86_64.apk \
+            Rufin-macos-arm64.dmg \
+            Rufin-macos-x86_64.dmg \
+            "Rufin-$version-setup.exe"; do
+            test -f "dist/$asset" || { echo "missing $asset" >&2; exit 1; }
+          done
+          for fedora in 44 45; do
+            for arch in x86_64 aarch64; do
+              test "$(find dist -maxdepth 1 -name "rufin-*.fc$fedora.$arch.rpm" | wc -l)" -eq 1
+            done
+          done
+          ls -l dist
+          test "$(find dist -type f | wc -l)" -eq 13
+
+      - name: Attest packages
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --draft=false --latest --discussion-category Announcements
+
+  aur-publish:
+    name: AUR publish
+    needs: publish
+    uses: ./.github/workflows/aur-publish.yml
+    with:
+      package: rufin-bin
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

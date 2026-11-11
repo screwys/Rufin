@@ -1,6 +1,12 @@
 name: Windows build
 
 on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build
+        required: true
+        default: main
   workflow_call:
     inputs:
       ref:
