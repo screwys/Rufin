@@ -537,6 +537,11 @@ msgstr "Qualunque genere"
 msgid "Any"
 msgstr "Qualunque"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Impostazioni dell'app"
+
 msgid "App settings"
 msgstr "Impostazioni dell'app"
 
@@ -1036,6 +1041,11 @@ msgstr "Collezioni"
 
 msgid "Color for the active word during playback"
 msgstr "Colore per la parola attiva durante il playback"
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Schema di colori"
 
 #, fuzzy
 #| msgid "Columns"
@@ -4352,6 +4362,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr ""
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Add folder"
 msgid "Sync folder"
@@ -4531,6 +4544,9 @@ msgid "Transition mode"
 msgstr ""
 
 msgid "Translation language"
+msgstr ""
+
+msgid "Tray icon"
 msgstr ""
 
 msgid "Treble"
@@ -5180,9 +5196,6 @@ msgstr ""
 
 #~ msgid "Artist / Album"
 #~ msgstr "Artista / Album"
-
-#~ msgid "Color scheme"
-#~ msgstr "Schema di colori"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Seleziona una cartella locale esistente"

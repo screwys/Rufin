@@ -541,6 +541,11 @@ msgstr "Cualquier género"
 msgid "Any"
 msgstr "Cualquiera"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Ajustes de la aplicación"
+
 msgid "App settings"
 msgstr "Ajustes de la aplicación"
 
@@ -982,6 +987,9 @@ msgstr "Colecciones"
 
 msgid "Color for the active word during playback"
 msgstr "Color de la palabra activa durante la reproducción"
+
+msgid "Colored"
+msgstr ""
 
 msgid "Column borders"
 msgstr "Bordes de la columna"
@@ -4132,6 +4140,9 @@ msgstr "Cambiar panel"
 msgid "Switching library..."
 msgstr "Cambiando biblioteca..."
 
+msgid "Symbolic"
+msgstr ""
+
 msgid "Sync folder"
 msgstr "Sincronizar carpeta"
 
@@ -4301,6 +4312,11 @@ msgstr "Modo de transición"
 
 msgid "Translation language"
 msgstr "Idioma de traducción"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Mostrar icono en la bandeja del sistema"
 
 msgid "Treble"
 msgstr "Agudos"

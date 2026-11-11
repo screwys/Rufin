@@ -543,6 +543,11 @@ msgstr "Любой жанр"
 msgid "Any"
 msgstr "Любой"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "Настройки приложения"
+
 msgid "App settings"
 msgstr "Настройки приложения"
 
@@ -982,6 +987,11 @@ msgstr "Коллекции"
 
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Цветовая схема"
 
 msgid "Column borders"
 msgstr "Границы столбцов"
@@ -4112,6 +4122,9 @@ msgstr "Переключить панель"
 msgid "Switching library..."
 msgstr "Переключение библиотеки…"
 
+msgid "Symbolic"
+msgstr ""
+
 msgid "Sync folder"
 msgstr "Папка синхронизации"
 
@@ -4276,6 +4289,11 @@ msgstr "Режим перехода"
 
 msgid "Translation language"
 msgstr "Язык перевода"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Показывать значок в системном трее"
 
 msgid "Treble"
 msgstr "Высокие частоты"
@@ -5160,9 +5178,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Updated Rufin to {version}. Restart to apply."
 #~ msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
-
-#~ msgid "Color scheme"
-#~ msgstr "Цветовая схема"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Переименовать плейлист"

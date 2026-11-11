@@ -553,6 +553,11 @@ msgstr "Beliebiges Genre"
 msgid "Any"
 msgstr "Beliebige"
 
+#, fuzzy
+#| msgid "App settings"
+msgid "App icon"
+msgstr "App-Einstellungen"
+
 msgid "App settings"
 msgstr "App-Einstellungen"
 
@@ -993,6 +998,11 @@ msgstr "Sammlungen"
 
 msgid "Color for the active word during playback"
 msgstr "Farbe des aktuellen Wortes während der Wiedergabe"
+
+#, fuzzy
+#| msgid "Color scheme"
+msgid "Colored"
+msgstr "Farbschema"
 
 msgid "Column borders"
 msgstr "Spaltenrahmen"
@@ -4175,6 +4185,9 @@ msgstr "Bereich wechseln"
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt …"
 
+msgid "Symbolic"
+msgstr ""
+
 #, fuzzy
 #| msgid "Save in folder"
 msgid "Sync folder"
@@ -4350,6 +4363,11 @@ msgstr "Übergangsmodus"
 
 msgid "Translation language"
 msgstr "Übersetzungssprache"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Tray icon"
+msgstr "Symbol im Infobereich anzeigen"
 
 msgid "Treble"
 msgstr "Höhen"
@@ -5232,9 +5250,6 @@ msgstr "Willkommen beim Rufin-Setup"
 #~ msgstr ""
 #~ "Rufin wurde auf {version} aktualisiert. Neu starten, um die Änderungen zu "
 #~ "übernehmen."
-
-#~ msgid "Color scheme"
-#~ msgstr "Farbschema"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Playlist umbenennen"
