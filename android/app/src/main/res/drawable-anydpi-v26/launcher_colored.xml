@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The monochrome glyph is what Android 13+ themed icons tint. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background><color android:color="#ffffff" /></background>
+    <foreground android:drawable="@drawable/launcher_colored_foreground" />
+    <monochrome android:drawable="@drawable/launcher_glyph_light" />
+</adaptive-icon>

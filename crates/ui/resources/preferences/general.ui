@@ -30,6 +30,19 @@
           </object>
         </child>
         <child>
+          <object class="AdwComboRow" id="tray_icon_row">
+            <property name="title" translatable="yes">Tray icon</property>
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">Colored</item>
+                  <item translatable="yes">Symbolic</item>
+                </items>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
           <object class="AdwSwitchRow" id="keep_running_row">
             <property name="title" translatable="yes">Keep Rufin running after closing the window</property>
           </object>

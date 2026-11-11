@@ -855,6 +855,7 @@ fn general_page(
         window_group: adw::PreferencesGroup,
         activity_overview_row: adw::ActionRow,
         tray_row: adw::SwitchRow,
+        tray_icon_row: adw::ComboRow,
         keep_running_row: adw::SwitchRow,
         start_minimized_row: adw::SwitchRow,
         type_to_search_row: adw::SwitchRow,
@@ -964,19 +965,34 @@ fn general_page(
         #[cfg(not(target_os = "macos"))]
         start_minimized_row.set_active(settings.tray_enabled && settings.start_minimized);
         #[cfg(target_os = "macos")]
+        window_group.remove(&tray_icon_row);
+        #[cfg(target_os = "macos")]
         for row in [&tray_row, &keep_running_row, &start_minimized_row] {
             window_group.remove(row);
         }
         #[cfg(not(target_os = "macos"))]
         start_minimized_row.set_visible(settings.tray_enabled);
         #[cfg(not(target_os = "macos"))]
+        tray_icon_row.set_visible(settings.tray_enabled);
+        #[cfg(not(target_os = "macos"))]
+        tray_icon_row.set_selected(u32::from(settings.symbolic_tray_icon));
+        #[cfg(not(target_os = "macos"))]
+        let tray_icon_shell = Rc::clone(shell);
+        #[cfg(not(target_os = "macos"))]
+        tray_icon_row.connect_selected_notify(move |row| {
+            tray_icon_shell.set_symbolic_tray_icon(row.selected() == 1);
+        });
+        #[cfg(not(target_os = "macos"))]
         let tray_shell = Rc::clone(shell);
         #[cfg(not(target_os = "macos"))]
         let start_minimized_row_for_tray = start_minimized_row.clone();
         #[cfg(not(target_os = "macos"))]
+        let tray_icon_row_for_tray = tray_icon_row.clone();
+        #[cfg(not(target_os = "macos"))]
         tray_row.connect_active_notify(move |row| {
             let enabled = row.is_active();
             start_minimized_row_for_tray.set_visible(enabled);
+            tray_icon_row_for_tray.set_visible(enabled);
             if !enabled {
                 start_minimized_row_for_tray.set_active(false);
             }

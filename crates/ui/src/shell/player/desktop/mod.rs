@@ -243,6 +243,19 @@ impl Shell {
     }
 
     #[cfg(not(target_os = "macos"))]
+    pub(crate) fn set_symbolic_tray_icon(&self, symbolic: bool) {
+        if self
+            .settings
+            .set_app_setting("tray icon setting", symbolic, |settings| {
+                &mut settings.symbolic_tray_icon
+            })
+            .is_some()
+        {
+            self.refresh_tray();
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn set_keep_running_after_close(self: &Rc<Self>, enabled: bool) {
         let Some(committed) = self.settings.set_app_setting(
             "keep running after close setting",
@@ -347,8 +360,14 @@ impl Shell {
         if self.desktop.tray.borrow().is_some() {
             return true;
         }
-        let private_mode = self.settings.current.borrow().application.private_mode;
-        let (tray, receiver) = match desktop_integration::Tray::start(private_mode) {
+        let (private_mode, symbolic) = {
+            let settings = self.settings.current.borrow();
+            (
+                settings.application.private_mode,
+                settings.symbolic_tray_icon,
+            )
+        };
+        let (tray, receiver) = match desktop_integration::Tray::start(private_mode, symbolic) {
             Ok(started) => started,
             Err(error) => {
                 warn!(%error);
@@ -369,10 +388,13 @@ impl Shell {
         }
     }
 
-    pub(crate) fn refresh_tray_private_mode(&self) {
-        let private_mode = self.settings.current.borrow().application.private_mode;
+    pub(crate) fn refresh_tray(&self) {
+        let settings = self.settings.current.borrow();
         if let Some(tray) = self.desktop.tray.borrow().as_ref() {
-            tray.set_private_mode(private_mode);
+            tray.update(
+                settings.application.private_mode,
+                settings.symbolic_tray_icon,
+            );
         }
     }
 

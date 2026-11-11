@@ -25,7 +25,7 @@ class StorageRestartActivity : Activity() {
     }
 
     private fun reopen() {
-        startActivity(Intent.makeRestartActivityTask(ComponentName(this, MainActivity::class.java)))
+        startActivity(Intent.makeRestartActivityTask(ComponentName(this, RufinActivity::class.java)))
         finish()
         Process.killProcess(Process.myPid())
     }

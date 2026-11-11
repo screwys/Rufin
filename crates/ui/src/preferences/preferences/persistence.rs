@@ -26,7 +26,7 @@ impl Shell {
         {
             return;
         }
-        self.refresh_tray_private_mode();
+        self.refresh_tray();
         self.reconcile_mounted_route();
         self.update_media_controls();
         let search_dialog = self.player_ui.selected_lyrics().and_then(|lyrics| {

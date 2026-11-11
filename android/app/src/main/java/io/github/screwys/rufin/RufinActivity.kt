@@ -27,7 +27,7 @@ import io.github.screwys.rufin.diagnostics.FrameDiagnostics
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
-class MainActivity : ComponentActivity() {
+class RufinActivity : ComponentActivity() {
     private val connection: RufinConnection by viewModels()
     private val documentConsent = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
         AndroidPermissions.complete(it.resultCode == RESULT_OK)
@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
             val measureFrames = BuildConfig.DEBUG || model.debugLogging
             DisposableEffect(measureFrames) {
                 val diagnostics = if (measureFrames)
-                    FrameDiagnostics(window, (1_000_000_000.0 / androidx.core.content.ContextCompat.getDisplayOrDefault(this@MainActivity).refreshRate).toLong()) else null
+                    FrameDiagnostics(window, (1_000_000_000.0 / androidx.core.content.ContextCompat.getDisplayOrDefault(this@RufinActivity).refreshRate).toLong()) else null
                 onDispose { diagnostics?.close() }
             }
             LaunchedEffect(connection) {
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            val preferences = remember { PreferencesConnection(connection, this@MainActivity) }
+            val preferences = remember { PreferencesConnection(connection, this@RufinActivity) }
             LaunchedEffect(preferences) {
                 try { preferences.observe() }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
