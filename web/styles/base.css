@@ -96,6 +96,14 @@ button[aria-pressed="true"] {
   background: transparent;
 }
 
+/* GTK's flat buttons: a faint wash of their own color under the pointer, deeper while pressed. */
+.icon-button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.icon-button:active {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
 .text-button {
   background: transparent;
   padding: 6px 8px;
@@ -525,10 +533,6 @@ dialog.playlist-edit {
   --accent: #1766b1;
   --blue: #3584e4;
   --player: #f8f8fa;
-}
-
-:root[data-theme="light"] nav :is(button, a)[aria-current="page"] {
-  background: #0000000c;
 }
 
 :root[data-theme="light"] #toast,

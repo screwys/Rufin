@@ -1,6 +1,9 @@
 import { tr } from "./ui.js";
 import {
+  closeFullscreen,
   cover,
+  openFullscreen,
+  switchPane,
   $,
   button,
   el,
@@ -17,6 +20,7 @@ import { api, session, state } from "./connection.js";
 
 import { markCurrent, openLinks, setFavorite } from "./library.js";
 import { showQueueMenu } from "./queue.js";
+import { showSettings } from "./preferences.js";
 
 let receivedAt = 0;
 
@@ -62,12 +66,22 @@ function showPlayback(value) {
   receivedAt = performance.now();
   const track = value?.current?.track;
   $("player-menu").disabled = !track;
-  for (const [id, text] of [["player-title", track?.title || tr("Nothing playing")], ["player-artist", track?.artist || ""], ["player-album", track?.album || ""]])
+  for (const [id, text] of [
+    ["player-title", track?.title || tr("Nothing playing")],
+    ["player-artist", track?.artist || ""],
+    ["player-album", track?.album || ""],
+    ["fullscreen-title", track?.title || tr("Nothing playing")],
+    ["fullscreen-artist", track?.artist || ""],
+    ["fullscreen-album", track?.album || ""],
+  ])
     if ($(id).textContent !== text || !$(id).classList.contains("text-slide")) {
       $(id).textContent = text;
       $(id).title = text;
       slideText($(id));
     }
+  const labels = value?.current?.labels || [];
+  if ($("fullscreen-meta").textContent !== labels.join(""))
+    $("fullscreen-meta").replaceChildren(...labels.map((label) => el("span", "", label)));
   // The mini player's top bar names what plays, as GTK's window title does.
   $("mini-title").textContent = track ? [track.title, track.artist].filter(Boolean).join(" · ") : "";
   const playing = ["playing", "resolving", "buffering"].includes(value?.state);
@@ -106,16 +120,22 @@ function showPlayback(value) {
   $("seek").max = Math.max(1, value?.duration_ms || 0);
   $("seek").disabled = !track || !value.can_seek;
   $("duration").textContent = time(value?.duration_ms);
-  if (
-    state.currentMediaUri !== (value?.current?.media_uri ?? null) ||
-    state.currentRun !== (value?.current?.run ?? null)
-  ) {
+  const mediaChanged = state.currentMediaUri !== (value?.current?.media_uri ?? null);
+  if (mediaChanged || state.currentRun !== (value?.current?.run ?? null)) {
     state.currentMediaUri = value?.current?.media_uri ?? null;
     state.currentRun = value?.current?.run ?? null;
     $("current-favorite").disabled = !track;
     lyricsDocument = null;
     activeLine = -1;
     showLyrics({ state: "empty" });
+    if (track)
+      run(async () => {
+        await api("/lyrics", "POST", {});
+        showLyrics(await api("/lyrics"));
+      });
+  }
+  // The cover belongs to the media, not to the run playing it.
+  if (mediaChanged) {
     coverRequest?.abort();
     coverRequest = new AbortController();
     if (!track) {
@@ -134,10 +154,6 @@ function showPlayback(value) {
         );
         if (!shown && !signal.aborted)
           $("mini-cover").replaceChildren(icon("rufin-symbolic"));
-      });
-      run(async () => {
-        await api("/lyrics", "POST", {});
-        showLyrics(await api("/lyrics"));
       });
     }
   }
@@ -339,7 +355,27 @@ async function setVolume(persist) {
   }
 }
 
+// The fullscreen player shows the bar's cover, and the dynamic background is drawn from it.
+function mirrorCover() {
+  const copy = () => [...$("mini-cover").children].map((node) => node.cloneNode(true));
+  $("fullscreen-cover").replaceChildren(...copy());
+  $("fullscreen-backdrop").replaceChildren(...[...copy(), ...copy()].filter((node) => node.tagName === "IMG"));
+}
+
 function init() {
+  new MutationObserver(mirrorCover).observe($("mini-cover"), { childList: true });
+  mirrorCover();
+  $("mini-cover").addEventListener("click", () => {
+    if (!state.playback?.current) return;
+    openFullscreen();
+    run(showSettings);
+  });
+  $("close-fullscreen").addEventListener("click", closeFullscreen);
+  $("fullscreen-pane").addEventListener("click", switchPane);
+  addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector("dialog[open], :popover-open"))
+      closeFullscreen();
+  });
   $("player-menu").removeAttribute("popovertarget");
   $("player-menu").addEventListener("click", () => {
     if (state.playback?.current)
@@ -349,6 +385,8 @@ function init() {
   for (const [id, field] of [
     ["player-artist", "artist"],
     ["player-album", "album"],
+    ["fullscreen-artist", "artist"],
+    ["fullscreen-album", "album"],
   ]) {
     $(id).addEventListener("click", () => {
       if (state.playback?.current?.track) openLinks(state.playback.current.track, field, $(id));

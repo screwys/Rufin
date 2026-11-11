@@ -41,7 +41,9 @@ function show(preferences) {
     narrow_enabled: values["/layout/narrow_enabled"],
     narrow_threshold: values["/layout/narrow_threshold"],
     narrow_profile: { left_sidebar: values["/layout/narrow_profile/left_sidebar"], right_sidebar: values["/layout/narrow_profile/right_sidebar"] },
+    fullscreen_lyrics: values["/fullscreen_lyrics_visible"],
   });
+  $("fullscreen-player").dataset.background = values["/fullscreen_dynamic_background"] === false ? "" : values["/fullscreen_background_image"] === false ? "color" : "image";
   $("right-panel").classList.toggle("without-queue", values["/right_panel/queue_visible"] === false);
   $("right-panel").classList.toggle("without-lyrics", values["/lyrics_panel_visible"] === false);
 }

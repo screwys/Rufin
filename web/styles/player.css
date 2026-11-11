@@ -334,6 +334,11 @@
   padding: 0;
 }
 
+/* The bar's buttons are round, as GTK's. */
+:is(.transport-buttons, .player-actions, .seek-row) .icon-button {
+  border-radius: 50%;
+}
+
 .transport-buttons .icon,
 .player-actions .icon {
   width: 16px;
@@ -425,57 +430,135 @@
   min-width: 34px;
 }
 
-#app[data-actions="volume"] :is(#current-favorite, #toggle-right),
-#app[data-actions="favorite"] #toggle-right {
+#app[data-bar="desktop"][data-actions="volume"] :is(#current-favorite, #toggle-right),
+#app[data-bar="desktop"][data-actions="favorite"] #toggle-right {
   display: none;
 }
 
-/* Below 642px and in the mini player the bar is only playback: the transport over the seek bar,
-   with volume and the heart at its ends. The tall mini player shows the cover above them; the
-   short one is GTK's strip. */
-#app:is([data-bar="controls"], [data-mini]) .player {
-  height: auto;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  align-content: end;
-  padding: 6px 8px 8px;
-  row-gap: 4px;
+/* GTK draws Auto DJ's and Play random's icons at their 23px canvas. */
+:is(#auto-dj, #random) .icon {
+  width: 23px;
+  height: 23px;
 }
-#app:is([data-bar="controls"], [data-mini]) :is(.transport, .player-actions, .volume) {
-  display: contents;
+
+/* The cover opens the fullscreen player. */
+#mini-cover {
+  padding: 0;
 }
-#app:is([data-bar="controls"], [data-mini]) :is(.player-track, #sleep-timer-button, #playback-settings-button, #toggle-right, #volume) {
+#mini-cover:hover {
+  background: #77767b;
+}
+#app[data-mini] #mini-cover {
+  pointer-events: none;
+}
+
+/* Outside the desktop row the bar keeps only playback, in GTK's narrow layouts; ui.js moves
+   volume, favorite and the extras to where each keeps them. The compact layout shows what plays
+   beside volume, previous, play, next and favorite, under a thin seek bar along the top edge. The
+   controls layout, under the fullscreen player and in the tall mini player, puts the transport
+   over the seek bar. The strip, in the short mini player, puts the seek bar over volume,
+   previous, play, next and repeat. */
+#app:not([data-bar="desktop"]) .player-actions {
   display: none;
 }
-#app:is([data-bar="controls"], [data-mini="tall"]) #current-favorite {
-  display: grid;
-  grid-area: -2 / 3;
+#app:not([data-bar="desktop"]) .transport {
+  min-width: 0;
 }
-#app[data-transport="five"] :is(#auto-dj, .random-buttons) {
+#app[data-bar="compact"] .player {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+#app[data-bar="compact"] :is(#auto-dj, #shuffle, #repeat, #random-buttons, .seek-row time) {
   display: none;
 }
-#app:is([data-bar="controls"], [data-mini]) .transport-buttons {
-  grid-area: -3 / 1 / -2 / -1;
+#app[data-bar="compact"] .transport-buttons {
   padding-top: 0;
-  height: 44px;
 }
-#app:is([data-bar="controls"], [data-mini]) .seek-row {
-  grid-area: -2 / 2;
+#app[data-bar="compact"] .seek-row {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
   width: auto;
+  height: 9px;
 }
-#app:is([data-bar="controls"], [data-mini]) #mute {
-  grid-area: -2 / 1;
+#app[data-bar="compact"] #seek {
+  height: 9px;
+  margin: 0;
+}
+#app[data-bar="compact"] #seek::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 0;
+}
+#app[data-bar="compact"] #seek::-moz-range-track {
+  height: 3px;
+  border-radius: 0;
+}
+#app[data-bar="compact"] #seek::-webkit-slider-thumb {
+  margin-top: -4px;
+}
+#app[data-bar="compact"] #seek:not(:hover, :active, :focus-visible)::-webkit-slider-thumb {
+  opacity: 0;
+}
+#app[data-bar="compact"] #seek:not(:hover, :active, :focus-visible)::-moz-range-thumb {
+  opacity: 0;
+}
+#app:is([data-bar="controls"], [data-bar="strip"]) .player {
+  height: auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: end;
+}
+#app:is([data-bar="controls"], [data-bar="strip"]) .transport-buttons {
+  height: 44px;
+  padding-top: 0;
+}
+#app:is([data-bar="controls"], [data-bar="strip"]) .seek-row {
+  width: 100%;
+}
+#app[data-bar="controls"] .player {
+  padding: 6px 8px 8px;
+}
+#app[data-bar="controls"] .player-track {
+  display: none;
+}
+#app[data-bar="controls"] .transport-buttons {
+  gap: var(--controls-gap, 8px);
+}
+#app[data-bar="controls"] .seek-row {
+  margin-top: 4px;
+}
+#app[data-seek-hidden] .seek-row {
+  justify-content: center;
+}
+#app[data-seek-hidden] .seek-row :is(time, #seek) {
+  display: none;
+}
+/* The extras at the ends of the controls layout's seek bar, small enough to keep its height. */
+.seek-row .icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+#app[data-bar="strip"] :is(.player-track, #auto-dj, #shuffle, #random-buttons) {
+  display: none;
+}
+#app[data-bar="strip"] .seek-row {
+  order: -1;
 }
 #app[data-mini] .player {
   grid-row: 2 / -1;
   padding: 8px 8px 10px;
 }
+#app[data-mini="short"] .player {
+  padding: 0 8px 4px;
+}
 #app[data-mini="tall"] .player {
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 #app[data-mini="tall"] .player-track {
   display: flex;
-  grid-area: 1 / 1 / 2 / -1;
   justify-content: center;
   height: 100%;
   min-height: 0;
@@ -490,23 +573,193 @@
   flex: 0 1 auto;
   aspect-ratio: 1;
 }
-#app[data-mini="short"] .player {
-  padding: 0 8px 4px;
+
+/* The fullscreen player covers the pages above the bar: its top bar, then the details and lyrics
+   in the first pane beside the queue in the second. With the dynamic background, the cover tints
+   it and shows through the panes. */
+#fullscreen-player {
+  grid-row: 1 / 3;
+  grid-column: 1 / -1;
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 -8px;
+  overflow: hidden;
+  background: var(--bg);
 }
-#app[data-mini="short"] :is(#current-favorite, #shuffle) {
+#fullscreen-player[hidden],
+#app[data-mini] #fullscreen-player {
   display: none;
 }
-#app[data-mini="short"] .seek-row {
-  grid-area: 1 / 1 / 2 / -1;
+#fullscreen-backdrop {
+  position: absolute;
+  inset: 0;
+  display: none;
+  overflow: hidden;
+  pointer-events: none;
 }
-#app[data-mini="short"] .transport-buttons {
-  grid-area: 2 / 2;
+#fullscreen-player:is([data-background="color"], [data-background="image"]) #fullscreen-backdrop {
+  display: block;
 }
-#app[data-mini="short"] #mute {
-  grid-area: 2 / 1;
+#fullscreen-backdrop img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.2);
+}
+#fullscreen-backdrop img:first-child {
+  filter: blur(120px) saturate(1.3);
+  opacity: 0.22;
+}
+#fullscreen-backdrop img + img {
+  display: none;
+  filter: blur(40px);
+  opacity: 0.25;
+}
+#fullscreen-player[data-background="image"] #fullscreen-backdrop img + img {
+  display: block;
+}
+:root[data-theme="light"] #fullscreen-backdrop img:first-child {
+  opacity: 0.15;
+}
+:root[data-theme="light"] #fullscreen-backdrop img + img {
+  opacity: 0.12;
+}
+.fullscreen-topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 46px;
+  padding: 0 8px;
+}
+.fullscreen-topbar .icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.fullscreen-topbar .icon {
+  width: 16px;
+  height: 16px;
+}
+.fullscreen-panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 8px 8px;
+}
+#fullscreen-player[data-panes="first"] #fullscreen-second,
+#fullscreen-player[data-panes="second"] #fullscreen-first {
+  display: none;
+}
+.fullscreen-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.fullscreen-card {
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--sidebar);
+}
+#fullscreen-player:is([data-background="color"], [data-background="image"]) .fullscreen-card {
+  background: color-mix(in srgb, var(--bg) 20%, transparent);
+}
+#fullscreen-hero {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+}
+#fullscreen-player[data-lyrics] #fullscreen-hero {
+  flex: 0 0 var(--hero-height);
+}
+#fullscreen-player[data-beside] #fullscreen-hero {
+  flex-direction: row;
+  justify-content: flex-start;
+}
+#fullscreen-cover {
+  flex: 0 0 auto;
+  width: var(--cover-size, 96px);
+  height: var(--cover-size, 96px);
+  box-shadow: 0 2px 8px #0000000f;
+}
+.fullscreen-details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
+#fullscreen-player[data-beside] .fullscreen-details {
+  flex: 1;
+  align-items: flex-start;
+  text-align: left;
+}
+.fullscreen-details > * {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+#fullscreen-title {
+  color: var(--window-fg-color, var(--text));
+  font-size: 22px;
+  font-weight: 800;
+}
+#fullscreen-artist {
+  font-size: 16px;
+  font-weight: 500;
+}
+#fullscreen-album {
+  font-size: 14px;
+}
+#fullscreen-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: inherit;
+  gap: 4px;
+  padding-top: 2px;
+  font-size: 12px;
+  white-space: normal;
+}
+#fullscreen-player[data-without-album] #fullscreen-album,
+#fullscreen-player[data-without-meta] #fullscreen-meta {
+  display: none;
+}
+#fullscreen-lyrics {
+  display: none;
+  flex: 1;
+}
+#fullscreen-player[data-lyrics] #fullscreen-lyrics {
+  display: flex;
+  flex-direction: column;
+}
+#fullscreen-lyrics #lyrics-panel {
+  flex: 1;
+}
+#fullscreen-second #close-right {
+  display: none;
 }
 
 #playback-settings,
+#fullscreen-settings,
 #sleep-timer {
   position: fixed;
   inset: auto;

@@ -2680,6 +2680,9 @@ msgstr ""
 msgid "November {year}"
 msgstr ""
 
+msgid "Now Playing"
+msgstr ""
+
 msgid "Now playing notifications"
 msgstr ""
 

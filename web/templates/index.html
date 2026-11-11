@@ -231,6 +231,35 @@
         </section>
       </aside>
 
+      <section id="fullscreen-player" aria-label="{{ localization::tr("Now Playing") }}" data-panes="both" data-background="image" hidden>
+        <div id="fullscreen-backdrop" aria-hidden="true"></div>
+        <header class="fullscreen-topbar">
+          <button type="button" id="close-fullscreen" class="icon-button" title="{{ localization::tr("Close fullscreen player") }}" aria-label="{{ localization::tr("Close fullscreen player") }}">{% call m::icon("rufin-go-down-symbolic") %}{% endcall %}</button>
+          <button type="button" id="fullscreen-pane" class="icon-button" title="{{ localization::tr("Switch pane") }}" aria-label="{{ localization::tr("Switch pane") }}">{% call m::icon("rufin-view-dual-symbolic") %}{% endcall %}</button>
+          <button type="button" id="fullscreen-customize" class="icon-button" title="{{ localization::tr("Customize display") }}" aria-label="{{ localization::tr("Customize display") }}" aria-haspopup="menu">{% call m::icon("rufin-sliders-2-symbolic") %}{% endcall %}</button>
+        </header>
+        <div class="fullscreen-panes">
+          <div id="fullscreen-first" class="fullscreen-pane">
+            <div id="fullscreen-hero" class="fullscreen-card">
+              <div class="cover" id="fullscreen-cover"></div>
+              <div class="fullscreen-details">
+                <strong id="fullscreen-title"></strong>
+                <button class="metadata-link" id="fullscreen-artist"></button>
+                <button class="metadata-link" id="fullscreen-album"></button>
+                <div id="fullscreen-meta"></div>
+              </div>
+            </div>
+            <div id="fullscreen-lyrics" class="fullscreen-card"></div>
+          </div>
+          <div id="fullscreen-second" class="fullscreen-pane fullscreen-card"></div>
+        </div>
+      </section>
+      <div id="fullscreen-settings" popover="auto" role="menu" aria-label="{{ localization::tr("Customize display") }}">
+        <label class="menu-switch">{{ localization::tr("Show lyrics") }}<input type="checkbox" role="switch" data-setting="/fullscreen_lyrics_visible" /></label>
+        <label class="menu-switch">{{ localization::tr("Dynamic background") }}<input type="checkbox" role="switch" data-setting="/fullscreen_dynamic_background" /></label>
+        <label class="menu-switch">{{ localization::tr("Enable background image") }}<input type="checkbox" role="switch" data-setting="/fullscreen_background_image" /></label>
+      </div>
+
       <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
         <input type="hidden" name="id" value="{{ page.source }}" />
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
@@ -244,9 +273,9 @@
       </form>
       <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
         <div class="player-track">
-          <div class="cover mini" id="mini-cover">
+          <button type="button" class="cover mini" id="mini-cover" title="{{ localization::tr("Open fullscreen player") }}" aria-label="{{ localization::tr("Open fullscreen player") }}">
             {% if page.preview.is_empty() %}{% call m::icon("rufin-symbolic") %}{% endcall %}{% else %}<img src="{{ page.preview }}" alt="" />{% endif %}
-          </div>
+          </button>
           <div>
             <div class="player-title-row">
               <strong id="player-title">{% if page.playing.is_empty() %}{{ localization::tr("Nothing playing") }}{% else %}{{ page.playing }}{% endif %}</strong>
@@ -301,7 +330,7 @@
             >
               {% call m::icon("rufin-repeat-symbolic") %}{% endcall %}
             </button>
-            <div class="random-buttons">
+            <div class="random-buttons" id="random-buttons">
               <button
                 id="random"
                 class="icon-button"
