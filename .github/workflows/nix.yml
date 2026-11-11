@@ -1,10 +1,5 @@
 name: Nix
-run-name: >-
-  ${{ github.event_name == 'workflow_dispatch' &&
-      (startsWith(inputs.ref, 'v') || startsWith(inputs.ref, 'refs/tags/v')) &&
-      format('Stage {0}', inputs.ref) ||
-      github.event_name == 'workflow_call' && format('Check Nix {0}', inputs.ref) ||
-      format('Build Nix {0}', inputs.ref || github.ref_name) }}
+run-name: Build Nix ${{ inputs.ref || github.ref_name }}
 
 on:
   push:

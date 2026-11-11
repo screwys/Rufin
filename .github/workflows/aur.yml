@@ -1,8 +1,5 @@
 name: AUR
-run-name: >-
-  ${{ inputs.upload_release_asset && format('Stage {0}', inputs.release_tag) ||
-      inputs.publish && format('Publish AUR {0}', inputs.release_tag || inputs.package) ||
-      format('Build AUR {0}', inputs.package) }}
+run-name: ${{ inputs.publish && format('Publish AUR {0}', inputs.release_tag || inputs.package) || format('Build AUR {0}', inputs.package) }}
 
 on:
   workflow_dispatch:
@@ -20,11 +17,6 @@ on:
         description: Existing release tag required for rufin-bin
         required: false
         default: ""
-      upload_release_asset:
-        description: Upload the Arch payload to a draft GitHub release
-        required: true
-        default: false
-        type: boolean
       publish:
         description: Push AUR metadata
         required: true
@@ -39,207 +31,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate requested operation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Keep release staging separate from AUR publication
-        env:
-          PACKAGE: ${{ inputs.package }}
-          PUBLISH: ${{ inputs.publish }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          UPLOAD_RELEASE_ASSET: ${{ inputs.upload_release_asset }}
-        run: |
-          set -euo pipefail
-          if [[ "$UPLOAD_RELEASE_ASSET" == "true" && "$PUBLISH" == "true" ]]; then
-            echo "Stage the GitHub release asset before publishing AUR metadata" >&2
-            exit 1
-          fi
-          if [[ "$UPLOAD_RELEASE_ASSET" == "true" ]]; then
-            if [[ -z "$RELEASE_TAG" ]]; then
-              echo "Arch release staging requires a release tag" >&2
-              exit 1
-            fi
-            if [[ "$PACKAGE" != "rufin-bin" && "$PACKAGE" != "both" ]]; then
-              echo "Arch release staging requires rufin-bin or both" >&2
-              exit 1
-            fi
-          fi
-
   build:
     name: Build AUR packages
-    needs: validate
     uses: ./.github/workflows/aur-build.yml
     with:
       package: ${{ inputs.package }}
       release_tag: ${{ inputs.release_tag }}
       publish: ${{ inputs.publish }}
 
-  release-assets:
-    name: Upload Arch release assets
-    needs: build
-    if: >-
-      inputs.upload_release_asset &&
-      (needs.build.outputs.package == 'rufin-bin' || needs.build.outputs.package == 'both')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-
-    steps:
-      - name: Download Arch payloads
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: archlinux-*
-          path: dist
-          merge-multiple: true
-
-      - name: Verify release assets
-        run: |
-          set -euo pipefail
-          test "$(find dist -maxdepth 1 -name 'rufin-*-archlinux-x86_64.tar.zst' | wc -l)" -eq 1
-
-      - name: Attest Arch payloads
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
-        with:
-          subject-path: dist/*.tar.zst
-
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-          gh release upload \
-            "$RELEASE_TAG" \
-            dist/*.tar.zst \
-            --clobber \
-            --repo "$GITHUB_REPOSITORY"
-
   publish:
-    name: Publish AUR packages
-    needs:
-      - build
-      - release-assets
-    if: always() && inputs.publish
-    runs-on: ubuntu-latest
-    container: archlinux:latest
-
-    steps:
-      - name: Validate package results
-        env:
-          BUILD_RESULT: ${{ needs.build.result }}
-          PACKAGE: ${{ needs.build.outputs.package }}
-          RELEASE_ASSETS_RESULT: ${{ needs.release-assets.result }}
-        run: |
-          set -euo pipefail
-          test "$BUILD_RESULT" = "success"
-          if [[ "$PACKAGE" == "rufin-bin" || "$PACKAGE" == "both" ]]; then
-            test "$RELEASE_ASSETS_RESULT" = "skipped"
-          fi
-
-      - name: Install publish dependencies
-        run: pacman -Syu --noconfirm --needed git openssh
-
-      - name: Download rufin-bin metadata
-        if: needs.build.outputs.package == 'rufin-bin' || needs.build.outputs.package == 'both'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: aur-bin-metadata
-          path: packages/rufin-bin
-
-      - name: Download rufin-git metadata
-        if: needs.build.outputs.package == 'rufin-git' || needs.build.outputs.package == 'both'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: aur-git-metadata
-          path: packages/rufin-git
-
-      - name: Configure AUR SSH
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
-            echo "AUR_SSH_PRIVATE_KEY is not set" >&2
-            exit 1
-          fi
-
-          install -d -m 700 ~/.ssh
-          key_file="$HOME/.ssh/aur"
-          key_material="${AUR_SSH_PRIVATE_KEY//$'\r'/}"
-          if [[ "$key_material" == *"\\n"* ]]; then
-            printf '%b' "$key_material" > "$key_file"
-            printf '\n' >> "$key_file"
-          elif [[ "$key_material" == *"-----BEGIN "* ]]; then
-            printf '%s\n' "$key_material" > "$key_file"
-          elif printf '%s' "$key_material" | base64 -d > "$key_file.tmp" 2>/dev/null; then
-            mv "$key_file.tmp" "$key_file"
-          else
-            printf '%s\n' "$key_material" > "$key_file"
-          fi
-          rm -f "$key_file.tmp"
-          chmod 600 "$key_file"
-          if ! head -n 1 "$key_file" | grep -q '^-----BEGIN .*PRIVATE KEY-----$'; then
-            echo "AUR_SSH_PRIVATE_KEY is not an OpenSSH private key after decoding" >&2
-            exit 1
-          fi
-          secret_fingerprint="$(
-            ssh-keygen -y -f "$key_file" |
-              ssh-keygen -lf - |
-              awk '{print $2}'
-          )"
-          test "$secret_fingerprint" = "SHA256:N1BBpqTVHS0EDGTCEVNjw02KpaR4onZs8LisHRnsPww"
-
-          ssh-keyscan aur.archlinux.org > ~/.ssh/known_hosts
-          ssh-keygen -lf ~/.ssh/known_hosts |
-            grep -q "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
-
-          git config --global user.name "screwys"
-          git config --global user.email "254296947+screwys@users.noreply.github.com"
-          git config --global core.sshCommand \
-            "ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-
-      - name: Publish packages
-        env:
-          REQUESTED_PACKAGE: ${{ needs.build.outputs.package }}
-        run: |
-          set -euo pipefail
-          case "$REQUESTED_PACKAGE" in
-            rufin-bin) packages=(rufin-bin) ;;
-            rufin-git) packages=(rufin-git) ;;
-            both) packages=(rufin-bin rufin-git) ;;
-            *) echo "Unknown package: $REQUESTED_PACKAGE" >&2; exit 1 ;;
-          esac
-
-          tmpdir="$(mktemp -d)"
-          for aur_package in "${packages[@]}"; do
-            source_dir="$GITHUB_WORKSPACE/packages/$aur_package"
-            repo="$tmpdir/$aur_package"
-            if ! git clone "ssh://aur@aur.archlinux.org/${aur_package}.git" "$repo"; then
-              mkdir -p "$repo"
-              git -C "$repo" init -b master
-              git -C "$repo" remote add origin "ssh://aur@aur.archlinux.org/${aur_package}.git"
-            fi
-
-            cp "$source_dir/PKGBUILD" "$repo/PKGBUILD"
-            cp "$source_dir/.SRCINFO" "$repo/.SRCINFO"
-            git -C "$repo" add PKGBUILD .SRCINFO
-            if [[ -z "$(git -C "$repo" status --porcelain)" ]]; then
-              echo "No AUR changes for $aur_package"
-              continue
-            fi
-
-            if git -C "$repo" rev-parse --verify HEAD >/dev/null 2>&1; then
-              message="Update package"
-            else
-              message="Initial import"
-            fi
-            git -C "$repo" commit -m "$message"
-            git -C "$repo" push origin master
-          done
+    name: Publish
+    needs: build
+    if: inputs.publish
+    uses: ./.github/workflows/aur-publish.yml
+    with:
+      package: ${{ needs.build.outputs.package }}
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

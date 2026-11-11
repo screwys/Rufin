@@ -1,69 +1,35 @@
 name: RPM
-run-name: ${{ inputs.upload_release_tag != '' && format('Stage {0}', inputs.upload_release_tag) || format('Build RPM {0}', inputs.ref) }}
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      ref:
-        description: Git ref containing the RPM packaging tooling
+      release_tag:
+        description: Release tag to build in COPR
         required: true
-        default: main
-      upload_release_tag:
-        description: Optional existing GitHub release tag to upload the RPMs to
-        required: false
-        default: ""
-      copr_build_id:
-        description: Optional existing COPR build to collect for release recovery
-        required: false
-        default: ""
+        type: string
+    secrets:
+      COPR_CONFIG:
+        required: true
 
 permissions:
   contents: read
-
-concurrency:
-  group: rpm-${{ inputs.upload_release_tag || github.ref }}
-  cancel-in-progress: true
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  validate:
-    name: Validate release target
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Validate manual release target
-        if: inputs.upload_release_tag != ''
-        env:
-          BUILD_REF: ${{ inputs.ref }}
-          COPR_BUILD_ID: ${{ inputs.copr_build_id }}
-          RELEASE_TAG: ${{ inputs.upload_release_tag }}
-        run: |
-          set -euo pipefail
-          if [[ "$BUILD_REF" != "$RELEASE_TAG" && "$BUILD_REF" != "refs/tags/$RELEASE_TAG" ]]; then
-            echo "Manual release uploads must build the same tag they upload" >&2
-            exit 1
-          fi
-          if [[ -n "$COPR_BUILD_ID" && ! "$COPR_BUILD_ID" =~ ^[0-9]+$ ]]; then
-            echo "COPR build ID must be numeric." >&2
-            exit 1
-          fi
-
   srpm:
     name: Generate source RPM
-    needs: validate
     uses: ./.github/workflows/rpm-source.yml
     with:
-      ref: ${{ inputs.ref }}
-      release_tag: ${{ inputs.upload_release_tag }}
-      verify_release_tag: ${{ inputs.upload_release_tag != '' }}
+      ref: ${{ inputs.release_tag }}
+      release_tag: ${{ inputs.release_tag }}
+      verify_release_tag: true
       upload_artifact: true
 
   copr:
     name: Build RPMs in COPR
-    if: inputs.upload_release_tag != ''
     needs: srpm
     runs-on: ubuntu-24.04
     container:
@@ -93,32 +59,26 @@ jobs:
           printf '%s\n' "$COPR_CONFIG" > "$HOME/.config/copr"
           chmod 600 "$HOME/.config/copr"
 
-      - name: Select and monitor COPR build
+      - name: Build and monitor in COPR
         id: build
         env:
-          RECOVERY_COPR_BUILD_ID: ${{ inputs.copr_build_id }}
-          RELEASE_TAG: ${{ inputs.upload_release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          build_id="$RECOVERY_COPR_BUILD_ID"
-          if [[ -z "$build_id" ]]; then
-            srpm="$(find dist -maxdepth 1 -name 'rufin-*.src.rpm' -print -quit)"
-            test -n "$srpm"
-            output="$(copr-cli build \
-              --nowait \
-              --chroot fedora-44-x86_64 \
-              --chroot fedora-44-aarch64 \
-              --chroot fedora-45-x86_64 \
-              --chroot fedora-45-aarch64 \
-              screwyy/rufin \
-              "$srpm")"
-            printf '%s\n' "$output"
-            build_line="$(printf '%s\n' "$output" | grep -E '^Created builds: [0-9]+$')"
-            build_id="${build_line#Created builds: }"
-            [[ "$build_id" =~ ^[0-9]+$ ]]
-          else
-            echo "Reusing COPR build $build_id."
-          fi
+          srpm="$(find dist -maxdepth 1 -name 'rufin-*.src.rpm' -print -quit)"
+          test -n "$srpm"
+          output="$(copr-cli build \
+            --nowait \
+            --chroot fedora-44-x86_64 \
+            --chroot fedora-44-aarch64 \
+            --chroot fedora-45-x86_64 \
+            --chroot fedora-45-aarch64 \
+            screwyy/rufin \
+            "$srpm")"
+          printf '%s\n' "$output"
+          build_line="$(printf '%s\n' "$output" | grep -E '^Created builds: [0-9]+$')"
+          build_id="${build_line#Created builds: }"
+          [[ "$build_id" =~ ^[0-9]+$ ]]
           echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
 
           expected_version="${RELEASE_TAG#v}-1"
@@ -197,7 +157,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.release_tag }}
           persist-credentials: false
 
       - name: Trust checked-out repository
@@ -277,48 +237,3 @@ jobs:
           path: dist/release/*.rpm
           if-no-files-found: error
           retention-days: 7
-
-  release:
-    name: Upload RPM release assets
-    if: inputs.upload_release_tag != ''
-    needs: packages
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-
-    steps:
-      - name: Download workflow artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: rpm-release-*
-          merge-multiple: true
-          path: dist
-
-      - name: Verify release assets
-        run: |
-          set -euo pipefail
-          test "$(find dist -maxdepth 1 -name 'rufin-*.fc44.x86_64.rpm' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -name 'rufin-*.fc45.x86_64.rpm' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -name 'rufin-*.fc44.aarch64.rpm' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -name 'rufin-*.fc45.aarch64.rpm' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -name 'rufin-*.src.rpm' | wc -l)" -eq 0
-
-      - name: Attest RPMs
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
-        with:
-          subject-path: dist/*.rpm
-
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.upload_release_tag }}
-        run: |
-          set -euo pipefail
-          gh release upload \
-            "$RELEASE_TAG" \
-            dist/*.rpm \
-            --clobber \
-            --repo "$GITHUB_REPOSITORY"
