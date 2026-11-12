@@ -605,7 +605,10 @@ pub(crate) struct CacheEntry {
 }
 
 fn digest(value: &str) -> String {
-    format!("{:x}", Md5::digest(value.as_bytes()))
+    format!(
+        "{:032x}",
+        u128::from_be_bytes(Md5::digest(value.as_bytes()).into())
+    )
 }
 
 fn atomic_write(path: &Path, mut bytes: impl Read) -> io::Result<()> {

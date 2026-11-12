@@ -134,7 +134,10 @@ impl ArtworkKey {
     }
 
     fn binding_digest(identity: &str) -> String {
-        format!("{:x}", Md5::digest(identity.as_bytes()))
+        format!(
+            "{:032x}",
+            u128::from_be_bytes(Md5::digest(identity.as_bytes()).into())
+        )
     }
 
     /// The same revision and source policy, independent of display size.

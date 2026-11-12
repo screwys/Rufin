@@ -987,7 +987,10 @@ impl fmt::Debug for SubsonicCredential {
 impl SubsonicCredential {
     pub(super) fn from_password(password: &str) -> Self {
         let salt = random_salt();
-        let token = format!("{:x}", Md5::digest(format!("{password}{salt}")));
+        let token = format!(
+            "{:032x}",
+            u128::from_be_bytes(Md5::digest(format!("{password}{salt}")).into())
+        );
         Self::Token {
             salt,
             token,

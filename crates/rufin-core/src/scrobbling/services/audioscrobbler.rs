@@ -352,7 +352,7 @@ fn api_signature(params: &[(String, String)], secret: &str) -> String {
         input.push_str(value);
     }
     input.push_str(secret);
-    format!("{:x}", Md5::digest(input))
+    format!("{:032x}", u128::from_be_bytes(Md5::digest(input).into()))
 }
 
 #[cfg(test)]
