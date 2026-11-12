@@ -11,7 +11,7 @@ use tracing::debug;
 use crate::{
     ExternalLyricsProvider, LyricsBundle as Lyrics, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine as LyricLine, LyricsOrigin, LyricsRole, LyricsSearchContent, LyricsSearchResult,
-    UserPreferences, normalize_language_tag,
+    normalize_language_tag,
 };
 
 const EXTERNAL_LYRICS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1790,34 +1790,18 @@ pub struct LocalLyricsInput {
     pub cue_track: bool,
 }
 
+/// A sidecar beside the audio file wins over embedded lyrics; CUE tracks read sidecars only.
 pub fn local_file_lyrics(
     input: &LocalLyricsInput,
-    preferences: &UserPreferences,
     embedded: impl FnOnce() -> Option<Lyrics>,
 ) -> Option<Lyrics> {
     let sidecar = local_sidecar_candidates(input)
         .iter()
         .find_map(|path| lyrics_from_sidecar_file(path));
-    if input.cue_track
-        || sidecar
-            .as_ref()
-            .is_some_and(|lyrics| lyrics.acquisition_complete(preferences))
-    {
+    if input.cue_track {
         return sidecar;
     }
-    match embedded() {
-        Some(embedded)
-            if sidecar.as_ref().is_none_or(|current| {
-                !embedded.is_instrumental()
-                    && (embedded.acquisition_complete(preferences)
-                        || !current.satisfies_preferences(preferences)
-                            && embedded.satisfies_preferences(preferences))
-            }) =>
-        {
-            Some(embedded)
-        }
-        _ => sidecar,
-    }
+    sidecar.or_else(embedded)
 }
 
 pub fn lyrics_from_edited_text(content: &str) -> Option<Lyrics> {

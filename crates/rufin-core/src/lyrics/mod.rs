@@ -556,7 +556,6 @@ impl LyricsService {
             request.media_uri(),
             playable.as_deref(),
             Some(&request.context.media.row.track.metadata.title),
-            &selection_settings(&request.plan),
         )
         .await
         .ok()

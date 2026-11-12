@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use lyrics::{LyricsBundle, LyricsOrigin, UserPreferences};
+use lyrics::{LyricsBundle, LyricsOrigin};
 
 use super::media::ScannedTrack;
 
@@ -33,6 +33,6 @@ pub(crate) fn read_local(track: &mut ScannedTrack) {
         .lyrics
         .take()
         .and_then(lyrics::lyrics_with_displayable_content);
-    let bundle = lyrics::local_file_lyrics(&input, &UserPreferences::default(), || embedded);
+    let bundle = lyrics::local_file_lyrics(&input, || embedded);
     set_lyrics(track, bundle);
 }
