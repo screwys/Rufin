@@ -7,7 +7,7 @@ use sources::{SourceConfiguration, SourceId};
 use crate::detail_links::DetailLink;
 use crate::route::Route;
 use crate::settings::app::Settings;
-use crate::settings::{ContextMenuItem, SidebarPin};
+use crate::settings::{ConfiguredSource, ContextMenuItem, SidebarPin};
 use crate::source::SourceOwner;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
@@ -43,6 +43,8 @@ pub struct Menu {
     pub edit: bool,
     pub remove_unavailable: bool,
     pub delete: bool,
+    /// Delete permanently: the files of a track or an album, when Preferences allow it.
+    pub delete_permanently: bool,
 }
 
 /// Where a row's Go to leads.
@@ -92,7 +94,8 @@ fn offered(
     shown: impl Fn(ContextMenuItem) -> bool,
 ) -> Menu {
     let stored = owner.shared.settings.load();
-    let source = row_source(owner, &stored.sources, row);
+    let configured = row_source(owner, &stored.sources, row);
+    let source = configured.map(|configured| &configured.configuration);
     let plays = crate::view::PlayTarget::plays(row);
     let mut menu = Menu {
         play: plays && shown(ContextMenuItem::Play),
@@ -157,6 +160,8 @@ fn offered(
     };
     menu.download = !downloaded && downloadable(source, row) && shown(ContextMenuItem::Download);
     menu.remove_download = downloaded && shown(ContextMenuItem::Download);
+    menu.delete_permanently =
+        settings.application.allow_permanent_delete && deletable(configured, row);
     menu.share = crate::sharing::offered(owner, row).filter(|_| shown(ContextMenuItem::Share));
     menu.pin = row
         .pin()
@@ -179,6 +184,7 @@ pub fn selection(settings: &Settings) -> Menu {
         edit_metadata: shown(ContextMenuItem::EditMetadata),
         download: shown(ContextMenuItem::Download),
         remove_download: shown(ContextMenuItem::Download),
+        delete_permanently: settings.application.allow_permanent_delete,
         ..Menu::default()
     }
 }
@@ -186,7 +192,8 @@ pub fn selection(settings: &Settings) -> Menu {
 /// Where Go to on `row` leads: its artists, its album and its folder or server page.
 pub fn go_to(owner: &SourceOwner, row: &Row) -> Vec<GoTo> {
     let stored = owner.shared.settings.load();
-    targets(row_source(owner, &stored.sources, row), row).collect()
+    let source = row_source(owner, &stored.sources, row);
+    targets(source.map(|source| &source.configuration), row).collect()
 }
 
 /// Go to's destinations, each built when it is asked for.
@@ -254,7 +261,7 @@ fn row_source<'a>(
     owner: &SourceOwner,
     sources: &'a crate::settings::SourceSettings,
     row: &Row,
-) -> Option<&'a SourceConfiguration> {
+) -> Option<&'a ConfiguredSource> {
     let id = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => match &track.source_id {
             Some(id) => SourceId::new(id),
@@ -270,8 +277,29 @@ fn row_source<'a>(
     sources
         .configured
         .iter()
-        .map(|item| &item.configuration)
-        .find(|configuration| configuration.source_id == id)
+        .find(|configured| configured.configuration.source_id == id)
+}
+
+/// Whether Delete permanently applies: opened files, and tracks and albums of a source that
+/// deletes files. A CUE track goes only with its album, and a Subsonic server's tracks only in
+/// a mapped folder.
+fn deletable(source: Option<&ConfiguredSource>, row: &Row) -> bool {
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } if track.cue => return false,
+        Row::Track(track) | Row::AlbumTrack { track, .. } if track.source_id.is_none() => {
+            return track.media_uri.starts_with("file:")
+                || library::document_media_id(&track.media_uri).is_some();
+        }
+        Row::Track(_) | Row::AlbumTrack { .. } | Row::Album(_) | Row::AlbumHeading(_) => {}
+        _ => return false,
+    }
+    source.is_some_and(|source| match source.configuration.source_kind() {
+        Some(library::SourceKind::Navidrome | library::SourceKind::Subsonic) => {
+            source.local_access.is_some()
+        }
+        Some(library::SourceKind::Peer) | None => false,
+        Some(_) => true,
+    })
 }
 
 /// Whether Download applies: tracks of a remote source or a web address, child folders of a

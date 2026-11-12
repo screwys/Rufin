@@ -52,6 +52,36 @@ impl AndroidLibrary {
         self.download_selection(Arc::new(selection), remove).await
     }
 
+    /// Delete permanently: the files of the track at `media_uri`, or of the collection `route`
+    /// opens.
+    pub async fn delete_target(
+        &self,
+        route: Option<Route>,
+        media_uri: String,
+    ) -> Result<(), AndroidError> {
+        let selection = match route {
+            Some(route) => self.selection(route, SelectionScope::Downloads).await?,
+            None => MemberSelection::Uris(vec![media_uri].into()),
+        };
+        self.delete_selection(Arc::new(selection)).await
+    }
+
+    /// Delete permanently: the files of the tracks of `selection`.
+    pub async fn delete_selection(
+        &self,
+        selection: Arc<MemberSelection>,
+    ) -> Result<(), AndroidError> {
+        let selection = Arc::unwrap_or_clone(selection);
+        let source = self.source.clone();
+        self.runtime
+            .spawn(async move {
+                let deleted = source.delete_selection(selection).recv().await;
+                deleted.map_err(error)?.map_err(error)
+            })
+            .await
+            .map_err(error)?
+    }
+
     /// Downloads the tracks of `selection`, or with `remove` deletes their downloads.
     pub async fn download_selection(
         &self,

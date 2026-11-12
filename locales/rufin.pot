@@ -437,6 +437,9 @@ msgstr ""
 msgid "Allow downloading"
 msgstr ""
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr ""
 
@@ -1215,6 +1218,9 @@ msgstr ""
 msgid "Default"
 msgstr ""
 
+msgid "Delete Permanently?"
+msgstr ""
+
 msgid "Delete Playlist"
 msgstr ""
 
@@ -1223,6 +1229,9 @@ msgid "Delete \"{name}\"?"
 msgstr ""
 
 msgid "Delete folder"
+msgstr ""
+
+msgid "Delete permanently"
 msgstr ""
 
 msgid "Delete playlist file"
@@ -4084,6 +4093,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"

@@ -108,6 +108,15 @@ impl PlexSource {
         )
         .await
     }
+    /// Deletes a track with its file, when the server allows media deletion.
+    pub async fn delete_track(&self, track: &str) -> SourceResult<()> {
+        self.unit(
+            Method::DELETE,
+            &format!("/library/metadata/{}", raw_item_id(track)),
+            &[],
+        )
+        .await
+    }
     pub async fn add_playlist_tracks(&self, playlist: &str, ids: &[String]) -> SourceResult<()> {
         self.unit(
             Method::PUT,

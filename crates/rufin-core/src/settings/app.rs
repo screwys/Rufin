@@ -223,6 +223,9 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     release_check_interval_hours: u32 = default_release_check_interval_hours() => set_release_check_interval_hours;
     #[serde(default)]
     reduce_motion: bool = false => set_reduce_motion;
+    /// Delete permanently on tracks and albums.
+    #[serde(default)]
+    allow_permanent_delete: bool = false => set_allow_permanent_delete;
     #[serde(default = "default_true")]
     show_downloaded_badges: bool = true => set_show_downloaded_badges;
     /// Android: whether rule downloads run on mobile data too.

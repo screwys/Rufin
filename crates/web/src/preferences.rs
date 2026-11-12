@@ -11,6 +11,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
 /// rest stay the host's: its window, tray, controller and secrets.
 const SETTINGS: &[&str] = &[
     "/release_check_interval_hours",
+    "/allow_permanent_delete",
     "/prefer_distinct_track_covers",
     "/use_sort_tags",
     "/external_metadata_enabled",

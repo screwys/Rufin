@@ -4,7 +4,7 @@ import { api, state } from "./connection.js";
 
 import { setFavorite, openLinks } from "./library.js";
 
-import { playlistMenu, radioMenu, showMenu, goToMenu, shareAction } from "./menus.js";
+import { deleteAction, playlistMenu, radioMenu, showMenu, goToMenu, shareAction } from "./menus.js";
 
 import { $, button, el, run } from "./ui.js";
 import {
@@ -198,6 +198,7 @@ function showQueueMenu(row, anchor, event) {
   const destination = menu.go_to && goToMenu(track);
   if (destination) actions.push(null, destination);
   if (menu.share) actions.push(shareAction(menu.share));
+  if (menu.delete_permanently) actions.push(deleteAction({ uris: [track.uri] }));
   showMenu(actions, anchor, event);
 }
 

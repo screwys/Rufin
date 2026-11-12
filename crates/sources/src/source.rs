@@ -14,6 +14,8 @@ use playback::{SourceReportFact, StreamRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::policy::raw_item_id;
+mod delete;
+pub use delete::delete_opened_track;
 pub(crate) mod metadata;
 use crate::{
     ImageBytes, SourceConfiguration, SourceError, SourceId, SourceResult, SourceSettingsChange,

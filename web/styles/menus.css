@@ -25,6 +25,10 @@
   background: var(--hover);
 }
 
+.menu-item.destructive {
+  color: var(--destructive, #e01b24);
+}
+
 .menu-item {
   display: flex;
   align-items: center;

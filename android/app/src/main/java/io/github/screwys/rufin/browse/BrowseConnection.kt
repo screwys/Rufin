@@ -349,6 +349,10 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     fun download(item: BrowseItem, remove: Boolean = false) = connection.runAction {
         library?.downloadTarget(item.row.route, item.row.mediaUri, remove)
     }
+    /** Delete permanently: the files of the row's track, or of the collection it opens. */
+    fun delete(item: BrowseItem) = connection.runAction {
+        library?.deleteTarget(item.row.route, item.row.mediaUri)
+    }
     fun refreshLabels(version: Int) {
         val previous = translationVersion
         translationVersion = version

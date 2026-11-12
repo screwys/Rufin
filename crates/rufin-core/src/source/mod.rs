@@ -1,6 +1,7 @@
 //! Source configuration, browsing selection, and source work.
 pub mod authorization;
 mod availability;
+mod delete;
 mod download;
 pub mod feed;
 pub mod folders;

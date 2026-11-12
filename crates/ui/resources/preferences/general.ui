@@ -79,6 +79,11 @@
           </object>
         </child>
         <child>
+          <object class="AdwSwitchRow" id="permanent_delete_row">
+            <property name="title" translatable="yes">Allow permanently deleting tracks</property>
+          </object>
+        </child>
+        <child>
           <object class="AdwActionRow" id="activity_overview_row">
             <property name="title" translatable="yes">Listening overview</property>
             <property name="activatable">true</property>

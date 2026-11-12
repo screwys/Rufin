@@ -74,7 +74,7 @@ private data class Picked(val all: Boolean = false, val rows: Set<ULong> = empty
 
 /** A playlist's Select mode: sort from its chip, pick rows or all of them, reorder by dragging
  *  in Playlist order, and act on what is picked: Play, Add to…, Download, Remove, and under More
- *  Play next, Play later and Edit metadata. */
+ *  Play next, Play later, Edit metadata and Delete permanently. */
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -86,6 +86,8 @@ internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection
     var adding by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    val deletable = model.preferences?.player?.application?.allowPermanentDelete == true
     val total = rows.itemCount
     val count = picked.count(total)
     val library = browse.library
@@ -147,7 +149,7 @@ internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection
                     more = more, onMore = { more = it },
                     onNext = { act { selection -> model.connectedService().playRequest { library?.playSelection(selection, QueuePlacement.AfterCurrent, false) } } },
                     onLater = { act { selection -> model.connectedService().playRequest { library?.playSelection(selection, QueuePlacement.End, false) } } },
-                    onEdit = { editing = true })
+                    onEdit = { editing = true }, deletable = deletable, onDelete = { deleting = true })
             }
         }
         // As the page's own sort sheet: the fields in one box, the picked one highlighted, and a switch.
@@ -164,6 +166,12 @@ internal fun PlaylistSelectMode(model: RufinConnection, browse: BrowseConnection
                 SettingsGroup { SettingsSwitch(translate("Reverse order"), page.options.descending) { page.options.descending = it } }
             }
         }
+        if (deleting) AlertDialog(onDismissRequest = { deleting = false },
+            title = { Text(translate("Delete Permanently?")) },
+            text = { Text(translate("The files are deleted where they are stored. This cannot be undone.")) },
+            confirmButton = { TextButton({ deleting = false; act { selection -> library?.deleteSelection(selection) }; picked = Picked() },
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(translate("Delete")) } },
+            dismissButton = { TextButton({ deleting = false }) { Text(translate("Cancel")) } })
         if (adding) PlaylistPickerSheet(model, browse, playlist, player, selectionOf = { selection() }) { adding = false }
         if (editing) io.github.screwys.rufin.metadata.MetadataEditorScreen(model, null,
             selection = { selection() ?: MemberSelection.fromUris(emptyList()) }) { editing = false }
@@ -222,6 +230,7 @@ private fun SelectRow(item: BrowseItem, player: PlayerConnection, picked: Boolea
 private fun SelectActions(modifier: Modifier, enabled: Boolean, writable: Boolean,
     onPlay: () -> Unit, onAdd: () -> Unit, onDownload: () -> Unit, onRemove: () -> Unit,
     more: Boolean, onMore: (Boolean) -> Unit, onNext: () -> Unit, onLater: () -> Unit, onEdit: () -> Unit,
+    deletable: Boolean, onDelete: () -> Unit,
 ) {
     Surface(modifier.padding(horizontal = 12.dp, vertical = 14.dp).fillMaxWidth().height(64.dp), shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 8.dp) {
@@ -239,6 +248,11 @@ private fun SelectActions(modifier: Modifier, enabled: Boolean, writable: Boolea
                         leadingIcon = { RufinIcon("rufin-go-last-symbolic", null, Modifier.size(20.dp)) })
                     DropdownMenuItem(text = { Text(translate("Edit metadata")) }, onClick = { onMore(false); onEdit() },
                         leadingIcon = { RufinIcon("rufin-document-edit-symbolic", null, Modifier.size(20.dp)) })
+                    if (deletable) {
+                        val danger = MaterialTheme.colorScheme.error
+                        DropdownMenuItem(text = { Text(translate("Delete permanently"), color = danger) }, onClick = { onMore(false); onDelete() },
+                            leadingIcon = { RufinIcon("rufin-user-trash-symbolic", null, Modifier.size(20.dp), tint = danger) })
+                    }
                 }
             }
         }

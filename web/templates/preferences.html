@@ -24,6 +24,7 @@
         <h4>{{ localization::tr("App settings") }}</h4>
         <div class="pref-group">
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Update check interval") }}</span></span><select data-setting="/release_check_interval_hours"><option value="1">{{ localization::tr("1 hour") }}</option><option value="6">{{ localization::tr("6 hours") }}</option><option value="12">{{ localization::tr("12 hours") }}</option><option value="24">{{ localization::tr("24 hours") }}</option></select></label>
+          {% call m::switch("/allow_permanent_delete", localization::tr("Allow permanently deleting tracks"), "") %}{% endcall %}
         </div>
         <h4>{{ localization::tr("Metadata") }}</h4>
         <div class="pref-group">

@@ -833,9 +833,7 @@ pub async fn delete_playlist(
                 PlaylistOwner::Server(source, _) => {
                     match &source.implementation {
                         Implementation::Plex(provider) => provider.delete_playlist(&id).await?,
-                        Implementation::JellyfinEmby(provider) => {
-                            provider.delete_playlist(&id).await?
-                        }
+                        Implementation::JellyfinEmby(provider) => provider.delete_item(&id).await?,
                         Implementation::OpenSubsonic(provider) => {
                             provider.delete_playlist(&id).await?
                         }
