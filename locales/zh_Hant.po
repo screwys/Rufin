@@ -333,9 +333,6 @@ msgstr ""
 msgid "Add Manually"
 msgstr "新增規則"
 
-msgid "Add Rule"
-msgstr "新增規則"
-
 #, fuzzy
 #| msgid "Add a new source"
 msgid "Add Source"
@@ -373,6 +370,11 @@ msgid "Add folder"
 msgstr "新增資料夾"
 
 #, fuzzy
+#| msgid "Add a new source"
+msgid "Add group"
+msgstr "新增來源"
+
+#, fuzzy
 #| msgid "Add a title"
 msgid "Add image"
 msgstr "新增標題"
@@ -381,6 +383,11 @@ msgstr "新增標題"
 #| msgid "Local music folder"
 msgid "Add music"
 msgstr "本地音樂資料夾"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "新增規則"
 
 msgid "Add to Favorites"
 msgstr "加入最愛"
@@ -532,9 +539,6 @@ msgstr "應用程式名稱"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
-msgid "Apply Template"
-msgstr ""
-
 msgid "Apply"
 msgstr ""
 
@@ -600,6 +604,11 @@ msgstr "私密儲存空間"
 
 msgid "Artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "遞減"
 
 msgid "Audio effects"
 msgstr ""
@@ -1530,11 +1539,6 @@ msgstr "診斷記錄"
 msgid "Direct"
 msgstr "時長"
 
-#, fuzzy
-#| msgid "Duration"
-msgid "Direction"
-msgstr "時長"
-
 msgid "Disable private mode"
 msgstr "禁用無痕模式"
 
@@ -2314,6 +2318,11 @@ msgstr ""
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 
+#, fuzzy
+#| msgid "New Playlist"
+msgid "In playlist"
+msgstr "新增播放清單"
+
 msgid "Inactive at this sample rate"
 msgstr ""
 
@@ -2659,6 +2668,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Cached"
+msgid "Match"
+msgstr "已快取"
+
+#, fuzzy
+#| msgid "Cached"
 msgid "Matched"
 msgstr "已快取"
 
@@ -2773,21 +2787,6 @@ msgstr "更多操作"
 
 msgid "More"
 msgstr ""
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Monthly)"
-msgstr "最常播放"
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Weekly)"
-msgstr "最常播放"
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Yearly)"
-msgstr "最常播放"
 
 msgid "Most Played"
 msgstr "最常播放"
@@ -2931,6 +2930,11 @@ msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
+msgstr "從未播放"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "從未播放"
 
 msgid "New Playlist"
@@ -3309,6 +3313,9 @@ msgstr "收藏"
 msgid "Orange"
 msgstr "橘色"
 
+msgid "Order"
+msgstr ""
+
 #, fuzzy
 #| msgid "Release date"
 msgid "Original audio"
@@ -3395,9 +3402,6 @@ msgid "Perceptual"
 msgstr ""
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3551,6 +3555,11 @@ msgstr "播放清單"
 
 msgid "Playlists"
 msgstr "播放清單"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Plays from"
+msgstr "任意播放"
 
 msgid "Plays"
 msgstr ""
@@ -3707,6 +3716,9 @@ msgstr "離開"
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 #, fuzzy
 #| msgid "Selection"
 msgid "Range selection"
@@ -3730,6 +3742,11 @@ msgstr ""
 #| msgid "Recently released"
 msgid "Recent searches"
 msgstr "最近發行"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "最近播放"
 
 msgid "Recently played"
 msgstr "最近播放"
@@ -3889,6 +3906,11 @@ msgstr "從最愛中移除"
 #| msgid "Remove folder"
 msgid "Remove from folder"
 msgstr "移除資料夾"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "移除規則"
 
 msgid "Remove rule"
 msgstr "移除規則"
@@ -4600,9 +4622,6 @@ msgstr "藝人名稱"
 msgid "Sort title"
 msgstr ""
 
-msgid "Sort"
-msgstr "排序"
-
 #, fuzzy
 #| msgid "Sidebar route by position"
 msgid "Source by position"
@@ -4647,6 +4666,11 @@ msgstr ""
 #| msgid "ListenBrainz"
 msgid "Start Listening"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start from"
+msgstr "正在儲存..."
 
 msgid "Start minimized"
 msgstr ""
@@ -4778,9 +4802,6 @@ msgid "Teal"
 msgstr ""
 
 msgid "Techno"
-msgstr ""
-
-msgid "Template"
 msgstr ""
 
 #, fuzzy
@@ -5272,6 +5293,12 @@ msgstr ""
 msgid "after"
 msgstr "晚於"
 
+msgid "all"
+msgstr ""
+
+msgid "any"
+msgstr ""
+
 msgid "before"
 msgstr "早於"
 
@@ -5280,6 +5307,9 @@ msgstr "低於"
 
 msgid "contains"
 msgstr "包含"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "不包含"
@@ -5296,6 +5326,9 @@ msgstr "排除"
 msgid "here"
 msgstr ""
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr "為空"
 
@@ -5310,6 +5343,17 @@ msgstr "是"
 
 msgid "kbps"
 msgstr "kbps"
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "of these"
+msgstr "編輯元資料"
 
 msgid "range"
 msgstr ""
@@ -5474,6 +5518,29 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Duration"
+#~ msgid "Direction"
+#~ msgstr "時長"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "最常播放"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "最常播放"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "最常播放"
+
+#~ msgid "Sort"
+#~ msgstr "排序"
 
 #, fuzzy
 #~| msgid "This device"
