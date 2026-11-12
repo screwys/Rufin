@@ -7,10 +7,10 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 15:33+0000\n"
+"PO-Revision-Date: 2026-11-12 09:02+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
-"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/"
-">\n"
+"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
+"\n"
 "Language: id\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -29,8 +29,8 @@ msgstr ""
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
-"Dengan menyetujui, perangkat ini bisa mengakses profil dan info login sumber "
-"yang tersimpan."
+"Dengan menyetujui, perangkat ini bisa mengakses profil dan informasi masuk "
+"sumber yang tersimpan."
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
@@ -139,8 +139,8 @@ msgid ""
 "Relative paths start at the music folder or source URL. Local paths can also "
 "be absolute."
 msgstr ""
-"Path relatif dimulai dari folder musik atau URL sumber. Path lokal juga bisa "
-"absolut."
+"Jalur relatif dimulai dari folder musik atau URL sumber. Jalur lokal juga "
+"bisa absolut."
 
 msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
@@ -153,22 +153,22 @@ msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
 msgstr ""
-"Hapus semua data, pengaturan dan login tersimpan Rufin? Rufin akan dimulai "
-"ulang setelah data dihapus."
+"Hapus semua data, pengaturan dan informasi masuk tersimpan Rufin? Rufin akan "
+"dimulai ulang setelah data dihapus."
 
 msgid ""
 "Remove everything Rufin keeps about Local, including its favorites, ratings "
 "and lyrics? Your music files will not be deleted."
 msgstr ""
-"Hapus semua yang disimpan Rufin tentang Lokal, termasuk favorit, rating, dan "
-"lirik? File musik Anda tidak akan dihapus."
+"Hapus semua yang disimpan Rufin tentang Lokal, termasuk favorit, penilaian, "
+"dan lirik? File musik Anda tidak akan dihapus."
 
 msgid ""
 "Remove everything Rufin keeps about {name}, including its favorites, ratings "
 "and lyrics?"
 msgstr ""
-"Hapus semua yang Rufin simpan tentang {name}, termasuk favorit, rating dan "
-"lirik?"
+"Hapus semua yang Rufin simpan tentang {name}, termasuk favorit, penilaian "
+"dan lirik?"
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -177,7 +177,8 @@ msgid ""
 msgstr ""
 "Ganti konten yang dipilih dan hapus sumber yang telah diatur berikut?\n"
 "{sources}\n"
-"Data pengguna dan login tetap disimpan kecuali dipilih untuk dihapus."
+"Data pengguna dan informasi masuk tetap disimpan kecuali dipilih untuk "
+"dihapus."
 
 msgid ""
 "Replace the selected contents with this backup? Local folder permissions may "
@@ -247,7 +248,7 @@ msgid ""
 "stars and then round them up for the source"
 msgstr ""
 "Sumber ini tidak mendukung hal ini secara bawaan, tetapi Rufin dapat "
-"menampilkan bintang sebagian lalu membulatkannya ke atas untuk sumber ini"
+"menampilkan setengah bintang lalu membulatkannya ke atas untuk sumber ini"
 
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
@@ -571,7 +572,7 @@ msgid "Apply"
 msgstr "Terapkan"
 
 msgid "Approve sign-in in your browser"
-msgstr "Setujui login di browser Anda"
+msgstr "Setujui proses masuk di browser Anda"
 
 msgid "Approve"
 msgstr "Setujui"
@@ -624,6 +625,7 @@ msgstr "Sampul"
 msgid "Audio effects"
 msgstr "Efek audio"
 
+#, fuzzy
 msgid "Audio fade on play/pause"
 msgstr "Fade audio saat putar/jeda"
 
@@ -904,121 +906,121 @@ msgid "Clear EBU R128 cache"
 msgstr "Hapus cache EBU R128"
 
 msgid "Clear Japanese dictionary"
-msgstr ""
+msgstr "Hapus kamus bahasa Jepang"
 
 msgid "Clear Mapping"
-msgstr ""
+msgstr "Hapus Pemetaan"
 
 msgid "Clear album"
-msgstr ""
+msgstr "Hapus album"
 
 msgid "Clear all cache"
-msgstr ""
+msgstr "Hapus semua cache"
 
 msgid "Clear all cache?"
-msgstr ""
+msgstr "Hapus semua cache?"
 
 msgid "Clear all data"
-msgstr ""
+msgstr "Hapus semua data"
 
 msgid "Clear all data?"
-msgstr ""
+msgstr "Hapus semua data?"
 
 msgid "Clear artist"
-msgstr ""
+msgstr "Hapus artis"
 
 msgid "Clear artwork cache"
-msgstr ""
+msgstr "Hapus cache sampul"
 
 msgid "Clear fetched lyrics for this track"
-msgstr ""
+msgstr "hapus lirik yang diambil untuk lagu ini"
 
 msgid "Clear fingerprint cache"
 msgstr "Hapus cache data pengenal"
 
 msgid "Clear lookup cache"
-msgstr ""
+msgstr "Hapus cache pencarian"
 
 msgid "Clear lyrics cache"
-msgstr ""
+msgstr "Hapus cache lirik"
 
 msgid "Clear queue"
-msgstr ""
+msgstr "Kosongkan antrean"
 
 msgid "Clear this cache?"
-msgstr ""
+msgstr "Hapus cache ini?"
 
 msgid "Clear title"
-msgstr ""
+msgstr "Hapus judul"
 
 msgid "Clear waveform cache"
-msgstr ""
+msgstr "Hapus cache bentuk gelombang"
 
 msgid "Clear"
-msgstr ""
+msgstr "Hapus"
 
 msgid "Clearing queue also clears the current song"
-msgstr ""
+msgstr "Mengosongkan antrean juga menghapus lagu yang sedang diputar"
 
 msgid "Clipping"
 msgstr ""
 
 msgid "Close Window"
-msgstr ""
+msgstr "Tutup jendela"
 
 msgid "Close app window"
-msgstr ""
+msgstr "Tutup jendela aplikasi"
 
 msgid "Close fullscreen player"
-msgstr ""
+msgstr "Tutup pemutar layar penuh"
 
 msgid "Close"
-msgstr ""
+msgstr "Tutup"
 
 msgid "Club"
 msgstr ""
 
 msgid "Collapse sidebar"
-msgstr ""
+msgstr "Ciutkan sidebar"
 
 msgid "Collapse/expand sidebar"
-msgstr ""
+msgstr "Ciutkan/perluas sidebar"
 
 msgid "Collection"
-msgstr ""
+msgstr "Koleksi"
 
 msgid "Collections"
-msgstr ""
+msgstr "Koleksi"
 
 msgid "Color for the active word during playback"
-msgstr ""
+msgstr "Warna untuk kata aktif saat diputar"
 
 msgid "Colored"
-msgstr ""
+msgstr "Berwarna"
 
 msgid "Column borders"
-msgstr ""
+msgstr "Garis tepi kolom"
 
 msgid "Columns"
-msgstr ""
+msgstr "Kolom"
 
 msgid "Combine lyrics and visualizer"
-msgstr ""
+msgstr "Gabungkan lirik dan visualisasi"
 
 msgid "Comment text"
-msgstr ""
+msgstr "Teks komentar"
 
 msgid "Comment"
-msgstr ""
+msgstr "Komentar"
 
 msgid "Compact"
-msgstr ""
+msgstr "Ringkas"
 
 msgid "Compare these emoji on both devices"
-msgstr ""
+msgstr "Bandingkan emoji ini di kedua perangkat"
 
 msgid "Compilation"
-msgstr ""
+msgstr "Kompilasi"
 
 msgid "Complete sign-in in your browser"
 msgstr ""
@@ -1132,891 +1134,926 @@ msgid "Copy link"
 msgstr ""
 
 msgid "Copy of {name}"
-msgstr ""
+msgstr "Salinan {name}"
 
 msgid "Copy"
-msgstr ""
+msgstr "Salin"
 
 msgid "Copyright"
-msgstr ""
+msgstr "Hak Cipta"
 
 msgid "Could not load listening overview"
-msgstr ""
+msgstr "Gagal memuat ringkasan mendengarkan"
 
 msgid "Could not load page"
-msgstr ""
+msgstr "Gagal memuat halaman"
 
 msgid "Could not load related tracks"
-msgstr ""
+msgstr "Gagal memuat lagu terkait"
 
 msgid "Could not load this page"
-msgstr ""
+msgstr "Gagal memuat halaman ini"
 
 msgid "Could not open browser"
-msgstr ""
+msgstr "Gagal membuka browser"
 
 msgid "Could not open file: {error}"
-msgstr ""
+msgstr "Tidak dapat membuka file: {error}"
 
 msgid "Could not open folder: {error}"
-msgstr ""
+msgstr "Tidak dapat membuka folder: {error}"
 
 msgid "Could not play this track"
-msgstr ""
+msgstr "Tidak dapat memutar lagu ini"
 
 msgid "Could not read artwork"
-msgstr ""
+msgstr "Tidak dapat membaca sampul"
 
 msgid "Could not receive live updates"
-msgstr ""
+msgstr "Tidak dapat menerima pembaruan langsung"
 
 msgid "Could not save diagnostic log"
-msgstr ""
+msgstr "Tidak dapat menyimpan log diagnostik"
 
 msgid "Could not share: {error}"
-msgstr ""
+msgstr "Gagal membagikan: {error}"
 
 msgid "Could not update Rufin to {version}"
-msgstr ""
+msgstr "Gagal memperbarui Rufin ke {version}"
 
 msgid "Could not update favorites"
-msgstr ""
+msgstr "Tidak dapat memperbarui favorit"
 
 msgid "Couldn't connect to the server"
-msgstr ""
+msgstr "Gagal terhubung ke server"
 
 msgid "Couldn't connect to {service}"
-msgstr ""
+msgstr "Gagal terhubung ke {service}"
 
 msgid "Couldn't decode this track"
-msgstr ""
+msgstr "Tidak dapat mendekode lagu ini"
 
 msgid "Couldn't load this folder"
-msgstr ""
+msgstr "Tidak dapat memuat folder ini"
 
 msgid "Couldn't search for lyrics"
-msgstr ""
+msgstr "Gagal mencari lirik"
 
 msgid "Couldn’t download Japanese dictionary"
-msgstr ""
+msgstr "Gagal mengunduh kamus bahasa Jepang"
 
 msgid "Country"
-msgstr ""
+msgstr "Negara"
 
 msgid "Create a playlist from queue"
-msgstr ""
+msgstr "Buat playlist dari antrean"
 
 msgid "Create playlist"
-msgstr ""
+msgstr "Buat playlist"
 
 msgid "Create"
-msgstr ""
+msgstr "Buat"
 
+#, fuzzy
 msgid "Crossfade duration"
-msgstr ""
+msgstr "Durasi Crossfade"
 
+#, fuzzy
 msgid "Crossfade mode"
-msgstr ""
+msgstr "Mode Crossfade"
 
+#, fuzzy
 msgid "Crossfade"
-msgstr ""
+msgstr "Crossfade"
 
+#, fuzzy
 msgid "Crossfeed"
-msgstr ""
+msgstr "Crossfeed"
 
 msgid "Current artwork"
-msgstr ""
+msgstr "Sampul saat ini"
 
 msgid "Custom HTTP headers"
-msgstr ""
+msgstr "Header HTTP kustom"
 
 msgid "Custom bands"
-msgstr ""
+msgstr "Pita kustom"
 
 msgid "Custom"
-msgstr ""
+msgstr "Kustom"
 
 msgid "Customization"
-msgstr ""
+msgstr "Kustomisasi"
 
 msgid "Customize display"
-msgstr ""
+msgstr "Sesuaikan tampilan"
 
 msgid "Customize"
-msgstr ""
+msgstr "Kustomisasi"
 
 msgid "Cut"
-msgstr ""
+msgstr "Potong"
 
 msgid "Daily"
-msgstr ""
+msgstr "Harian"
 
+#, fuzzy
 msgid "Dance"
-msgstr ""
+msgstr "Dance"
 
 msgid "Dark"
-msgstr ""
+msgstr "Gelap"
 
 msgid "Database sizes show stored data, excluding database overhead."
 msgstr ""
+"Ukuran database hanya menampilkan data yang disimpan, tidak termasuk "
+"overhead database."
 
 msgid "Date added"
-msgstr ""
+msgstr "Tanggal ditambahkan"
 
 msgid "Date"
-msgstr ""
+msgstr "Tanggal"
 
 msgid "Days after month ends"
-msgstr ""
+msgstr "Hari setelah bulan berakhir"
 
 msgid "Days after year ends"
-msgstr ""
+msgstr "Hari setelah tahun berakhir"
 
 msgid "Days before month ends"
-msgstr ""
+msgstr "Hari sebelum bulan berakhir"
 
 msgid "Days before year ends"
-msgstr ""
+msgstr "Hari sebelum tahun berakhir"
 
 msgid "Debug logging"
-msgstr ""
+msgstr "Log debug"
 
 msgid "December {year}"
-msgstr ""
+msgstr "Desember {year}"
 
 msgid "Decrease"
-msgstr ""
+msgstr "Kurangi"
 
 msgid "Default left sidebar"
-msgstr ""
+msgstr "Sidebar sisi kiri bawaan"
 
 msgid "Default right sidebar"
-msgstr ""
+msgstr "Sidebar sisi kanan bawaan"
 
 msgid "Default"
-msgstr ""
+msgstr "Bawaan"
 
 msgid "Delete Playlist"
-msgstr ""
+msgstr "Hapus Playlist"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
-msgstr ""
+msgstr "Hapus \"{name}\"?"
 
 msgid "Delete folder"
-msgstr ""
+msgstr "Hapus folder"
 
 msgid "Delete playlist file"
-msgstr ""
+msgstr "Hapus file playlist"
 
 msgid "Delete preset"
-msgstr ""
+msgstr "Hapus preset"
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Hapus {count} playlist?"
 
 msgid "Delete"
-msgstr ""
+msgstr "Hapus"
 
 msgid "Delivery"
-msgstr ""
+msgstr "Metode pemutaran"
 
 msgid "Descending"
-msgstr ""
+msgstr "Menurun"
 
 msgid "Description"
-msgstr ""
+msgstr "Deskripsi"
 
 msgid "Detail track columns"
-msgstr ""
+msgstr "Kolom detail lagu"
 
 msgid "Detail"
-msgstr ""
+msgstr "Detail"
 
 msgid "Details"
-msgstr ""
+msgstr "Detail"
 
 msgid "Device invitation"
-msgstr ""
+msgstr "Undangan perangkat"
 
 msgid "Device name"
-msgstr ""
+msgstr "Nama perangkat"
 
 msgid "Device"
-msgstr ""
+msgstr "Perangkat"
 
 msgid "Diagnostic log saved"
-msgstr ""
+msgstr "Log diagnostik tersimpan"
 
 msgid "Diagnostic log"
-msgstr ""
+msgstr "Log diagnostik"
 
 msgid "Direct"
-msgstr ""
+msgstr "Langsung"
 
 msgid "Direction"
-msgstr ""
+msgstr "Arah"
 
 msgid "Disable private mode"
-msgstr ""
+msgstr "Matikan mode privat"
 
 msgid "Disabled"
-msgstr ""
+msgstr "Nonaktif"
 
 msgid "Disc number"
-msgstr ""
+msgstr "Nomor disc"
 
+#, fuzzy
 msgid "Disc {number}"
-msgstr ""
+msgstr "Disc {number}"
 
+#, fuzzy
 msgid "Disc"
-msgstr ""
+msgstr "Disc"
 
 msgid "Discard changes?"
-msgstr ""
+msgstr "Buang perubahan?"
 
 msgid "Discography"
-msgstr ""
+msgstr "Diskografi"
 
 msgid "Disconnect from Rufin?"
-msgstr ""
+msgstr "Putuskan koneksi dari Rufin?"
 
 msgid "Disconnect this device"
-msgstr ""
+msgstr "Putuskan koneksi perangkat ini"
 
 msgid "Disconnect this device?"
-msgstr ""
+msgstr "Putuskan koneksi perangkat ini?"
 
 msgid "Disconnect"
-msgstr ""
+msgstr "Putuskan"
 
+#, fuzzy
 msgid "Discord Rich Presence"
-msgstr ""
+msgstr "Discord Rich Presence"
 
 msgid "Discord access in Flatpak"
-msgstr ""
+msgstr "Akses Discord di Flatpak"
 
+#, fuzzy
 msgid "Discord"
-msgstr ""
+msgstr "Discord"
 
 msgid "Display"
-msgstr ""
+msgstr "Tampilan"
 
 msgid "Do not encrypt"
-msgstr ""
+msgstr "Tanpa enkripsi"
 
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Apakah Anda ingin menerapkan perubahan metadata ke {count} lagu?"
 
 msgid "Do you want to use the existing configuration?"
-msgstr ""
+msgstr "Apakah Anda ingin menggunakan konfigurasi yang ada?"
 
 msgid "Don't duplicate"
-msgstr ""
+msgstr "Jangan duplikasi"
 
 msgid "Donate"
-msgstr ""
+msgstr "Donasi"
 
 msgid "Done"
-msgstr ""
+msgstr "Selesai"
 
 msgid "Download Automatically"
-msgstr ""
+msgstr "Unduh Otomatis"
 
 msgid "Download Folder"
-msgstr ""
+msgstr "Folder Unduhan"
 
 msgid "Download Lazily"
-msgstr ""
+msgstr "Unduh Sesuai Kebutuhan"
 
 msgid "Download Queue"
-msgstr ""
+msgstr "Unduh Antrean"
 
 msgid "Download on Mobile Data"
-msgstr ""
+msgstr "Unduh menggunakan Data Seluler"
 
 msgid "Download queued"
-msgstr ""
+msgstr "Unduhan masuk antrean"
 
 msgid "Download started"
-msgstr ""
+msgstr "Unduhan dimulai"
 
 msgid "Download"
-msgstr ""
+msgstr "Unduh"
 
 msgid "Downloaded"
-msgstr ""
+msgstr "Terunduh"
 
 msgid "Downloading Japanese dictionary..."
-msgstr ""
+msgstr "Mengunduh kamus bahasa Jepang..."
 
 msgid "Downloading artwork"
-msgstr ""
+msgstr "Mengunduh sampul"
 
 msgid "Downloading artwork... {count} checked"
-msgstr ""
+msgstr "Mengunduh sampul... {count} diperiksa"
 
 msgid "Downloading lyrics"
-msgstr ""
+msgstr "Mengunduh lirik"
 
 msgid "Downloading lyrics... {count} checked"
-msgstr ""
+msgstr "Mengunduh lirik... {count} diperiksa"
 
 msgid "Downloading"
-msgstr ""
+msgstr "Mengunduh"
 
 msgid "Downloads"
-msgstr ""
+msgstr "Unduhan"
 
 msgid "Drag to reorder"
-msgstr ""
+msgstr "Seret untuk mengubah urutan"
 
 msgid "Duplicate preset"
-msgstr ""
+msgstr "Duplikasi preset"
 
 msgid "Duplicate"
-msgstr ""
+msgstr "Duplikasi"
 
 msgid "Duration"
-msgstr ""
+msgstr "Durasi"
 
 msgid "Dynamic background"
-msgstr ""
+msgstr "Latar belakang dinamis"
 
 msgid "Dynamic"
-msgstr ""
+msgstr "Dinamis"
 
 msgid "EBU R128 analysis"
-msgstr ""
+msgstr "Analisis EBU R128"
 
 msgid "EBU R128 reference level"
-msgstr ""
+msgstr "Tingkat referensi EBU R128"
 
+#, fuzzy
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
+#, fuzzy
 msgid "EP"
-msgstr ""
+msgstr "EP"
 
 msgid "EPs"
-msgstr ""
+msgstr "EP"
 
+#, fuzzy
 msgid "ERB"
-msgstr ""
+msgstr "ERB"
 
 msgid "Edit Lyrics"
-msgstr ""
+msgstr "Edit Lirik"
 
+#, fuzzy
 msgid "Edit Playlist"
-msgstr ""
+msgstr "Edit Playlist"
 
 msgid "Edit Smart Playlist"
-msgstr ""
+msgstr "Edit Playlist Pintar"
 
 msgid "Edit Source"
-msgstr ""
+msgstr "Edit Sumber"
 
 msgid "Edit lyrics"
-msgstr ""
+msgstr "Edit lirik"
 
+#, fuzzy
 msgid "Edit metadata"
-msgstr ""
+msgstr "Edit metadata"
 
 msgid "Edit theme"
-msgstr ""
+msgstr "Edit tema"
 
+#, fuzzy
 msgid "Edit"
-msgstr ""
+msgstr "Edit"
 
 msgid "Embed in track"
-msgstr ""
+msgstr "Sematkan di lagu"
 
+#, fuzzy
 msgid "Emby Connect"
-msgstr ""
+msgstr "Emby Connect"
 
+#, fuzzy
 msgid "Emby"
-msgstr ""
+msgstr "Emby"
 
 msgid "Enable Controller"
-msgstr ""
+msgstr "Aktifkan Pengendali"
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "Aktifkan Analisis EBU R128?"
 
 msgid "Enable Rufin Connect"
-msgstr ""
+msgstr "Aktifkan Rufin Connect"
 
 msgid "Enable automatic backups"
-msgstr ""
+msgstr "Aktifkan pencadangan otomatis"
 
 msgid "Enable background image"
-msgstr ""
+msgstr "Aktifkan gambar latar belakang"
 
 msgid "Enable caching lyrics"
-msgstr ""
+msgstr "Aktifkan cache lirik"
 
 msgid "Enable partial star ratings"
-msgstr ""
+msgstr "Aktifkan penilaian setengah bintang"
 
 msgid "Enable private mode"
-msgstr ""
+msgstr "Aktifkan mode privat"
 
 msgid "Enable"
-msgstr ""
+msgstr "Aktifkan"
 
 msgid "Enabled"
-msgstr ""
+msgstr "Aktif"
 
 msgid "Encoding peak"
-msgstr ""
+msgstr "Puncak encoding"
 
+#, fuzzy
 msgid "Encoding"
-msgstr ""
+msgstr "Encoding"
 
 msgid "Encrypt backups"
-msgstr ""
+msgstr "Enkripsi cadangan"
 
 msgid "End of this track"
-msgstr ""
+msgstr "Akhir lagu ini"
 
 msgid "Ends around {time}"
-msgstr ""
+msgstr "Selesai sekitar {time}"
 
 msgid "Enter API credentials first"
-msgstr ""
+msgstr "Masukan kredensial API terlebih dahulu"
 
 msgid "Enter a server address and API key"
-msgstr ""
+msgstr "Masukan alamat server dan kunci API"
 
 msgid "Enter a server address, username, and password"
-msgstr ""
+msgstr "Masukan alamat server, nama pengguna, dan kata sandi"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
-msgstr ""
+msgstr "Masukan alamat server Nextcloud Anda untuk masuk melalui browser"
 
 msgid "Entire Library"
 msgstr "Seluruh pustaka"
 
 msgid "Equalizer is controlled by the receiver"
-msgstr ""
+msgstr "Equalizer dikendalikan oleh perangkat penerima"
 
+#, fuzzy
 msgid "Equalizer"
-msgstr ""
+msgstr "Equalizer"
 
 msgid "Ever played"
-msgstr ""
+msgstr "Pernah diputar"
 
 msgid "Everything, including new tracks"
-msgstr ""
+msgstr "Semuanya, termasuk lagu baru"
 
 msgid "Excluded folders"
-msgstr ""
+msgstr "Folder yang dikecualikan"
 
 msgid "Expand lyrics and visualizer"
-msgstr ""
+msgstr "Perluas lirik dan visualisasi"
 
 msgid "Expand sidebar"
-msgstr ""
+msgstr "Perluas sidebar"
 
 msgid "Expires"
-msgstr ""
+msgstr "Kadaluwarsa"
 
 msgid "Explore"
-msgstr ""
+msgstr "Jelajahi"
 
 msgid "Export Activity"
-msgstr ""
+msgstr "Ekspor Aktivitas"
 
 msgid "Export Backup"
-msgstr ""
+msgstr "Ekspor Cadangan"
 
 msgid "Export PNG"
-msgstr ""
+msgstr "Ekspor PNG"
 
 msgid "Export Playlist"
-msgstr ""
+msgstr "Ekspor Playlist"
 
 msgid "Export format"
-msgstr ""
+msgstr "Ekspor format"
 
 msgid "Export playlist"
-msgstr ""
+msgstr "Ekspor playlist"
 
 msgid "Export preset"
-msgstr ""
+msgstr "Ekspor preset"
 
 msgid "Export your listening history in Rufin"
-msgstr ""
+msgstr "Ekspor riwayat pemutaran Anda di Rufin"
 
 msgid "Export"
-msgstr ""
+msgstr "Ekspor"
 
 msgid "External lyric lookup is off"
-msgstr ""
+msgstr "Pencarian lirik eksternal nonaktif"
 
 msgid "External lyrics lookup"
-msgstr ""
+msgstr "Pencarian lirik eksternal"
 
 msgid "External metadata lookup"
-msgstr ""
+msgstr "Pencarian metadata eksternal"
 
 msgid "External site links"
-msgstr ""
+msgstr "Tautan situs eksternal"
 
 msgid "FFT size"
-msgstr ""
+msgstr "Ukuran FFT"
 
+#, fuzzy
 msgid "FLAC"
-msgstr ""
+msgstr "FLAC"
 
+#, fuzzy
 msgid "Fade audio when playback is paused or resumed"
-msgstr ""
+msgstr "Fade audio saat pemutaran dijeda atau dilanjutkan"
 
 msgid "Fall speed (%)"
-msgstr ""
+msgstr "Kecepatan jatuh (%)"
 
 msgid "Favorite current track"
-msgstr ""
+msgstr "Tambahkan lagu saat ini ke Favorit"
 
 msgid "Favorite tracks"
-msgstr ""
+msgstr "Lagu favorit"
 
 msgid "Favorite tracks, plus tracks from favorite albums and artists"
-msgstr ""
+msgstr "Lagu favorit, ditambah lagu dari album dan artis favorit"
 
 msgid "Favorite"
-msgstr ""
+msgstr "Favorit"
 
 msgid "Favorites and ratings"
-msgstr ""
+msgstr "Favorit dan penilaian"
 
 msgid "Favorites"
-msgstr ""
+msgstr "Favorit"
 
 msgid "Featured genres"
-msgstr ""
+msgstr "Genre pilihan"
 
 msgid "February {year}"
-msgstr ""
+msgstr "Februari {year}"
 
 msgid "Fetching Home"
-msgstr ""
+msgstr "Memuat Beranda"
 
 msgid "Fetching albums"
-msgstr ""
+msgstr "Memuat album"
 
 msgid "Fetching artists"
-msgstr ""
+msgstr "Memuat artis"
 
 msgid "Fetching artwork"
-msgstr ""
+msgstr "Memuat sampul"
 
 msgid "Fetching genres"
-msgstr ""
+msgstr "Memuat genre"
 
 msgid "Fetching lyrics"
-msgstr ""
+msgstr "Memuat lirik"
 
 msgid "Fetching metadata..."
-msgstr ""
+msgstr "Memuat metadata..."
 
 msgid "Fetching playlists"
-msgstr ""
+msgstr "Memuat playlist"
 
 msgid "Field"
-msgstr ""
+msgstr "Bidang"
 
 msgid "File connection"
-msgstr ""
+msgstr "Koneksi file"
 
 msgid "File connections"
-msgstr ""
+msgstr "Koneksi file"
 
 msgid "File format"
-msgstr ""
+msgstr "Format file"
 
 msgid "File path"
-msgstr ""
+msgstr "Jalur file"
 
 msgid "File size"
-msgstr ""
+msgstr "Ukuran file"
 
 msgid "Filename"
-msgstr ""
+msgstr "Nama file"
 
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
+"File harus memiliki tag Mood/BPM tertulis. Tidak didukung untuk Jellyfin"
 
 msgid "Filled spectrum"
-msgstr ""
+msgstr "Spektrum terisi"
 
 msgid "Filter type"
-msgstr ""
+msgstr "Jenis filter"
 
 msgid "Find in {name}"
-msgstr ""
+msgstr "Cari di {name}"
 
 msgid "Find shares"
-msgstr ""
+msgstr "Cari folder bersama"
 
 msgid "Find your ListenBrainz user token"
-msgstr ""
+msgstr "Temukan token pengguna ListenBrainz Anda"
 
 msgid "Finding lyrics..."
-msgstr ""
+msgstr "Mencari lirik..."
 
 msgid "Finish the last track"
-msgstr ""
+msgstr "Selesaikan lagu terakhir"
 
 msgid "Finishes the track playing at {time}"
-msgstr ""
+msgstr "Menyelesaikan lagu yang sedang diputar pada {time}"
 
 msgid "Fit to height"
-msgstr ""
+msgstr "Sesuaikan dengan tinggi"
 
 msgid "Fixed position"
-msgstr ""
+msgstr "Posisi tetap"
 
 msgid "Flat"
-msgstr ""
+msgstr "Datar"
 
 msgid "Folder name"
-msgstr ""
+msgstr "Nama folder"
 
 msgid "Folder path"
-msgstr ""
+msgstr "Jalur folder"
 
+#, fuzzy
 msgid "Folder"
-msgstr ""
+msgstr "Folder"
 
 msgid "Folders"
-msgstr ""
+msgstr "Folder"
 
 msgid "Follow the app accent with lighter and darker tones"
 msgstr ""
+"Mengikuti warna aksen aplikasi dengan warna yang lebih terang dan lebih gelap"
 
 msgid "Font family"
-msgstr ""
+msgstr "Jenis font"
 
 msgid "Font size (px)"
-msgstr ""
+msgstr "Ukuran font (px)"
 
 msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
+"Hanya untuk impor atau ekspor ini. Biarkan kosong untuk arsip tanpa enkripsi."
 
 msgid "Forget Source"
-msgstr ""
+msgstr "Lupakan Sumber"
 
 msgid "Format not supported"
-msgstr ""
+msgstr "Format tidak didukung"
 
 msgid "Format"
-msgstr ""
+msgstr "Format"
 
 msgid "Forward"
-msgstr ""
+msgstr "Maju"
 
 msgid "Found Servers"
-msgstr ""
+msgstr "Server Ditemukan"
 
 msgid "Found"
-msgstr ""
+msgstr "Ditemukan"
 
 msgid "Frame rate limit"
-msgstr ""
+msgstr "Batas frame rate"
 
 msgid "Frames per second"
-msgstr ""
+msgstr "Frame per detik"
 
 msgid "Frequency · Hz"
-msgstr ""
+msgstr "Frekuensi · Hz"
 
 msgid "Frequency scale"
-msgstr ""
+msgstr "Skala frekuensi"
 
 msgid "Frequency"
-msgstr ""
+msgstr "Frekuensi"
 
 msgid "Friday"
-msgstr ""
+msgstr "Jumat"
 
+#, fuzzy
 msgid "Full Bass & Treble"
-msgstr ""
+msgstr "Full Bass & Treble"
 
+#, fuzzy
 msgid "Full Bass"
-msgstr ""
+msgstr "Full Bass"
 
+#, fuzzy
 msgid "Full Treble"
-msgstr ""
+msgstr "Full Treble"
 
 msgid "Full"
-msgstr ""
+msgstr "Penuh"
 
 msgid "Fullscreen player"
-msgstr ""
+msgstr "Pemutar layar penuh"
 
 msgid "Fullscreen"
-msgstr ""
+msgstr "Layar penuh"
 
+#, fuzzy
 msgid "Furigana"
-msgstr ""
+msgstr "Furigana"
 
+#, fuzzy
 msgid "Gain · dB"
-msgstr ""
+msgstr "Gain · dB"
 
+#, fuzzy
 msgid "Gain"
-msgstr ""
+msgstr "Gain"
 
 msgid "Gapless mode"
-msgstr ""
+msgstr "Mode tanpa jeda"
 
 msgid "Gapless"
-msgstr ""
+msgstr "Tanpa jeda"
 
 msgid "General"
-msgstr ""
+msgstr "Umum"
 
+#, fuzzy
 msgid "Genius"
-msgstr ""
+msgstr "Genius"
 
 msgid "Genre radio"
-msgstr ""
+msgstr "Radio genre"
 
 msgid "Genre tracks"
-msgstr ""
+msgstr "Lagu genre"
 
 msgid "Genre"
-msgstr ""
+msgstr "Genre"
 
 msgid "Genres"
-msgstr ""
+msgstr "Genre"
 
 msgid "Gestures"
-msgstr ""
+msgstr "Gestur"
 
 msgid "Get token"
-msgstr ""
+msgstr "Dapatkan token"
 
 msgid "Go to Album"
-msgstr ""
+msgstr "Buka Album"
 
 msgid "Go to {artist}"
-msgstr ""
+msgstr "Buka {artis}"
 
 msgid "Go to"
-msgstr ""
+msgstr "Buka"
 
+#, fuzzy
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Gradient end"
-msgstr ""
+msgstr "Akhir gradasi"
 
 msgid "Gradient start"
-msgstr ""
+msgstr "Awal gradasi"
 
 msgid "Graphic"
-msgstr ""
+msgstr "Grafis"
 
 msgid "Green"
-msgstr ""
+msgstr "Hijau"
 
 msgid "Grid labels"
-msgstr ""
+msgstr "Keterangan kisi"
 
 msgid "Grid spacing"
-msgstr ""
+msgstr "Jarak kiri"
 
 msgid "Grid"
-msgstr ""
+msgstr "Kisi"
 
 msgid "Grouping"
-msgstr ""
+msgstr "Pengelompokan"
 
 msgid "Guest / public access"
-msgstr ""
+msgstr "Akses tamu / publik"
 
+#, fuzzy
 msgid "Halo"
-msgstr ""
+msgstr "Halo"
 
 msgid "Height (%)"
-msgstr ""
+msgstr "Tinggi (%)"
 
 msgid "Help"
-msgstr ""
+msgstr "Bantuan"
 
 msgid "Hidden"
-msgstr ""
+msgstr "Tersembunyi"
 
 msgid "Hide sidebar"
-msgstr ""
+msgstr "Sembunyikan sidebar"
 
 msgid "High shelf"
-msgstr ""
+msgstr "Shelf tinggi"
 
 msgid "Highlight hovered row"
-msgstr ""
+msgstr "Sorot baris saat diarahkan"
 
 msgid "History"
-msgstr ""
+msgstr "Riwayat"
 
 msgid "Hold and drag to resize"
-msgstr ""
+msgstr "Tahan dan seret untuk mengubah ukuran"
 
 msgid "Hold to reorder"
-msgstr ""
+msgstr "Tahan untuk mengubah urutan"
 
 msgid "Home Blocks"
-msgstr ""
+msgstr "Blok Beranda"
 
 msgid "Home Profile"
-msgstr ""
+msgstr "Pofil Beranda"
 
 msgid "Home"
-msgstr ""
+msgstr "Beranda"
 
 msgid "Hour"
-msgstr ""
+msgstr "Jam"
 
 msgid "Hours"
-msgstr ""
+msgstr "Jam"
 
+#, fuzzy
 msgid "Hz"
-msgstr ""
+msgstr "Hz"
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
-msgstr ""
+msgstr "Jika halaman tidak terbuka, Libre.fm memblokir rentang IP/VPN Anda"
 
 msgid "If you do not have API keys, create them"
-msgstr ""
+msgstr "Jika belum punya kunci API, silakan buat kunci dahulu"
 
 msgid "Ignore playback volume"
-msgstr ""
+msgstr "Abaikan volume pemutaran"
 
 msgid "Image files"
-msgstr ""
+msgstr "File gambar"
 
 msgid "Image"
-msgstr ""
+msgstr "Gambar"
 
 msgid "Import Backup"
-msgstr ""
+msgstr "Impor Cadangan"
 
 msgid "Import Playlist"
-msgstr ""
+msgstr "Impor Playlist"
 
 msgid "Import preset"
-msgstr ""
+msgstr "Impor preset"
 
 msgid "Import theme"
-msgstr ""
+msgstr "Impor tema"
 
 msgid "Import"
-msgstr ""
+msgstr "Impor"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2024,13 +2061,13 @@ msgstr ""
 "ditambahkan."
 
 msgid "Inactive at this sample rate"
-msgstr ""
+msgstr "Tidak aktif pada laju sampel ini"
 
 msgid "Include detailed Rufin diagnostics in this session"
-msgstr ""
+msgstr "Sertakan diagnostik Rufin yang rinci pada sesi ini"
 
 msgid "Increase"
-msgstr ""
+msgstr "Perbesar"
 
 msgid "Install available updates when Rufin starts"
 msgstr ""
@@ -3556,10 +3593,10 @@ msgid "Save"
 msgstr ""
 
 msgid "Saved Plex Login"
-msgstr ""
+msgstr "Informasi masuk Plex Tersimpan"
 
 msgid "Saved logins"
-msgstr ""
+msgstr "Informasi Masuk Tersimpan"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
@@ -3843,13 +3880,13 @@ msgid "Show tray icon"
 msgstr ""
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Tampilkan visualisasi dan lirik di panel kanan"
 
 msgid "Show visualizer in the right panel"
-msgstr ""
+msgstr "Tampilkan visualisasi di panel kanan"
 
 msgid "Show visualizer"
-msgstr ""
+msgstr "Tampilkan visualisasi"
 
 msgid "Show"
 msgstr ""
@@ -4118,8 +4155,9 @@ msgstr ""
 msgid "Techno"
 msgstr ""
 
+#, fuzzy
 msgid "Template"
-msgstr ""
+msgstr "Template"
 
 msgid "Test connection"
 msgstr ""
@@ -4347,7 +4385,7 @@ msgid "Use Rufin data folder"
 msgstr ""
 
 msgid "Use Saved Login"
-msgstr ""
+msgstr "Gunakan Informasi masuk Tersimpan"
 
 msgid "Use This Source"
 msgstr ""
@@ -4446,7 +4484,7 @@ msgid "Visible"
 msgstr ""
 
 msgid "Visualizer"
-msgstr ""
+msgstr "Visualisasi"
 
 msgid "Volume Down"
 msgstr ""
@@ -4696,6 +4734,13 @@ msgid ""
 "\n"
 "Click Next to continue."
 msgstr ""
+"Rufin adalah pemutar musik native untuk server Jellyfin, Navidrome/"
+"OpenSubsonic, Plex, dan Emby; folder lokal, WebDAV termasuk jalur masuk "
+"langsung melalui browser Nextcloud, serta berbagi file Samba dan NAS.\n"
+"\n"
+"Program penyiapan ini akan menginstal Rufin di komputer anda.\n"
+"\n"
+"Klik Berikutnya untuk melanjutkan."
 
 #. Windows installer: CleanupFailed.
 msgctxt "Windows installer"
