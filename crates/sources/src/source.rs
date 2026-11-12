@@ -71,7 +71,6 @@ pub async fn read_local_lyrics(
     media_uri: &str,
     playable: Option<&library::Playable>,
     title: Option<&str>,
-    preferences: &lyrics::UserPreferences,
 ) -> SourceResult<Option<lyrics::LyricsBundle>> {
     let local_path = |uri: &str| {
         library::cue_media_parts(uri).map_or_else(
@@ -127,9 +126,8 @@ pub async fn read_local_lyrics(
         title,
         cue_track,
     };
-    let preferences = preferences.clone();
     tokio::task::spawn_blocking(move || {
-        lyrics::local_file_lyrics(&input, &preferences, || {
+        lyrics::local_file_lyrics(&input, || {
             crate::file::metadata::read_embedded_lyrics(&input.audio_path)
                 .ok()
                 .flatten()
@@ -1758,14 +1756,7 @@ impl Source {
                         .await
                         .map(|text| text.and_then(native_text));
                 }
-                read_local_lyrics(
-                    catalog,
-                    media_uri,
-                    None,
-                    None,
-                    &lyrics::UserPreferences::default(),
-                )
-                .await
+                read_local_lyrics(catalog, media_uri, None, None).await
             }
             Implementation::JellyfinEmby(source) => {
                 source.lyrics(&self.track_object_id(media_uri)?).await
