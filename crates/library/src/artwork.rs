@@ -150,12 +150,12 @@ impl ArtworkCandidate {
         };
         let directory = match &candidate.image {
             ArtworkImage::Native { source_id, .. } | ArtworkImage::Local { source_id, .. } => {
-                format!("native/{:x}", Md5::digest(source_id.as_str()))
+                format!("native/{:032x}", md5(source_id.as_str()))
             }
             ArtworkImage::Playlist { .. } => "playlists".into(),
             _ => "external".into(),
         };
-        candidate.key = format!("{directory}/{:x}", Md5::digest(candidate.stable_identity()));
+        candidate.key = format!("{directory}/{:032x}", md5(candidate.stable_identity()));
         candidate
     }
 
@@ -404,11 +404,15 @@ pub(crate) fn playlist_mosaic(
             smart,
             source_id,
             object_id,
-            revision: format!("mosaic:{:x}", Md5::digest(picks.join("\0"))),
+            revision: format!("mosaic:{:032x}", md5(picks.join("\0"))),
             mosaic: Some(picks),
         },
         None,
     )))
+}
+
+fn md5(value: impl AsRef<[u8]>) -> u128 {
+    u128::from_be_bytes(Md5::digest(value).into())
 }
 
 /// Up to four member URIs whose pictures differ, one per album: the chosen ones first, then

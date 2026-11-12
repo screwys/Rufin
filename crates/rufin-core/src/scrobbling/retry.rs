@@ -829,7 +829,7 @@ fn opaque_account_id(service: DeliveryService, identity: &str) -> String {
         DeliveryService::ListenBrainz => "listenbrainz",
     };
     let value = format!("rufin-scrobbling-account\0{service}\0{}", identity.trim());
-    format!("{:x}", Md5::digest(value))
+    format!("{:032x}", u128::from_be_bytes(Md5::digest(value).into()))
 }
 
 fn retry_delay(attempts: u32) -> i64 {
