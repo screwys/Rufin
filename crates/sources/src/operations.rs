@@ -226,6 +226,22 @@ pub enum LyricsStorage {
     Sidecar,
 }
 
+impl LyricsStorage {
+    /// The place a save uses: the preferred kind where the track has it, else one it has.
+    pub fn preferred(available: &[Self], sidecar: bool) -> Option<Self> {
+        let preferred = if sidecar {
+            Self::Sidecar
+        } else {
+            Self::Embedded
+        };
+        available
+            .iter()
+            .copied()
+            .find(|storage| *storage == preferred)
+            .or_else(|| available.first().copied())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtworkEdit {
     pub change: ArtworkChange,

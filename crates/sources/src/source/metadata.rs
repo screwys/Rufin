@@ -517,6 +517,48 @@ struct SaveWork {
     folders: std::collections::HashSet<String>,
 }
 
+/// Where the lyrics of track `uri` can be saved: in the source that holds it, or in its own
+/// file when no source does. Every save of lyrics asks here.
+pub async fn lyrics_storage(
+    source: Option<&Arc<Source>>,
+    catalog: &Catalog,
+    uri: &str,
+) -> Vec<crate::LyricsStorage> {
+    let source = source.cloned();
+    let playable = match &source {
+        Some(_) => match catalog.playable_by_uri(uri).await {
+            Ok(Some(playable)) => Some(playable),
+            _ => return Vec::new(),
+        },
+        None => None,
+    };
+    let uri = uri.to_owned();
+    tokio::task::spawn_blocking(move || match (source, playable) {
+        (Some(source), Some(playable)) => source.lyrics_storage(&playable),
+        _ => NativeFile::direct(&uri)
+            .map(|file| file.lyrics_storage())
+            .unwrap_or_default(),
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Saves the lyrics of track `uri` in one of its `lyrics_storage` places.
+pub async fn write_lyrics(
+    source: Option<&Arc<Source>>,
+    catalog: &Catalog,
+    uri: &str,
+    lyrics: &str,
+    sidecar: bool,
+) -> Result<(), Error> {
+    let Some(source) = source else {
+        let file = NativeFile::direct(uri)?;
+        file.save_lyrics(lyrics, sidecar, || false).await?;
+        return file.publish_direct(catalog).await;
+    };
+    source.write_lyrics(catalog, uri, lyrics, sidecar).await
+}
+
 #[derive(Clone, Default)]
 pub struct FileEditSession {
     source: Option<Arc<Source>>,
@@ -535,35 +577,28 @@ impl FileEditSession {
         }
     }
 
-    pub fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
-        self.single
-            .as_ref()
-            .map(NativeFile::lyrics_storage)
-            .unwrap_or_default()
-    }
-
     pub async fn save_lyrics(
         &self,
         catalog: &Catalog,
         text: &str,
         sidecar: bool,
     ) -> Result<Option<String>, Error> {
+        write_lyrics(
+            self.source.as_ref(),
+            catalog,
+            &self.media_uri,
+            text,
+            sidecar,
+        )
+        .await?;
         if let Some(source) = &self.source {
-            source
-                .write_lyrics(catalog, &self.media_uri, text, sidecar)
-                .await?;
             source.refresh_written_lyrics(catalog);
-            return self
-                .single
-                .as_ref()
-                .ok_or(Error::Unavailable)?
-                .revision()
-                .await;
         }
-        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
-        file.save_lyrics(text, sidecar, || false).await?;
-        file.publish_direct(catalog).await?;
-        file.revision().await
+        self.single
+            .as_ref()
+            .ok_or(Error::Unavailable)?
+            .revision()
+            .await
     }
 
     pub fn media_uri(&self) -> &str {
@@ -1180,10 +1215,7 @@ impl Source {
     }
 
     /// Where the lyrics of a playable can be saved, from its row. Reads no SQL.
-    pub fn lyrics_storage(
-        self: &Arc<Self>,
-        playable: &library::Playable,
-    ) -> Vec<crate::LyricsStorage> {
+    fn lyrics_storage(self: &Arc<Self>, playable: &library::Playable) -> Vec<crate::LyricsStorage> {
         if playable.cue_path.is_some() {
             return Vec::new();
         }
@@ -1200,18 +1232,6 @@ impl Source {
             return Vec::new();
         };
         file.lyrics_storage()
-    }
-
-    pub fn lyrics_writable(self: &Arc<Self>, playable: &library::Playable, sidecar: bool) -> bool {
-        self.lyrics_storage(playable).into_iter().any(|storage| {
-            storage == crate::LyricsStorage::Server
-                || storage
-                    == if sidecar {
-                        crate::LyricsStorage::Sidecar
-                    } else {
-                        crate::LyricsStorage::Embedded
-                    }
-        })
     }
 
     pub async fn write_lyrics(
