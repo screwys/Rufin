@@ -35,21 +35,13 @@ pub struct LyricsContext {
 }
 
 impl LyricsService {
+    /// The source that holds the media's track.
     async fn source(&self, context: &LyricsContext) -> Option<Arc<Source>> {
-        self.source_of(&context.media.id.media_uri, context.playable.as_deref())
-            .await
-    }
-
-    /// The source that holds track `uri`, whose audio may be `playable`.
-    async fn source_of(
-        &self,
-        uri: &str,
-        playable: Option<&library::Playable>,
-    ) -> Option<Arc<Source>> {
+        let uri = &context.media.id.media_uri;
         let source_id = match library::source_entity_parts(uri) {
             Some((source, kind, _)) if kind == "track" => source,
             Some(_) => return None,
-            None => match playable {
+            None => match &context.playable {
                 Some(playable) => playable.source_id.clone()?,
                 None => self
                     .catalog
@@ -121,9 +113,8 @@ struct LyricsFallback {
 }
 
 struct LyricsWriteTarget {
-    context: LyricsContext,
+    media_id: CurrentMediaId,
     content: String,
-    sidecar: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,42 +292,41 @@ impl LyricsService {
         Some(playable)
     }
 
-    fn check_write_access(self: &Arc<Self>, mut context: LyricsContext) {
+    /// Where a save puts the lyrics of track `uri`: the source that holds the track (none
+    /// for a file no source holds) and whether they go beside the file. `None` when nothing
+    /// there can hold lyrics. Edit metadata finds its places the same way.
+    async fn save_target(&self, uri: &str) -> Option<(Option<Arc<Source>>, bool)> {
+        let source = match self.source_owner.media_source_id(uri).await {
+            Ok(Some(id)) => self.source_owner.open_client(id).await.map(Some),
+            Ok(None) => Ok(None),
+            Err(error) => Err(error),
+        }
+        .inspect_err(|error| warn!(%error, "could not find where lyrics are saved"))
+        .ok()?;
+        let storages = sources::lyrics_storage(source.as_ref(), &self.catalog, uri).await;
+        let sidecar = self.settings().ui.lyrics.preferences.save_lyrics_as_sidecar;
+        let storage = sources::LyricsStorage::preferred(&storages, sidecar);
+        if storage.is_none() {
+            debug!("the track's source cannot hold lyrics");
+        }
+        Some((source, storage? == sources::LyricsStorage::Sidecar))
+    }
+
+    fn check_write_access(self: &Arc<Self>, context: LyricsContext) {
         let service = Arc::clone(self);
         self.runtime.spawn(async move {
-            context.playable = service.playable(&context).await;
-            let sidecar = service
-                .settings()
-                .ui
-                .lyrics
-                .preferences
-                .save_lyrics_as_sidecar;
-            let writable = match (service.source(&context).await, context.playable.clone()) {
-                (Some(source), Some(playable)) => {
-                    tokio::task::spawn_blocking(move || source.lyrics_writable(&playable, sidecar))
-                        .await
-                        .unwrap_or(false)
-                }
-                _ => false,
-            };
+            let uri = &context.media.id.media_uri;
+            let writable = service.save_target(uri).await.is_some();
             let event = {
                 let mut state = service
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if service
-                    .settings()
-                    .ui
-                    .lyrics
-                    .preferences
-                    .save_lyrics_as_sidecar
-                    != sidecar
-                {
-                    return;
-                }
-                let Some(current) = state.current.as_mut().filter(|current| {
-                    current.context.media.id.media_uri == context.media.id.media_uri
-                }) else {
+                let Some(current) = state
+                    .current
+                    .as_mut()
+                    .filter(|current| &current.context.media.id.media_uri == uri)
+                else {
                     return;
                 };
                 if current.writable == writable {
@@ -863,42 +853,34 @@ impl LyricsService {
                 return None;
             };
             Some(LyricsWriteTarget {
-                context: current.context.clone(),
+                media_id: current.context.media.id.clone(),
                 content: lyrics_to_lrc_text(document, 0),
-                sidecar: settings.ui.lyrics.preferences.save_lyrics_as_sidecar,
             })
         }
     }
 
-    async fn write_lyrics_to_source(self: &Arc<Self>, mut target: LyricsWriteTarget) {
-        target.context.playable = self.playable(&target.context).await;
-        let (Some(source), Some(playable)) = (
-            self.source(&target.context).await,
-            target.context.playable.clone(),
-        ) else {
+    async fn write_lyrics_to_source(self: &Arc<Self>, target: LyricsWriteTarget) {
+        let uri = &target.media_id.media_uri;
+        let Some((source, sidecar)) = self.save_target(uri).await else {
             return;
         };
-        if !source.lyrics_writable(&playable, target.sidecar) {
-            return;
-        }
         let Ok(_permit) = self.write_lane.acquire().await else {
             return;
         };
-        let result = source
-            .write_lyrics(
-                &self.catalog,
-                &target.context.media.id.media_uri,
-                &target.content,
-                target.sidecar,
-            )
-            .await;
+        let result = sources::write_lyrics(
+            source.as_ref(),
+            &self.catalog,
+            uri,
+            &target.content,
+            sidecar,
+        )
+        .await;
         if let Err(error) = result {
             warn!(%error, "could not save lyrics to source");
             self.publish(LyricsEvent::SourceSaveFailed {
-                media_id: target.context.media.id.clone(),
+                media_id: target.media_id,
                 error,
             });
-            return;
         }
     }
 
@@ -1380,26 +1362,23 @@ impl LyricsService {
             return;
         };
         let content = lyrics_to_lrc_text(document, 0);
-        let sidecar = self.settings().ui.lyrics.preferences.save_lyrics_as_sidecar;
         let current = self.begin_edited(&media_id);
-        let playable = current
-            .as_ref()
-            .and_then(|request| request.context.playable.clone());
         let service = Arc::clone(self);
         let _task = self.runtime.spawn(async move {
             let uri = &media_id.media_uri;
-            let Some(source) = service.source_of(uri, playable.as_deref()).await else {
+            let Some((source, sidecar)) = service.save_target(uri).await else {
                 return;
             };
             let Ok(_permit) = service.write_lane.acquire().await else {
                 return;
             };
-            match source
-                .write_lyrics(&service.catalog, uri, &content, sidecar)
+            match sources::write_lyrics(source.as_ref(), &service.catalog, uri, &content, sidecar)
                 .await
             {
                 Ok(()) => {
-                    source.refresh_written_lyrics(&service.catalog);
+                    if let Some(source) = &source {
+                        source.refresh_written_lyrics(&service.catalog);
+                    }
                     if let Some(request) = current {
                         service.cache_and_accept(&request, bundle, false).await;
                     }
@@ -1631,8 +1610,18 @@ impl LyricsHandle {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl LyricsHandle {
-    pub fn save_result_to_source(&self, media_id: CurrentMediaId, result: LyricsSearchResult) {
-        self.service.save_result(media_id, result, None);
+    /// Saves a search result in the track's source. False when the setting or the source
+    /// leaves the lyrics to the caller, which then asks where to save a file.
+    pub async fn save_result_to_source(
+        &self,
+        media_id: CurrentMediaId,
+        result: LyricsSearchResult,
+    ) -> bool {
+        let saves = self.saves_to_source(&media_id).await;
+        if saves {
+            self.service.save_result(media_id, result, None);
+        }
+        saves
     }
 }
 
@@ -1641,12 +1630,40 @@ impl LyricsHandle {
         self.service
             .save_current(media_id, offset_millis, Some(path));
     }
+
+    /// Whether a save goes to the track's source, asked when the person saves.
+    async fn saves_to_source(&self, media_id: &CurrentMediaId) -> bool {
+        let service = Arc::clone(&self.service);
+        let uri = media_id.media_uri.clone();
+        self.service
+            .runtime
+            .spawn(async move {
+                service
+                    .settings()
+                    .ui
+                    .lyrics
+                    .preferences
+                    .save_lyrics_to_source
+                    && service.save_target(&uri).await.is_some()
+            })
+            .await
+            .unwrap_or(false)
+    }
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl LyricsHandle {
-    pub fn save_current_to_source(&self, media_id: CurrentMediaId, offset_millis: i64) {
-        self.service.save_current(media_id, offset_millis, None);
+    /// Saves the shown lyrics in the track's source; false as `save_result_to_source`.
+    pub async fn save_current_to_source(
+        &self,
+        media_id: CurrentMediaId,
+        offset_millis: i64,
+    ) -> bool {
+        let saves = self.saves_to_source(&media_id).await;
+        if saves {
+            self.service.save_current(media_id, offset_millis, None);
+        }
+        saves
     }
 
     pub fn update_lyrics_text(&self, media_id: CurrentMediaId, text: String) {

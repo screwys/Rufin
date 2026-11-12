@@ -276,13 +276,9 @@ fn build_lyrics_settings(
     storage.set_visible(settings.save_lyrics_to_source && uses_local_storage());
     let storage_shell = Rc::clone(shell);
     sidecar.connect_toggled(move |button| {
-        if storage_shell.set_lyrics_setting("lyrics storage setting", false, |settings| {
+        storage_shell.set_lyrics_setting("lyrics storage setting", false, |settings| {
             settings.save_lyrics_as_sidecar = button.is_active()
-        }) {
-            if let Some(window_shell) = storage_shell.shell() {
-                window_shell.products.lyrics.refresh_write_access();
-            }
-        }
+        });
     });
 
     let save_shell = Rc::clone(shell);

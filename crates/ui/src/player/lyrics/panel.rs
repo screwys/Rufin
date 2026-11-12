@@ -159,14 +159,15 @@ impl PlayerUi {
         };
         let offset_millis = lyrics.offset_millis.get();
         drop(lyrics);
-        if self.should_save_lyrics_to_source(&media_id) {
-            shell
+        gtk::glib::spawn_future_local(async move {
+            if shell
                 .products
                 .lyrics
-                .save_current_to_source(media_id, offset_millis);
-            return;
-        }
-        gtk::glib::spawn_future_local(async move {
+                .save_current_to_source(media_id.clone(), offset_millis)
+                .await
+            {
+                return;
+            }
             let dialog = gtk::FileDialog::builder()
                 .title(tr("Save Lyrics"))
                 .initial_name(lyrics_save_filename(&current.row.track.metadata.title))
@@ -182,19 +183,6 @@ impl PlayerUi {
                 .lyrics
                 .save_current(media_id, offset_millis, path);
         });
-    }
-
-    fn should_save_lyrics_to_source(&self, media_id: &playback::CurrentMediaId) -> bool {
-        self.shell().is_some_and(|shell| {
-            shell
-                .settings
-                .current
-                .borrow()
-                .lyrics
-                .preferences
-                .save_lyrics_to_source
-                && shell.products.lyrics.current_writable(media_id)
-        })
     }
 
     pub fn present_lyrics_edit_dialog(self: &Rc<Self>) {
@@ -489,14 +477,15 @@ impl PlayerUi {
                 };
                 let media_id = save_media.clone();
                 let result = save_result.clone();
-                if player.should_save_lyrics_to_source(&media_id) {
-                    shell
+                gtk::glib::spawn_future_local(async move {
+                    if shell
                         .products
                         .lyrics
-                        .save_result_to_source(media_id, result);
-                    return;
-                }
-                gtk::glib::spawn_future_local(async move {
+                        .save_result_to_source(media_id.clone(), result.clone())
+                        .await
+                    {
+                        return;
+                    }
                     let dialog = gtk::FileDialog::builder()
                         .title(tr("Save Lyrics"))
                         .initial_name(lyrics_save_filename(&result.track_name))

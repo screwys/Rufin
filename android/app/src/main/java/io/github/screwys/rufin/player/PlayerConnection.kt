@@ -276,9 +276,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         lyricsOwner?.search(token, query)
     }
     fun previewLyrics(token: CurrentMediaId, result: LyricsSearchResult) = action { lyricsOwner?.preview(token, result) }
-    fun saveLyricsResult(token: CurrentMediaId, result: LyricsSearchResult) = action { lyricsOwner?.saveResultToSource(token, result) }
     fun editLyrics(token: CurrentMediaId, text: String) = action { lyricsOwner?.updateLyricsText(token, text) }
-    fun saveLyrics(token: CurrentMediaId) = action { lyricsOwner?.saveCurrentToSource(token, lyricsOffset) }
+    fun saveLyrics(token: CurrentMediaId, export: () -> Unit) = action {
+        if (lyricsOwner?.saveCurrentToSource(token, lyricsOffset) != true) export()
+    }
     fun clearLyrics(token: CurrentMediaId) = action {
         if (currentId != token) return@action
         lyricsOwner?.clearFetched(token)

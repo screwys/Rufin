@@ -95,7 +95,6 @@ internal fun LyricsPanel(player: PlayerConnection, state: LazyListState, selecti
 internal fun LyricsActions(player: PlayerConnection) {
     val current = player.currentLyrics
     val document = current?.document
-    val preferences = player.settings?.lyrics
     val token = player.lyricsToken
     var search by remember { mutableStateOf(false) }
     var edit by remember { mutableStateOf(false) }
@@ -123,8 +122,7 @@ internal fun LyricsActions(player: PlayerConnection) {
                 DropdownMenuItem(text = { Text(translate("Save Lyrics")) }, onClick = {
                     menu = false
                     val captured = token ?: return@DropdownMenuItem
-                    if (preferences?.saveLyricsToSource == true && current.writable) player.saveLyrics(captured)
-                    else {
+                    player.saveLyrics(captured) {
                         exportToken = captured
                         exportOffset = player.lyricsOffset
                         export.launch("${player.currentItem?.metadata?.title.orEmpty()}.lrc")

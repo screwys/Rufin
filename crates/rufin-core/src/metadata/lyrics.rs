@@ -44,63 +44,32 @@ impl MetadataEditor {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
             let session = self.lyrics_session().await?;
-            let storages = match &session.destination {
-                EditDestination::Files(_) => self
-                    .source
-                    .shared
-                    .runtime
-                    .spawn_blocking(move || {
-                        let EditDestination::Files(files) = &session.destination else {
-                            unreachable!()
-                        };
-                        files.lyrics_storage()
-                    })
-                    .await
-                    .map_err(|error| Error::Write(error.to_string()))?,
-                EditDestination::Server { .. } => {
-                    if let Some(source) = session.source.clone() {
-                        let catalog = self.source.shared.catalog.clone();
-                        let uri = session.media_uri.clone();
-                        self.source
-                            .shared
-                            .runtime
-                            .spawn(async move {
-                                let key = catalog
-                                    .track_keys(&[uri], &library::ReadCancellation::new())
-                                    .await
-                                    .ok()?
-                                    .pop()?;
-                                let playable = catalog.playable(key).await.ok()??;
-                                Some(source.lyrics_storage(&playable))
-                            })
-                            .await
-                            .map_err(|error| Error::Write(error.to_string()))?
-                            .unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    }
-                }
-            };
+            let catalog = self.source.shared.catalog.clone();
+            let storages = self
+                .source
+                .shared
+                .runtime
+                .spawn(async move {
+                    sources::lyrics_storage(session.source.as_ref(), &catalog, &session.media_uri)
+                        .await
+                })
+                .await
+                .map_err(|error| Error::Write(error.to_string()))?;
             let stored = self.source.shared.settings.load();
             let settings = &stored.ui;
-            let preferred = if settings.lyrics.preferences.save_lyrics_as_sidecar {
-                LyricsStorage::Sidecar
-            } else {
-                LyricsStorage::Embedded
-            };
             let state = self.state();
             let storage = state
                 .lyrics
                 .as_ref()
                 .map(|lyrics| lyrics.storage)
                 .filter(|storage| storages.contains(storage))
-                .unwrap_or_else(|| {
-                    if storages.contains(&preferred) {
-                        preferred
-                    } else {
-                        storages.first().copied().unwrap_or(LyricsStorage::Server)
-                    }
-                });
+                .or_else(|| {
+                    LyricsStorage::preferred(
+                        &storages,
+                        settings.lyrics.preferences.save_lyrics_as_sidecar,
+                    )
+                })
+                .unwrap_or(LyricsStorage::Server);
             Ok(MetadataLyricsSettings {
                 can_search: settings
                     .lyrics
