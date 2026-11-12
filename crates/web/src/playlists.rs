@@ -1,9 +1,9 @@
 use super::*;
 use library::{PlaylistEntryKey, PlaylistKey};
 
-/// The tracks a playlist add takes: `uris`, or the selected rows of a page or all it lists, as
-/// a queue of that page takes them.
-async fn playlist_selection(
+/// The tracks a playlist add or a delete takes: `uris`, or the selected rows of a page or all
+/// it lists, as a queue of that page takes them.
+pub(super) async fn media_selection(
     products: &ProductHandles,
     uris: Vec<String>,
     page: Option<page::PageToken>,
@@ -305,7 +305,7 @@ pub(super) async fn create(
         ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
+    let selection = media_selection(products, input.uris, input.page, input.ranges).await?;
     let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
@@ -381,7 +381,7 @@ pub(super) async fn add_entries(
         skip_duplicates: bool,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
+    let selection = media_selection(products, input.uris, input.page, input.ranges).await?;
     let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,

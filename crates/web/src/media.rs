@@ -13,6 +13,32 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/favorite", get(selection_favorite).post(favorite))
         .route("/api/queue/radio", post(radio))
         .route("/api/share", post(share))
+        .route("/api/delete", post(delete))
+}
+
+/// Delete permanently: the files of `uris`, or of the selected rows of a page or all it lists.
+async fn delete(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        #[serde(default)]
+        uris: Vec<String>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
+    }
+    let input: Input = body(request).await?;
+    let selection =
+        playlists::media_selection(&products, input.uris, input.page, input.ranges).await?;
+    products
+        .source
+        .delete_selection(selection)
+        .recv()
+        .await
+        .map_err(internal)?
+        .map_err(bad_request)?;
+    Ok(accepted())
 }
 
 pub(super) async fn favorite(

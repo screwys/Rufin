@@ -134,6 +134,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     PreferenceChoice(translate("Update check interval"), state.releaseCheckIntervalHours.toString(),
                         listOf("1" to translate("1 hour"), "6" to translate("6 hours"), "12" to translate("12 hours"), "24" to translate("24 hours")),
                         select = { preferences.changePreference { setReleaseCheckIntervalHours(it.toUInt()) } })
+                    SettingsSwitch(translate("Allow permanently deleting tracks"), state.allowPermanentDelete) { preferences.changePreference { setAllowPermanentDelete(it) } }
                     SettingsLink(null, translate("Listening overview")) { navigate(MoreDestination.OverviewSettings) }
                 }
                 SettingsGroup(translate("Notifications")) {

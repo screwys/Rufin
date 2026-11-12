@@ -107,6 +107,8 @@ pub struct ContextMenuSurface {
     custom_children: RefCell<Vec<ContextMenuCustomChild>>,
     /// Submenu rows whose body runs an action, by label: Play and the radio.
     submenu_actions: RefCell<Vec<(String, String)>>,
+    /// Labels of the actions drawn in the danger accent.
+    destructive: RefCell<Vec<String>>,
     next_action: Cell<usize>,
 }
 
@@ -162,12 +164,17 @@ impl ContextMenuSurface {
             entries: RefCell::new(Vec::new()),
             custom_children: RefCell::new(Vec::new()),
             submenu_actions: RefCell::new(Vec::new()),
+            destructive: RefCell::new(Vec::new()),
             next_action: Cell::new(0),
         }
     }
 
     pub fn popover(&self) -> &gtk::PopoverMenu {
         &self.popover
+    }
+
+    pub fn target(&self) -> &gtk::Widget {
+        &self.target
     }
 
     /// The Play submenu: Play, Play Next and Play Later as `menu` offers them, each also
@@ -257,6 +264,21 @@ impl ContextMenuSurface {
         self.entries
             .borrow_mut()
             .push((ContextMenuSection::Fixed, item));
+    }
+
+    /// An action in the danger accent, last of the download actions: Delete permanently.
+    pub fn append_destructive_action(
+        &self,
+        label: &str,
+        icon_name: &str,
+        run: impl Fn() + 'static,
+    ) {
+        let label = tr(label);
+        let item = menu_action_item(&label, &self.action(true, run), icon_name);
+        self.entries
+            .borrow_mut()
+            .push((ContextMenuSection::Downloads, item));
+        self.destructive.borrow_mut().push(label);
     }
 
     /// An action under a generated name that closes the menu before it runs. Returns its
@@ -433,6 +455,7 @@ impl ContextMenuSurface {
             owner.add_css_class(CONTEXT_MENU_HOVER_HELD_CLASS);
         }
         show_native_menu_icons(&self.popover);
+        mark_destructive(self.popover.upcast_ref(), &self.destructive.into_inner());
         keep_parent_grab_for_nested_native_menus(&self.popover);
         let unmap_handler = Rc::new(RefCell::new(Some(popdown_on_anchor_unmap(
             &self.target,
@@ -831,6 +854,24 @@ fn show_native_menu_icons_from(container: &gtk::Widget) {
             }
         }
         show_native_menu_icons_from(&widget);
+    }
+}
+
+/// Draws the menu buttons labelled `labels` in the danger accent. Menu buttons carry no action
+/// name; they are known by their text.
+fn mark_destructive(container: &gtk::Widget, labels: &[String]) {
+    if labels.is_empty() {
+        return;
+    }
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.type_().name() == "GtkModelButton"
+            && labels.contains(&widget.property::<String>("text"))
+        {
+            widget.add_css_class("rufin-menu-destructive");
+        }
+        mark_destructive(&widget, labels);
     }
 }
 

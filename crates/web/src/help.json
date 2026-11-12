@@ -68,6 +68,7 @@
     "POST /api/sources/refresh": {
       "id": "source ID"
     },
+    "POST /api/delete": "Delete permanently, when Preferences allow it (allow_permanent_delete): the files of {uris:[track URI]}, or of a page's rows with {page} or {page, ranges}. A Jellyfin, Emby or Plex server deletes its tracks itself; a Local, WebDAV or SMB source, or a Subsonic server through its Local File Access folder, has the files deleted. A CUE image is deleted whole with its sheet, when all of its tracks are selected. The tracks leave the library and their downloads are removed.",
     "POST /api/downloads": "Download tracks with {uris:[track URI]}. Each track goes to its source's download location in that source's download quality, as a download started in the app does. Returns without waiting for the downloads.",
     "GET /api/downloads/cache-settings": "Read artwork and lyrics caching choices across all sources and whether artists and albums sort by their sort tags, as {artwork:bool,lyrics:bool,sort_tags:bool}. True downloads automatically; false downloads lazily.",
     "POST /api/downloads/cache-settings": "Set caching choices across all sources and the sort tag choice with {artwork:bool,lyrics:bool,sort_tags:bool}. Automatic downloads include existing and newly scanned entries. Returns the saved choices.",

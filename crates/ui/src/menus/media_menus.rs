@@ -987,6 +987,54 @@ fn append_download_actions(
             move || download(&shell, &payload, true),
         );
     }
+    if menu.delete_permanently {
+        let shell = Rc::clone(shell);
+        let payload = payload.clone();
+        let target = surface.target().downgrade();
+        surface.append_destructive_action(msgid("Delete permanently"), TRASH_ICON, move || {
+            if let Some(target) = target.upgrade() {
+                confirm_delete(&shell, &target, payload.clone());
+            }
+        });
+    }
+}
+
+/// Asks before Delete permanently, then deletes the files of the tracks of `payload`.
+fn confirm_delete(shell: &Rc<Shell>, target: &gtk::Widget, payload: MediaDragSource) {
+    let tr = |text| localization::tr(text);
+    let dialog = adw::AlertDialog::builder()
+        .heading(tr(msgid("Delete Permanently?")))
+        .body(tr(msgid(
+            "The files are deleted where they are stored. This cannot be undone.",
+        )))
+        .build();
+    dialog.add_response("cancel", &tr(msgid("Cancel")));
+    dialog.add_response("delete", &tr(msgid("Delete")));
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    let shell = Rc::clone(shell);
+    dialog.connect_response(Some("delete"), move |_, _| {
+        let payload = payload.clone();
+        let source = shell.products.source.clone();
+        let task = shell.products.runtime.spawn(async move {
+            let selection = payload
+                .track_selection(&source, rufin_core::view::SelectionScope::Downloads)
+                .await?;
+            let reply = source.delete_selection(selection);
+            reply.recv().await.map_err(|error| error.to_string())?
+        });
+        let shell = Rc::clone(&shell);
+        glib::spawn_future_local(async move {
+            let error = match task.await {
+                Ok(Ok(())) => return,
+                Ok(Err(error)) => error,
+                Err(error) => error.to_string(),
+            };
+            shell.control_feedback.show_feedback_toast(error);
+        });
+    });
+    dialog.present(Some(target));
 }
 
 fn append_radio(surface: &ContextMenuSurface, shell: &Shell, label: &str, seed: RadioSeed) {

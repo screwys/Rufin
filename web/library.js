@@ -20,6 +20,7 @@ import { api, browserHeaders, fragment, session, state } from "./connection.js";
 
 import {
   closeMenus,
+  deleteAction,
   openName,
   openPlaylistTransfer,
   playlistMenu,
@@ -522,6 +523,7 @@ async function showTrackMenu(index, row, anchor, event) {
   const destination = menu.go_to && goToMenu(row);
   if (destination) actions.push(null, destination);
   if (menu.share) actions.push(shareAction(menu.share));
+  if (menu.delete_permanently) actions.push(deleteAction(media));
   showMenu(actions, anchor, event);
 }
 
@@ -768,6 +770,8 @@ function bindCard(card) {
       const destination = options.go_to && goToMenu(row);
       if (destination) actions.push(null, destination);
       if (options.share) actions.push(shareAction(options.share));
+      if (options.delete_permanently)
+        actions.push(deleteAction(row.play ? { page: row.play } : { uris: [row.uri] }));
       // The pin closes the menu, as on GTK and Android.
       if (options.pin) actions.push(pinAction(options.pin));
       showMenu(actions, anchor, event);

@@ -728,10 +728,11 @@ impl JellyfinEmbySource {
 }
 
 impl JellyfinEmbySource {
-    pub async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
+    /// Deletes a playlist, or a track with its file.
+    pub async fn delete_item(&self, object_id: &str) -> SourceResult<()> {
         let url = endpoint(
             &self.base_url(),
-            &format!("Items/{}", raw_item_id(playlist_id)),
+            &format!("Items/{}", raw_item_id(object_id)),
         )?;
         self.send_unit(self.client.delete(url)).await
     }

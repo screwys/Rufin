@@ -33,7 +33,7 @@ function menuItems(menu, actions) {
       menu.append(el("hr"));
       continue;
     }
-    const [label, execute, itemIcon, children] = entry;
+    const [label, execute, itemIcon, children, destructive] = entry;
     const name =
       itemIcon ||
       {
@@ -59,7 +59,7 @@ function menuItems(menu, actions) {
         await execute();
       },
       name,
-      "menu-item",
+      destructive ? "menu-item destructive" : "menu-item",
     );
     if (name) item.append(document.createTextNode(label));
     item.setAttribute("role", "menuitem");
@@ -165,6 +165,20 @@ function goToMenu(row) {
 // first in the share dialog. Where the browser gives no clipboard, as over plain http, the link
 // shows to copy by hand.
 let sharing = null;
+
+// Delete permanently, in the danger accent, once the browser confirms it.
+function deleteAction(media) {
+  return [
+    tr("Delete permanently"),
+    async () => {
+      const text = `${tr("Delete Permanently?")}\n${tr("The files are deleted where they are stored. This cannot be undone.")}`;
+      if (confirm(text)) await api("/delete", "POST", media);
+    },
+    "rufin-user-trash-symbolic",
+    undefined,
+    true,
+  ];
+}
 
 function shareAction(share) {
   return [tr("Share"), () => {
@@ -490,6 +504,7 @@ function init() {
 }
 
 export {
+  deleteAction,
   openPlaylistTransfer,
   goToMenu,
   shareAction,

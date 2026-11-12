@@ -861,6 +861,7 @@ fn general_page(
         type_to_search_row: adw::SwitchRow,
         automatic_updates_row: adw::SwitchRow,
         release_check_interval_row: adw::ComboRow,
+        permanent_delete_row: adw::SwitchRow,
         control_notifications_row: adw::SwitchRow,
         notifications_row: adw::SwitchRow,
         release_notifications_row: adw::SwitchRow,
@@ -884,6 +885,12 @@ fn general_page(
         &use_sort_tags_row,
         "sort tag setting",
         |settings| &mut settings.application.use_sort_tags,
+        |_| {},
+    );
+    shell.settings.bind_switch(
+        &permanent_delete_row,
+        "permanent delete setting",
+        |settings| &mut settings.application.allow_permanent_delete,
         |_| {},
     );
 

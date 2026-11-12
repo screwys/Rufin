@@ -231,6 +231,7 @@ internal fun BrowseMenuSheet(
     val item = favoriteItem(model, listed)
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
+    var deletePermanently by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf<Share?>(null) }
     var folderPicker by remember { mutableStateOf(false) }
     val playlistFolder = item.row.playlistFolder
@@ -316,7 +317,7 @@ internal fun BrowseMenuSheet(
                         }
                     }
                 }
-                if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
+                if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", action = onPlaylist)
                 if (offered.favorite) BrowseMenuAction(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     if (item.row.favorite) "Remove from Favorites" else "Add to Favorites") { browse.favorite(item); onDismiss() }
                 offered.folder?.let { inFolder ->
@@ -335,8 +336,8 @@ internal fun BrowseMenuSheet(
                 if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
                 if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
                 offered.share?.let { share -> BrowseMenuAction("rufin-share-symbolic", "Share") { sharing = share } }
-                if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
-                onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
+                if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", action = onMetadata)
+                onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", action = it) }
                 if (playlistFolder != null) {
                     if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
                     if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
@@ -350,6 +351,8 @@ internal fun BrowseMenuSheet(
                     if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
                     if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
                 }
+                if (offered.deletePermanently)
+                    BrowseMenuAction("rufin-user-trash-symbolic", "Delete permanently", destructive = true) { deletePermanently = true }
                 // Details and the pin close the menu, just above the rating.
                 if (item.row.target != null) BrowseMenuAction("rufin-info-symbolic", "Details") { details = true }
                 if (offered.pin != null) BrowseMenuAction("rufin-bookmark-symbolic",
@@ -395,6 +398,12 @@ internal fun BrowseMenuSheet(
             onDismiss()
         } }) { Text(translate("Delete")) } },
         dismissButton = { TextButton({ delete = false }) { Text(translate("Cancel")) } })
+    if (deletePermanently) AlertDialog(onDismissRequest = { deletePermanently = false },
+        title = { Text(translate("Delete Permanently?")) },
+        text = { Text(translate("The files are deleted where they are stored. This cannot be undone.")) },
+        confirmButton = { TextButton({ deletePermanently = false; browse.delete(item); onDismiss() },
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(translate("Delete")) } },
+        dismissButton = { TextButton({ deletePermanently = false }) { Text(translate("Cancel")) } })
 }
 
 /** The share sheet of a row, as its menu's Share and a Share swipe open it. */
@@ -546,9 +555,10 @@ internal fun BrowsePrimaryAction(icon: String, label: String, modifier: Modifier
 }
 
 @Composable
-internal fun BrowseMenuAction(icon: String, label: String, action: () -> Unit) {
-    ListItem(headlineContent = { Text(translate(label)) },
-        leadingContent = { RufinIcon(icon, null, Modifier.size(24.dp)) },
+internal fun BrowseMenuAction(icon: String, label: String, destructive: Boolean = false, action: () -> Unit) {
+    val color = if (destructive) MaterialTheme.colorScheme.error else LocalContentColor.current
+    ListItem(headlineContent = { Text(translate(label), color = color) },
+        leadingContent = { RufinIcon(icon, null, Modifier.size(24.dp), tint = color) },
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         modifier = Modifier.clickable(onClick = action))
 }
