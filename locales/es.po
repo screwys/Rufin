@@ -520,6 +520,9 @@ msgstr "Todos"
 msgid "Allow downloading"
 msgstr "Permitir descargar"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Permitir conexiones remotas"
 
@@ -1293,6 +1296,11 @@ msgstr "Barra derecha por defecto"
 msgid "Default"
 msgstr "Por defecto"
 
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete Permanently?"
+msgstr "Elimininar preajuste"
+
 msgid "Delete Playlist"
 msgstr "Eliminar lista de reproducción"
 
@@ -1302,6 +1310,11 @@ msgstr "¿Elminiar \"{name}\"?"
 
 msgid "Delete folder"
 msgstr "Eliminar carpeta"
+
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete permanently"
+msgstr "Elimininar preajuste"
 
 msgid "Delete playlist file"
 msgstr "Eliminar archivo de lista de reproducción"
@@ -4190,6 +4203,9 @@ msgstr "La pista anclada ya no está"
 
 msgid "The connection no longer exists"
 msgstr "La conexión ya no existe"
+
+msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "ID de álbum de TheAudioDB"

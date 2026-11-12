@@ -528,6 +528,9 @@ msgstr "Visi"
 msgid "Allow downloading"
 msgstr "Lejupielādē"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Atļaut attālinātās savienojumus"
 
@@ -1444,6 +1447,11 @@ msgstr "Noklusējuma labais sānu panelis"
 msgid "Default"
 msgstr "Noklusējums"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete Permanently?"
+msgstr "Ielīmēt iepriekš iestatīto"
+
 msgid "Delete Playlist"
 msgstr "Dzēst atskaņošanas sarakstu"
 
@@ -1455,6 +1463,11 @@ msgstr "Dzēst \"{name}\"?"
 #| msgid "Selected folders"
 msgid "Delete folder"
 msgstr "Atlasītās mapes"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete permanently"
+msgstr "Ielīmēt iepriekš iestatīto"
 
 msgid "Delete playlist file"
 msgstr "Dzēst atskaņošanas saraksta failu"
@@ -4695,6 +4708,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"

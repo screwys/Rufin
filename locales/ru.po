@@ -522,6 +522,9 @@ msgstr "Все"
 msgid "Allow downloading"
 msgstr "Разрешить загрузку"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Разрешить удалённые подключения"
 
@@ -1295,6 +1298,11 @@ msgstr "Правая боковая панель по умолчанию"
 msgid "Default"
 msgstr "По умолчанию"
 
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete Permanently?"
+msgstr "Удалить пресет"
+
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
 
@@ -1304,6 +1312,11 @@ msgstr "Удалить \"{name}\"?"
 
 msgid "Delete folder"
 msgstr "Удалить папку"
+
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete permanently"
+msgstr "Удалить пресет"
 
 msgid "Delete playlist file"
 msgstr "Удалить файл плейлиста"
@@ -4172,6 +4185,9 @@ msgstr "Закрепленный трек исчез"
 
 msgid "The connection no longer exists"
 msgstr "Соединение больше не существует"
+
+msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "Идентификатор альбома TheAudioDB"

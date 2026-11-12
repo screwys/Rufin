@@ -514,6 +514,9 @@ msgstr "Tutto"
 msgid "Allow downloading"
 msgstr "Scaricando"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Consenti connessioni remote"
 
@@ -1403,6 +1406,11 @@ msgstr "Barra laterale di destra predefinita"
 msgid "Default"
 msgstr "Predefinito"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete Permanently?"
+msgstr "Cancella Playlist"
+
 msgid "Delete Playlist"
 msgstr "Cancella Playlist"
 
@@ -1414,6 +1422,11 @@ msgstr "Sei sicuro di cancellare \"{name}\"?"
 #| msgid "Add folder"
 msgid "Delete folder"
 msgstr "Aggiungi cartella"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete permanently"
+msgstr "Cancella Playlist"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -4415,6 +4428,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"

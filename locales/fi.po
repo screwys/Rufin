@@ -488,6 +488,9 @@ msgstr "Kaikki"
 msgid "Allow downloading"
 msgstr "Ladataan"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Salli etäyhteydet"
 
@@ -1409,6 +1412,11 @@ msgstr "Oletusarvoinen oikea sivupalkki"
 msgid "Default"
 msgstr "Oletus"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete Permanently?"
+msgstr "Liitä esiasetus"
+
 msgid "Delete Playlist"
 msgstr "Poista soittolista"
 
@@ -1420,6 +1428,11 @@ msgstr "Poistetaanko \"{name}\"?"
 #| msgid "Selected folders"
 msgid "Delete folder"
 msgstr "Valitut kansiot"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete permanently"
+msgstr "Liitä esiasetus"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -4690,6 +4703,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"

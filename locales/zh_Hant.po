@@ -486,6 +486,9 @@ msgstr ""
 msgid "Allow downloading"
 msgstr "正在下載"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr ""
 
@@ -1442,6 +1445,11 @@ msgstr "預設右側邊欄"
 msgid "Default"
 msgstr "回復預設值"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete Permanently?"
+msgstr "預設集"
+
 msgid "Delete Playlist"
 msgstr "刪除播放清單"
 
@@ -1453,6 +1461,11 @@ msgstr ""
 #| msgid "Select Music Folder"
 msgid "Delete folder"
 msgstr "選擇音樂資料夾"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete permanently"
+msgstr "預設集"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -4785,6 +4798,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"
