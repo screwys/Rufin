@@ -524,6 +524,9 @@ msgstr "Kõik"
 msgid "Allow downloading"
 msgstr "Allalaadimisel"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Liba kasutada kaugühendusi"
 
@@ -1300,6 +1303,11 @@ msgstr "Vaikimisi parem külgpaan"
 msgid "Default"
 msgstr "Vaikimisi"
 
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete Permanently?"
+msgstr "Kustuta eelseadistus"
+
 msgid "Delete Playlist"
 msgstr "Kustuta esitusloend"
 
@@ -1309,6 +1317,11 @@ msgstr "Kas kustutad: „{name}“?"
 
 msgid "Delete folder"
 msgstr "Kustuta kaust"
+
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete permanently"
+msgstr "Kustuta eelseadistus"
 
 msgid "Delete playlist file"
 msgstr "Kustuta esitusloendi fail"
@@ -4214,6 +4227,9 @@ msgstr ""
 
 msgid "The connection no longer exists"
 msgstr "Seda ühendust pole enam olemas"
+
+msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB albumi tunnus"

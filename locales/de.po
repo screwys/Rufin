@@ -532,6 +532,9 @@ msgstr "Alle"
 msgid "Allow downloading"
 msgstr "Wird heruntergeladen"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr "Remote-Verbindungen erlauben"
 
@@ -1308,6 +1311,11 @@ msgstr "Standard-Seitenleiste rechts"
 msgid "Default"
 msgstr "Standard"
 
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete Permanently?"
+msgstr "Voreinstellung löschen"
+
 msgid "Delete Playlist"
 msgstr "Playlist löschen"
 
@@ -1317,6 +1325,11 @@ msgstr "„{name}“ löschen?"
 
 msgid "Delete folder"
 msgstr "Ordner löschen"
+
+#, fuzzy
+#| msgid "Delete preset"
+msgid "Delete permanently"
+msgstr "Voreinstellung löschen"
 
 msgid "Delete playlist file"
 msgstr "Playlist-Datei löschen"
@@ -4237,6 +4250,9 @@ msgstr ""
 
 msgid "The connection no longer exists"
 msgstr "Die Verbindung existiert nicht mehr"
+
+msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB-Album-ID"

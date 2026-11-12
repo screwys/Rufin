@@ -499,6 +499,9 @@ msgstr ""
 msgid "Allow downloading"
 msgstr "Stahování"
 
+msgid "Allow permanently deleting tracks"
+msgstr ""
+
 msgid "Allow remote connections"
 msgstr ""
 
@@ -1479,6 +1482,11 @@ msgstr "Výchozí pravý postranní panel"
 msgid "Default"
 msgstr "Obnovit výchozí"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete Permanently?"
+msgstr "Předvolba"
+
 msgid "Delete Playlist"
 msgstr "Smazat playlist"
 
@@ -1490,6 +1498,11 @@ msgstr ""
 #| msgid "Select Music Folder"
 msgid "Delete folder"
 msgstr "Vybrat složku s hudbou"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete permanently"
+msgstr "Předvolba"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -4895,6 +4908,9 @@ msgid "The anchored track is gone"
 msgstr ""
 
 msgid "The connection no longer exists"
+msgstr ""
+
+msgid "The files are deleted where they are stored. This cannot be undone."
 msgstr ""
 
 msgid "TheAudioDB album ID"
