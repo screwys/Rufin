@@ -177,7 +177,8 @@ mod tests {
     #[tokio::test]
     async fn deleting_local_and_opened_tracks_removes_their_files() {
         let directory = tempfile::tempdir().unwrap();
-        let music = directory.path().join("music");
+        // Local tracks are known by their canonical path; macOS keeps temporary files under a link.
+        let music = directory.path().canonicalize().unwrap().join("music");
         std::fs::create_dir(&music).unwrap();
         let (kept, deleted) = (music.join("kept.wav"), music.join("deleted.wav"));
         std::fs::write(&kept, silent_wav()).unwrap();
