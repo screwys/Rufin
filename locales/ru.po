@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 17:44+0000\n"
+"PO-Revision-Date: 2026-11-12 16:44+0000\n"
 "Last-Translator: Александр Стельмах "
 "<aguhadug@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
@@ -523,7 +523,7 @@ msgid "Allow downloading"
 msgstr "Разрешить загрузку"
 
 msgid "Allow permanently deleting tracks"
-msgstr ""
+msgstr "Разрешить безвозвратное удаление треков"
 
 msgid "Allow remote connections"
 msgstr "Разрешить удалённые подключения"
@@ -546,10 +546,8 @@ msgstr "Любой жанр"
 msgid "Any"
 msgstr "Любой"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "App icon"
-msgstr "Настройки приложения"
+msgstr "Иконка приложения"
 
 msgid "App settings"
 msgstr "Настройки приложения"
@@ -991,10 +989,8 @@ msgstr "Коллекции"
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
 
-#, fuzzy
-#| msgid "Color scheme"
 msgid "Colored"
-msgstr "Цветовая схема"
+msgstr "Цветной"
 
 msgid "Column borders"
 msgstr "Границы столбцов"
@@ -1298,10 +1294,8 @@ msgstr "Правая боковая панель по умолчанию"
 msgid "Default"
 msgstr "По умолчанию"
 
-#, fuzzy
-#| msgid "Delete preset"
 msgid "Delete Permanently?"
-msgstr "Удалить пресет"
+msgstr "Удалить безвозвратно?"
 
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
@@ -1313,10 +1307,8 @@ msgstr "Удалить \"{name}\"?"
 msgid "Delete folder"
 msgstr "Удалить папку"
 
-#, fuzzy
-#| msgid "Delete preset"
 msgid "Delete permanently"
-msgstr "Удалить пресет"
+msgstr "Удалить безвозвратно"
 
 msgid "Delete playlist file"
 msgstr "Удалить файл плейлиста"
@@ -4136,7 +4128,7 @@ msgid "Switching library..."
 msgstr "Переключение библиотеки…"
 
 msgid "Symbolic"
-msgstr ""
+msgstr "Символический"
 
 msgid "Sync folder"
 msgstr "Папка синхронизации"
@@ -4187,7 +4179,7 @@ msgid "The connection no longer exists"
 msgstr "Соединение больше не существует"
 
 msgid "The files are deleted where they are stored. This cannot be undone."
-msgstr ""
+msgstr "Файлы удаляются из места их хранения. Это действие нельзя отменить."
 
 msgid "TheAudioDB album ID"
 msgstr "Идентификатор альбома TheAudioDB"
@@ -4306,10 +4298,8 @@ msgstr "Режим перехода"
 msgid "Translation language"
 msgstr "Язык перевода"
 
-#, fuzzy
-#| msgid "Show tray icon"
 msgid "Tray icon"
-msgstr "Показывать значок в системном трее"
+msgstr "Иконка в трее"
 
 msgid "Treble"
 msgstr "Высокие частоты"
