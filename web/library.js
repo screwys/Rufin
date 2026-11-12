@@ -1,4 +1,5 @@
 import { openMetadata } from "./metadata.js";
+import { openSmartPlaylist } from "./smart-playlists.js";
 import { tr } from "./ui.js";
 import {
   closeFullscreen,
@@ -281,6 +282,7 @@ function showPage(data) {
   $("library-toolbar").hidden = data.section === "Home";
   $("play-collection").hidden = data.play !== "true";
   $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
+  $("new-smart-playlist").hidden = !(opened.route === "SmartPlaylists" || opened.route.PlaylistFolder?.smart);
   if (data.sorts) {
     $("sort").replaceChildren(
       ...JSON.parse(data.sorts).map(([name, title]) => new Option(title, name)),
@@ -685,6 +687,10 @@ function init() {
   );
   $("play-collection").addEventListener("click", () => run(playCollection));
   $("new-playlist").addEventListener("click", () => run(() => openName()));
+  // New Smart Playlist goes into the smart playlist folder the page shows, as on GTK.
+  $("new-smart-playlist").addEventListener("click", () =>
+    run(() => openSmartPlaylist({ folder: opened.route.PlaylistFolder?.key ?? null })),
+  );
 }
 
 function bindCards(host) {
@@ -747,7 +753,8 @@ function bindCard(card) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite(row, kind),
         ]);
-      // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
+      // The web's playlist dialogs edit, export and delete playlists and edit smart ones, not
+      // folders.
       if (options.export && kind === "playlist")
         actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
       if (options.remove_unavailable)
@@ -757,6 +764,8 @@ function bindCard(card) {
           "rufin-user-trash-symbolic",
         ]);
       if (options.edit && kind === "playlist") actions.push([tr("Edit"), () => openName(row)]);
+      if (options.edit && kind === "smart-playlist")
+        actions.push([tr("Edit"), () => openSmartPlaylist({ key: row.id })]);
       if (options.delete && kind === "playlist")
         actions.push([
           tr("Delete Playlist"),

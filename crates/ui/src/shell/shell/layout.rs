@@ -377,6 +377,18 @@ fn resolve_layout_for_profile(
     }
 }
 
+/// The mini player has no pages for dialogs and no room for them. Dialogs that ask before closing
+/// still ask; on macOS and Windows they are their own windows and stay.
+fn close_dialogs(window: &gtk::ApplicationWindow) {
+    let Some(window) = window.downcast_ref::<adw::ApplicationWindow>() else {
+        return;
+    };
+    let dialogs: Vec<adw::Dialog> = window.dialogs().iter().filter_map(Result::ok).collect();
+    for dialog in dialogs.iter().rev() {
+        dialog.close();
+    }
+}
+
 #[cfg(test)]
 fn right_sidebar_allocation_position(split_width: i32, requested_right_width: i32) -> Option<i32> {
     let available_right = split_width - MIN_USEFUL_MAIN_WIDTH - RIGHT_PANE_SEPARATOR_WIDTH;
@@ -638,6 +650,17 @@ impl Shell {
         // The bar spans the window, so it follows the size chosen here rather than its own
         // allocation, which stays at its old minimum until this layout takes effect.
         let width_changed = self.player_ui.views.player_controls.width.replace(width) != width;
+        if mini != crate::player::MiniPlayer::Off
+            && self.player_ui.mini.get() == crate::player::MiniPlayer::Off
+        {
+            // Closing starts animations and may ask, so it waits for the allocation to end.
+            let window = self.chrome.window.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(window) = window.upgrade() {
+                    close_dialogs(&window);
+                }
+            });
+        }
         self.player_ui.apply_mini_player(mini);
         if width_changed {
             self.player_ui.apply_bottom_player_layout();

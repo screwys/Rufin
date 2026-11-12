@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkListBoxRow" id="row">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <property name="child">
+      <object class="GtkBox" id="group">
+        <property name="orientation">vertical</property>
+        <property name="spacing">8</property>
+        <property name="margin-top">10</property>
+        <property name="margin-bottom">10</property>
+        <property name="margin-start">10</property>
+        <property name="margin-end">10</property>
+        <child>
+          <object class="GtkBox">
+            <property name="spacing">8</property>
+            <child>
+              <object class="GtkDropDown" id="matching">
+                <property name="valign">center</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item translatable="yes">All</item>
+                      <item translatable="yes">Any</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child><object class="GtkLabel"><property name="label" translatable="yes">of these</property><property name="xalign">0</property><property name="hexpand">true</property></object></child>
+            <child>
+              <object class="GtkButton" id="remove">
+                <property name="icon-name">rufin-list-remove-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Remove group</property>
+                <property name="valign">center</property>
+                <style><class name="flat"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkListBox" id="rules">
+            <property name="selection-mode">none</property>
+            <style><class name="boxed-list"/><class name="smart-playlist-group"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="add_rule">
+            <property name="halign">start</property>
+            <style><class name="flat"/></style>
+            <property name="child"><object class="AdwButtonContent"><property name="icon-name">rufin-list-add-symbolic</property><property name="label" translatable="yes">Add rule</property></object></property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

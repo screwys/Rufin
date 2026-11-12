@@ -41,7 +41,7 @@ impl Drop for CancelReadOnDrop {
     }
 }
 
-async fn run_read<T, F>(
+pub(crate) async fn run_read<T, F>(
     runtime: &tokio::runtime::Handle,
     read: impl FnOnce(ReadCancellation) -> F,
 ) -> Result<T, AndroidError>

@@ -671,6 +671,8 @@ pub(crate) struct Inputs {
     pub(crate) smart: Option<Arc<Vec<i64>>>,
     /// The listens a History order shows.
     pub(crate) history: Vec<Listen>,
+    /// The time smart playlists are evaluated at, in unix seconds.
+    pub(crate) now: i64,
 }
 
 /// Whether `parts` and `year`, joined by spaces and lowercased, hold the lowercase `text`; a
@@ -1540,7 +1542,14 @@ impl Context<'_> {
         let folder = self.list_folder(read).flatten();
         let mut totals = HashMap::<i64, Totals>::new();
         let every_source = read.source.is_none();
-        for item in self.playlist_items(read, folder, &Inputs::default(), every_source) {
+        let inputs = Inputs {
+            now: match read.kind {
+                ListKind::SmartPlaylists { now } => now,
+                _ => 0,
+            },
+            ..Inputs::default()
+        };
+        for item in self.playlist_items(read, folder, &inputs, every_source) {
             if let Some(owner) = item.folder {
                 let total = totals.entry(owner).or_default();
                 total.tracks += item.totals.tracks;
@@ -1904,7 +1913,6 @@ impl Context<'_> {
         let text = |id: StrId| Fact::Text(Some(Cow::Borrowed(snapshot.text(id))));
         match field {
             F::Title => text(record.title),
-            F::Artist => text(record.artist),
             F::Album => text(record.album_title),
             F::Comment => Fact::Text(
                 (record.comment != StrId::NONE)
@@ -1928,7 +1936,12 @@ impl Context<'_> {
                     .last
                     .and_then(date_text),
             ),
-            F::Genre | F::Mood => unreachable!("tag rules read the track's tags"),
+            F::Compilation => Fact::Number(Some(i64::from(self.album_of(record).is_some_and(
+                |album| self.snapshot.albums.records[album as usize].flags & COMPILATION != 0,
+            )))),
+            F::Artist | F::Genre | F::Mood | F::Playlist => {
+                unreachable!("these rules read the track's links")
+            }
         }
     }
 
@@ -1938,6 +1951,8 @@ impl Context<'_> {
         record: &TrackRec,
         rule: &crate::SmartPlaylistRule,
         period: Option<&HashMap<i64, Played>>,
+        now: i64,
+        playlists: &HashMap<&str, HashSet<u32>>,
     ) -> bool {
         use crate::SmartPlaylistRuleField as F;
         use crate::SmartPlaylistRuleOperator as O;
@@ -1945,21 +1960,52 @@ impl Context<'_> {
         if !rule.field.operators().contains(&rule.operator) {
             return false;
         }
-        if matches!(rule.field, F::Genre | F::Mood) {
-            let kind = if rule.field == F::Genre {
-                TagKind::Genre
-            } else {
-                TagKind::Mood
+        if let (F::Playlist, Some(V::Playlist(object))) = (rule.field, &rule.value) {
+            let held = playlists
+                .get(object.as_str())
+                .is_some_and(|tracks| tracks.contains(&slot));
+            return held == (rule.operator == O::Is);
+        }
+        if let (O::InTheLast | O::NotInTheLast, Some(V::Number(days))) =
+            (rule.operator, &rule.value)
+        {
+            let at = match rule.field {
+                F::DateAdded => known(record.added),
+                _ => self.smart_played(slot, record, rule.field, period).last,
             };
-            let names = self.snapshot.track_runs(record)[2]
-                .iter()
-                .filter(|slot| self.tag_kind(**slot) == Some(kind))
-                .map(|slot| {
-                    self.snapshot
-                        .text(self.snapshot.tags.records[*slot as usize].name)
-                        .to_lowercase()
-                })
-                .collect::<Vec<_>>();
+            let since = now - days * 86_400;
+            let recent = at.is_some_and(|at| i64::from(at) >= since);
+            return recent == (rule.operator == O::InTheLast);
+        }
+        // Artists and tags match each one the track links, as their pages list the track.
+        if matches!(rule.field, F::Artist | F::Genre | F::Mood) {
+            let snapshot = self.snapshot;
+            let names = match rule.field {
+                F::Artist => snapshot.track_runs(record)[0]
+                    .iter()
+                    .map(|slot| {
+                        snapshot
+                            .text(snapshot.artists.records[*slot as usize].name)
+                            .to_lowercase()
+                    })
+                    .collect::<Vec<_>>(),
+                _ => {
+                    let kind = if rule.field == F::Genre {
+                        TagKind::Genre
+                    } else {
+                        TagKind::Mood
+                    };
+                    snapshot.track_runs(record)[2]
+                        .iter()
+                        .filter(|slot| self.tag_kind(**slot) == Some(kind))
+                        .map(|slot| {
+                            snapshot
+                                .text(snapshot.tags.records[*slot as usize].name)
+                                .to_lowercase()
+                        })
+                        .collect::<Vec<_>>()
+                }
+            };
             return match (rule.operator, &rule.value) {
                 (O::IsEmpty, _) => names.is_empty(),
                 (O::IsNotEmpty, _) => !names.is_empty(),
@@ -1982,7 +2028,7 @@ impl Context<'_> {
             };
         }
         let fact = self.smart_fact(slot, record, rule.field, period);
-        if rule.field == F::Played {
+        if matches!(rule.field, F::Played | F::Compilation) {
             let (Some(V::Bool(value)), Fact::Number(Some(plays))) = (&rule.value, &fact) else {
                 return false;
             };
@@ -2046,6 +2092,7 @@ impl Context<'_> {
         record: &TrackRec,
         definition: &SmartPlaylistDefinition,
         period: Option<&HashMap<i64, Played>>,
+        now: i64,
     ) -> Option<SortValue> {
         use crate::SmartPlaylistRuleField as F;
         use crate::SmartPlaylistSort as S;
@@ -2071,6 +2118,8 @@ impl Context<'_> {
             S::SkipCount => Some(SortValue::Number(i64::from(
                 self.smart_played(slot, record, F::SkipCount, period).skips,
             ))),
+            // A shuffle that holds for one evaluation time.
+            S::Random => Some(SortValue::Number(shuffled(record.key, now))),
         }
     }
 
@@ -2097,6 +2146,22 @@ impl Context<'_> {
             .activity_period
             .seconds()
             .and_then(|seconds| inputs.periods.get(&Some(seconds)));
+        // The tracks of each playlist the rules name, by object id.
+        let mut playlists = HashMap::<&str, HashSet<u32>>::new();
+        for rule in definition.rules() {
+            if let Some(crate::SmartPlaylistRuleValue::Playlist(object)) = &rule.value
+                && rule.field == crate::SmartPlaylistRuleField::Playlist
+                && !playlists.contains_key(object.as_str())
+            {
+                let tracks = snapshot
+                    .playlists
+                    .iter()
+                    .find(|(_, playlist)| snapshot.text(playlist.object) == object)
+                    .map(|(_, playlist)| playlist.entries.iter().map(|entry| entry.track).collect())
+                    .unwrap_or_default();
+                playlists.insert(object.as_str(), tracks);
+            }
+        }
         snapshot
             .tracks
             .iter()
@@ -2108,15 +2173,9 @@ impl Context<'_> {
                 })
             })
             .filter(move |(slot, record)| {
-                definition
-                    .match_all
-                    .iter()
-                    .all(|rule| self.smart_rule(*slot, record, rule, period))
-                    && (definition.match_any.is_empty()
-                        || definition
-                            .match_any
-                            .iter()
-                            .any(|rule| self.smart_rule(*slot, record, rule, period)))
+                definition.holds(|rule| {
+                    self.smart_rule(*slot, record, rule, period, inputs.now, &playlists)
+                })
             })
     }
 
@@ -2137,15 +2196,17 @@ impl Context<'_> {
             .matching(definition, inputs, folder)
             .map(|(slot, record)| {
                 (
-                    self.smart_sort(slot, record, definition, period),
+                    self.smart_sort(slot, record, definition, period, inputs.now),
                     snapshot.track_sort(record),
                     record.key,
                     slot,
                 )
             })
             .collect::<Vec<_>>();
+        let descending =
+            definition.descending && definition.sort_field != crate::SmartPlaylistSort::Random;
         members.sort_by(|a, b| {
-            nulls_last(a.0.as_ref(), b.0.as_ref(), definition.descending)
+            nulls_last(a.0.as_ref(), b.0.as_ref(), descending)
                 .then_with(|| a.1.cmp(&b.1))
                 .then(a.2.cmp(&b.2))
         });
@@ -2154,6 +2215,14 @@ impl Context<'_> {
         }
         members.into_iter().map(|member| member.3).collect()
     }
+}
+
+/// A track's place in the shuffle of time `now`: splitmix64 of both.
+fn shuffled(key: u32, now: i64) -> i64 {
+    let mut mixed = (u64::from(key) << 32 ^ now as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (mixed ^ (mixed >> 31)) as i64
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -2182,24 +2251,8 @@ fn evaluated(
 
 /// The listen windows a smart playlist reads: None when its rules need none.
 pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> {
-    use crate::SmartPlaylistRuleField as F;
-    use crate::SmartPlaylistSort as S;
     let seconds = definition.activity_period.seconds()?;
-    let sorted = matches!(
-        definition.sort_field,
-        S::PlayCount | S::SkipCount | S::LastPlayed
-    );
-    let ruled = definition
-        .match_all
-        .iter()
-        .chain(&definition.match_any)
-        .any(|rule| {
-            matches!(
-                rule.field,
-                F::Played | F::PlayCount | F::SkipCount | F::LastPlayed
-            )
-        });
-    (sorted || ruled).then_some(seconds)
+    definition.reads_plays().then_some(seconds)
 }
 
 /// Orders, totals and other values built from the Catalog, kept while the stamps they depend on
@@ -2858,6 +2911,7 @@ impl Catalog {
         periods: Vec<i64>,
         now: i64,
     ) -> LibraryResult<()> {
+        inputs.now = now;
         let mut periods = periods
             .into_iter()
             .filter(|seconds| !inputs.periods.contains_key(&Some(*seconds)))
