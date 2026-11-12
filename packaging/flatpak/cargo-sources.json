@@ -1419,14 +1419,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/constant_time_eq/constant_time_eq-0.6.0.crate",
-        "sha256": "6187e670c346a04bcbf5def0393d57ec0e5ab56565cde6be4a7cbdb6cdc2f3f6",
-        "dest": "cargo/vendor/constant_time_eq-0.6.0"
+        "url": "https://static.crates.io/crates/constant_time_eq/constant_time_eq-0.6.1.crate",
+        "sha256": "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9",
+        "dest": "cargo/vendor/constant_time_eq-0.6.1"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"6187e670c346a04bcbf5def0393d57ec0e5ab56565cde6be4a7cbdb6cdc2f3f6\", \"files\": {}}",
-        "dest": "cargo/vendor/constant_time_eq-0.6.0",
+        "contents": "{\"package\": \"9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9\", \"files\": {}}",
+        "dest": "cargo/vendor/constant_time_eq-0.6.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
