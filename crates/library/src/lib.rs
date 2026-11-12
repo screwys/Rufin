@@ -142,10 +142,10 @@ pub use queue::{
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistCopy, SmartPlaylistDefinition, SmartPlaylistRow,
+    SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,
+    SmartPlaylistDefinition, SmartPlaylistFieldSection, SmartPlaylistMatch, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
-    SmartPlaylistWrite,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueChoice, SmartPlaylistWrite,
 };
 pub use tracks::{TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView};
 

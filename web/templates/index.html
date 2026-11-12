@@ -20,6 +20,7 @@
     {% include "equalizer.html" %}
     {% include "preferences.html" %}
     {% include "metadata.html" %}
+    {% include "smart_playlist.html" %}
     <dialog id="login-dialog" aria-labelledby="login-title" {% if !page.connected %}open{% endif %}>
       <form id="login-form" method="post" action="/session">
         <div class="login-heading">
@@ -167,6 +168,8 @@
           <button type="button" id="new-playlist" {% if !page.playlists %}hidden{% endif %}>
             {% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("New Playlist") }}</button>
           <button type="button" id="import-playlist" {% if !page.playlists %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
+          <button type="button" id="new-smart-playlist" hidden>
+            {% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("New Smart Playlist") }}</button>
         </form>
         <div id="source-progress" role="status" hidden>
           <span id="source-progress-label"></span>

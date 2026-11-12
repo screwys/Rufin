@@ -1,0 +1,41 @@
+<dialog id="smart-dialog" aria-labelledby="smart-title">
+  <form id="smart-form" class="smart">
+    <header class="smart-header">
+      <button type="button" data-close="smart-dialog">{{ localization::tr("Cancel") }}</button>
+      <div class="smart-heading">
+        <h2 id="smart-title">{{ localization::tr("New Smart Playlist") }}</h2>
+        <small id="smart-count" role="status"></small>
+      </div>
+      <button type="submit" id="smart-save" class="primary">{{ localization::tr("Create") }}</button>
+    </header>
+    <div class="smart-body">
+      <input id="smart-name" placeholder="{{ localization::tr("Playlist name") }}" aria-label="{{ localization::tr("Playlist name") }}" />
+      <section id="smart-templates" class="smart-section">
+        <h3>{{ localization::tr("Start from") }}</h3>
+        <div id="smart-template-list" class="smart-chips"></div>
+      </section>
+      <section class="smart-section">
+        <h3 id="smart-match" class="smart-match"></h3>
+        <div id="smart-rules" class="smart-rules"></div>
+        <div class="smart-adds">
+          <button type="button" class="smart-add" id="smart-add-rule">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("Add rule") }}</button>
+          <button type="button" class="smart-add" id="smart-add-group">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("Add group") }}</button>
+        </div>
+      </section>
+      <section class="smart-section">
+        <h3>{{ localization::tr("Order") }}</h3>
+        <div class="pref-group">
+          <div class="pref-row">
+            <span class="pref-label" id="smart-sort-label">{{ localization::tr("Sort by") }}</span>
+            <select id="smart-sort" aria-labelledby="smart-sort-label"></select>
+            <button type="button" class="icon-button" id="smart-descending" aria-pressed="false" title="{{ localization::tr("Change sort order") }}" aria-label="{{ localization::tr("Change sort order") }}">{% call m::icon("rufin-sort-name-symbolic") %}{% endcall %}</button>
+          </div>
+          <label class="pref-row"><span class="pref-label">{{ localization::tr("Limit") }}</span><input id="smart-limit" inputmode="numeric" placeholder="{{ localization::tr("No limit") }}" /></label>
+          <label class="pref-row" id="smart-period-row"><span class="pref-label">{{ localization::tr("Plays from") }}</span><select id="smart-period"></select></label>
+          <label class="pref-row" id="smart-source-row"><span class="pref-label">{{ localization::tr("Source") }}</span><select id="smart-source"></select></label>
+        </div>
+      </section>
+    </div>
+    <div id="smart-suggestions" class="smart-suggestions" popover="manual" role="listbox"></div>
+  </form>
+</dialog>
