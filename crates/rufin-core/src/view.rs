@@ -1127,6 +1127,10 @@ impl View {
             &self.options,
             changed,
         );
+        // Plays change Home only where it shows Rufin's own play blocks.
+        if changed.listened && matches!(&self.body, Body::Home(home) if home.reads_plays) {
+            return refresh.max(Refresh::Reread);
+        }
         // A missing page has nothing to read again; it opens again.
         if matches!(self.body, Body::Missing) && refresh == Refresh::Reread {
             return Refresh::Reopen;
@@ -2348,6 +2352,8 @@ fn changes(
                         read_order(route, &options, &settings).2
                     })
             }
+            // Home answers for its own blocks in `View::refresh`.
+            Route::Home => false,
             _ => read_order(route, options, &settings).2,
         };
         if sensitive {
@@ -2494,10 +2500,7 @@ fn uses_activity(route: &Route, options: &OpenOptions, settings: &LibraryListSet
     let layout = options.layout.unwrap_or(settings.layout);
     matches!(
         route,
-        Route::Home
-            | Route::SmartPlaylists
-            | Route::PlaylistFolder { smart: true, .. }
-            | Route::History
+        Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } | Route::History
     ) || settings.sort_key.activity_sensitive()
         || match layout {
             LibraryLayout::Grid => &settings.grid_fields,
