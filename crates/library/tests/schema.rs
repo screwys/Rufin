@@ -70,7 +70,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     .await;
     let mut raw = connection(&path, false).await;
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(NULL,'source',?1,'Snapshot','Artist','Album',100,'1970-01',100000,90000,0)").bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at) VALUES('rufin:source/track/source/track-a','lifetime',4,2,90);").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     fixture.catalog.close().await.unwrap();
     let mut before = durable_rows(&path).await;
@@ -312,6 +312,75 @@ async fn newer_store_keeps_its_compatible_columns() {
 }
 
 #[tokio::test]
+async fn store_of_0_17_moves_its_counts_into_play_counts() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    Catalog::open(&path).await.unwrap().close().await.unwrap();
+    let mut raw = connection(&path, false).await;
+    // 0.17 kept counts by source and object id, and a file-library track's 0.16 baseline as a
+    // native count it never shows.
+    sqlx::raw_sql("INSERT INTO sources(source_key,object_id,kind) VALUES (1,'files','local'),(2,'server','jellyfin');
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,indexed,native_play_count,native_last_played) VALUES
+            (1,1,'local:track:1','file:///one.flac','One',1,100,50),
+            (2,2,'s1','rufin:source/track/server/s1','Server',1,7,20);
+        DROP TABLE play_counts;
+        CREATE TABLE legacy_activity(source_id TEXT NOT NULL,period TEXT NOT NULL,item_kind TEXT NOT NULL,track_object_id TEXT NOT NULL,play_count INTEGER NOT NULL,skip_count INTEGER NOT NULL,last_played_at INTEGER,title TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',album TEXT NOT NULL DEFAULT '',PRIMARY KEY(source_id,period,item_kind,track_object_id)) STRICT;
+        INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES
+            ('files','lifetime','track','local:track:1',3,1,40),
+            ('server','2024-05','track','gone',2,0,30),
+            ('server','lifetime','artist','a',9,0,NULL);
+        PRAGMA user_version=60;")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    Catalog::open_installation(
+        &path,
+        &path.with_extension("released.sqlite"),
+        &path.with_extension("catalog.sqlite"),
+    )
+    .await
+    .unwrap()
+    .close()
+    .await
+    .unwrap();
+    let mut raw = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, i64, i64, Option<i64>)>(
+            "SELECT media_uri,period,plays,skips,last_played_at FROM play_counts ORDER BY media_uri"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![
+            (
+                "file:///one.flac".into(),
+                "lifetime".into(),
+                103,
+                1,
+                Some(50)
+            ),
+            (
+                "rufin:source/track/server/gone".into(),
+                "2024-05".into(),
+                2,
+                0,
+                Some(30)
+            ),
+        ]
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (Option<i64>,)>(
+            "SELECT native_play_count FROM tracks ORDER BY track_key"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![(None,), (Some(7),)]
+    );
+}
+
+#[tokio::test]
 async fn released_store_imports_old_playlist_artwork_and_files() {
     let directory = tempfile::tempdir().unwrap();
     let released = directory.path().join("rufin-store.sqlite");
@@ -373,7 +442,7 @@ async fn released_store_imports_old_playlist_artwork_and_files() {
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT play_count FROM legacy_activity WHERE track_object_id='played'"
+            "SELECT plays FROM play_counts WHERE media_uri='rufin:source/track/source/played'"
         )
         .fetch_one(&mut raw)
         .await
@@ -431,7 +500,7 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            60,
+            61,
             "{version}"
         );
         // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.
@@ -471,13 +540,16 @@ async fn released_stores_upgrade_with_their_user_data() {
             [r#"["rufin:source/track/server/s1","favorite",0]"#],
             "{version}"
         );
-        // Carried-over counts keep their names, also for tracks the catalog no longer has.
+        // Track counts become play counts, also for tracks the catalog no longer has.
         assert_eq!(
-            values(&mut raw, "SELECT json_array(period,item_kind,track_object_id,play_count,title,artist,album) FROM legacy_activity ORDER BY period,item_kind").await,
+            values(
+                &mut raw,
+                "SELECT json_array(media_uri,period,plays,skips) FROM play_counts ORDER BY period"
+            )
+            .await,
             [
-                r#"["2017-07","track","vanished",2,"Vanished","Lost Artist","Lost Album"]"#,
-                r#"["lifetime","artist","ar2",9,"Server Artist","Server Artist",""]"#,
-                r#"["lifetime","track","s2",5,"Server Two","Server Artist","Server Album"]"#,
+                r#"["rufin:source/track/server/vanished","2017-07",2,0]"#,
+                r#"["rufin:source/track/server/s2","lifetime",5,1]"#,
             ],
             "{version}"
         );

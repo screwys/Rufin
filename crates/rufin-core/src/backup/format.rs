@@ -290,8 +290,10 @@ pub fn stage_backup(
             return Err(invalid("backup contains an unsafe path"));
         }
         let Some(name) = path.to_str() else { continue };
+        // Backups of 0.17 and earlier keep play counts in legacy-activity.jsonl.
         let known = BackupContents::default()
             .members()
+            .chain(["legacy-activity.jsonl"])
             .any(|member| member == name)
             || playlist_member_number(name).is_some();
         if !known {
@@ -313,9 +315,13 @@ pub fn stage_backup(
         return Err(invalid("unsupported backup version"));
     }
     for name in manifest.contents.members() {
-        if name == "playlist-folders.jsonl" {
-            continue;
-        }
+        let name = match name {
+            "playlist-folders.jsonl" => continue,
+            "play-counts.jsonl" if !directory.path().join(name).is_file() => {
+                "legacy-activity.jsonl"
+            }
+            name => name,
+        };
         if !directory.path().join(name).is_file() {
             return Err(invalid(format!("backup is missing {name}")));
         }

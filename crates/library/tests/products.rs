@@ -780,14 +780,21 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         [fixture.track_uris[0].as_str()]
     );
 
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-        SELECT source.object_id,'lifetime','track',track.object_id,
+    sqlx::query(
+        "INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+        SELECT track.media_uri,'lifetime',
             CASE track.track_key WHEN ?2 THEN 4 WHEN ?3 THEN 1 ELSE 20 END,0,
             CASE track.track_key WHEN ?2 THEN 50 WHEN ?3 THEN 500 ELSE 600 END
-        FROM tracks track JOIN sources source USING(source_key)
-        WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)")
-        .bind(fixture.source).bind(fixture.tracks[0]).bind(fixture.tracks[1]).bind(fixture.tracks[2])
-        .execute(&mut raw).await.unwrap();
+        FROM tracks track
+        WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)",
+    )
+    .bind(fixture.source)
+    .bind(fixture.tracks[0])
+    .bind(fixture.tracks[1])
+    .bind(fixture.tracks[2])
+    .execute(&mut raw)
+    .await
+    .unwrap();
     sqlx::query("UPDATE tracks SET native_play_count=9,native_last_played=700 WHERE track_key=?1")
         .bind(fixture.tracks[1])
         .execute(&mut raw)

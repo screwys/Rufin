@@ -495,6 +495,7 @@ dialog.playlist-edit {
 }
 
 #connect-progress { display: flex; align-items: center; gap: 12px; }
+dialog > #toast { position: fixed; }
 #connect-progress > span { min-width: 0; }
 #connect-progress button { flex-shrink: 0; }
 

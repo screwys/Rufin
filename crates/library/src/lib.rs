@@ -15,6 +15,7 @@ uniffi::custom_type!(LibraryIndex, u64, {
 mod audio;
 pub use audio::*;
 mod activity;
+mod activity_import;
 mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
@@ -84,9 +85,10 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityKey,
-    LegacyActivityRecord, ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityExportFormat, ActivityRecord, CalendarActivityPeriod, ListenDeliveryTarget,
+    ListenWrite, PendingListenDelivery, PlayCount, PlayCountKey,
 };
+pub use activity_import::ActivityImportReport;
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
     authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,

@@ -83,15 +83,19 @@ impl<'a> Context<'a> {
         Self { snapshot, listened }
     }
 
-    pub(crate) fn played(&self, slot: u32, record: &TrackRec) -> Played {
-        let stats = self.snapshot.stats.get(&slot).copied().unwrap_or_default();
-        if record.source == NO_SOURCE
+    /// Whether a track's plays are Rufin's listens; a server's tracks show the server's.
+    pub(crate) fn counts_listens(&self, record: &TrackRec) -> bool {
+        record.source == NO_SOURCE
             || self
                 .listened
                 .get(usize::from(record.source))
                 .copied()
                 .unwrap_or(true)
-        {
+    }
+
+    pub(crate) fn played(&self, slot: u32, record: &TrackRec) -> Played {
+        let stats = self.snapshot.stats.get(&slot).copied().unwrap_or_default();
+        if self.counts_listens(record) {
             Played {
                 plays: stats.plays,
                 skips: stats.skips,
