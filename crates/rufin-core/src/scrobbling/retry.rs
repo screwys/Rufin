@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -12,7 +13,11 @@ use reqwest::blocking::Client;
 use tracing::warn;
 
 use crate::scrobbling::services::{audioscrobbler, listenbrainz};
-use crate::scrobbling::{AudioscrobblerSettings, ListenBrainzSettings, Settings};
+use crate::scrobbling::settings::{
+    LASTFM, LIBREFM, LISTENBRAINZ, RUFIN_API_KEY, RUFIN_API_SECRET, ScrobblingProtocol,
+    lastfm_application, server_account,
+};
+use crate::scrobbling::{AudioscrobblerSettings, Settings};
 use crate::settings::{SettingsFile, StoredSettings};
 
 const NOTIFICATION_CAPACITY: usize = 1;
@@ -120,46 +125,57 @@ impl std::fmt::Display for DeliveryError {
     }
 }
 
+/// Where an account's listens go, with the credentials they are sent with.
 #[derive(Clone)]
-enum TargetSettings {
+enum Endpoint {
     Audioscrobbler {
         service: audioscrobbler::Service,
         settings: AudioscrobblerSettings,
     },
-    ListenBrainz(ListenBrainzSettings),
+    ListenBrainz {
+        service: listenbrainz::Service,
+        user_token: String,
+    },
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum DeliveryService {
-    LastFm,
-    LibreFm,
-    ListenBrainz,
-}
-
-impl DeliveryService {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::LastFm => "lastfm",
-            Self::LibreFm => "librefm",
-            Self::ListenBrainz => "listenbrainz",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "lastfm" => Some(Self::LastFm),
-            "librefm" => Some(Self::LibreFm),
-            "listenbrainz" => Some(Self::ListenBrainz),
-            _ => None,
-        }
-    }
-}
-
+/// One account listens are delivered to: a fixed service or a server the user added. Its
+/// scrobbles wait in the Store under `service` and `account_id`.
 #[derive(Clone)]
 struct DeliveryTarget {
-    service: DeliveryService,
+    service: String,
     account_id: String,
-    settings: TargetSettings,
+    enabled: bool,
+    now_playing_enabled: bool,
+    endpoint: Endpoint,
+}
+
+impl DeliveryTarget {
+    fn sends(&self, now_playing: bool) -> bool {
+        self.enabled && (!now_playing || self.now_playing_enabled) && self.signed_in()
+    }
+
+    fn signed_in(&self) -> bool {
+        match &self.endpoint {
+            Endpoint::Audioscrobbler { settings, .. } => {
+                !settings.api_key.is_empty()
+                    && !settings.api_secret.is_empty()
+                    && !settings.session_key.is_empty()
+            }
+            Endpoint::ListenBrainz { user_token, .. } => !user_token.is_empty(),
+        }
+    }
+
+    /// The credentials, which may change while the account stays the same.
+    fn credentials(&self) -> Vec<&str> {
+        match &self.endpoint {
+            Endpoint::Audioscrobbler { settings, .. } => vec![
+                &settings.api_key,
+                &settings.api_secret,
+                &settings.session_key,
+            ],
+            Endpoint::ListenBrainz { user_token, .. } => vec![user_token],
+        }
+    }
 }
 
 /// The accounts' credentials the worker sends with, and the committed settings they were read
@@ -173,6 +189,8 @@ struct Accounts {
 struct DeliveryState {
     settings: SettingsFile,
     accounts: Mutex<Accounts>,
+    /// The accounts, as service and account id, whose scrobbles wait for a new sign-in.
+    held: Mutex<HashSet<(String, String)>>,
 }
 
 impl DeliveryState {
@@ -189,9 +207,9 @@ impl DeliveryState {
             .as_ref()
             .is_some_and(|read_from| read_from.same_scrobbling_accounts(stored))
         {
-            for descriptor in super::secret_descriptors() {
-                *descriptor.value_mut(&mut settings) =
-                    descriptor.value(&accounts.credentials).to_owned();
+            for descriptor in super::secret_descriptors(&settings) {
+                let value = descriptor.value(&accounts.credentials).to_owned();
+                descriptor.set(&mut settings, value);
             }
         }
         settings.sanitize();
@@ -367,6 +385,7 @@ impl Scrobbler {
                     credentials: Settings::default(),
                     read_from: None,
                 }),
+                held: Mutex::new(HashSet::new()),
             }),
             worker: Mutex::new(None),
         }
@@ -410,13 +429,10 @@ impl Scrobbler {
         for (service, account_id) in previous {
             if !current
                 .iter()
-                .any(|current| current == &(service, account_id.clone()))
+                .any(|current| current.0 == service && current.1 == account_id)
             {
                 self.runtime
-                    .block_on(
-                        self.catalog
-                            .remove_listen_deliveries(service.as_str(), &account_id),
-                    )
+                    .block_on(self.catalog.remove_listen_deliveries(&service, &account_id))
                     .map_err(|error| error.to_string())?;
             }
         }
@@ -425,12 +441,28 @@ impl Scrobbler {
             self.runtime
                 .block_on(
                     self.catalog
-                        .wake_listen_deliveries(service.as_str(), &account_id, now),
+                        .wake_listen_deliveries(&service, &account_id, now),
                 )
                 .map_err(|error| error.to_string())?;
         }
+        let held = self
+            .runtime
+            .block_on(self.catalog.held_listen_accounts())
+            .map_err(|error| error.to_string())?;
+        *self.state.held.lock().unwrap_or_else(|p| p.into_inner()) = held.into_iter().collect();
         self.wake();
         Ok(())
+    }
+
+    /// The accounts of `settings`, by name, whose session stopped working: their scrobbles
+    /// wait until they sign in again.
+    pub(crate) fn signed_out(&self, settings: &Settings) -> Vec<String> {
+        let held = self.state.held.lock().unwrap_or_else(|p| p.into_inner());
+        accounts(settings)
+            .into_iter()
+            .filter(|target| held.contains(&(target.service.clone(), target.account_id.clone())))
+            .map(|target| target.service)
+            .collect()
     }
 
     pub fn now_playing(&self, track: Option<&TrackMetadata>) {
@@ -458,7 +490,7 @@ impl Scrobbler {
         targets(&settings, false)
             .into_iter()
             .map(|target| ListenDeliveryTarget {
-                service: target.service.as_str().to_string(),
+                service: target.service,
                 account_id: target.account_id,
                 next_attempt_at: Some(unix_seconds()),
             })
@@ -559,7 +591,7 @@ fn deliver_now_playing(
             return;
         }
         if let Err(error) = submit(client, &target, &submission) {
-            warn!(%error, service = ?target.service, "now-playing update failed");
+            warn!(%error, service = target.service, "now-playing update failed");
         }
     }
 }
@@ -594,16 +626,20 @@ fn deliver_due(
         if work.lock().map_or(true, |work| work.closed) {
             return false;
         }
-        let Some(service) = DeliveryService::parse(&pending.service) else {
-            let _ = runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key));
-            settled = true;
-            continue;
-        };
-        let account = (service, pending.account_id.clone());
+        let account = (pending.service.clone(), pending.account_id.clone());
         if stopped.contains(&account) {
             continue;
         }
-        let Some(current) = current_target(state, service, &pending.account_id) else {
+        let Some(current) = current_target(state, &pending.service, &pending.account_id) else {
+            // Scrobbles for a service no account names any more, such as a removed server.
+            if state.sending().is_some_and(|settings| {
+                !accounts(&settings)
+                    .iter()
+                    .any(|account| account.service == pending.service)
+            }) {
+                let _ = runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key));
+                settled = true;
+            }
             continue;
         };
         let submission = Submission::Scrobble {
@@ -611,6 +647,7 @@ fn deliver_due(
             started_at_unix_seconds: pending.started_at,
         };
         match finish_delivery(
+            state,
             catalog,
             runtime,
             pending,
@@ -627,6 +664,7 @@ fn deliver_due(
 }
 
 fn finish_delivery(
+    state: &DeliveryState,
     catalog: &Catalog,
     runtime: &tokio::runtime::Handle,
     pending: PendingListenDelivery,
@@ -675,6 +713,11 @@ fn finish_delivery(
                 ?service,
                 "external scrobbling credentials need attention"
             );
+            state
+                .held
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert((service, pending.account_id));
             DeliveryFlow::StopAccount
         }
         Err(DeliveryError::Stop(error)) => {
@@ -696,7 +739,7 @@ fn finish_delivery(
 
 fn current_target(
     state: &DeliveryState,
-    service: DeliveryService,
+    service: &str,
     account_id: &str,
 ) -> Option<DeliveryTarget> {
     state.sending().and_then(|settings| {
@@ -711,123 +754,137 @@ fn submit(
     target: &DeliveryTarget,
     submission: &Submission,
 ) -> Result<(), DeliveryError> {
-    match &target.settings {
-        TargetSettings::Audioscrobbler { service, settings } => {
-            audioscrobbler::submit(client, *service, settings, submission)
+    match &target.endpoint {
+        Endpoint::Audioscrobbler { service, settings } => {
+            audioscrobbler::submit(client, service, settings, submission)
         }
-        TargetSettings::ListenBrainz(settings) => {
-            listenbrainz::submit(client, settings, submission)
-        }
+        Endpoint::ListenBrainz {
+            service,
+            user_token,
+        } => listenbrainz::submit(client, service, user_token, submission),
     }
+}
+
+/// Every account `settings` names, signed in or not.
+fn accounts(settings: &Settings) -> Vec<DeliveryTarget> {
+    let audioscrobbler = |service: &str,
+                          endpoint: audioscrobbler::Service,
+                          account: &AudioscrobblerSettings| {
+        DeliveryTarget {
+            service: service.to_owned(),
+            account_id: audioscrobbler_account_id(service, &account.username, &account.session_key),
+            enabled: account.enabled,
+            now_playing_enabled: account.now_playing_enabled,
+            endpoint: Endpoint::Audioscrobbler {
+                service: endpoint,
+                settings: account.clone(),
+            },
+        }
+    };
+    let (api_key, api_secret) =
+        lastfm_application(&settings.lastfm.api_key, &settings.lastfm.api_secret);
+    let lastfm = AudioscrobblerSettings {
+        api_key: api_key.to_owned(),
+        api_secret: api_secret.to_owned(),
+        ..settings.lastfm.clone()
+    };
+    let mut accounts = vec![
+        audioscrobbler(LASTFM, audioscrobbler::Service::lastfm(), &lastfm),
+        audioscrobbler(
+            LIBREFM,
+            audioscrobbler::Service::librefm(),
+            &settings.librefm,
+        ),
+        DeliveryTarget {
+            service: LISTENBRAINZ.to_owned(),
+            account_id: opaque_account_id(LISTENBRAINZ, &settings.listenbrainz.user_token),
+            enabled: settings.listenbrainz.enabled,
+            now_playing_enabled: settings.listenbrainz.now_playing_enabled,
+            endpoint: Endpoint::ListenBrainz {
+                service: listenbrainz::Service::listenbrainz(),
+                user_token: settings.listenbrainz.user_token.clone(),
+            },
+        },
+    ];
+    for server in &settings.servers {
+        let service = server_account(&server.id);
+        let (account_id, endpoint) = match server.protocol {
+            ScrobblingProtocol::ListenBrainz => (
+                opaque_account_id(&service, &server.secret),
+                Endpoint::ListenBrainz {
+                    service: listenbrainz::Service::server(&server.name, &server.url),
+                    user_token: server.secret.clone(),
+                },
+            ),
+            ScrobblingProtocol::Audioscrobbler => (
+                audioscrobbler_account_id(&service, &server.username, &server.secret),
+                Endpoint::Audioscrobbler {
+                    service: audioscrobbler::Service::server(&server.name, &server.url),
+                    settings: AudioscrobblerSettings {
+                        enabled: server.enabled,
+                        username: server.username.clone(),
+                        api_key: RUFIN_API_KEY.into(),
+                        api_secret: RUFIN_API_SECRET.into(),
+                        session_key: server.secret.clone(),
+                        now_playing_enabled: server.now_playing_enabled,
+                    },
+                },
+            ),
+        };
+        accounts.push(DeliveryTarget {
+            service,
+            account_id,
+            enabled: server.enabled,
+            now_playing_enabled: server.now_playing_enabled,
+            endpoint,
+        });
+    }
+    accounts
 }
 
 fn targets(settings: &Settings, now_playing: bool) -> Vec<DeliveryTarget> {
-    let mut targets = Vec::with_capacity(3);
-    if settings.lastfm.configured(now_playing) {
-        targets.push(DeliveryTarget {
-            service: DeliveryService::LastFm,
-            account_id: audioscrobbler_account_id(DeliveryService::LastFm, &settings.lastfm),
-            settings: TargetSettings::Audioscrobbler {
-                service: audioscrobbler::Service::LastFm,
-                settings: settings.lastfm.clone(),
-            },
-        });
-    }
-    if settings.librefm.configured(now_playing) {
-        targets.push(DeliveryTarget {
-            service: DeliveryService::LibreFm,
-            account_id: audioscrobbler_account_id(DeliveryService::LibreFm, &settings.librefm),
-            settings: TargetSettings::Audioscrobbler {
-                service: audioscrobbler::Service::LibreFm,
-                settings: settings.librefm.clone(),
-            },
-        });
-    }
-    if settings.listenbrainz.configured(now_playing) {
-        targets.push(DeliveryTarget {
-            service: DeliveryService::ListenBrainz,
-            account_id: opaque_account_id(
-                DeliveryService::ListenBrainz,
-                &settings.listenbrainz.user_token,
-            ),
-            settings: TargetSettings::ListenBrainz(settings.listenbrainz.clone()),
-        });
-    }
-    targets
+    accounts(settings)
+        .into_iter()
+        .filter(|target| target.sends(now_playing))
+        .collect()
 }
 
-fn known_accounts(settings: &Settings) -> Vec<(DeliveryService, String)> {
-    let mut accounts = Vec::with_capacity(3);
-    if !settings.lastfm.session_key.is_empty() {
-        accounts.push((
-            DeliveryService::LastFm,
-            audioscrobbler_account_id(DeliveryService::LastFm, &settings.lastfm),
-        ));
-    }
-    if !settings.librefm.session_key.is_empty() {
-        accounts.push((
-            DeliveryService::LibreFm,
-            audioscrobbler_account_id(DeliveryService::LibreFm, &settings.librefm),
-        ));
-    }
-    if !settings.listenbrainz.user_token.is_empty() {
-        accounts.push((
-            DeliveryService::ListenBrainz,
-            opaque_account_id(
-                DeliveryService::ListenBrainz,
-                &settings.listenbrainz.user_token,
-            ),
-        ));
-    }
-    accounts
+fn known_accounts(settings: &Settings) -> Vec<(String, String)> {
+    accounts(settings)
+        .into_iter()
+        .filter(DeliveryTarget::signed_in)
+        .map(|target| (target.service, target.account_id))
+        .collect()
 }
 
-fn reauthorized_accounts(
-    previous: &Settings,
-    current: &Settings,
-) -> Vec<(DeliveryService, String)> {
-    let mut accounts = Vec::with_capacity(2);
-    for (service, previous, current) in [
-        (DeliveryService::LastFm, &previous.lastfm, &current.lastfm),
-        (
-            DeliveryService::LibreFm,
-            &previous.librefm,
-            &current.librefm,
-        ),
-    ] {
-        if previous.session_key.is_empty() || current.session_key.is_empty() {
-            continue;
-        }
-        let previous_account = audioscrobbler_account_id(service, previous);
-        let current_account = audioscrobbler_account_id(service, current);
-        let credentials_changed = previous.api_key != current.api_key
-            || previous.api_secret != current.api_secret
-            || previous.session_key != current.session_key;
-        if previous_account == current_account && credentials_changed {
-            accounts.push((service, current_account));
-        }
-    }
-    accounts
+/// Accounts signed in again with other credentials, whose held scrobbles can be sent now.
+fn reauthorized_accounts(previous: &Settings, current: &Settings) -> Vec<(String, String)> {
+    let previous = accounts(previous);
+    accounts(current)
+        .into_iter()
+        .filter(|current| {
+            current.signed_in()
+                && previous.iter().any(|previous| {
+                    previous.signed_in()
+                        && previous.service == current.service
+                        && previous.account_id == current.account_id
+                        && previous.credentials() != current.credentials()
+                })
+        })
+        .map(|target| (target.service, target.account_id))
+        .collect()
 }
 
-fn audioscrobbler_account_id(
-    service: DeliveryService,
-    settings: &AudioscrobblerSettings,
-) -> String {
-    let identity = if settings.username.trim().is_empty() {
-        settings.session_key.as_str()
+fn audioscrobbler_account_id(service: &str, username: &str, session_key: &str) -> String {
+    let identity = if username.trim().is_empty() {
+        session_key
     } else {
-        settings.username.as_str()
+        username
     };
     opaque_account_id(service, &identity.to_lowercase())
 }
 
-fn opaque_account_id(service: DeliveryService, identity: &str) -> String {
-    let service = match service {
-        DeliveryService::LastFm => "lastfm",
-        DeliveryService::LibreFm => "librefm",
-        DeliveryService::ListenBrainz => "listenbrainz",
-    };
+fn opaque_account_id(service: &str, identity: &str) -> String {
     let value = format!("rufin-scrobbling-account\0{service}\0{}", identity.trim());
     format!("{:032x}", u128::from_be_bytes(Md5::digest(value).into()))
 }
@@ -849,6 +906,7 @@ mod tests {
     use library::{Catalog, LibraryField, ReadCancellation, SourceId};
 
     use super::*;
+    use crate::scrobbling::ListenBrainzSettings;
 
     #[test]
     fn now_playing_keeps_only_the_track_stable_for_one_second() {
@@ -867,8 +925,8 @@ mod tests {
 
     #[test]
     fn account_identity_is_service_scoped_and_does_not_store_the_secret() {
-        let lastfm = opaque_account_id(DeliveryService::LastFm, "secret");
-        let listenbrainz = opaque_account_id(DeliveryService::ListenBrainz, "secret");
+        let lastfm = opaque_account_id(LASTFM, "secret");
+        let listenbrainz = opaque_account_id(LISTENBRAINZ, "secret");
         assert_ne!(lastfm, listenbrainz);
         assert!(!lastfm.contains("secret"));
     }
@@ -1030,7 +1088,7 @@ mod tests {
         let retry_track = SubmissionTrack::from_pending(&due[0]);
         assert_eq!(retry_track.duration_millis, 180_000);
         assert_eq!(due[0].listened_millis, 90_000);
-        let lastfm_account = opaque_account_id(DeliveryService::LastFm, "listener");
+        let lastfm_account = opaque_account_id(LASTFM, "listener");
         assert_eq!(
             catalog
                 .block_listen_deliveries("lastfm", &lastfm_account, "invalid session")

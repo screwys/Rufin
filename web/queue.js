@@ -183,10 +183,12 @@ function showQueue(value) {
 function showQueueMenu(row, anchor, event) {
   const track = row.track, menu = track.menu, actions = [];
   const position = { position: row.position };
-  if (menu.play) actions.push([tr("Play"), () => api("/queue/activate", "POST", position)]);
-  if (menu.play_next) actions.push([tr("Play Next"), () => api("/queue/next", "POST", position)]);
-  if (menu.play_later)
-    actions.push([tr("Play Later"), () => api("/queue/reorder", "POST", { positions: [row.position], before: null })]);
+  if (menu.play)
+    actions.push(
+      [tr("Play"), () => api("/queue/activate", "POST", position)],
+      [tr("Play Next"), () => api("/queue/next", "POST", position)],
+      [tr("Play Later"), () => api("/queue/reorder", "POST", { positions: [row.position], before: null })],
+    );
   if (menu.radio) actions.push(radioMenu(menu.radio));
   actions.push(null);
   if (menu.add_to_playlist) actions.push(playlistMenu({ uris: [track.uri] }));

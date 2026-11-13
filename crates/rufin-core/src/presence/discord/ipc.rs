@@ -392,16 +392,20 @@ fn read_response(stream: &mut IpcStream) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::presence::{APP_ICON_ASSET, LinkType, Settings};
+    use crate::presence::{APP_ICON_ASSET, Settings};
     use playback::TransportStatus;
 
     #[test]
     fn lastfm_album_url_uses_the_album_display_artist() {
-        let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
+        let mut view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
+        let current = view.transport.current.as_mut().expect("current track");
+        let metadata = &mut std::sync::Arc::make_mut(&mut current.row).track.metadata;
+        metadata.musicbrainz_release_track_id = None;
+        metadata.musicbrainz_recording_id = None;
+        metadata.primary_artist_musicbrainz_id = None;
         let activity = Activity::new(
             &Settings {
                 enabled: true,
-                link_type: LinkType::LastFm,
                 ..Settings::default()
             },
             &view.transport,
@@ -426,7 +430,6 @@ mod tests {
         let activity = Activity::new(
             &Settings {
                 enabled: true,
-                link_type: LinkType::MusicBrainz,
                 ..Settings::default()
             },
             &view.transport,

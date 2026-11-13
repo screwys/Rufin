@@ -397,10 +397,6 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
         dialog: adw::PreferencesDialog,
         page: adw::PreferencesPage,
         fields_group: adw::PreferencesGroup,
-        lyrics: adw::SwitchRow,
-        visualizer: adw::SwitchRow,
-        dynamic_background: adw::SwitchRow,
-        background_image: adw::SwitchRow,
     });
     dialog.set_content_width(crate::widgets::layout::large_popup_content_width(560));
     dialog.set_content_height(crate::widgets::layout::large_popup_content_height(
@@ -421,14 +417,6 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
         &fields_group,
         &rows,
     );
-    let settings = app.settings.current.borrow();
-    let active = [
-        settings.player_display.fullscreen_lyrics_visible,
-        settings.player_display.fullscreen_visualizer_visible,
-        settings.player_display.fullscreen_dynamic_background,
-        settings.player_display.fullscreen_background_image,
-    ];
-    drop(settings);
     let weak = Rc::downgrade(shell);
     let display = crate::widgets::display::DisplayEditor::new(
         &app.settings.current.borrow().library_list(key).display,
@@ -445,47 +433,9 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
         },
     );
     display.set_layout(Some(rufin_core::settings::LibraryLayout::Row));
-    display.prepend_rows(&[&lyrics, &visualizer, &dynamic_background, &background_image]);
     page.remove(&fields_group);
     page.add(&display.group);
     page.add(&fields_group);
-    background_image.set_sensitive(active[2]);
-    let image_row = background_image.downgrade();
-    dynamic_background.connect_active_notify(move |row| {
-        if let Some(image_row) = image_row.upgrade() {
-            image_row.set_sensitive(row.is_active());
-        }
-    });
-    for (index, row) in [lyrics, visualizer, dynamic_background, background_image]
-        .into_iter()
-        .enumerate()
-    {
-        row.set_active(active[index]);
-        let weak = Rc::downgrade(shell);
-        row.connect_active_notify(move |row| {
-            let Some(shell) = weak.upgrade() else {
-                return;
-            };
-            let Some(app) = shell.shell() else {
-                return;
-            };
-            app.settings
-                .update_app_settings("fullscreen display", |settings| {
-                    let value = match index {
-                        0 => &mut settings.player_display.fullscreen_lyrics_visible,
-                        1 => &mut settings.player_display.fullscreen_visualizer_visible,
-                        2 => &mut settings.player_display.fullscreen_dynamic_background,
-                        _ => &mut settings.player_display.fullscreen_background_image,
-                    };
-                    if *value == row.is_active() {
-                        return false;
-                    }
-                    *value = row.is_active();
-                    true
-                });
-            shell.apply_fullscreen_display_settings();
-        });
-    }
     crate::widgets::popup::present_light_dismiss_dialog(&dialog, &window);
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -851,7 +801,7 @@ impl crate::player::PlayerUi {
         }
     }
 
-    fn apply_fullscreen_display_settings(self: &Rc<Self>) {
+    pub(crate) fn apply_fullscreen_display_settings(self: &Rc<Self>) {
         let Some(shell) = self.shell() else {
             return;
         };

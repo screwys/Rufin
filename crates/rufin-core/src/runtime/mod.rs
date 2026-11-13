@@ -18,7 +18,8 @@ pub use inputs::{RuntimeInputs, SelectedLibrary, SourceEvent, VisualizerPublicat
 pub use release_update::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};
 pub use scrobbling::{
     LastFmPreferences, LibreFmPreferences, ListenBrainzPreferences, ScrobblingConnection,
-    ScrobblingConnectionEvent, ScrobblingHandle, ScrobblingPreferences,
+    ScrobblingConnectionEvent, ScrobblingHandle, ScrobblingPreferences, ScrobblingProtocol,
+    ScrobblingServerPreferences, ScrobblingServerRequest,
 };
 pub use source::SourceHandle;
 pub use storage::{CacheKind, CacheSummary, CacheUsage, StorageSummary};

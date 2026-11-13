@@ -6,96 +6,84 @@ use serde_json::Value;
 
 use crate::http::{client, download, fetch_optional_json};
 use crate::musicbrainz::{search_album_release_group_ids, search_album_release_ids};
+use crate::{CoverProvider, LookupPolicy};
 
 const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 const LASTFM_PLACEHOLDER_IMAGE_ID: &str = "2a96cbd8b46e442fc41c2b86b821562f";
 const RELEASE_URL: &str = "https://coverartarchive.org/release";
 const RELEASE_GROUP_URL: &str = "https://coverartarchive.org/release-group";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AlbumCoverPolicy {
-    pub lastfm_api_key: String,
-    pub allow_musicbrainz: bool,
-}
-
-impl AlbumCoverPolicy {
-    pub fn new(lastfm_api_key: impl Into<String>, allow_musicbrainz: bool) -> Self {
-        Self {
-            lastfm_api_key: lastfm_api_key.into(),
-            allow_musicbrainz,
-        }
-    }
-}
-
 /// Finds cover bytes for an ordinary Rufin artwork binding.
 ///
-/// Exact Cover Art Archive identities remain ahead of Last.fm and text
-/// searches so a known album identity cannot be replaced by an approximate
-/// result.
-/// A missing size requests the original Cover Art Archive image.
+/// The album's MusicBrainz IDs are asked first, so a known album identity cannot be replaced
+/// by an approximate result; then the providers in the policy's order, until one has a cover.
+/// A missing size requests the original image.
 pub fn lookup_album_cover(
     album: &AlbumCover,
     size: Option<u32>,
-    policy: &AlbumCoverPolicy,
+    policy: &LookupPolicy,
 ) -> Result<Option<Vec<u8>>, String> {
     let client = client()?;
     let mut failures = Vec::new();
-    if policy.allow_musicbrainz {
-        for (root, id) in [
-            (RELEASE_GROUP_URL, album.release_group_id()),
-            (RELEASE_URL, album.release_id()),
-        ] {
-            if let Some(id) = id {
-                match download(client, &cover_art_url(root, id, size), "album cover") {
-                    Ok(Some(bytes)) => return Ok(Some(bytes)),
-                    Ok(None) => {}
-                    Err(error) => failures.push(error),
-                }
-            }
-        }
-    }
-    if let Some((artist, title)) = album.text() {
-        if !policy.lastfm_api_key.trim().is_empty() {
-            match lastfm_url(client, artist, title, &policy.lastfm_api_key) {
-                Ok(Some(url)) => match download(client, &url, "album cover") {
-                    Ok(Some(bytes)) => return Ok(Some(bytes)),
-                    Ok(None) => {}
-                    Err(error) => failures.push(error),
-                },
+    for (root, id) in [
+        (RELEASE_GROUP_URL, album.release_group_id()),
+        (RELEASE_URL, album.release_id()),
+    ] {
+        if let Some(id) = id {
+            match download(client, &cover_art_url(root, id, size), "album cover") {
+                Ok(Some(bytes)) => return Ok(Some(bytes)),
                 Ok(None) => {}
                 Err(error) => failures.push(error),
             }
         }
-        if policy.allow_musicbrainz {
-            match search_album_release_group_ids(artist, title) {
-                Ok(ids) => {
-                    if let Some(bytes) =
-                        download_identities(client, RELEASE_GROUP_URL, ids, size, &mut failures)
-                    {
-                        return Ok(Some(bytes));
+    }
+    let Some((artist, title)) = album.text() else {
+        return missing_or_errors(failures);
+    };
+    for provider in &policy.covers {
+        let url = match provider {
+            CoverProvider::MusicBrainz => {
+                for (search, root) in [
+                    (
+                        search_album_release_group_ids
+                            as fn(&str, &str) -> Result<Vec<String>, String>,
+                        RELEASE_GROUP_URL,
+                    ),
+                    (search_album_release_ids, RELEASE_URL),
+                ] {
+                    match search(artist, title) {
+                        Ok(ids) => {
+                            if let Some(bytes) =
+                                download_identities(client, root, ids, size, &mut failures)
+                            {
+                                return Ok(Some(bytes));
+                            }
+                        }
+                        Err(error) => failures.push(error),
                     }
                 }
-                Err(error) => failures.push(error),
+                continue;
             }
-            match search_album_release_ids(artist, title) {
-                Ok(ids) => {
-                    if let Some(bytes) =
-                        download_identities(client, RELEASE_URL, ids, size, &mut failures)
-                    {
-                        return Ok(Some(bytes));
-                    }
-                }
+            CoverProvider::LastFm => lastfm_url(client, artist, title, &policy.lastfm_api_key),
+        };
+        match url {
+            Ok(Some(url)) => match download(client, &url, "album cover") {
+                Ok(Some(bytes)) => return Ok(Some(bytes)),
+                Ok(None) => {}
                 Err(error) => failures.push(error),
-            }
+            },
+            Ok(None) => {}
+            Err(error) => failures.push(error),
         }
     }
     missing_or_errors(failures)
 }
 
-/// Finds a public cover URL for Discord, which cannot use Rufin's cached bytes.
+/// Finds a public cover URL for Discord, which cannot use Rufin's cached bytes: the album's
+/// Cover Art Archive listing, then the providers that answer with a URL, in order.
 pub fn public_album_cover_url(
     album: &AlbumCover,
-    lastfm_api_key: &str,
+    policy: &LookupPolicy,
 ) -> Result<Option<String>, String> {
     let mut failures = Vec::new();
     for (root, id) in [
@@ -129,13 +117,19 @@ pub fn public_album_cover_url(
             Err(error) => failures.push(error),
         }
     }
-    if !lastfm_api_key.trim().is_empty()
-        && let Some((artist, title)) = album.text()
-    {
-        match lastfm_url(client()?, artist, title, lastfm_api_key) {
-            Ok(Some(url)) => return Ok(Some(url)),
-            Ok(None) => {}
-            Err(error) => failures.push(error),
+    if let Some((artist, title)) = album.text() {
+        for provider in &policy.covers {
+            let url = match provider {
+                CoverProvider::MusicBrainz => continue,
+                CoverProvider::LastFm => {
+                    lastfm_url(client()?, artist, title, &policy.lastfm_api_key)
+                }
+            };
+            match url {
+                Ok(Some(url)) => return Ok(Some(url)),
+                Ok(None) => {}
+                Err(error) => failures.push(error),
+            }
         }
     }
     missing_or_errors(failures)
@@ -289,7 +283,10 @@ mod tests {
     #[test]
     fn artwork_urls_preserve_requested_sizes_and_provider_availability() {
         let album = AlbumCover::new("Artist", "Album", None, None).expect("album cover");
-        assert_eq!(public_album_cover_url(&album, ""), Ok(None));
+        assert_eq!(
+            public_album_cover_url(&album, &LookupPolicy::default()),
+            Ok(None)
+        );
         for (size, suffix) in [
             (Some(96), "front-250"),
             (Some(250), "front-250"),

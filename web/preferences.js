@@ -1,13 +1,33 @@
 import { api, browserHeaders, state } from "./connection.js";
 import { qualityControls } from "./download-quality.js";
+import { closeIntegration, init as initIntegrations, integrationOpen, showIntegrations } from "./integrations.js";
 import { openSource, sourceIcon, updateSources } from "./sources.js";
 import { $, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
 
 let values = {};
+let shown = null;
+
+// Rows that only apply while another setting is on, as GTK makes them insensitive.
+const dependencies = {
+  "/layout/narrow_threshold": "/layout/narrow_enabled",
+  "/layout/narrow_profile/left_sidebar": "/layout/narrow_enabled",
+  "/layout/narrow_profile/right_sidebar": "/layout/narrow_enabled",
+  "/fullscreen_background_image": "/fullscreen_dynamic_background",
+  "/prefer_server_lyrics": "/external_lyrics_enabled",
+  "/external_site_links/lastfm": "/external_site_links/enabled",
+  "/external_site_links/musicbrainz": "/external_site_links/enabled",
+  "/external_site_links/server": "/external_site_links/enabled",
+};
+
+function setSensitive(row, sensitive) {
+  row.classList.toggle("insensitive", !sensitive);
+  for (const input of row.querySelectorAll("input, select, button")) input.disabled = !sensitive;
+}
 
 // Every control naming a stored setting, in Preferences or the bar's settings popover, shows
 // it and changes it. Choices hold their value as JSON.
 function show(preferences) {
+  shown = preferences;
   values = preferences.values;
   for (const node of document.querySelectorAll("[data-setting]")) {
     const value = values[node.dataset.setting];
@@ -22,10 +42,10 @@ function show(preferences) {
     const [, path, not, expected] = node.dataset.when.match(/^(.*?)(!?)=(.*)$/);
     node.hidden = (values[path] === expected) === !!not;
   }
-  for (const node of document.querySelectorAll("[data-menu-item]"))
-    node.checked = values["/context_menu/items"]?.find((entry) => entry.item === node.dataset.menuItem)?.visible ?? true;
-  listRows($("pref-routes"), preferences.routes, (entry) => entry.item, (entry, change) => ({ operation: "route", item: entry.item, ...change }));
-  listRows($("pref-home-blocks"), preferences.home_blocks, (entry) => entry.block, (entry, change) => ({ operation: "home_block", block: entry.block, ...change }));
+  for (const [path, owner] of Object.entries(dependencies))
+    for (const node of document.querySelectorAll(`[data-setting="${path}"]`)) setSensitive(node.closest(".pref-row"), values[owner] !== false);
+  showCustomization(preferences);
+  showIntegrations(preferences);
   // The sidebar follows its entries' order and visibility, as GTK's does.
   const nav = document.querySelector("#navigation nav");
   for (const entry of preferences.routes) {
@@ -137,34 +157,89 @@ function accentMenu(theme, anchor) {
   openPopup(menu, anchor, "end");
 }
 
-// The sidebar entries and Home blocks: shown or not, and moved up and down, as GTK's lists.
-function listRows(host, entries, key, edit) {
+// Customization: the Layout tab's navigation rows, the Lists tab and the item menu preview.
+function showCustomization(preferences) {
+  const count = (rows) => tr("{shown} of {total} shown", { shown: rows.filter((row) => row.visible).length, total: rows.length });
+  $("pref-sidebar-items").querySelector("small").textContent = count(preferences.routes);
+  $("pref-home-blocks").querySelector("small").textContent = count(preferences.home_blocks);
+  const routes = preferences.routes;
+  listRows($("pref-routes"), routes.map((entry, index) => ({
+    key: entry.item, title: entry.title, subtitle: entry.subtitle, icon: entry.icon, visible: entry.visible,
+    up: index > 0, down: index < routes.length - 1,
+  })), (entry, change) => save(change.source
+    ? { operation: "route", item: change.source, target: entry.key, after: change.after }
+    : { operation: "route", item: entry.key, ...change }));
+  // A hidden block keeps its place below the shown ones, as GTK's editor.
+  const blocks = preferences.home_blocks;
+  const shownBlocks = blocks.filter((entry) => entry.visible).length;
+  listRows($("pref-home-blocks-list"), blocks.map((entry, index) => ({
+    key: entry.block, title: entry.title, visible: entry.visible, can_toggle: entry.can_toggle,
+    up: entry.visible && index > 0, down: entry.visible && index + 1 < shownBlocks,
+  })), (entry, change) => save(change.source
+    ? { operation: "home_block", block: change.source, target: entry.key, after: change.after }
+    : { operation: "home_block", block: entry.key, ...change }));
+  for (const node of document.querySelectorAll("[data-menu-item]"))
+    node.setAttribute("aria-pressed", String(values["/context_menu/items"]?.find((entry) => entry.item === node.dataset.menuItem)?.visible ?? true));
+  document.querySelector("[data-menu-rating]").setAttribute("aria-pressed", String(values["/context_menu/rating_visible"] !== false));
+}
+
+// The rows of an ordered list, as GTK's reorder rows: a drag handle, the entry, buttons that
+// move it and the switch that shows it. `edit` takes {visible}, {delta}, or {source, after}
+// when another entry of the list is dropped before or after this one.
+const reorderType = "application/x-rufin-reorder";
+let dragged = null;
+function listRows(host, entries, edit) {
   host.replaceChildren(
-    ...entries.map((entry, index) => {
+    ...entries.map((entry) => {
       const row = el("div", "pref-row pref-list-row");
-      const visible = el("input");
-      visible.type = "checkbox";
-      visible.checked = entry.visible;
-      visible.disabled = entry.can_toggle === false;
-      visible.setAttribute("aria-label", entry.title);
-      visible.onchange = () => save(edit(entry, { visible: visible.checked }));
+      row.dataset.key = entry.key;
+      const handle = icon("rufin-list-drag-handle-symbolic");
+      handle.classList.add("pref-drag");
+      handle.title = tr("Drag to reorder");
+      row.append(handle);
+      if (entry.icon) row.append(icon(entry.icon));
       const label = el("span", "pref-label");
       label.append(el("span", "", entry.title));
-      row.append(visible, label);
-      for (const [delta, name, title, disabled] of [
-        [-1, "rufin-go-up-symbolic", tr("Move up"), index === 0],
-        [1, "rufin-go-down-symbolic", tr("Move down"), index === entries.length - 1],
+      if (entry.subtitle) label.append(el("small", "", entry.subtitle));
+      row.append(label);
+      for (const [delta, name, title, enabled] of [
+        [-1, "rufin-go-up-symbolic", tr("Move up"), entry.up],
+        [1, "rufin-go-down-symbolic", tr("Move down"), entry.down],
       ]) {
         const move = el("button", "icon-button");
         move.type = "button";
         move.title = title;
         move.setAttribute("aria-label", `${title}: ${entry.title}`);
-        move.disabled = disabled;
+        move.disabled = !enabled;
         move.append(icon(name));
-        move.onclick = () => save(edit(entry, { delta }));
+        move.onclick = () => edit(entry, { delta });
         row.append(move);
       }
-      row.dataset.key = key(entry);
+      if (entry.suffix) row.append(entry.suffix);
+      const visible = el("input");
+      visible.type = "checkbox";
+      visible.role = "switch";
+      visible.checked = entry.visible;
+      visible.disabled = entry.can_toggle === false;
+      visible.setAttribute("aria-label", entry.title);
+      visible.onchange = () => edit(entry, { visible: visible.checked });
+      row.append(visible);
+      row.draggable = true;
+      row.addEventListener("dragstart", (event) => {
+        dragged = { host, key: entry.key };
+        event.dataTransfer.setData(reorderType, "");
+        event.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragend", () => (dragged = null));
+      row.addEventListener("dragover", (event) => {
+        if (dragged?.host === host && event.dataTransfer.types.includes(reorderType)) event.preventDefault();
+      });
+      row.addEventListener("drop", (event) => {
+        if (dragged?.host !== host || dragged.key === entry.key) return;
+        event.preventDefault();
+        const rect = row.getBoundingClientRect();
+        edit(entry, { source: dragged.key, after: event.clientY > rect.top + rect.height / 2 });
+      });
       return row;
     }),
   );
@@ -188,6 +263,7 @@ function set(path, value) {
 function controlValue(node) {
   if (node.type === "checkbox") return node.checked;
   if (node.type === "number" || node.type === "range") return Number(node.value);
+  if (node.type === "password") return node.value.trim();
   return JSON.parse(node.value);
 }
 
@@ -307,15 +383,6 @@ async function renderDownloads() {
   else downloadQuality.set(item.download_quality);
 }
 
-async function renderFileConnections() {
-  const saved = () => run(renderFileConnections);
-  const connections = await api("/integrations/files");
-  $("pref-file-connections").replaceChildren(
-    ...connections.map((item) => linkRow(item.name, "", () => openSource(item, { kind: item.kind, saved }), sourceIcon(item.kind))),
-  );
-  $("pref-file-connections").hidden = !connections.length;
-}
-
 function showPage(page, title = null) {
   for (const tab of document.querySelectorAll(".pref-tab[data-page]"))
     tab.setAttribute("aria-selected", String(tab.dataset.page === page));
@@ -325,10 +392,10 @@ function showPage(page, title = null) {
   $("preferences-page-title").textContent = title || tab?.textContent.trim() || "";
   $("preferences-dialog").classList.add("showing-page");
   $("preferences-dialog").classList.toggle("in-subpage", page === "source");
+  closeIntegration();
   if (page === "storage") run(async () => showStorage(await api("/preferences/storage")));
   if (page === "library") run(renderLibrary);
   if (page === "downloads") run(renderDownloads);
-  if (page === "integrations") run(renderFileConnections);
 }
 
 // Opens Preferences at `page`, as the source menu's Manage opens GTK's Library page.
@@ -349,16 +416,26 @@ function init() {
       const value = controlValue(node);
       if (path === "/playback/loudness_normalization" && value === "EbuR128" && values[path] !== "EbuR128" &&
         !confirm(tr("Enable EBU R128 Analysis?"))) {
-        show({ values, routes: [], home_blocks: [] });
+        show(shown);
         return;
       }
       set(path, value);
     }
-    const item = event.target.closest("[data-menu-item]");
-    if (item)
-      set("/context_menu/items", (values["/context_menu/items"] || []).map((entry) =>
-        entry.item === item.dataset.menuItem ? { ...entry, visible: item.checked } : entry));
+    if (event.target.name === "customization-tab")
+      for (const tab of document.querySelectorAll("[data-customization-tab]")) tab.hidden = tab.dataset.customizationTab !== event.target.value;
   });
+  // Each item menu entry shows or hides itself, as GTK's preview.
+  for (const entry of document.querySelectorAll("[data-menu-item]"))
+    entry.addEventListener("click", () => {
+      const visible = entry.getAttribute("aria-pressed") !== "true";
+      set("/context_menu/items", (values["/context_menu/items"] || []).map((item) =>
+        item.item === entry.dataset.menuItem ? { ...item, visible } : item));
+    });
+  document.querySelector("[data-menu-rating]").addEventListener("click", (event) =>
+    set("/context_menu/rating_visible", event.currentTarget.getAttribute("aria-pressed") !== "true"));
+  $("pref-sidebar-items").addEventListener("click", () => $("sidebar-items-dialog").showModal());
+  $("pref-home-blocks").addEventListener("click", () => $("home-blocks-dialog").showModal());
+  initIntegrations();
   document.addEventListener("input", (event) => {
     if (event.target.matches(".pref-range input")) event.target.nextElementSibling.textContent = event.target.value;
   });
@@ -367,8 +444,6 @@ function init() {
     openPreferences();
   });
   $("pref-add-source").addEventListener("click", () => openSource());
-  for (const node of document.querySelectorAll("[data-file-connection]"))
-    node.addEventListener("click", () => openSource(null, { kind: node.dataset.fileConnection, saved: () => run(renderFileConnections) }));
   $("pref-download-source").addEventListener("change", () => run(renderDownloads));
   $("pref-activity-export").addEventListener("click", () => run(exportActivity));
   $("pref-activity-import").addEventListener("click", () => $("pref-activity-file").click());
@@ -388,7 +463,8 @@ function init() {
     set("/private_mode", !values["/private_mode"]);
   });
   $("preferences-back").addEventListener("click", () => {
-    if (dialog.classList.contains("in-subpage")) showPage("library");
+    if (integrationOpen()) closeIntegration();
+    else if (dialog.classList.contains("in-subpage")) showPage("library");
     else dialog.classList.remove("showing-page");
   });
   for (const tab of document.querySelectorAll(".pref-tab[data-page]"))
@@ -408,4 +484,4 @@ function init() {
 // Shows the stored settings on every control that names one, outside Preferences too.
 const showSettings = async () => show(await api("/preferences"));
 
-export { init, openPreferences, showSettings };
+export { init, listRows, openPreferences, save, set, showSettings };

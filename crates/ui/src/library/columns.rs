@@ -4,8 +4,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use ::library::{ArtistRow, Row, TrackRow};
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
+use rufin_core::artwork::ArtworkBinding;
 
 use super::collection_context::present_track_context_menu;
 use crate::favorites::{

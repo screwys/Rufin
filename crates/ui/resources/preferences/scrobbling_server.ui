@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <!-- A scrobbling server the user added. -->
+  <object class="AdwPreferencesPage" id="server_page">
+    <child>
+      <object class="AdwPreferencesGroup" id="server_hero" />
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Server</property>
+        <child>
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Protocol</property>
+            <child type="suffix">
+              <object class="GtkLabel" id="server_protocol">
+                <style>
+                  <class name="dim-label" />
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="server_url">
+            <property name="title" translatable="yes">Server URL</property>
+            <property name="subtitle-selectable">true</property>
+            <property name="use-markup">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="server_token">
+            <property name="title" translatable="yes">User token</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwEntryRow" id="server_username">
+            <property name="title" translatable="yes">Username</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="server_password">
+            <property name="title" translatable="yes">Password</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Scrobbling</property>
+        <child>
+          <object class="AdwSwitchRow" id="server_enabled">
+            <property name="title" translatable="yes">Scrobble plays</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="server_now_playing">
+            <property name="title" translatable="yes">Now playing updates</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <child>
+          <object class="AdwButtonRow" id="server_remove">
+            <property name="title" translatable="yes">Remove server</property>
+            <style>
+              <class name="destructive-action" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

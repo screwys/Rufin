@@ -47,7 +47,6 @@ fn playback_settings_popover(window: &Rc<crate::shell::shell::Shell>) -> gtk::Po
         visualizer: adw::SwitchRow,
         combine: adw::SwitchRow,
         audio_output: adw::ActionRow,
-        waveform_row: adw::SwitchRow,
     });
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
@@ -70,31 +69,6 @@ fn playback_settings_popover(window: &Rc<crate::shell::shell::Shell>) -> gtk::Po
     let preserve_pitch = preserve_pitch_row(shell, playback.preserve_pitch);
     preserve_pitch.set_sensitive(local_output);
     settings_group.add(&preserve_pitch);
-
-    waveform_row.set_active(
-        window
-            .settings
-            .current
-            .borrow()
-            .player_display
-            .seekbar_waveform_enabled,
-    );
-    let waveform_shell = Rc::downgrade(window);
-    waveform_row.connect_active_notify(move |row| {
-        let Some(waveform_shell) = waveform_shell.upgrade() else {
-            return;
-        };
-        if waveform_shell
-            .settings
-            .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
-                &mut settings.player_display.seekbar_waveform_enabled
-            })
-            .is_some()
-        {
-            waveform_shell.player_ui.update_bottom_player_transport();
-        }
-    });
-    settings_group.add(&waveform_row);
 
     queue.set_active(settings.right_panel.queue_visible);
     let queue_shell = Rc::downgrade(shell);

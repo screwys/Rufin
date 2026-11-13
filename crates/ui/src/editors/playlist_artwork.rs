@@ -51,12 +51,12 @@ impl ArtworkEditor {
         let fallback = editing
             .automatic_binding
             .iter()
-            .map(|binding| artwork::ArtworkBinding::opaque(binding))
+            .map(|binding| rufin_core::artwork::ArtworkBinding::opaque(binding))
             .collect::<Vec<_>>();
         let bindings = editing
             .binding
             .as_ref()
-            .map(|binding| vec![artwork::ArtworkBinding::opaque(binding)])
+            .map(|binding| vec![rufin_core::artwork::ArtworkBinding::opaque(binding)])
             .unwrap_or_else(|| fallback.clone());
         let current = artwork.elastic_cover_group_projection_for_artwork(&bindings, 512, false);
         artwork_current.append(&current.widget());

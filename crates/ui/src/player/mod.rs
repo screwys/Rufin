@@ -213,7 +213,7 @@ impl PlayerUi {
         crate::library::CatalogUi::new(&shell).related_tracks_view(rows)
     }
 
-    fn present_full_artwork(&self, artwork: artwork::ArtworkBinding) {
+    fn present_full_artwork(&self, artwork: rufin_core::artwork::ArtworkBinding) {
         if let Some(shell) = self.shell() {
             shell.present_full_artwork(artwork);
         }

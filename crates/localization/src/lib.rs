@@ -235,6 +235,20 @@ pub fn track_count_text(count: u64) -> String {
     )
 }
 
+/// How many remote folders of a kind there are, as Integrations lists them.
+pub fn folder_count_text(count: u64) -> String {
+    if count == 0 {
+        return tr("None");
+    }
+    let label = count.to_string();
+    trn_with(
+        "{count} folder",
+        "{count} folders",
+        count,
+        &[("count", &label)],
+    )
+}
+
 pub const fn msgid(message: &'static str) -> &'static str {
     message
 }

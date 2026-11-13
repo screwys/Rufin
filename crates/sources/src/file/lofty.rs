@@ -135,18 +135,138 @@ pub(crate) fn read_lofty_file(
     file: impl Read + Seek,
     options: ParseOptions,
 ) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
+    let probe = probe(file, options)?;
+    let Some(_) = probe.file_type() else {
+        return Ok(None);
+    };
+    probe.read().map(Some)
+}
+
+/// The tag keys of an album's version, as Navidrome reads them.
+const ALBUM_VERSION_KEYS: [&str; 3] = [
+    "ALBUMVERSION",
+    "MUSICBRAINZ_ALBUMCOMMENT",
+    "MusicBrainz Album Comment",
+];
+
+/// Reads a file for its scan, with its album version: Lofty's generic tag drops keys it
+/// does not map, so the version comes from the format's own tag.
+pub(crate) fn read_lofty_scan(
+    file: impl Read + Seek,
+    options: ParseOptions,
+) -> Result<Option<(TaggedFile, Option<String>)>, lofty::error::FileParseError> {
+    use lofty::ape::{ApeFile, ApeTag};
+    use lofty::file::AudioFile;
+    use lofty::flac::FlacFile;
+    use lofty::id3::v2::{Frame, Id3v2Tag};
+    use lofty::iff::{aiff::AiffFile, wav::WavFile};
+    use lofty::mp4::{AtomData, AtomIdent, Ilst, Mp4File};
+    use lofty::mpeg::MpegFile;
+    use lofty::musepack::MpcFile;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::ogg::{OpusFile, SpeexFile, VorbisFile};
+    use lofty::wavpack::WavPackFile;
+
+    fn version_key(key: &str) -> bool {
+        ALBUM_VERSION_KEYS
+            .iter()
+            .any(|version| version.eq_ignore_ascii_case(key))
+    }
+    fn vorbis(tag: &VorbisComments) -> Option<String> {
+        ALBUM_VERSION_KEYS
+            .iter()
+            .find_map(|key| tag.get(key))
+            .map(str::to_owned)
+    }
+    fn id3(tag: Option<&Id3v2Tag>) -> Option<String> {
+        tag?.into_iter().find_map(|frame| match frame {
+            Frame::UserText(text) if version_key(&text.description) => {
+                Some(text.content.to_string())
+            }
+            _ => None,
+        })
+    }
+    fn ape(tag: Option<&ApeTag>) -> Option<String> {
+        let tag = tag?;
+        ALBUM_VERSION_KEYS
+            .iter()
+            .find_map(|key| tag.get(key)?.value().text())
+            .map(str::to_owned)
+    }
+    fn ilst(tag: Option<&Ilst>) -> Option<String> {
+        tag?.into_iter().find_map(|atom| match atom.ident() {
+            AtomIdent::Freeform { name, .. } if version_key(name) => {
+                atom.data().find_map(|data| match data {
+                    AtomData::UTF8(text) => Some(text.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    fn read<F: AudioFile + Into<TaggedFile>>(
+        reader: &mut (impl Read + Seek),
+        options: ParseOptions,
+        version: impl FnOnce(&F) -> Option<String>,
+    ) -> Result<(TaggedFile, Option<String>), lofty::error::FileParseError> {
+        let file = F::read_from(reader, options)?;
+        let version = version(&file);
+        Ok((file.into(), version))
+    }
+
+    let probe = probe(file, options)?;
+    let Some(file_type) = probe.file_type() else {
+        return Ok(None);
+    };
+    let reader = &mut probe.into_inner();
+    match file_type {
+        FileType::Flac => read(reader, options, |file: &FlacFile| {
+            (file.vorbis_comments().and_then(vorbis)).or_else(|| id3(file.id3v2()))
+        }),
+        FileType::Vorbis => read(reader, options, |file: &VorbisFile| {
+            vorbis(file.vorbis_comments())
+        }),
+        FileType::Opus => read(reader, options, |file: &OpusFile| {
+            vorbis(file.vorbis_comments())
+        }),
+        FileType::Speex => read(reader, options, |file: &SpeexFile| {
+            vorbis(file.vorbis_comments())
+        }),
+        FileType::Mpeg => read(reader, options, |file: &MpegFile| {
+            id3(file.id3v2()).or_else(|| ape(file.ape()))
+        }),
+        FileType::Mp4 => read(reader, options, |file: &Mp4File| ilst(file.ilst())),
+        FileType::Aiff => read(reader, options, |file: &AiffFile| id3(file.id3v2())),
+        FileType::Wav => read(reader, options, |file: &WavFile| id3(file.id3v2())),
+        FileType::Ape => read(reader, options, |file: &ApeFile| {
+            ape(file.ape()).or_else(|| id3(file.id3v2()))
+        }),
+        FileType::Mpc => read(reader, options, |file: &MpcFile| {
+            ape(file.ape()).or_else(|| id3(file.id3v2()))
+        }),
+        FileType::WavPack => read(reader, options, |file: &WavPackFile| ape(file.ape())),
+        _ => Probe::with_file_type(reader, file_type)
+            .options(options)
+            .read()
+            .map(|file| (file, None)),
+    }
+    .map(Some)
+}
+
+fn probe<R: Read + Seek>(
+    file: R,
+    options: ParseOptions,
+) -> Result<Probe<BufReader<R>>, lofty::error::FileParseError> {
     apply_global_options(
         GlobalOptions::new()
             .allocation_limit(LOFTY_ALLOCATION_MAX_BYTES)
             .preserve_format_specific_items(false),
     );
-    let probe = Probe::new(BufReader::new(file))
+    Probe::new(BufReader::new(file))
         .options(options)
-        .guess_file_type()?;
-    let Some(_) = probe.file_type() else {
-        return Ok(None);
-    };
-    probe.read().map(Some)
+        .guess_file_type()
+        .map_err(Into::into)
 }
 
 pub(crate) fn read_lofty_for_edit(

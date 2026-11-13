@@ -759,7 +759,6 @@
 }
 
 #playback-settings,
-#fullscreen-settings,
 #sleep-timer {
   position: fixed;
   inset: auto;

@@ -23,7 +23,6 @@ app-identity.workspace = true
 uniffi.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-artwork.workspace = true
 async-channel.workspace = true
 glib.workspace = true
 gstreamer.workspace = true
@@ -31,7 +30,6 @@ gstreamer-audio.workspace = true
 jni = "0.22.4"
 library.workspace = true
 localization.workspace = true
-lyrics.workspace = true
 ndk-context = "0.1.1"
 playback.workspace = true
 playback-gstreamer.workspace = true

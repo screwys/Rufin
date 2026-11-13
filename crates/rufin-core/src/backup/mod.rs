@@ -78,6 +78,9 @@ struct SavedLogins {
     librefm_username: String,
     #[serde(default)]
     listenbrainz_username: String,
+    /// The servers the user added, their secrets in `scrobbling`.
+    #[serde(default)]
+    scrobbling_servers: Vec<crate::scrobbling::ServerSettings>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -180,8 +183,8 @@ impl BackupOwner {
             export.ui.sidebar.playlist_pin_imported_sources.clear();
             export.secret_scope_id.clear();
             export.scrobbling_secrets_present = false;
-            for descriptor in crate::scrobbling::secret_descriptors() {
-                descriptor.value_mut(&mut export.scrobbling).clear();
+            for descriptor in crate::scrobbling::secret_descriptors(&export.scrobbling) {
+                descriptor.set(&mut export.scrobbling, String::new());
             }
             Some(serde_json::to_vec_pretty(&export).map_err(|e| e.to_string())?)
         } else {
@@ -734,9 +737,13 @@ fn copy_scrobbling_logins(previous: &StoredSettings, incoming: &mut StoredSettin
     incoming.scrobbling.lastfm.username = previous.scrobbling.lastfm.username.clone();
     incoming.scrobbling.librefm.username = previous.scrobbling.librefm.username.clone();
     incoming.scrobbling.listenbrainz.username = previous.scrobbling.listenbrainz.username.clone();
-    for descriptor in crate::scrobbling::secret_descriptors() {
-        *descriptor.value_mut(&mut incoming.scrobbling) =
-            descriptor.value(&previous.scrobbling).to_owned();
+    // Servers are accounts: they stay with the logins.
+    incoming.scrobbling.servers = previous.scrobbling.servers.clone();
+    for descriptor in crate::scrobbling::secret_descriptors(&incoming.scrobbling) {
+        descriptor.set(
+            &mut incoming.scrobbling,
+            descriptor.value(&previous.scrobbling).to_owned(),
+        );
     }
 }
 
@@ -939,6 +946,7 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
         lastfm_api_key: stored.ui.lastfm_api_key.clone(),
         librefm_username: stored.scrobbling.librefm.username.clone(),
         listenbrainz_username: stored.scrobbling.listenbrainz.username.clone(),
+        scrobbling_servers: stored.scrobbling.servers.clone(),
         ..SavedLogins::default()
     };
     for source in stored.sources.connections() {
@@ -953,7 +961,7 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
             .insert(source.configuration.source_id.clone(), value);
     }
     let scrobbling = read_scrobbling(stored, secrets)?;
-    for descriptor in crate::scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors(&scrobbling) {
         let value = descriptor.value(&scrobbling);
         logins.scrobbling.insert(
             format!("{}:{}", descriptor.namespace(), descriptor.kind()),
@@ -973,6 +981,7 @@ fn restore_logins(
     incoming.ui.lastfm_api_key = logins.lastfm_api_key;
     incoming.scrobbling.librefm.username = logins.librefm_username;
     incoming.scrobbling.listenbrainz.username = logins.listenbrainz_username;
+    incoming.scrobbling.servers = logins.scrobbling_servers;
     for (source_id, value) in logins.sources {
         let Some(source) = incoming
             .sources
@@ -995,10 +1004,10 @@ fn restore_logins(
         }
     }
     let mut scrobbling = incoming.scrobbling_runtime_settings();
-    for descriptor in crate::scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors(&scrobbling) {
         let name = format!("{}:{}", descriptor.namespace(), descriptor.kind());
         if let Some(value) = logins.scrobbling.get(&name) {
-            *descriptor.value_mut(&mut scrobbling) = value.clone().unwrap_or_default();
+            descriptor.set(&mut scrobbling, value.clone().unwrap_or_default());
         }
     }
     if let Err(error) = store_scrobbling(incoming, secrets, &scrobbling) {

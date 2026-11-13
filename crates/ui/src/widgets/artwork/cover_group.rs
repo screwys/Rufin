@@ -1,7 +1,7 @@
 use std::{cell::Cell, rc::Rc};
 
 use adw::prelude::*;
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 
 use super::ArtworkState;
 use super::ArtworkTile;

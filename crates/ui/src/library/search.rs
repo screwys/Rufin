@@ -9,11 +9,11 @@ use std::time::Duration;
 
 use crate::widgets::selection::PlayTarget;
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};

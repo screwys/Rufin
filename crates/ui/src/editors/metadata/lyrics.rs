@@ -1,6 +1,6 @@
 use super::{Editor, refresh_save_state};
 use adw::prelude::*;
-use lyrics::LyricsSearchResult;
+use rufin_core::lyrics::LyricsSearchResult;
 use sources::LyricsStorage;
 use std::{
     cell::{Cell, RefCell},

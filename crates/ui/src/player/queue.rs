@@ -13,10 +13,10 @@ use crate::widgets::{
     view_model::{RowItem, connect_row_bind},
 };
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use library::QueueRow;
 use localization::tr;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::{QueueReorderTarget, QueueSelection};
 use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
 use std::{

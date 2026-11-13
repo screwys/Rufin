@@ -6,7 +6,7 @@ use std::sync::Arc;
 pub struct AndroidMore {
     catalog: Arc<library::Catalog>,
     settings: rufin_core::SettingsHandle,
-    artwork: artwork::Artwork,
+    artwork: rufin_core::artwork::Artwork,
     runtime: tokio::runtime::Handle,
 }
 impl AndroidMore {

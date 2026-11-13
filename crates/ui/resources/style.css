@@ -2596,12 +2596,6 @@ listview.queue-list row {
   opacity: 0.82;
 }
 
-.lyrics-provider-order button {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-}
-
 entry.lyrics-offset-value.flat,
 entry.lyrics-offset-value.flat:focus-within {
   min-width: 40px;
@@ -3036,4 +3030,39 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 /* A smart playlist group's rules sit inset in the rule list. */
 list.boxed-list.smart-playlist-group {
   background-color: color-mix(in srgb, black 12%, var(--card-bg-color));
+}
+
+/* Customization › Menus: the item menu, each entry showing or hiding itself. */
+.menu-preview {
+  padding: 6px;
+}
+
+.menu-preview > separator {
+  margin: 5px 6px;
+}
+
+button.menu-preview-entry {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+button.menu-preview-entry:not(.menu-preview-shown) .menu-preview-check {
+  opacity: 0;
+}
+
+button.menu-preview-entry:not(.menu-preview-shown) label,
+button.menu-preview-entry:not(.menu-preview-shown) image {
+  opacity: 0.45;
+}
+
+button.menu-preview-entry:not(.menu-preview-shown) label {
+  text-decoration-line: line-through;
+}
+
+/* Integrations: the dot of an active integration. */
+.integration-active {
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 50%;
+  background-color: var(--success-color);
 }
