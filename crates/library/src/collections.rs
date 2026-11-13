@@ -1,12 +1,10 @@
 //! Album and artist views, collection choices and album release lookups. Rows, orders, totals
 //! and pictures come from the resident Catalog.
 
-use sqlx::FromRow;
-
 use crate::catalog::views::Context;
 use crate::{
-    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryField, LibraryResult,
-    ListKind, ListRead, Read, ReadCancellation, SourceKey,
+    ArtistKey, Catalog, FolderKey, GenreKey, LibraryField, LibraryResult, ListKind, ListRead, Read,
+    ReadCancellation, SourceKey,
 };
 
 #[derive(Clone, Debug)]
@@ -37,16 +35,26 @@ pub enum AlbumReleaseClass {
     Album,
     Ep,
     Single,
+    Live,
     Collection,
+    Soundtrack,
+    Remix,
+    Demo,
     Other,
 }
 
 impl AlbumReleaseClass {
-    const ALL: [Self; 5] = [
+    /// Every class, in the order of an artist's releases.
+    pub const COUNT: usize = 9;
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Album,
         Self::Ep,
         Self::Single,
+        Self::Live,
         Self::Collection,
+        Self::Soundtrack,
+        Self::Remix,
+        Self::Demo,
         Self::Other,
     ];
 
@@ -68,7 +76,7 @@ impl AlbumReleaseClass {
     /// The class an `albums.flags` column holds.
     pub(crate) fn stored(flags: i64) -> Self {
         Self::ALL
-            .get((flags >> crate::schema::ALBUM_RELEASE_SHIFT & 0b111) as usize)
+            .get((flags >> crate::schema::ALBUM_RELEASE_SHIFT & 0b1111) as usize)
             .copied()
             .unwrap_or(Self::Album)
     }
@@ -122,19 +130,6 @@ pub struct FolderChoice {
     pub folder_key: FolderKey,
     pub object_id: String,
     pub name: String,
-}
-
-#[derive(Clone, Debug, Eq, FromRow, PartialEq)]
-pub struct AlbumReleaseCandidate {
-    pub album_key: AlbumKey,
-    pub media_uri: String,
-    pub lookup_identity: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AlbumReleaseResult {
-    Found { release_types: Vec<String> },
-    Missing,
 }
 
 impl Catalog {
@@ -230,82 +225,33 @@ impl Catalog {
             .await?)
     }
 
-    pub async fn album_release_candidates(
-        &self,
-        source: SourceKey,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumReleaseCandidate>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let limit = limit.min(100);
-        self.loaded().await;
-        let mut candidates = Vec::new();
-        let mut after = 0;
-        while candidates.len() < limit {
-            let page: Vec<AlbumReleaseCandidate> = {
-                let mut connection = self.acquire_cancellable(cancellation).await?;
-                sqlx::query_as("SELECT album_key,media_uri,release_identity lookup_identity FROM albums WHERE source_key=?1 AND album_key>?2 AND release_identity IS NOT NULL AND release_lookup_identity IS NOT release_identity ORDER BY album_key LIMIT 256")
-                    .bind(source)
-                    .bind(after)
-                    .fetch_all(&mut *connection)
-                    .await?
-            };
-            let Some(last) = page.last() else { break };
-            after = last.album_key.raw();
-            let snapshot = self.snapshot();
-            let context = Context::new(&snapshot);
-            let derived = self.derived(&context, None);
-            candidates.extend(
-                page.into_iter()
-                    .filter(|candidate| {
-                        snapshot
-                            .albums
-                            .slot(candidate.album_key.raw())
-                            .is_some_and(|slot| derived.albums[slot as usize].tracks > 0)
-                    })
-                    .take(limit - candidates.len()),
-            );
-        }
-        Ok(candidates)
+    /// The MusicBrainz release identities of albums no source typed, which have no answer yet.
+    pub async fn untyped_release_identities(&self) -> LibraryResult<Vec<String>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT DISTINCT release_identity FROM albums WHERE release_identity IS NOT NULL AND release_identity NOT IN(SELECT identity FROM musicbrainz_release_types)")
+            .fetch_all(&mut *connection)
+            .await?)
     }
 
-    pub async fn accept_album_release_result(
+    /// Keeps MusicBrainz's release types for these identities, none for one it does not
+    /// know, and resolves their albums.
+    pub async fn accept_release_types(
         &self,
-        source: SourceKey,
-        album: AlbumKey,
-        lookup_identity: &str,
-        result: AlbumReleaseResult,
-    ) -> LibraryResult<Option<AlbumKey>> {
-        if lookup_identity.is_empty()
-            || matches!(&result,AlbumReleaseResult::Found { release_types } if release_types.is_empty() || release_types.iter().any(|value|value.trim().is_empty()))
-        {
-            return Err(LibraryError::InvalidRequest(
-                "invalid Album release lookup result".to_string(),
-            ));
-        }
+        answers: &[(String, Vec<String>)],
+    ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        let Some(mut record) = write
-            .get::<crate::catalog::records::Album>(album.raw())
-            .await?
-            .filter(|record| record.source == source)
-        else {
-            return Ok(None);
-        };
-        if record.release_identity.as_deref() != Some(lookup_identity)
-            || record.release_lookup_identity.as_deref() == Some(lookup_identity)
-        {
-            return Ok(None);
-        }
-        if let AlbumReleaseResult::Found { release_types } = result {
-            sqlx::query("INSERT INTO album_release_observations(album_key,lookup_identity,release_types) VALUES(?1,?2,jsonb(?3)) ON CONFLICT(album_key) DO UPDATE SET lookup_identity=excluded.lookup_identity,release_types=excluded.release_types").bind(album).bind(lookup_identity).bind(serde_json::to_string(&release_types)?).execute(write.connection().await?).await?;
-        }
-        record.release_lookup_identity = Some(lookup_identity.to_owned());
-        write.put(record);
-        crate::catalog::albums::resolve(&mut write, &[album.raw()].into()).await?;
+        let answers = serde_json::to_string(answers)?;
+        sqlx::query("INSERT INTO musicbrainz_release_types(identity,release_types) SELECT value->>0,jsonb(value->1) FROM json_each(?1) WHERE true ON CONFLICT(identity) DO UPDATE SET release_types=excluded.release_types")
+            .bind(&answers)
+            .execute(write.connection().await?)
+            .await?;
+        let albums: Vec<i64> = sqlx::query_scalar("SELECT album_key FROM albums WHERE release_identity IN(SELECT value->>0 FROM json_each(?1))")
+            .bind(&answers)
+            .fetch_all(write.connection().await?)
+            .await?;
+        crate::catalog::albums::resolve(&mut write, &albums.into_iter().collect()).await?;
         write.commit().await?;
-        Ok(Some(album))
+        Ok(())
     }
 
     /// A source's music folders by name, at most 256, for the music-folder chooser.

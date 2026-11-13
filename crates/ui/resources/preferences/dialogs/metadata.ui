@@ -224,6 +224,7 @@
   <object class="GtkLabel" id="field_Performer"><property name="label" translatable="yes">Performer</property></object>
   <object class="GtkLabel" id="field_Record_label"><property name="label" translatable="yes">Record label</property></object>
   <object class="GtkLabel" id="field_Release_date"><property name="label" translatable="yes">Release date</property></object>
+  <object class="GtkLabel" id="field_Secondary_release_types"><property name="label" translatable="yes">Secondary release types</property></object>
   <object class="GtkLabel" id="field_Similar_artists"><property name="label" translatable="yes">Similar artists</property></object>
   <object class="GtkLabel" id="field_Studio"><property name="label" translatable="yes">Studio</property></object>
   <object class="GtkLabel" id="field_Studios"><property name="label" translatable="yes">Studios</property></object>

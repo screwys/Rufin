@@ -30,6 +30,98 @@ function openMetadata(item) {
   });
 }
 
+// Any number of a field's options, picked in a menu. The field is set when the menu closes.
+function choices(field, set) {
+  const chosen = new Set(field.value.split(";").map((value) => value.trim()).filter(Boolean));
+  const value = () => field.options.filter((option) => chosen.has(option)).join("; ");
+  const picker = el("button", "metadata-choices");
+  picker.type = "button";
+  picker.setAttribute("aria-haspopup", "listbox");
+  const name = el("span", "", field.value);
+  picker.append(name, icon("rufin-pan-down-symbolic"));
+  const menu = el("div", "smart-suggestions");
+  menu.popover = "auto";
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-multiselectable", "true");
+  for (const option of field.options) {
+    const item = el("button", "menu-item");
+    item.type = "button";
+    item.setAttribute("role", "option");
+    item.append(icon("rufin-object-select-symbolic"), el("span", "", option));
+    const mark = () => {
+      item.setAttribute("aria-selected", String(chosen.has(option)));
+      item.classList.toggle("active", chosen.has(option));
+    };
+    mark();
+    item.addEventListener("click", () => {
+      if (!chosen.delete(option)) chosen.add(option);
+      mark();
+      name.textContent = value();
+    });
+    menu.append(item);
+  }
+  picker.addEventListener("click", () => {
+    menu.showPopover();
+    const rect = picker.getBoundingClientRect();
+    menu.style.minWidth = `${rect.width}px`;
+    menu.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${rect.bottom + menu.offsetHeight + 12 <= innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - menu.offsetHeight - 4)}px`;
+  });
+  menu.addEventListener("toggle", (event) => {
+    if (event.newState === "closed" && value() !== field.value) set(value());
+  });
+  picker.menu = menu;
+  return picker;
+}
+
+// A list's values as chips, each removed on its own, and an input that adds one.
+function values(field, value, set) {
+  const chips = value.split(";").map((chip) => chip.trim()).filter(Boolean);
+  const host = el("span", "metadata-values");
+  chips.forEach((chip, index) => {
+    const node = el("span", "metadata-chip", chip);
+    if (field.writable)
+      node.append(button(tr("Remove"), () => set(chips.filter((_, other) => other !== index).join("; ")), "rufin-window-close-symbolic"));
+    host.append(node);
+  });
+  if (!field.writable) return host;
+  const add = el("input");
+  add.setAttribute("aria-label", field.label);
+  add.dataset.key = field.key;
+  add.addEventListener("change", () => {
+    if (add.value.trim()) set([...chips, add.value].join("; "));
+  });
+  // Enter adds the value; it does not save the dialog.
+  add.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    add.dispatchEvent(new Event("change"));
+  });
+  host.append(add);
+  return host;
+}
+
+// A date is typed, in whole or in part, or picked from the browser's calendar.
+function calendar(input) {
+  const date = el("input", "metadata-date");
+  date.type = "date";
+  date.tabIndex = -1;
+  date.addEventListener("change", () => {
+    if (!date.value) return;
+    input.value = date.value;
+    input.dispatchEvent(new Event("change"));
+  });
+  const open = button(tr("Choose"), () => {
+    // A year or a month opens on its first day.
+    const [year, month = "01", day = "01"] = input.value.split(/\D+/);
+    date.value = /^\d{4}$/.test(year) ? `${year}-${month}-${day}` : "";
+    date.showPicker();
+  }, "rufin-x-office-calendar-symbolic");
+  const host = el("span", "metadata-calendar");
+  host.append(open, date);
+  return host;
+}
+
 function show(value) {
   editor = { ...editor, ...value };
   const host = $("metadata-fields");
@@ -37,25 +129,40 @@ function show(value) {
   host.replaceChildren();
   for (const field of editor.fields) {
     if (!field.writable && !field.value) continue;
-    const row = el("label", "pref-row metadata-field");
+    const several = field.options.length && field.kind === "List";
+    const list = !field.options.length && field.kind === "List";
+    const shown = field.mixed ? "" : field.value;
+    // A menu's items and a list's chips are not the row's control, so its row is not a label.
+    const row = el(several || list ? "div" : "label", "pref-row metadata-field");
     const label = el("span", "pref-label");
     label.append(el("span", "", field.mixed ? field.mixed_label : field.label));
-    const input = el("input");
-    input.dataset.key = field.key;
-    input.value = field.value;
+    const set = (value) =>
+      run(async () => show(await api(`/metadata${query()}`, "PATCH", { operation: "set", key: field.key, value })));
+    let input;
+    if (several) {
+      input = choices(field, set);
+    } else if (field.options.length) {
+      input = el("select");
+      for (const option of ["", ...field.options]) input.append(new Option(option, option));
+    } else if (list) {
+      input = values(field, shown, set);
+    } else {
+      input = el("input");
+      if (field.kind === "Number") Object.assign(input, { type: "number", min: "0", step: "any" });
+    }
+    if (!several && !list) {
+      // The number a text starts with: tags hold `8; 8` and `120.5` too.
+      input.value = field.kind === "Number" ? parseInt(shown) || "" : shown;
+      input.addEventListener("change", () => set(input.value));
+    }
+    if (!list) input.dataset.key = field.key;
     input.disabled = !field.writable;
     if (!field.writable) row.title = tr("This source cannot edit this field");
-    if (field.kind === "Number") input.inputMode = "numeric";
-    input.addEventListener("change", () =>
-      run(async () => show(await api(`/metadata${query()}`, "PATCH", { operation: "set", key: field.key, value: input.value }))),
-    );
     row.append(label, input);
+    if (several) row.append(input.menu);
     if (field.writable) {
-      const clear = button(tr("Clear"), () => {
-        input.value = "";
-        input.dispatchEvent(new Event("change"));
-      }, "rufin-edit-clear-symbolic");
-      row.append(clear);
+      if (field.kind === "Date") row.append(calendar(input));
+      row.append(button(tr("Clear"), () => set(""), "rufin-edit-clear-symbolic"));
       if (field.changed) {
         const reset = button(tr("Original: {value}", { value: field.original }), () =>
           run(async () => show(await api(`/metadata${query()}`, "PATCH", { operation: "reset", key: field.key }))),

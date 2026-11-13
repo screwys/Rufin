@@ -851,10 +851,29 @@ impl SourceOwner {
     }
 
     fn cancel_selected_jobs(&self) {
-        for job in [&self.shared.connection, &self.shared.album_release] {
-            if let Some(job) = job.lock().unwrap_or_else(|p| p.into_inner()).take() {
-                job.abort();
-            }
+        let job = &self.shared.connection;
+        if let Some(job) = job.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            job.abort();
+        }
+    }
+
+    /// Asks MusicBrainz for the release types of the albums no source typed, unless that
+    /// runs: it asks until none is left.
+    fn fill_release_types(&self) {
+        let mut active = self
+            .shared
+            .album_release
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if active.as_ref().is_none_or(|task| task.is_finished()) {
+            let task = self
+                .shared
+                .runtime
+                .spawn(crate::album_release::fill_release_types(
+                    self.shared.catalog.clone(),
+                    self.shared.settings.clone(),
+                ));
+            *active = Some(task.abort_handle());
         }
     }
 
@@ -974,6 +993,7 @@ impl SourceOwner {
             return;
         }
         if let Ok(playlist_files) = &result {
+            self.fill_release_types();
             self.import_playlist_pins_once(source_id).await;
             if *playlist_files {
                 crate::playlist_files::discover(self, source_id).await;
@@ -2529,33 +2549,6 @@ impl SourceOwner {
 }
 
 impl SourceOwner {
-    pub fn selected_library_revealed(&self, source_id: SourceId) {
-        let Some(selected) = self
-            .selected_library()
-            .filter(|selected| selected.source_id == source_id)
-        else {
-            return;
-        };
-        let mut active = self
-            .shared
-            .album_release
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if let Some(task) = active.take() {
-            task.abort();
-        }
-        let task =
-            self.shared
-                .runtime
-                .spawn(crate::album_release::run_selected_album_release_lookup(
-                    self.shared.catalog.clone(),
-                    self.shared.settings.clone(),
-                    selected.source_key,
-                ));
-        *active = Some(task.abort_handle());
-        drop(active);
-    }
-
     pub fn refresh_home(
         &self,
         source_id: SourceId,

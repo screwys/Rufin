@@ -191,19 +191,26 @@ pub fn album_release_title(value: library::AlbumReleaseClass) -> &'static str {
         library::AlbumReleaseClass::Album => msgid("Album"),
         library::AlbumReleaseClass::Ep => msgid("EP"),
         library::AlbumReleaseClass::Single => msgid("Single"),
+        library::AlbumReleaseClass::Live => msgid("Live"),
         library::AlbumReleaseClass::Collection => msgid("Collection"),
+        library::AlbumReleaseClass::Soundtrack => msgid("Soundtrack"),
+        library::AlbumReleaseClass::Remix => msgid("Remix"),
+        library::AlbumReleaseClass::Demo => msgid("Demo"),
         library::AlbumReleaseClass::Other => msgid("Release"),
     }
 }
 
-/// An artist page's release groups in their order: each release class, then Appears On.
-pub const ARTIST_RELEASE_TITLES: [&str; 6] = [
+/// An artist page's release groups, one per release class in its order.
+pub const ARTIST_RELEASE_TITLES: [&str; library::AlbumReleaseClass::COUNT] = [
     msgid("Albums"),
     msgid("EPs"),
     msgid("Singles"),
+    msgid("Live"),
     msgid("Collections"),
+    msgid("Soundtracks"),
+    msgid("Remixes"),
+    msgid("Demos"),
     msgid("Other releases"),
-    msgid("Appears On"),
 ];
 
 /// The title a list's sort choice shows for `field`.

@@ -1,5 +1,6 @@
 //! Album resolution. An album takes its credits, release types and resolved metadata from its
-//! observed header, or else from its indexed members in path, disc and track order. Member
+//! observed header, or else from its indexed members in path, disc and track order; when
+//! neither names a release type, MusicBrainz's answer for its release does. Member
 //! facts that are not in the track rows are read by key, once per page of albums.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -25,12 +26,11 @@ struct Member {
     album_tags: Option<AlbumTags>,
 }
 
-/// The stored metadata, header and accepted release lookup of an album.
+/// The stored metadata and header of an album.
 #[derive(Default)]
 struct Stored {
     metadata: Option<Value>,
     input: Option<Value>,
-    accepted: Option<(String, Vec<String>)>,
 }
 
 /// Resolves these albums again.
@@ -173,22 +173,18 @@ fn order(track: &Track) -> (Option<&str>, i64, i64, Option<&str>, i64) {
     )
 }
 
-/// Metadata, headers and accepted lookups of these albums.
+/// Metadata and headers of these albums.
 async fn stored(write: &mut Write<'_>, albums: &[Album]) -> LibraryResult<HashMap<i64, Stored>> {
     let keys = albums
         .iter()
         .map(|album| album.key.raw())
         .collect::<Vec<_>>();
-    let rows: Vec<(i64, Option<String>, Option<String>, Option<String>, Option<String>)> = sqlx::query_as("SELECT album.album_key,json(album.metadata),json(album.input_metadata),accepted.lookup_identity,json(accepted.release_types) FROM albums album LEFT JOIN album_release_observations accepted USING(album_key) WHERE album.album_key IN(SELECT value FROM json_each(?1))")
+    let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as("SELECT album_key,json(metadata),json(input_metadata) FROM albums WHERE album_key IN(SELECT value FROM json_each(?1))")
         .bind(serde_json::to_string(&keys)?)
         .fetch_all(write.connection().await?)
         .await?;
     let mut stored = HashMap::new();
-    for (key, metadata, input, lookup, types) in rows {
-        let accepted = match (lookup, types) {
-            (Some(lookup), Some(types)) => Some((lookup, serde_json::from_str(&types)?)),
-            _ => None,
-        };
+    for (key, metadata, input) in rows {
         stored.insert(
             key,
             Stored {
@@ -196,7 +192,6 @@ async fn stored(write: &mut Write<'_>, albums: &[Album]) -> LibraryResult<HashMa
                 input: input
                     .map(|input| serde_json::from_str(&input))
                     .transpose()?,
-                accepted,
             },
         );
     }
@@ -309,33 +304,9 @@ async fn resolve_album(
             .unwrap_or_else(|| artist.metadata.name.to_lowercase())
     };
 
-    // A lookup result counts only for the identity it was made for.
-    let (group, release) = match &header {
-        Some(header) => (
-            header.musicbrainz_release_group_id.clone(),
-            header.musicbrainz_release_id.clone(),
-        ),
-        None => (
-            first(|member| member.group.as_deref()),
-            first(|member| member.release.as_deref()),
-        ),
-    };
-    let identity = group
-        .map(|id| format!("release-group:{id}"))
-        .or_else(|| release.map(|id| format!("release:{id}")));
-    album.release_lookup_identity = album
-        .release_lookup_identity
-        .take()
-        .filter(|lookup| identity.as_ref() == Some(lookup));
-    album.release_identity = identity;
-    let accepted = stored
-        .accepted
-        .filter(|(lookup, _)| album.release_lookup_identity.as_ref() == Some(lookup))
-        .map(|(_, types)| types);
-    let mut release_types = match (accepted, &header) {
-        (Some(types), _) => types,
-        (None, Some(header)) => header.release_types.clone(),
-        (None, None) => {
+    let mut release_types = match &header {
+        Some(header) => header.release_types.clone(),
+        None => {
             let mut known = HashSet::new();
             indexed
                 .iter()
@@ -348,6 +319,32 @@ async fn resolve_album(
     };
     // The Store keeps no empty release type.
     release_types.retain(|kind| !kind.is_empty());
+    // An album no source typed takes MusicBrainz's types for its release, once asked.
+    let (group, release) = match &header {
+        Some(header) => (
+            header.musicbrainz_release_group_id.clone(),
+            header.musicbrainz_release_id.clone(),
+        ),
+        None => (
+            first(|member| member.group.as_deref()),
+            first(|member| member.release.as_deref()),
+        ),
+    };
+    album.release_identity = group
+        .map(|id| format!("release-group:{id}"))
+        .or_else(|| release.map(|id| format!("release:{id}")))
+        .filter(|_| release_types.is_empty());
+    if let Some(identity) = &album.release_identity {
+        let answer: Option<String> = sqlx::query_scalar(
+            "SELECT json(release_types) FROM musicbrainz_release_types WHERE identity=?1",
+        )
+        .bind(identity)
+        .fetch_optional(write.connection().await?)
+        .await?;
+        if let Some(answer) = answer {
+            release_types = serde_json::from_str(&answer)?;
+        }
+    }
 
     let leader = indexed.first();
     let added = header
@@ -434,7 +431,8 @@ async fn resolve_album(
     Ok(())
 }
 
-/// Classifies an album by its compilation flag and release types.
+/// Classifies an album by its compilation flag and release types: a secondary type names the
+/// class, and the primary type does when there is none.
 pub(crate) fn release_class(compilation: bool, types: &[String]) -> AlbumReleaseClass {
     let tokens = types
         .iter()
@@ -442,23 +440,22 @@ pub(crate) fn release_class(compilation: bool, types: &[String]) -> AlbumRelease
         .map(|token| token.trim().to_lowercase())
         .filter(|token| !token.is_empty())
         .collect::<Vec<_>>();
-    if compilation {
+    let any = |names: &[&str]| tokens.iter().any(|token| names.contains(&token.as_str()));
+    if compilation || any(&["compilation", "compilations", "collection", "collections"]) {
         AlbumReleaseClass::Collection
-    } else if tokens.is_empty() || tokens.iter().any(|token| token == "album") {
+    } else if any(&["soundtrack"]) {
+        AlbumReleaseClass::Soundtrack
+    } else if any(&["live"]) {
+        AlbumReleaseClass::Live
+    } else if any(&["remix", "dj-mix", "dj mix", "mixtape/street"]) {
+        AlbumReleaseClass::Remix
+    } else if any(&["demo"]) {
+        AlbumReleaseClass::Demo
+    } else if tokens.is_empty() || any(&["album"]) {
         AlbumReleaseClass::Album
-    } else if tokens.iter().any(|token| {
-        matches!(
-            token.as_str(),
-            "compilation" | "compilations" | "collection" | "collections"
-        )
-    }) {
-        AlbumReleaseClass::Collection
-    } else if tokens
-        .iter()
-        .any(|token| matches!(token.as_str(), "ep" | "e.p."))
-    {
+    } else if any(&["ep", "e.p."]) {
         AlbumReleaseClass::Ep
-    } else if tokens.iter().any(|token| token == "single") {
+    } else if any(&["single"]) {
         AlbumReleaseClass::Single
     } else {
         AlbumReleaseClass::Other

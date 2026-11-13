@@ -2671,7 +2671,7 @@ impl Catalog {
             Read::List(list) => {
                 let keys = self.list_keys(context, list, inputs, read_at);
                 if let ListKind::ArtistAlbums { .. } = list.kind {
-                    let mut classes = [0; 6];
+                    let mut classes = [0; AlbumReleaseClass::COUNT];
                     for key in &keys {
                         if let Some(album) = snapshot.albums.get(*key) {
                             classes[usize::from(AlbumReleaseClass::of(album.flags).code())] += 1;

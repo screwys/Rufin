@@ -136,23 +136,127 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
         }
         items(state.fields, key = { it.field.key }) { presented ->
             val field = presented.field
-            OutlinedTextField(value = if (field.mixed) "" else field.value, onValueChange = { connection.setField(field.key, it) },
+            val number = field.kind == MetadataFieldKind.NUMBER
+            val date = field.kind == MetadataFieldKind.DATE
+            var picking by remember { mutableStateOf(false) }
+            if (field.options.isNotEmpty()) MetadataChoiceField(connection, presented, editable)
+            else if (field.kind == MetadataFieldKind.LIST) MetadataListField(connection, presented, editable)
+            // The number a text starts with: tags hold `8; 8` and `120.5` too.
+            else OutlinedTextField(value = if (field.mixed) "" else if (number) field.value.takeWhile { it in '0'..'9' } else field.value,
+                onValueChange = { connection.setField(field.key, if (number) it.filter { digit -> digit in '0'..'9' } else it) },
                 modifier = Modifier.fillMaxWidth(), label = { Text(if (field.mixed) presented.mixedLabel else field.label) }, enabled = editable,
                 readOnly = !field.writable,
                 supportingText = if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
-                trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
-                    RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) } }) else null,
-                singleLine = field.kind == MetadataFieldKind.NUMBER || field.kind == MetadataFieldKind.DATE,
-                keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == MetadataFieldKind.NUMBER) KeyboardType.Decimal else KeyboardType.Text),
+                // A date is typed, in whole or in part, or picked from the calendar.
+                trailingIcon = if (presented.identified || date && field.writable) ({ Row {
+                    if (date && field.writable) IconButton({ picking = true }, enabled = editable) {
+                        RufinIcon("rufin-x-office-calendar-symbolic", translate("Choose")) }
+                    MetadataReset(connection, presented, editable) } }) else null,
+                singleLine = number || date,
+                keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
                 colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
                     else OutlinedTextFieldDefaults.colors(),
             )
+            if (picking) MetadataDatePicker(field.value, { picking = false }) { connection.setField(field.key, it) }
         }
         if (state.lockWritable) item {
             SettingsGroup {
                 SettingsRow(translate("Lock metadata"),
                     summary = translate("Prevent automatic metadata refreshes from replacing these values"),
                     trailing = { Switch(state.locked == true, connection::setLocked, enabled = editable) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetadataReset(connection: MetadataConnection, presented: io.github.screwys.rufin.shared.rufin_core.MetadataFieldPresentation, editable: Boolean) {
+    if (presented.identified) IconButton({ connection.undo(presented.field.key) }, enabled = editable) {
+        RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) }
+}
+
+/** A list's values as chips, each removed with a tap, under the field that adds one. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MetadataListField(connection: MetadataConnection, presented: io.github.screwys.rufin.shared.rufin_core.MetadataFieldPresentation, editable: Boolean) {
+    val field = presented.field
+    fun values(text: String) = text.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+    val all = if (field.mixed) emptyList() else values(field.value)
+    // The text being typed is the list's last value already, so a save never drops it.
+    var typed by remember { mutableStateOf("") }
+    val chips = if (typed.isNotBlank() && all.lastOrNull() == typed.trim()) all.dropLast(1) else all
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(typed, { text ->
+                connection.setField(field.key, (chips + values(text)).joinToString("; "))
+                typed = text.substringAfterLast(';').trimStart()
+            }, Modifier.fillMaxWidth(), label = { Text(if (field.mixed) presented.mixedLabel else field.label) }, enabled = editable,
+            readOnly = !field.writable,
+            supportingText = if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
+            trailingIcon = if (presented.identified) ({ MetadataReset(connection, presented, editable) }) else null,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { typed = "" }),
+            colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
+                else OutlinedTextFieldDefaults.colors())
+        if (chips.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            chips.forEachIndexed { index, chip ->
+                InputChip(false, { connection.setField(field.key, (chips.filterIndexed { other, _ -> other != index } + values(typed)).joinToString("; ")) },
+                    label = { Text(chip) }, enabled = editable && field.writable,
+                    trailingIcon = if (field.writable) ({ RufinIcon("rufin-window-close-symbolic", translate("Remove"), Modifier.size(InputChipDefaults.IconSize)) }) else null)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MetadataDatePicker(value: String, onDismiss: () -> Unit, onDate: (String) -> Unit) {
+    fun utc() = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    // A year or a month opens on its first day; an empty field, on today.
+    val parts = value.split(Regex("\\D+")).map { it.toIntOrNull() }
+    val initial = parts[0]?.takeIf { it in DatePickerDefaults.YearRange }?.let { year ->
+        utc().apply { clear(); set(year, (parts.getOrNull(1) ?: 1) - 1, parts.getOrNull(2) ?: 1) }.timeInMillis
+    }
+    val picker = rememberDatePickerState(initial)
+    DatePickerDialog(onDismissRequest = onDismiss,
+        confirmButton = { TextButton({
+            picker.selectedDateMillis?.let { millis ->
+                val date = utc().apply { timeInMillis = millis }
+                onDate(String.format(java.util.Locale.ROOT, "%04d-%02d-%02d", date[java.util.Calendar.YEAR],
+                    date[java.util.Calendar.MONTH] + 1, date[java.util.Calendar.DAY_OF_MONTH]))
+            }
+            onDismiss()
+        }) { Text(translate("Choose")) } },
+        dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } }) { DatePicker(picker) }
+}
+
+/** A field with a fixed vocabulary: its value is picked from a menu, one of them or, for a list, any number. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MetadataChoiceField(connection: MetadataConnection, presented: io.github.screwys.rufin.shared.rufin_core.MetadataFieldPresentation, editable: Boolean) {
+    val field = presented.field
+    val several = field.kind == MetadataFieldKind.LIST
+    val chosen = field.value.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded, { expanded = it && editable && field.writable }) {
+        OutlinedTextField(if (field.mixed) "" else field.value, {},
+            Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            readOnly = true, singleLine = true, enabled = editable,
+            label = { Text(if (field.mixed) presented.mixedLabel else field.label) },
+            supportingText = if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
+            trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
+                RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) } })
+                else ({ RufinIcon("rufin-pan-down-symbolic", null, Modifier.size(16.dp)) }),
+            colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
+                else OutlinedTextFieldDefaults.colors())
+        ExposedDropdownMenu(expanded, { expanded = false }) {
+            if (!several) DropdownMenuItem({ Text(translate("None")) }, { connection.setField(field.key, ""); expanded = false },
+                leadingIcon = { if (chosen.isEmpty()) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp)) else Spacer(Modifier.size(18.dp)) })
+            field.options.forEach { option ->
+                val selected = option in chosen
+                DropdownMenuItem({ Text(option) }, {
+                    if (several) connection.setField(field.key, field.options.filter { (it in chosen) != (it == option) }.joinToString("; "))
+                    else { connection.setField(field.key, option); expanded = false }
+                }, leadingIcon = { if (selected) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp)) else Spacer(Modifier.size(18.dp)) })
             }
         }
     }

@@ -143,18 +143,19 @@ internal class MetadataConnection(
 
     fun setField(id: String, value: String) = change { it.setField(id, value) }
     fun setLocked(value: Boolean) = change { it.setLocked(value) }
-    fun undo(id: String) = action { it.resetField(id) }
+    // A reset is quick work on the editor's own state: it shows no progress.
+    fun undo(id: String) = action(progress = false) { it.resetField(id) }
     fun setStorage(value: ArtworkStorage) = change { it.setArtworkStorage(value) }
 
-    private fun action(block: suspend (MetadataEditor) -> Unit) {
+    private fun action(progress: Boolean = true, block: suspend (MetadataEditor) -> Unit) {
         val editor = bridge ?: return
         scope.launch {
-            busy = true
+            if (progress) busy = true
             failure = null
             try { block(editor); bridge?.let { refresh(it) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failure = error; state = bridge?.snapshot() }
-            finally { busy = false }
+            finally { if (progress) busy = false }
         }
     }
 

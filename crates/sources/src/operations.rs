@@ -24,6 +24,9 @@ pub struct MetadataField {
     pub writable: bool,
     pub mixed: bool,
     pub suggestion: Option<String>,
+    /// The values a field with a fixed vocabulary takes: one of them when its kind is Text,
+    /// any number when it is List. Empty for a field that takes any text.
+    pub options: Vec<String>,
 }
 
 pub type MetadataChanges = std::collections::BTreeMap<String, String>;
@@ -65,6 +68,11 @@ impl MetadataDraft {
             if let Some(next) = next.fields.iter().find(|next| next.key == field.key) {
                 field.mixed |= field.value != next.value || next.mixed;
                 field.writable &= next.writable;
+                for option in &next.options {
+                    if !field.options.contains(option) {
+                        field.options.push(option.clone());
+                    }
+                }
             } else if !(self.kind == SourceEntityKind::Artist
                 && matches!(
                     field.key.as_str(),
@@ -143,7 +151,36 @@ impl MetadataField {
             writable,
             mixed: false,
             suggestion: None,
+            options: Vec::new(),
         }
+    }
+
+    /// Gives the field a vocabulary. Its values take the vocabulary's spelling, and a value
+    /// outside it stays one of the choices.
+    pub(crate) fn with_options(mut self, options: &[&str]) -> Self {
+        if options.is_empty() {
+            return self;
+        }
+        self.options = options.iter().map(|option| (*option).to_owned()).collect();
+        let mut values = Vec::new();
+        for value in self.value.split(';').map(str::trim) {
+            if value.is_empty() {
+                continue;
+            }
+            let known = self
+                .options
+                .iter()
+                .find(|option| option.eq_ignore_ascii_case(value));
+            match known {
+                Some(option) => values.push(option.clone()),
+                None => {
+                    self.options.push(value.to_owned());
+                    values.push(value.to_owned());
+                }
+            }
+        }
+        self.value = values.join("; ");
+        self
     }
 }
 

@@ -208,15 +208,15 @@ impl MetadataEditor {
     pub async fn reset_field(&self, key: String) -> Result<(), SourceMetadataError> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
-            if self.draft.kind != SourceEntityKind::Track
-                && let Some(scope) = &self.batch
-            {
-                scope.batch.reset_scope(key.clone()).await?;
-                self.reload_batch().await?;
-            } else if let Some(scope) = &self.batch {
+            if let Some(scope) = &self.batch {
+                // The reload shows what the batch holds; the other edits made here come back.
                 let mut pending = self.state().clone();
                 pending.touched.remove(&key);
-                scope.batch.reset(&scope.indices, key).await?;
+                if self.draft.kind == SourceEntityKind::Track {
+                    scope.batch.reset(&scope.indices, key).await?;
+                } else {
+                    scope.batch.reset_scope(key).await?;
+                }
                 self.reload_batch().await?;
                 let mut state = self.state();
                 for key in &pending.touched {

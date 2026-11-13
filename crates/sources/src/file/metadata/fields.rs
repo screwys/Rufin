@@ -12,17 +12,66 @@ struct Field {
     item: ItemKey,
     kind: MetadataFieldKind,
     scopes: u8,
+    /// The share of the item's values this field holds, for the release type tag: its one
+    /// primary type, or its secondary types.
+    part: Option<&'static [&'static str]>,
+}
+
+/// MusicBrainz's release types. A release type tag holds a primary one, then secondary ones.
+const PRIMARY_RELEASE_TYPES: &[&str] = &["Album", "Single", "EP", "Broadcast", "Other"];
+const SECONDARY_RELEASE_TYPES: &[&str] = &[
+    "Compilation",
+    "Soundtrack",
+    "Spokenword",
+    "Interview",
+    "Audiobook",
+    "Audio drama",
+    "Live",
+    "Remix",
+    "DJ-mix",
+    "Mixtape/Street",
+    "Demo",
+    "Field recording",
+];
+
+/// A flag is set, cleared or absent, and an absent one leaves the answer to other tags.
+const FLAG: &[&str] = &["Yes", "No"];
+
+/// The values of a release type tag this field holds, as written.
+fn part_values(tag: &Tag, field: &Field) -> Vec<String> {
+    let primary = field.part == Some(PRIMARY_RELEASE_TYPES);
+    tag.get_strings(field.item)
+        .flat_map(|value| value.split([';', '\0']))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| {
+            PRIMARY_RELEASE_TYPES
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(value))
+                == primary
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether two fields edit the same values of a tag.
+fn same(a: &Field, b: &Field) -> bool {
+    a.item == b.item && a.part == b.part
 }
 
 macro_rules! fields {
     ($($definition:tt),* $(,)?) => { const FIELDS: &[Field] = &[$(fields!(@field $definition)),*]; };
     (@field ($key:literal, $item:ident, $kind:ident, $scopes:literal)) => {
         Field { key: $key, label: None, item: ItemKey::$item,
-            kind: MetadataFieldKind::$kind, scopes: $scopes }
+            kind: MetadataFieldKind::$kind, scopes: $scopes, part: None }
     };
     (@field ($key:literal, $label:literal, $item:ident, $kind:ident, $scopes:literal)) => {
         Field { key: $key, label: Some($label), item: ItemKey::$item,
-            kind: MetadataFieldKind::$kind, scopes: $scopes }
+            kind: MetadataFieldKind::$kind, scopes: $scopes, part: None }
+    };
+    (@field ($key:literal, $label:literal, $item:ident, $kind:ident, $scopes:literal, $part:ident)) => {
+        Field { key: $key, label: Some($label), item: ItemKey::$item,
+            kind: MetadataFieldKind::$kind, scopes: $scopes, part: Some($part) }
     };
 }
 
@@ -76,6 +125,22 @@ fields![
     ("disc_total", "Total discs", DiscTotal, Number, 3),
     ("label", "Record label", Label, List, 3),
     ("compilation", "Compilation", FlagCompilation, Boolean, 3),
+    (
+        "release_type",
+        "Release type",
+        MusicBrainzReleaseType,
+        Text,
+        3,
+        PRIMARY_RELEASE_TYPES
+    ),
+    (
+        "secondary_release_types",
+        "Secondary release types",
+        MusicBrainzReleaseType,
+        List,
+        3,
+        SECONDARY_RELEASE_TYPES
+    ),
     (
         "musicbrainz_album_artist_id",
         "MusicBrainz album artist ID",
@@ -142,6 +207,7 @@ pub(super) fn read(
                             .join("; "),
                     )
                 }
+                _ if field.part.is_some() => tag.map(|tag| part_values(tag, field).join("; ")),
                 _ => Some(
                     tag.into_iter()
                         .flat_map(|tag| tag.get_strings(field.item))
@@ -150,8 +216,9 @@ pub(super) fn read(
                 ),
             }
             .unwrap_or_default();
-            if field.kind == MetadataFieldKind::Boolean && !value.is_empty() {
-                value = (value == "1").to_string();
+            let flag = field.kind == MetadataFieldKind::Boolean;
+            if flag && !value.is_empty() {
+                value = FLAG[usize::from(value != "1")].into();
             }
             (field.label.is_none() || writable || !value.is_empty()).then(|| {
                 let mut metadata =
@@ -160,7 +227,11 @@ pub(super) fn read(
                     metadata.label = label.into();
                 }
                 metadata.kind = field.kind;
-                metadata
+                metadata.with_options(if flag {
+                    FLAG
+                } else {
+                    field.part.unwrap_or_default()
+                })
             })
         })
         .collect()
@@ -244,13 +315,41 @@ pub(super) fn apply(
             tag.remove_key(ItemKey::TrackArtists);
             list(tag, ItemKey::TrackArtists);
         }
+        if field.part.is_some() {
+            // The tag keeps the other field's values: the primary type first, as Picard
+            // writes them.
+            let other = FIELDS
+                .iter()
+                .find(|other| other.item == item && other.part.is_some() && !same(other, field))
+                .map(|other| part_values(tag, other))
+                .unwrap_or_default();
+            let own = value
+                .split(';')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let (primary, secondary) = if field.part == Some(PRIMARY_RELEASE_TYPES) {
+                (own, other)
+            } else {
+                (other, own)
+            };
+            tag.remove_key(item);
+            for value in primary.into_iter().chain(secondary) {
+                tag.push_unchecked(lofty::tag::TagItem::new(
+                    item,
+                    lofty::tag::ItemValue::Text(value.to_lowercase()),
+                ));
+            }
+            continue;
+        }
         tag.remove_key(item);
         if !value.is_empty() {
             match field.kind {
                 MetadataFieldKind::Boolean => {
                     let value = match value {
-                        "true" => "1",
-                        "false" => "0",
+                        "Yes" => "1",
+                        "No" => "0",
                         _ => {
                             return Err(SourceMetadataError::Write(format!(
                                 "Invalid {}: {value}",
@@ -291,7 +390,7 @@ pub(super) fn project(edit: &MetadataEdit) -> crate::MetadataChanges {
                 .find(|field| field.key == key && field.scopes & scope != 0)?;
             let track = FIELDS
                 .iter()
-                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+                .find(|track| same(track, field) && track.scopes & 1 != 0)?;
             Some((track.key.to_string(), value.clone()))
         })
         .collect()
@@ -312,7 +411,7 @@ pub(super) fn scope_fields(
         .filter_map(|field| {
             let canonical = FIELDS
                 .iter()
-                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+                .find(|track| same(track, field) && track.scopes & 1 != 0)?;
             let original = track
                 .fields
                 .iter()
@@ -320,6 +419,7 @@ pub(super) fn scope_fields(
             let mut metadata =
                 MetadataField::new(field.key, original.value.clone(), original.writable);
             metadata.kind = field.kind;
+            metadata.options.clone_from(&original.options);
             if let Some(label) = field.label {
                 metadata.label = label.into();
             }
@@ -343,7 +443,7 @@ pub(super) fn scope_values(
         .filter_map(|field| {
             let track = FIELDS
                 .iter()
-                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+                .find(|track| same(track, field) && track.scopes & 1 != 0)?;
             Some((field.key.to_string(), values.get(track.key)?.clone()))
         })
         .collect()

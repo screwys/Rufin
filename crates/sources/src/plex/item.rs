@@ -104,6 +104,12 @@ pub(super) fn read_items<'a>(
                             is_compilation: field::<i64>(item, "compilation").map(|v| v != 0),
                             album_artists: artists,
                             genres: std::mem::take(&mut item_genres),
+                            release_types: library::normalize_release_types(
+                                items(&item["Format"])
+                                    .iter()
+                                    .chain(items(&item["Subformat"]))
+                                    .filter_map(|tag| tag["tag"].as_str()),
+                            ),
                             ..Default::default()
                         },
                         user_data: library::NativeUserState {

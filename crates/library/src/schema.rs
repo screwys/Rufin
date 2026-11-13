@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 62;
+pub(crate) const STORE_VERSION: i64 = 63;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -21,7 +21,7 @@ pub(crate) const HAS_PICTURE: i64 = 1;
 /// Tracks only.
 pub(crate) const TRACK_CUE: i64 = 2;
 /// Albums only: the release class code, from its compilation flag and release types, in
-/// three bits from here.
+/// four bits from here.
 pub(crate) const ALBUM_RELEASE_SHIFT: i64 = 2;
 
 /// Roles of `track_links` and `album_links`. Albums use the artist and genre roles.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 62;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 63;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -64,8 +64,9 @@ CREATE TABLE albums (
     added_at INTEGER,
     is_compilation INTEGER,
     first_seen_at INTEGER,
+    -- The MusicBrainz release group or release to ask for release types, when no source
+    -- gave the album any.
     release_identity TEXT,
-    release_lookup_identity TEXT,
     native_favorite INTEGER,
     native_rating INTEGER,
     native_play_count INTEGER,
@@ -78,6 +79,7 @@ CREATE TABLE albums (
     flags INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source_key,object_id)
 ) STRICT;
+CREATE INDEX albums_release_identity_idx ON albums(release_identity) WHERE release_identity IS NOT NULL;
 
 CREATE TABLE tracks (
     track_key INTEGER PRIMARY KEY,
@@ -199,11 +201,11 @@ CREATE TABLE album_links (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX album_links_target_idx ON album_links(role,target,album_key);
 
-CREATE TABLE album_release_observations (
-    album_key INTEGER PRIMARY KEY REFERENCES albums ON DELETE CASCADE,
-    lookup_identity TEXT NOT NULL,
+-- MusicBrainz's release types for a release identity, empty when it knows none.
+CREATE TABLE musicbrainz_release_types (
+    identity TEXT PRIMARY KEY,
     release_types BLOB NOT NULL
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE home_entries (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
