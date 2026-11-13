@@ -117,6 +117,16 @@
       <section id="pref-library" role="tabpanel" hidden>
         <div class="pref-group-header"><h4>{{ localization::tr("Sources") }}</h4><button type="button" id="pref-add-source">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("Add Source") }}</button></div>
         <div class="pref-group" id="pref-sources"></div>
+        <h4>{{ localization::tr("Export Activity") }}</h4>
+        <div class="pref-group">
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Export format") }}</span></span><select id="pref-activity-format"><option value="lastfm">Last.fm</option><option value="listenbrainz">ListenBrainz</option><option value="jsonl">JSONL</option></select></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Source") }}</span></span><select id="pref-activity-source"></select></label>
+          <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Export your listening history in Rufin") }}</span></span><button type="button" id="pref-activity-export">{{ localization::tr("Export") }}</button></div>
+        </div>
+        <h4>{{ localization::tr("Import Activity") }}</h4>
+        <div class="pref-group">
+          <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Listens from Rufin, ListenBrainz or Last.fm, or play counts from other players") }}</span></span><button type="button" id="pref-activity-import">{{ localization::tr("Import") }}</button><input type="file" id="pref-activity-file" hidden></div>
+        </div>
       </section>
       <section id="pref-source" role="tabpanel" hidden>
         <h4>{{ localization::tr("Server Actions") }}</h4>

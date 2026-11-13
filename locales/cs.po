@@ -72,6 +72,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -346,9 +351,6 @@ msgstr ""
 msgid "Add Manually"
 msgstr "Přidat pravidlo"
 
-msgid "Add Rule"
-msgstr "Přidat pravidlo"
-
 #, fuzzy
 #| msgid "Sources"
 msgid "Add Source"
@@ -386,6 +388,11 @@ msgid "Add folder"
 msgstr "Přidat složku"
 
 #, fuzzy
+#| msgid "Sources"
+msgid "Add group"
+msgstr "Zdroje"
+
+#, fuzzy
 #| msgid "Add a title"
 msgid "Add image"
 msgstr "Přidat název"
@@ -394,6 +401,11 @@ msgstr "Přidat název"
 #| msgid "Local music folder"
 msgid "Add music"
 msgstr "Místní hudební složka"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Přidat pravidlo"
 
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
@@ -547,11 +559,6 @@ msgstr "Název aplikace"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
-#, fuzzy
-#| msgid "Slate"
-msgid "Apply Template"
-msgstr "Šedá"
-
 msgid "Apply"
 msgstr ""
 
@@ -617,6 +624,11 @@ msgstr "Tajné úložiště"
 
 msgid "Artwork"
 msgstr ""
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Sestupně"
 
 msgid "Audio effects"
 msgstr ""
@@ -1571,11 +1583,6 @@ msgstr "Diagnostický protokol"
 msgid "Direct"
 msgstr "DirectSound"
 
-#, fuzzy
-#| msgid "DirectSound"
-msgid "Direction"
-msgstr "DirectSound"
-
 msgid "Disable private mode"
 msgstr "Vypnout soukromý režim"
 
@@ -2345,6 +2352,11 @@ msgstr "Uložené zdroje"
 msgid "Image"
 msgstr "Obrázek"
 
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Activity"
+msgstr "Chytrý Playlist"
+
 msgid "Import Backup"
 msgstr ""
 
@@ -2368,8 +2380,21 @@ msgstr "Uživatelská podpora"
 msgid "Import"
 msgstr "Uživatelská podpora"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "Smazat playlist"
+msgstr[1] "Smazat playlist"
+msgstr[2] "Smazat playlist"
+
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "In playlist"
+msgstr "Nový playlist"
 
 msgid "Inactive at this sample rate"
 msgstr ""
@@ -2726,8 +2751,18 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Cached"
+msgid "Match"
+msgstr "V mezipaměti"
+
+#, fuzzy
+#| msgid "Cached"
 msgid "Matched"
 msgstr "V mezipaměti"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Matching tracks..."
+msgstr "Žádné odpovídající skladby"
 
 msgid "Maximum frequency (Hz)"
 msgstr ""
@@ -2840,21 +2875,6 @@ msgstr "Více akcí"
 
 msgid "More"
 msgstr ""
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Monthly)"
-msgstr "Nejčastěji přehrávané"
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Weekly)"
-msgstr "Nejčastěji přehrávané"
-
-#, fuzzy
-#| msgid "Most Played"
-msgid "Most Played (Yearly)"
-msgstr "Nejčastěji přehrávané"
 
 msgid "Most Played"
 msgstr "Nejčastěji přehrávané"
@@ -3000,6 +3020,11 @@ msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
+msgstr "Nikdy nepřehráno"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Nikdy nepřehráno"
 
 msgid "New Playlist"
@@ -3383,6 +3408,9 @@ msgstr "Akce serveru"
 msgid "Orange"
 msgstr "Oranžová"
 
+msgid "Order"
+msgstr ""
+
 #, fuzzy
 #| msgid "Original"
 msgid "Original audio"
@@ -3473,9 +3501,6 @@ msgid "Perceptual"
 msgstr "Percentuální"
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3629,6 +3654,11 @@ msgstr "Playlist"
 
 msgid "Playlists"
 msgstr "Playlisty"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Plays from"
+msgstr "Přehrát náhodně"
 
 msgid "Plays"
 msgstr "Přehrává"
@@ -3787,6 +3817,9 @@ msgstr "Ukončit"
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 #, fuzzy
 #| msgid "Selection"
 msgid "Range selection"
@@ -3810,6 +3843,11 @@ msgstr ""
 #| msgid "Recently released"
 msgid "Recent searches"
 msgstr "Nedávno vydané"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Nedávno přehrané"
 
 msgid "Recently played"
 msgstr "Nedávno přehrané"
@@ -3979,6 +4017,11 @@ msgstr "Odebrat z oblíbených"
 #| msgid "Remove folder"
 msgid "Remove from folder"
 msgstr "Odebrat složku"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Odebrat pravidlo"
 
 msgid "Remove rule"
 msgstr "Odebrat pravidlo"
@@ -4476,6 +4519,15 @@ msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
 
 #, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} dnem"
+msgstr[1] "{count} dny"
+msgstr[2] "{count} dny"
+
+#, fuzzy
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Zdroj metadat"
@@ -4706,9 +4758,6 @@ msgstr "Jméno interpreta"
 msgid "Sort title"
 msgstr "Seřadit podle názvu"
 
-msgid "Sort"
-msgstr "Seřadit"
-
 #, fuzzy
 #| msgid "Sidebar route by position"
 msgid "Source by position"
@@ -4753,6 +4802,11 @@ msgstr ""
 #| msgid "ListenBrainz"
 msgid "Start Listening"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start from"
+msgstr "Ukládání..."
 
 msgid "Start minimized"
 msgstr "Spustit v minimalizovaném režimu"
@@ -4887,11 +4941,6 @@ msgstr "Tyrkysová"
 
 msgid "Techno"
 msgstr "Techno"
-
-#, fuzzy
-#| msgid "Slate"
-msgid "Template"
-msgstr "Šedá"
 
 #, fuzzy
 #| msgid "Connection"
@@ -5404,6 +5453,12 @@ msgstr "výše"
 msgid "after"
 msgstr "po"
 
+msgid "all"
+msgstr ""
+
+msgid "any"
+msgstr ""
+
 msgid "before"
 msgstr "před"
 
@@ -5412,6 +5467,9 @@ msgstr "pod"
 
 msgid "contains"
 msgstr "obsahuje"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "neobsahuje"
@@ -5428,6 +5486,9 @@ msgstr "vyloučit"
 msgid "here"
 msgstr "zde"
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr "je prázdné"
 
@@ -5442,6 +5503,17 @@ msgstr "je"
 
 msgid "kbps"
 msgstr "kbps"
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Support"
+msgid "of these"
+msgstr "Uživatelská podpora"
 
 msgid "range"
 msgstr "rozsah"
@@ -5475,6 +5547,12 @@ msgstr[0] "{count} dnem"
 msgstr[1] "{count} dny"
 msgstr[2] "{count} dny"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 #, fuzzy
 #| msgid "{count} track"
 #| msgid_plural "{count} tracks"
@@ -5489,6 +5567,18 @@ msgid_plural "{count} folders selected"
 msgstr[0] "{count} složka vybrána"
 msgstr[1] "{count} složky vybrány"
 msgstr[2] "{count} složek vybráno"
+
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
@@ -5628,6 +5718,39 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Slate"
+#~ msgid "Apply Template"
+#~ msgstr "Šedá"
+
+#, fuzzy
+#~| msgid "DirectSound"
+#~ msgid "Direction"
+#~ msgstr "DirectSound"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#~| msgid "Most Played"
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Nejčastěji přehrávané"
+
+#~ msgid "Sort"
+#~ msgstr "Seřadit"
+
+#, fuzzy
+#~| msgid "Slate"
+#~ msgid "Template"
+#~ msgstr "Šedá"
 
 #, fuzzy
 #~| msgid "This device"
@@ -5971,11 +6094,6 @@ msgstr ""
 
 #~ msgid "Save to rescan"
 #~ msgstr "Uložit pro opětovné naskenování"
-
-#, fuzzy
-#~| msgid "Smart Playlist"
-#~ msgid "Import a copy"
-#~ msgstr "Chytrý Playlist"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Nastavení textu skladeb"

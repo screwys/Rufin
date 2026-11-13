@@ -318,7 +318,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
         );
     }
     let mut rows = handle.prepare(
-        "SELECT track.track_key,legacy.play_count,legacy.skip_count,legacy.last_played_at FROM legacy_activity legacy JOIN sources source ON source.object_id=legacy.source_id JOIN tracks track ON track.source_key=source.source_key AND track.object_id=legacy.track_object_id WHERE legacy.period='lifetime' AND legacy.item_kind='track'",
+        "SELECT track.track_key,counted.plays,counted.skips,counted.last_played_at FROM play_counts counted JOIN tracks track USING(media_uri) WHERE counted.period='lifetime'",
     )?;
     while rows.step()? {
         let counted = listened.entry(rows.int(0)).or_insert((0, 0, None));

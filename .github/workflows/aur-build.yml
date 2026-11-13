@@ -271,7 +271,7 @@ jobs:
 
       - name: Upload Arch payload
         if: ${{ !inputs.publish }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: archlinux-x86_64
           path: dist/rufin-*-archlinux-x86_64.tar.zst
@@ -279,7 +279,7 @@ jobs:
           retention-days: 7
 
       - name: Upload rufin-bin metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aur-bin-metadata
           path: |
@@ -375,7 +375,7 @@ jobs:
           cp packaging/aur/rufin-git/PKGBUILD packaging/aur/rufin-git/.SRCINFO dist/aur-git/
 
       - name: Upload rufin-git metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aur-git-metadata
           path: |

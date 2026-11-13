@@ -52,6 +52,11 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         feedbackTimeout = viewModelScope.launch { delay(2000); feedback = null }
     }
     internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
+    /// Work in progress, shown until its result's message replaces it.
+    internal fun showWorking(message: String) {
+        feedbackTimeout?.cancel()
+        feedback = FeedbackMessage(message, null)
+    }
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
     private val feed = MutableSharedFlow<Changed>(extraBufferCapacity = 64)

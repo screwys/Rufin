@@ -62,8 +62,6 @@
                             <property name="child">
                               <object class="GtkBox" id="upper">
                                 <property name="orientation">horizontal</property>
-                                <property name="margin-start">8</property>
-                                <property name="margin-end">8</property>
                                 <property name="hexpand">true</property>
                                 <property name="vexpand">true</property>
                                 <child>
@@ -115,7 +113,7 @@
                 <property name="halign">center</property>
                 <property name="valign">end</property>
                 <property name="visible">false</property>
-                <style><class name="control-feedback-toast"/></style>
+                <property name="margin-bottom">109</property>
               </object>
             </child>
             <child type="overlay">

@@ -2,7 +2,7 @@
 //! the Write that a walk's staged files go through.
 
 use super::merge::Touched;
-use super::records::{Source, Track};
+use super::records::Track;
 use super::write::Write;
 use super::write::{Family, Scope};
 use super::*;
@@ -416,20 +416,6 @@ pub(super) async fn move_user_state(
     Ok(())
 }
 
-/// A track's source, the source's object id and the track's object id.
-async fn track_identity(
-    write: &mut Write<'_>,
-    track: &Track,
-) -> LibraryResult<Option<(SourceKey, String, String)>> {
-    let (Some(source), Some(object)) = (track.source, track.object.clone()) else {
-        return Ok(None);
-    };
-    Ok(write
-        .get::<Source>(source.raw())
-        .await?
-        .map(|row| (source, row.object, object)))
-}
-
 /// Moves each previous URI to its current URI. The old row takes the new URI, or folds into
 /// the row that already holds it, and what names the old URI follows.
 pub(super) async fn merge_local_file_uris_on(
@@ -454,7 +440,7 @@ pub(super) async fn merge_local_file_uris_on(
         .iter()
         .map(|(previous, _, _)| previous.as_str())
         .collect::<Vec<_>>();
-    let held: HashSet<String> = sqlx::query_scalar("SELECT value FROM json_each(?1) WHERE EXISTS(SELECT 1 FROM user_state WHERE media_uri=value) OR EXISTS(SELECT 1 FROM listens WHERE media_uri=value) OR EXISTS(SELECT 1 FROM lyrics_cache WHERE media_uri=value) OR EXISTS(SELECT 1 FROM downloads WHERE media_uri=value) OR EXISTS(SELECT 1 FROM local_locators WHERE media_uri=value AND origin<>'import')")
+    let held: HashSet<String> = sqlx::query_scalar("SELECT value FROM json_each(?1) WHERE EXISTS(SELECT 1 FROM user_state WHERE media_uri=value) OR EXISTS(SELECT 1 FROM listens WHERE media_uri=value) OR EXISTS(SELECT 1 FROM play_counts WHERE media_uri=value) OR EXISTS(SELECT 1 FROM lyrics_cache WHERE media_uri=value) OR EXISTS(SELECT 1 FROM downloads WHERE media_uri=value) OR EXISTS(SELECT 1 FROM local_locators WHERE media_uri=value AND origin<>'import')")
         .bind(serde_json::to_string(&previous)?)
         .fetch_all(write.connection().await?)
         .await?
@@ -470,10 +456,6 @@ pub(super) async fn merge_local_file_uris_on(
         if old.is_none() && !held.contains(previous) {
             continue;
         }
-        let old_identity = match &old {
-            Some(track) => track_identity(write, track).await?,
-            None => None,
-        };
         // A CUE track keeps its own row unless something still names the old one.
         if let Some(track) = &old
             && target.as_ref().is_some_and(|target| target.cue_path.is_some())
@@ -648,27 +630,19 @@ pub(super) async fn merge_local_file_uris_on(
             .execute(write.connection().await?)
             .await?;
 
-        if let Some((old_source, old_source_id, old_object)) = old_identity {
-            let moved = match write.by_natural::<Track>(current).await? {
-                Some(track) => track_identity(write, &track).await?,
-                None => None,
-            };
-            let (source, source_id, object) =
-                moved.unwrap_or_else(|| (old_source, old_source_id.clone(), object_id.clone()));
-            if (old_source, old_object.as_str()) != (source, object.as_str()) {
-                sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at,title,artist,album)
-                    SELECT ?3,period,item_kind,?4,play_count,skip_count,last_played_at,title,artist,album
-                    FROM legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'
-                    ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET
-                        play_count=legacy_activity.play_count+excluded.play_count,
-                        skip_count=legacy_activity.skip_count+excluded.skip_count,
-                        last_played_at=COALESCE(max(legacy_activity.last_played_at,excluded.last_played_at),legacy_activity.last_played_at,excluded.last_played_at)")
-                    .bind(&old_source_id).bind(&old_object).bind(&source_id).bind(&object)
-                    .execute(write.connection().await?).await?;
-                sqlx::query("DELETE FROM legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'")
-                    .bind(&old_source_id).bind(&old_object).execute(write.connection().await?).await?;
-            }
-        }
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+            SELECT ?2,period,plays,skips,last_played_at FROM play_counts WHERE media_uri=?1 {}",
+            crate::activity::ADD_PLAY_COUNTS
+        )))
+        .bind(previous)
+        .bind(current)
+        .execute(write.connection().await?)
+        .await?;
+        sqlx::query("DELETE FROM play_counts WHERE media_uri=?1")
+            .bind(previous)
+            .execute(write.connection().await?)
+            .await?;
         write
             .recount(&[previous.as_str(), current.as_str()])
             .await?;
