@@ -3013,3 +3013,8 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
   font-size: 2.6em;
   font-weight: 300;
 }
+
+/* A smart playlist group's rules sit inset in the rule list. */
+list.boxed-list.smart-playlist-group {
+  background-color: color-mix(in srgb, black 12%, var(--card-bg-color));
+}
