@@ -1,5 +1,5 @@
 mod files;
-pub use files::{bind_integrations, choose_integration};
+pub use files::{choose_integration, present_integration};
 mod jellyfin_emby;
 mod plex;
 

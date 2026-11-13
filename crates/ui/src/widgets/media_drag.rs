@@ -3,8 +3,8 @@ use crate::widgets::{
     selection::{PlayTarget, PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot},
 };
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::PlayRequest;
 use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};

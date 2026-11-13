@@ -239,7 +239,6 @@
         <header class="fullscreen-topbar">
           <button type="button" id="close-fullscreen" class="icon-button" title="{{ localization::tr("Close fullscreen player") }}" aria-label="{{ localization::tr("Close fullscreen player") }}">{% call m::icon("rufin-go-down-symbolic") %}{% endcall %}</button>
           <button type="button" id="fullscreen-pane" class="icon-button" title="{{ localization::tr("Switch pane") }}" aria-label="{{ localization::tr("Switch pane") }}">{% call m::icon("rufin-view-dual-symbolic") %}{% endcall %}</button>
-          <button type="button" id="fullscreen-customize" class="icon-button" title="{{ localization::tr("Customize display") }}" aria-label="{{ localization::tr("Customize display") }}" aria-haspopup="menu">{% call m::icon("rufin-sliders-2-symbolic") %}{% endcall %}</button>
         </header>
         <div class="fullscreen-panes">
           <div id="fullscreen-first" class="fullscreen-pane">
@@ -257,11 +256,6 @@
           <div id="fullscreen-second" class="fullscreen-pane fullscreen-card"></div>
         </div>
       </section>
-      <div id="fullscreen-settings" popover="auto" role="menu" aria-label="{{ localization::tr("Customize display") }}">
-        <label class="menu-switch">{{ localization::tr("Show lyrics") }}<input type="checkbox" role="switch" data-setting="/fullscreen_lyrics_visible" /></label>
-        <label class="menu-switch">{{ localization::tr("Dynamic background") }}<input type="checkbox" role="switch" data-setting="/fullscreen_dynamic_background" /></label>
-        <label class="menu-switch">{{ localization::tr("Enable background image") }}<input type="checkbox" role="switch" data-setting="/fullscreen_background_image" /></label>
-      </div>
 
       <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
         <input type="hidden" name="id" value="{{ page.source }}" />

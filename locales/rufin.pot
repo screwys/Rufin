@@ -55,6 +55,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
+"an API key."
+msgstr ""
+
+msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
 "Rufin. If it is installed as a flatpak, this is not needed."
 msgstr ""
@@ -226,9 +231,6 @@ msgstr ""
 msgid "+5 min"
 msgstr ""
 
-msgid ". You only need to fill email and an application name parts"
-msgstr ""
-
 msgid "1 day"
 msgstr ""
 
@@ -289,9 +291,6 @@ msgstr ""
 msgid "API key"
 msgstr ""
 
-msgid "API keys"
-msgstr ""
-
 msgid "About Rufin"
 msgstr ""
 
@@ -310,7 +309,13 @@ msgstr ""
 msgid "Accessibility"
 msgstr ""
 
+msgid "Account"
+msgstr ""
+
 msgid "Actions"
+msgstr ""
+
+msgid "Active"
 msgstr ""
 
 msgid "Activity"
@@ -319,7 +324,13 @@ msgstr ""
 msgid "Add Manually"
 msgstr ""
 
+msgid "Add SMB folder"
+msgstr ""
+
 msgid "Add Source"
+msgstr ""
+
+msgid "Add WebDAV folder"
 msgstr ""
 
 msgid "Add a matching server prefix"
@@ -361,6 +372,9 @@ msgstr ""
 msgid "Add rule"
 msgstr ""
 
+msgid "Add server"
+msgstr ""
+
 msgid "Add to Favorites"
 msgstr ""
 
@@ -395,6 +409,9 @@ msgid "Album artist"
 msgstr ""
 
 msgid "Album artists"
+msgstr ""
+
+msgid "Album covers"
 msgstr ""
 
 msgid "Album details"
@@ -451,6 +468,9 @@ msgstr ""
 msgid "Allow remote connections"
 msgstr ""
 
+msgid "Also album types and tag suggestions"
+msgstr ""
+
 msgid "Alternate addresses"
 msgstr ""
 
@@ -503,6 +523,9 @@ msgstr ""
 msgid "Artist details"
 msgstr ""
 
+msgid "Artist images"
+msgstr ""
+
 msgid "Artist name"
 msgstr ""
 
@@ -542,6 +565,9 @@ msgstr ""
 msgid "Ascending"
 msgstr ""
 
+msgid "Asked in this order."
+msgstr ""
+
 msgid "Audio effects"
 msgstr ""
 
@@ -563,14 +589,14 @@ msgstr ""
 msgid "Audio"
 msgstr ""
 
+msgid "Audioscrobbler API"
+msgstr ""
+
 #, rust-format
 msgid "August {year}"
 msgstr ""
 
 msgid "Authentication"
-msgstr ""
-
-msgid "Authorization timed out"
 msgstr ""
 
 msgid "Auto DJ refill threshold"
@@ -674,6 +700,9 @@ msgstr ""
 msgid "Blue"
 msgstr ""
 
+msgid "Bottom bar"
+msgstr ""
+
 msgid "Brightness (%)"
 msgstr ""
 
@@ -766,6 +795,9 @@ msgid "Channels"
 msgstr ""
 
 msgid "Check for updates"
+msgstr ""
+
+msgid "Checking the user token..."
 msgstr ""
 
 msgid "Choose Folder"
@@ -1023,9 +1055,6 @@ msgstr ""
 msgid "Contents"
 msgstr ""
 
-msgid "Context Menus"
-msgstr ""
-
 #, rust-format
 msgid "Continue from {device}"
 msgstr ""
@@ -1110,14 +1139,17 @@ msgstr ""
 msgid "Couldn't connect to the server"
 msgstr ""
 
-#, rust-format
-msgid "Couldn't connect to {service}"
+msgid "Couldn't connect"
 msgstr ""
 
 msgid "Couldn't decode this track"
 msgstr ""
 
 msgid "Couldn't load this folder"
+msgstr ""
+
+#, rust-format
+msgid "Couldn't open the sign-in page: {error}"
 msgstr ""
 
 msgid "Couldn't search for lyrics"
@@ -1127,6 +1159,15 @@ msgid "Couldn\342\200\231t download Japanese dictionary"
 msgstr ""
 
 msgid "Country"
+msgstr ""
+
+msgid "Covers and artist images your library doesn't have"
+msgstr ""
+
+msgid "Covers, artist images, tags"
+msgstr ""
+
+msgid "Create API keys"
 msgstr ""
 
 msgid "Create a playlist from queue"
@@ -1212,12 +1253,6 @@ msgid "December {year}"
 msgstr ""
 
 msgid "Decrease"
-msgstr ""
-
-msgid "Default left sidebar"
-msgstr ""
-
-msgid "Default right sidebar"
 msgstr ""
 
 msgid "Default"
@@ -1336,9 +1371,6 @@ msgstr ""
 msgid "Discord access in Flatpak"
 msgstr ""
 
-msgid "Discord"
-msgstr ""
-
 msgid "Display"
 msgstr ""
 
@@ -1417,6 +1449,9 @@ msgid "Drag to a folder"
 msgstr ""
 
 msgid "Drag to reorder"
+msgstr ""
+
+msgid "Drag to reorder."
 msgstr ""
 
 msgid "Duplicate preset"
@@ -1531,7 +1566,10 @@ msgstr ""
 msgid "Ends around {time}"
 msgstr ""
 
-msgid "Enter API credentials first"
+msgid "Enter a name and URL."
+msgstr ""
+
+msgid "Enter a name and the server's URL."
 msgstr ""
 
 msgid "Enter a server address and API key"
@@ -1541,6 +1579,12 @@ msgid "Enter a server address, username, and password"
 msgstr ""
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
+msgid "Enter your user token first"
+msgstr ""
+
+msgid "Enter your username and password."
 msgstr ""
 
 msgid "Entire Library"
@@ -1607,9 +1651,6 @@ msgid "External lyrics lookup"
 msgstr ""
 
 msgid "External metadata lookup"
-msgstr ""
-
-msgid "External site links"
 msgstr ""
 
 msgid "FFT size"
@@ -1679,9 +1720,6 @@ msgstr ""
 msgid "File connection"
 msgstr ""
 
-msgid "File connections"
-msgstr ""
-
 msgid "File format"
 msgstr ""
 
@@ -1710,7 +1748,7 @@ msgstr ""
 msgid "Find shares"
 msgstr ""
 
-msgid "Find your ListenBrainz user token"
+msgid "Find your token"
 msgstr ""
 
 msgid "Finding lyrics..."
@@ -1843,10 +1881,7 @@ msgstr ""
 msgid "Genres"
 msgstr ""
 
-msgid "Gestures"
-msgstr ""
-
-msgid "Get token"
+msgid "Get a personal key"
 msgstr ""
 
 msgid "Go to Album"
@@ -1919,10 +1954,10 @@ msgstr ""
 msgid "Hold to reorder"
 msgstr ""
 
-msgid "Home Blocks"
+msgid "Home Profile"
 msgstr ""
 
-msgid "Home Profile"
+msgid "Home blocks"
 msgstr ""
 
 msgid "Home"
@@ -1938,9 +1973,6 @@ msgid "Hz"
 msgstr ""
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
-msgstr ""
-
-msgid "If you do not have API keys, create them"
 msgstr ""
 
 msgid "Ignore playback volume"
@@ -2012,6 +2044,9 @@ msgstr ""
 msgid "Item is no longer available"
 msgstr ""
 
+msgid "Item menus"
+msgstr ""
+
 #, rust-format
 msgid "January {year}"
 msgstr ""
@@ -2057,6 +2092,9 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr ""
 
+msgid "Koito, Maloja and other ListenBrainz servers."
+msgstr ""
+
 msgid "LED spectrum"
 msgstr ""
 
@@ -2090,9 +2128,6 @@ msgstr ""
 msgid "Last played"
 msgstr ""
 
-msgid "Last.fm scrobbling"
-msgstr ""
-
 msgid "Last.fm"
 msgstr ""
 
@@ -2103,6 +2138,9 @@ msgid "Leave empty for an unencrypted archive."
 msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
+msgstr ""
+
+msgid "Left sidebar"
 msgstr ""
 
 msgid "Legacy authorization"
@@ -2120,16 +2158,10 @@ msgstr ""
 msgid "Less"
 msgstr ""
 
-msgid "Library Items"
+msgid "Library items"
 msgstr ""
 
 msgid "Library"
-msgstr ""
-
-msgid "Libre.fm scrobbling"
-msgstr ""
-
-msgid "Libre.fm"
 msgstr ""
 
 msgid "Light"
@@ -2156,10 +2188,13 @@ msgstr ""
 msgid "Linked file"
 msgstr ""
 
-msgid "ListenBrainz scrobbling"
+msgid "Links"
 msgstr ""
 
-msgid "ListenBrainz"
+msgid "ListenBrainz API"
+msgstr ""
+
+msgid "ListenBrainz or Audioscrobbler API"
 msgstr ""
 
 msgid "Listening overview"
@@ -2258,6 +2293,9 @@ msgstr ""
 msgid "Lookup"
 msgstr ""
 
+msgid "Lookups"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
@@ -2280,6 +2318,9 @@ msgid "Lyrics storage"
 msgstr ""
 
 msgid "Lyrics will appear here."
+msgstr ""
+
+msgid "Lyrics your library doesn't have"
 msgstr ""
 
 msgid "Lyrics"
@@ -2326,6 +2367,9 @@ msgstr ""
 msgid "Menu"
 msgstr ""
 
+msgid "Menus"
+msgstr ""
+
 msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
 
@@ -2339,9 +2383,6 @@ msgid "Metadata lookups"
 msgstr ""
 
 msgid "Metadata saved"
-msgstr ""
-
-msgid "Metadata source"
 msgstr ""
 
 msgid "Metadata was saved, but refreshing the source failed."
@@ -2419,12 +2460,6 @@ msgstr ""
 msgid "Move down"
 msgstr ""
 
-msgid "Move provider down"
-msgstr ""
-
-msgid "Move provider up"
-msgstr ""
-
 msgid "Move up"
 msgstr ""
 
@@ -2449,13 +2484,13 @@ msgstr ""
 msgid "Music"
 msgstr ""
 
-msgid "MusicBrainz + Last.fm"
-msgstr ""
-
 msgid "MusicBrainz album artist ID"
 msgstr ""
 
 msgid "MusicBrainz artist ID"
+msgstr ""
+
+msgid "MusicBrainz or Last.fm"
 msgstr ""
 
 msgid "MusicBrainz recording ID"
@@ -2491,10 +2526,7 @@ msgstr ""
 msgid "Narrow layout threshold"
 msgstr ""
 
-msgid "Narrow left sidebar"
-msgstr ""
-
-msgid "Narrow right sidebar"
+msgid "Narrow window"
 msgstr ""
 
 msgid "Navidrome"
@@ -2693,6 +2725,9 @@ msgstr ""
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not set"
+msgstr ""
+
 msgid "Not valid"
 msgstr ""
 
@@ -2839,6 +2874,12 @@ msgstr ""
 msgid "Opening Libre.fm authorization..."
 msgstr ""
 
+msgid "Optional. New images show up sooner with your own key."
+msgstr ""
+
+msgid "Optional. Rufin has its own."
+msgstr ""
+
 msgid "Options"
 msgstr ""
 
@@ -2874,6 +2915,12 @@ msgid "Output gain"
 msgstr ""
 
 msgid "Overview"
+msgstr ""
+
+msgid "Page links"
+msgstr ""
+
+msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -2928,10 +2975,10 @@ msgstr ""
 msgid "Performer"
 msgstr ""
 
-msgid "Pink"
+msgid "Personal API key"
 msgstr ""
 
-msgid "Pins"
+msgid "Pink"
 msgstr ""
 
 msgid "Plain lyrics"
@@ -3012,6 +3059,9 @@ msgstr ""
 msgid "Playback"
 msgstr ""
 
+msgid "Player"
+msgstr ""
+
 #, rust-format
 msgid "Playing from {}"
 msgstr ""
@@ -3074,9 +3124,6 @@ msgstr ""
 msgid "Port"
 msgstr ""
 
-msgid "Position"
-msgstr ""
-
 msgid "Preamp"
 msgstr ""
 
@@ -3093,6 +3140,9 @@ msgid "Preferences"
 msgstr ""
 
 msgid "Preparing library..."
+msgstr ""
+
+msgid "Presence and links"
 msgstr ""
 
 msgid "Preserve channels"
@@ -3153,6 +3203,12 @@ msgid "Profile up to date"
 msgstr ""
 
 msgid "Pronunciation"
+msgstr ""
+
+msgid "Protocol"
+msgstr ""
+
+msgid "Providers"
 msgstr ""
 
 msgid "Proxy casting through Rufin"
@@ -3308,6 +3364,15 @@ msgstr ""
 msgid "Remixes"
 msgstr ""
 
+msgid "Remote folders on a Windows share or NAS"
+msgstr ""
+
+msgid "Remote folders over WebDAV"
+msgstr ""
+
+msgid "Remote folders"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr ""
 
@@ -3366,6 +3431,9 @@ msgid "Remove rule"
 msgstr ""
 
 msgid "Remove search"
+msgstr ""
+
+msgid "Remove server"
 msgstr ""
 
 msgid "Remove unavailable tracks"
@@ -3463,6 +3531,12 @@ msgid "Reverse order"
 msgstr ""
 
 msgid "Ribbon"
+msgstr ""
+
+msgid "Rich Presence on"
+msgstr ""
+
+msgid "Right sidebar"
 msgstr ""
 
 msgid "Rise speed (%)"
@@ -3595,6 +3669,12 @@ msgstr ""
 msgid "Scheduled backup password saved"
 msgstr ""
 
+msgid "Scrobble plays"
+msgstr ""
+
+msgid "Scrobbling"
+msgstr ""
+
 msgid "Search Again"
 msgstr ""
 
@@ -3687,6 +3767,9 @@ msgstr ""
 msgid "Seek to {time}"
 msgstr ""
 
+msgid "Seekbar"
+msgstr ""
+
 msgid "Segment end"
 msgstr ""
 
@@ -3711,6 +3794,9 @@ msgstr ""
 msgid "Select all"
 msgstr ""
 
+msgid "Select an entry to show or hide it."
+msgstr ""
+
 #, rust-format
 msgid "Select {title}"
 msgstr ""
@@ -3729,6 +3815,9 @@ msgid "Selection"
 msgstr ""
 
 msgid "Self-host an Iroh Relay"
+msgstr ""
+
+msgid "Self-hosted scrobbling"
 msgstr ""
 
 #, rust-format
@@ -3756,6 +3845,9 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
+msgid "Server URL"
+msgstr ""
+
 msgid "Server default"
 msgstr ""
 
@@ -3770,6 +3862,12 @@ msgid "Server prefix doesn't match"
 msgstr ""
 
 msgid "Server"
+msgstr ""
+
+msgid "Service icons on album and artist pages"
+msgstr ""
+
+msgid "Services"
 msgstr ""
 
 msgid "Set the Discord activity type to Listening"
@@ -3815,9 +3913,6 @@ msgid "Show current lyrics line"
 msgstr ""
 
 msgid "Show downloaded badge"
-msgstr ""
-
-msgid "Show external service icons on album and artist pages"
 msgstr ""
 
 msgid "Show external site links"
@@ -3874,6 +3969,9 @@ msgstr ""
 msgid "Shows what you are playing on your Discord profile"
 msgstr ""
 
+msgid "Shows what you play on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr ""
 
@@ -3882,6 +3980,9 @@ msgstr ""
 
 #, rust-format
 msgid "Sidebar item {position}"
+msgstr ""
+
+msgid "Sidebar items"
 msgstr ""
 
 msgid "Sidebar route by position"
@@ -3896,6 +3997,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in again"
+msgstr ""
+
 msgid "Sign in to Plex first"
 msgstr ""
 
@@ -3906,6 +4010,9 @@ msgid "Sign in with a code"
 msgstr ""
 
 msgid "Sign in"
+msgstr ""
+
+msgid "Signing in..."
 msgstr ""
 
 msgid "Similar artists"
@@ -3965,6 +4072,9 @@ msgstr ""
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
+msgid "Song and artist links"
+msgstr ""
+
 msgid "Song title"
 msgstr ""
 
@@ -3996,9 +4106,6 @@ msgid "Source is no longer available"
 msgstr ""
 
 msgid "Source setup is unavailable"
-msgstr ""
-
-msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
 msgid "Source type"
@@ -4046,6 +4153,9 @@ msgstr ""
 msgid "Status display"
 msgstr ""
 
+msgid "Status"
+msgstr ""
+
 msgid "Stereo for lossy formats"
 msgstr ""
 
@@ -4085,6 +4195,9 @@ msgstr ""
 msgid "Swipe left"
 msgstr ""
 
+msgid "Swipe on a row"
+msgstr ""
+
 msgid "Swipe right"
 msgstr ""
 
@@ -4106,7 +4219,13 @@ msgstr ""
 msgid "Sync folder"
 msgstr ""
 
+msgid "Synced and plain lyrics"
+msgstr ""
+
 msgid "Synced lyrics"
+msgstr ""
+
+msgid "Synced lyrics, some word by word"
 msgstr ""
 
 msgid "System default"
@@ -4145,10 +4264,16 @@ msgstr ""
 msgid "The anchored track is gone"
 msgstr ""
 
+msgid "The closest match wins; on a tie, the higher one."
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
 msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
+
+msgid "The sheet a long press opens. Tap an entry to show or hide it."
 msgstr ""
 
 msgid "TheAudioDB album ID"
@@ -4551,6 +4676,9 @@ msgstr ""
 msgid "Your music belongs here"
 msgstr ""
 
+msgid "Your own API key"
+msgstr ""
+
 msgid "Your queue is empty."
 msgstr ""
 
@@ -4598,7 +4726,7 @@ msgstr ""
 msgid "excludes"
 msgstr ""
 
-msgid "here"
+msgid "fanart.tv key"
 msgstr ""
 
 msgid "in the last"
@@ -4679,6 +4807,12 @@ msgstr[0] ""
 msgstr[1] ""
 
 #, rust-format
+msgid "{count} folder"
+msgid_plural "{count} folders"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
 msgid "{count} line could not be read."
 msgid_plural "{count} lines could not be read."
 msgstr[0] ""
@@ -4738,6 +4872,10 @@ msgstr[1] ""
 
 #, rust-format
 msgid "{minutes} min"
+msgstr ""
+
+#, rust-format
+msgid "{shown} of {total} shown"
 msgstr ""
 
 #, rust-format

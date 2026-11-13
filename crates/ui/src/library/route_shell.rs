@@ -496,6 +496,7 @@ impl CatalogUi {
             title: adw::WindowTitle,
             scroller: gtk::ScrolledWindow,
             reset: gtk::Button,
+            layout_row: adw::ActionRow,
             layout_box: gtk::Box,
             fields_group: adw::PreferencesGroup,
             display_host: gtk::Box,
@@ -534,6 +535,8 @@ impl CatalogUi {
             layout_box.append(&button);
             layout_buttons.borrow_mut().push((layout, button));
         }
+        // A list with one layout has nothing to pick.
+        layout_row.set_visible(layout_buttons.borrow().len() > 1);
         let rows = Rc::new(RefCell::new(Vec::<adw::ActionRow>::new()));
         let display = {
             let settings = Rc::clone(&self.settings);

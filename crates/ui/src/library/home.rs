@@ -32,7 +32,7 @@ use crate::widgets::detail_links::DetailLinkBinding;
 use crate::widgets::interactions::{CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers};
 use crate::widgets::library_fields::COLLECTION_GRID_CARD_MARGIN;
 use crate::widgets::selection::PlayTarget;
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::album_row_artist_links;

@@ -39,6 +39,7 @@
   background: var(--hover);
 }
 .pref-content {
+  container: preferences / inline-size;
   overflow-y: auto;
   padding: 0 32px 32px;
   background: var(--bg);
@@ -63,9 +64,15 @@
 #preferences-back {
   visibility: hidden;
 }
-.pref-content h4 {
+.pref-content h4,
+.pref-dialog h4 {
   margin: 24px 0 8px;
   font-size: 14px;
+}
+/* A group's description under its title. */
+p.pref-note {
+  margin: -4px 0 8px;
+  line-height: 1.4;
 }
 .pref-group {
   border-radius: 12px;
@@ -318,4 +325,251 @@ button.pref-row:hover {
 }
 #preferences-dialog.in-subpage #preferences-back {
   visibility: visible;
+}
+
+.pref-row .segmented {
+  flex: none;
+  margin: 0;
+}
+.pref-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pref-row :is(input[type="password"], input[type="url"], input:not([type])) {
+  flex: 0 1 55%;
+  min-width: 0;
+}
+.pref-value {
+  color: var(--muted);
+}
+.insensitive {
+  opacity: 0.5;
+}
+.pref-list-row > .icon {
+  width: 16px;
+  height: 16px;
+}
+.pref-drag {
+  cursor: grab;
+  opacity: 0.6;
+}
+a.pref-row {
+  color: var(--text);
+  text-decoration: none;
+}
+a.pref-row:hover {
+  background: var(--hover);
+}
+[data-folders]:not(:empty) + .pref-row {
+  box-shadow: inset 0 1px var(--border-color, var(--line));
+}
+
+/* Customization: its tabs, as GTK's inline view switcher. */
+.segmented.pref-tabs {
+  margin: 12px 0 0;
+}
+/* Customization › Menus: the item menu, each entry showing or hiding itself. */
+.menu-preview {
+  display: grid;
+  width: min(260px, 100%);
+  margin: 8px auto 12px;
+  padding: 6px;
+}
+.menu-preview hr {
+  width: calc(100% - 12px);
+  margin: 5px 6px;
+  border: 0;
+  border-top: 1px solid var(--border-color, var(--line));
+}
+.menu-preview-entry {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+}
+.menu-preview-entry:hover {
+  background: var(--hover);
+}
+.menu-preview-entry .icon {
+  width: 16px;
+  height: 16px;
+}
+.menu-preview-entry > span:not(.icon) {
+  flex: 1;
+}
+.menu-preview-entry > .icon:last-child:not(:first-child) {
+  opacity: 0.6;
+}
+.menu-preview-stars {
+  display: flex;
+  gap: 4px;
+}
+.menu-preview-entry small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.menu-preview-entry[aria-pressed="false"] > .icon:first-child {
+  opacity: 0;
+}
+.menu-preview-entry[aria-pressed="false"] > :not(:first-child) {
+  opacity: 0.45;
+}
+.menu-preview-entry[aria-pressed="false"] > span:not(.icon) {
+  text-decoration: line-through;
+}
+
+/* Customization's navigation editors, as GTK's dialogs over Preferences. */
+.pref-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: min(700px, 90dvh);
+  padding: 0 20px 20px;
+  background: var(--bg);
+  overflow-y: auto;
+}
+.pref-dialog .pref-header {
+  margin: 0 -20px 8px;
+}
+.pref-dialog .pref-header > span {
+  width: 34px;
+}
+
+/* Integrations: the services beside the open one's page, as GTK's split view. */
+.integrations {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.integration-list {
+  position: sticky;
+  top: 56px;
+  display: grid;
+  gap: 2px;
+}
+.integration-list h5 {
+  margin: 12px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.integration-list h5:first-child {
+  margin-top: 4px;
+}
+.integration-group {
+  display: grid;
+  gap: 2px;
+}
+.integration-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+}
+.integration-row:hover,
+.integration-row[aria-current="true"] {
+  background: var(--hover);
+}
+.integration-row .pref-label > span {
+  font-weight: 600;
+}
+.integration-row .pref-label > :is(span, small) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.integration-row > .icon {
+  display: none;
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+}
+.integration-active {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #2ec27e;
+}
+.integration-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 12px 0 4px;
+}
+.integration-hero strong {
+  font-size: 20px;
+}
+.integration-hero small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.integration-hero button {
+  flex: none;
+}
+.integration-hero + .pref-group,
+.integration-page > .segmented {
+  margin-top: 16px;
+}
+/* Narrow: the list as boxed groups, each page opening on its own with Back. */
+@container preferences (max-width: 600px) {
+  .integrations {
+    --narrow: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .integration-list {
+    position: static;
+  }
+  .integration-list h5 {
+    margin: 24px 0 8px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .integration-group {
+    gap: 0;
+    border-radius: 12px;
+    background: var(--card-bg-color, var(--surface));
+    box-shadow: 0 0 0 1px var(--border-color, var(--line));
+    overflow: hidden;
+  }
+  .integration-row {
+    border-radius: 0;
+    padding: 8px 14px;
+  }
+  .integration-row + .integration-row {
+    box-shadow: inset 0 1px var(--border-color, var(--line));
+  }
+  .integration-row[aria-current="true"]:not(:hover) {
+    background: transparent;
+  }
+  .integration-row > .icon {
+    display: inline-block;
+  }
+  #preferences-dialog:not(.integration-open) .integration-detail,
+  #preferences-dialog.integration-open .integration-list {
+    display: none;
+  }
+  #preferences-dialog.integration-open #preferences-back {
+    visibility: visible;
+  }
+}
+.pref-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.segmented + p.pref-note,
+.segmented + p.pref-note + p.pref-note {
+  margin-top: 8px;
 }

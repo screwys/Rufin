@@ -1,13 +1,12 @@
 use std::collections::HashSet;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ContextMenuItem {
+    /// The Play group: Play, Play Next and Play Later, each also shuffled.
     Play,
-    PlayNext,
-    PlayLater,
     PlayRadio,
     AddToPlaylist,
     Favorites,
@@ -19,11 +18,9 @@ pub enum ContextMenuItem {
 }
 
 impl ContextMenuItem {
-    pub const fn all() -> [Self; 11] {
+    pub const fn all() -> [Self; 9] {
         [
             Self::Play,
-            Self::PlayNext,
-            Self::PlayLater,
             Self::PlayRadio,
             Self::AddToPlaylist,
             Self::Favorites,
@@ -47,7 +44,10 @@ pub struct ContextMenuItemSettings {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ContextMenuSettings {
-    #[serde(default = "default_context_menu_items")]
+    #[serde(
+        default = "default_context_menu_items",
+        deserialize_with = "known_items"
+    )]
     pub items: Vec<ContextMenuItemSettings>,
     #[serde(default = "default_true")]
     pub rating_visible: bool,
@@ -84,6 +84,25 @@ impl ContextMenuSettings {
 
 fn default_true() -> bool {
     true
+}
+
+/// The saved entries whose item still exists; a retired item, such as Play Next, is dropped.
+fn known_items<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<ContextMenuItemSettings>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Known(ContextMenuItemSettings),
+        Retired(serde::de::IgnoredAny),
+    }
+    Ok(Vec::<Entry>::deserialize(deserializer)?
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Known(entry) => Some(entry),
+            Entry::Retired(_) => None,
+        })
+        .collect())
 }
 
 fn default_context_menu_items() -> Vec<ContextMenuItemSettings> {
@@ -137,14 +156,25 @@ mod tests {
     }
 
     #[test]
-    fn rating_is_visible_by_default_and_in_older_settings() {
+    fn older_settings_keep_rating_visible_and_drop_retired_items() {
         assert!(ContextMenuSettings::default().rating_visible);
 
         let settings: ContextMenuSettings = serde_json::from_value(serde_json::json!({
-            "items": []
+            "items": [
+                { "item": "PlayNext", "visible": true },
+                { "item": "Download", "visible": false },
+                { "item": "PlayLater", "visible": true }
+            ]
         }))
         .expect("older context menu settings");
 
         assert!(settings.rating_visible);
+        assert_eq!(
+            settings.items,
+            [ContextMenuItemSettings {
+                item: ContextMenuItem::Download,
+                visible: false,
+            }]
+        );
     }
 }

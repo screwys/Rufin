@@ -63,7 +63,6 @@ const PREFERENCES: [&str; 5] = [
     "sidebar.pins",
     "lyrics.suppressed_auto_lyrics",
 ];
-const SCROBBLING: [&str; 3] = ["lastfm", "librefm", "listenbrainz"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct DeviceValue {
@@ -1280,12 +1279,11 @@ impl Records {
                     &preference(&stored.ui, name)?,
                 )?);
             }
-            let scrobbling = serde_json::to_value(read_scrobbling(&stored, secrets.as_ref())?)
-                .map_err(string_error)?;
-            for service in SCROBBLING {
+            let scrobbling = read_scrobbling(&stored, secrets.as_ref())?;
+            for account in scrobbling.accounts() {
                 items.push(secret_item(
-                    format!("setting:scrobbling:{service}"),
-                    &scrobbling_value(&scrobbling, service)?,
+                    format!("setting:scrobbling:{account}"),
+                    &scrobbling_value(&scrobbling, &account)?,
                     &key,
                 )?);
             }
@@ -1862,8 +1860,9 @@ impl Records {
                         .settings
                         .update_preferences(move |ui| set_preference(ui, &name, value))?;
                 }
-                "scrobbling" if !row.deleted => {
-                    self.apply_scrobbling(&owner, name, decode(row)?).await?;
+                "scrobbling" => {
+                    let value = (!row.deleted).then(|| decode(row)).transpose()?;
+                    self.apply_scrobbling(&owner, name, value).await?;
                 }
                 // The network starts again once a running join or action ends.
                 "relay" if !row.deleted => {
@@ -2048,36 +2047,38 @@ impl Records {
         Ok(())
     }
 
+    /// Applies a received account, or removes the server a tombstone names.
     async fn apply_scrobbling(
         &self,
         owner: &Arc<ConnectOwner>,
-        service: &str,
-        value: ScrobblingValue,
+        account: &str,
+        value: Option<ScrobblingValue>,
     ) -> Result<(), String> {
         let file = owner.settings.file().clone();
         let secrets = Arc::clone(owner.settings.secrets());
-        let service = service.to_owned();
+        let account = account.to_owned();
         let prepared = tokio::task::spawn_blocking(move || {
             let mut prepared = crate::settings::StoredSettings::clone(&file.load());
-            let mut settings = serde_json::to_value(read_scrobbling(&prepared, secrets.as_ref())?)
-                .map_err(string_error)?;
-            let mut account = value.account;
-            let secret: BTreeMap<String, String> = value
-                .secret
-                .map(|secret| serde_json::from_str(&secret))
-                .transpose()
-                .map_err(string_error)?
-                .unwrap_or_default();
-            for descriptor in crate::scrobbling::secret_descriptors()
-                .iter()
-                .filter(|descriptor| descriptor.kind().starts_with(&service))
-            {
-                account[secret_field(descriptor.kind())] =
-                    json!(secret.get(descriptor.kind()).cloned().unwrap_or_default());
+            let mut settings = read_scrobbling(&prepared, secrets.as_ref())?;
+            match value {
+                Some(value) => {
+                    let secret: BTreeMap<String, String> = value
+                        .secret
+                        .map(|secret| serde_json::from_str(&secret))
+                        .transpose()
+                        .map_err(string_error)?
+                        .unwrap_or_default();
+                    settings.set_account(&account, value.account)?;
+                    for descriptor in crate::scrobbling::secret_descriptors(&settings)
+                        .into_iter()
+                        .filter(|descriptor| descriptor.account() == account)
+                    {
+                        let value = secret.get(&descriptor.kind()).cloned().unwrap_or_default();
+                        descriptor.set(&mut settings, value);
+                    }
+                }
+                None => settings.remove_account(&account),
             }
-            settings[&service] = account;
-            let settings: crate::scrobbling::Settings =
-                serde_json::from_value(settings).map_err(string_error)?;
             store_scrobbling(&mut prepared, secrets.as_ref(), &settings)?;
             Ok::<_, String>(prepared)
         })
@@ -2388,34 +2389,28 @@ fn set_preference(
     Ok(())
 }
 
-/// A service's scrobbling account with its secrets moved into `secret`.
-fn scrobbling_value(settings: &Value, service: &str) -> Result<ScrobblingValue, String> {
-    let mut account = settings[service].clone();
+/// An account with its secrets moved into `secret`, by kind.
+fn scrobbling_value(
+    settings: &crate::scrobbling::Settings,
+    account: &str,
+) -> Result<ScrobblingValue, String> {
+    let mut cleared = settings.clone();
     let mut secret = BTreeMap::new();
-    for descriptor in crate::scrobbling::secret_descriptors()
-        .iter()
-        .filter(|descriptor| descriptor.kind().starts_with(service))
+    for descriptor in crate::scrobbling::secret_descriptors(settings)
+        .into_iter()
+        .filter(|descriptor| descriptor.account() == account)
     {
-        let field = secret_field(descriptor.kind());
-        if let Some(value) = account[field].as_str().filter(|value| !value.is_empty()) {
-            secret.insert(descriptor.kind().to_owned(), value.to_owned());
+        let value = descriptor.value(settings);
+        if !value.is_empty() {
+            secret.insert(descriptor.kind(), value.to_owned());
         }
-        account[field] = json!("");
+        descriptor.set(&mut cleared, String::new());
     }
     Ok(ScrobblingValue {
-        account,
+        account: cleared.account(account)?,
         secret: (!secret.is_empty())
             .then(|| serde_json::to_string(&secret))
             .transpose()
             .map_err(string_error)?,
     })
-}
-
-/// The field of a scrobbling account a secret kind fills.
-fn secret_field(kind: &str) -> &'static str {
-    match kind {
-        "lastfm-api-secret" => "api_secret",
-        "lastfm-session" | "librefm-session" => "session_key",
-        _ => "user_token",
-    }
 }

@@ -690,7 +690,7 @@ impl SearchPopup {
                 let artwork = result
                     .artwork_binding
                     .as_deref()
-                    .map(artwork::ArtworkBinding::opaque)
+                    .map(rufin_core::artwork::ArtworkBinding::opaque)
                     .unwrap_or_default();
                 shell
                     .artwork

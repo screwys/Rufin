@@ -1,10 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use artwork::{ArtworkKey, DecodedImage};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::{Cast, ObjectExt};
+use rufin_core::artwork::{ArtworkKey, DecodedImage};
 
 // The byte budget remains authoritative for Rufin's smallest 32px cover while
 // still bounding anomalous sub-32px texture/object metadata.
@@ -202,7 +202,7 @@ fn texture_from_decoded(image: Arc<DecodedImage>) -> Option<gdk::Texture> {
     )
 }
 
-pub(super) fn texture_from_preview(image: artwork::RgbaImage) -> Option<gdk::Texture> {
+pub(super) fn texture_from_preview(image: rufin_core::artwork::RgbaImage) -> Option<gdk::Texture> {
     let width = i32::try_from(image.width()).ok()?;
     let height = i32::try_from(image.height()).ok()?;
     let row_stride = usize::try_from(image.row_stride()).ok()?;
@@ -239,7 +239,7 @@ mod tests {
             let catalog = runtime
                 .block_on(library::Catalog::open(root.path().join("library.sqlite3")))
                 .unwrap();
-            let artwork = artwork::Artwork::new(
+            let artwork = rufin_core::artwork::Artwork::new(
                 root.path().join("covers"),
                 runtime.handle().clone(),
                 std::sync::Arc::new(catalog),
@@ -253,8 +253,11 @@ mod tests {
                 )
                 .unwrap();
                 artwork.key(
-                    &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 32)
-                        .cache_only(),
+                    &rufin_core::artwork::ArtworkRequest::new(
+                        rufin_core::artwork::ArtworkBinding::opaque(&binding),
+                        32,
+                    )
+                    .cache_only(),
                 )
             })
         })

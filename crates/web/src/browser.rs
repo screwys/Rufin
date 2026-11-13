@@ -444,15 +444,16 @@ impl<'a> Head<'a> {
             .summary()
             .and_then(|shown| shown.artwork.first().copied())
             .and_then(|binding| {
-                products
-                    .artwork
-                    .preview(artwork::ArtworkBinding::opaque(binding), allow_external)
+                products.artwork.preview(
+                    rufin_core::artwork::ArtworkBinding::opaque(binding),
+                    allow_external,
+                )
             })
             .map_or_else(
-                || artwork::showcase_band(&[], 0, 0, 0),
+                || rufin_core::artwork::showcase_band(&[], 0, 0, 0),
                 |preview| {
                     let image = &preview.image;
-                    artwork::showcase_band(
+                    rufin_core::artwork::showcase_band(
                         image.rgba(),
                         image.width(),
                         image.height(),
