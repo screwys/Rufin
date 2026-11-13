@@ -397,9 +397,6 @@ msgstr "Tegevus"
 msgid "Add Manually"
 msgstr "Lisa reegel"
 
-msgid "Add Rule"
-msgstr "Lisa reegel"
-
 msgid "Add Source"
 msgstr "Lisa allikas"
 
@@ -430,11 +427,21 @@ msgstr "Lisa praegune"
 msgid "Add folder"
 msgstr "Lisa kaust"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Lisa allikas"
+
 msgid "Add image"
 msgstr "Lisa pilt"
 
 msgid "Add music"
 msgstr "Lisa muusikat"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Lisa reegel"
 
 msgid "Add to Favorites"
 msgstr "Lisa lemmikuks"
@@ -568,9 +575,6 @@ msgstr "Rakenduse nimi"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Käib eraldi külgpaani ja täisekraani kohta"
 
-msgid "Apply Template"
-msgstr "Rakenda mall"
-
 msgid "Apply"
 msgstr "Rakenda"
 
@@ -624,6 +628,11 @@ msgstr "Kaanepildi salvestusruum"
 
 msgid "Artwork"
 msgstr "Kaanepildid"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Järjesta kahanevalt"
 
 msgid "Audio effects"
 msgstr "Heliefektid"
@@ -1375,9 +1384,6 @@ msgstr "Diagnostikalogi"
 msgid "Direct"
 msgstr "Otsene"
 
-msgid "Direction"
-msgstr "Suund"
-
 msgid "Disable private mode"
 msgstr "Lülita privaatne režiim välja"
 
@@ -2055,6 +2061,11 @@ msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Impordib failid meediumikogusse ja jälgib kaustades tekkivaid muudatusi."
 
+#, fuzzy
+#| msgid "New playlist"
+msgid "In playlist"
+msgstr "Uus esitusloend"
+
 msgid "Inactive at this sample rate"
 msgstr "Pole selle diskreetimissageduse puhul aktiivne"
 
@@ -2373,6 +2384,11 @@ msgstr "Vastendatud kohalik kaust"
 msgid "March {year}"
 msgstr "Märts {year}"
 
+#, fuzzy
+#| msgid "Matched"
+msgid "Match"
+msgstr "Vastav"
+
 msgid "Matched"
 msgstr "Vastav"
 
@@ -2476,15 +2492,6 @@ msgstr "Veel toiminguid"
 
 msgid "More"
 msgstr "Veel"
-
-msgid "Most Played (Monthly)"
-msgstr "Enimesitatud (igakuiselt)"
-
-msgid "Most Played (Weekly)"
-msgstr "Enimesitatud (iganädalaselt)"
-
-msgid "Most Played (Yearly)"
-msgstr "Enimesitatud (igaastaselt)"
 
 msgid "Most Played"
 msgstr "Enimesitatud"
@@ -2616,6 +2623,11 @@ msgstr ""
 "meediumileviseadmetele"
 
 msgid "Never Played"
+msgstr "Esitamata"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Esitamata"
 
 msgid "New Playlist"
@@ -2935,6 +2947,9 @@ msgstr "Valikud"
 msgid "Orange"
 msgstr "Oranž"
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr "Algne heliriba"
 
@@ -3016,9 +3031,6 @@ msgstr "Tajutav"
 
 msgid "Performer"
 msgstr "Esineja"
-
-msgid "Period"
-msgstr "Ajavahemik"
 
 msgid "Pink"
 msgstr "Roosa"
@@ -3145,6 +3157,11 @@ msgstr "Esitusloend"
 
 msgid "Playlists"
 msgstr "Esitusloendid"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Plays from"
+msgstr "Esitamisel seadmest"
 
 msgid "Plays"
 msgstr "Esitamisi"
@@ -3283,6 +3300,9 @@ msgstr "Välju"
 msgid "Radio"
 msgstr "Raadio"
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Vahemiku valik"
 
@@ -3300,6 +3320,11 @@ msgstr "Vastuvõttev profiil"
 
 msgid "Recent searches"
 msgstr "Hiljutised otsingus"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Hiljuti esitatud"
 
 msgid "Recently played"
 msgstr "Hiljuti esitatud"
@@ -3437,6 +3462,11 @@ msgstr "Eemalda lemmikute hulgast"
 
 msgid "Remove from folder"
 msgstr "Eemalda kaustast"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Eemalda reegel"
 
 msgid "Remove rule"
 msgstr "Eemalda reegel"
@@ -4057,9 +4087,6 @@ msgstr "Järjesta nime"
 msgid "Sort title"
 msgstr "Järjesta pealkirja alusel"
 
-msgid "Sort"
-msgstr "Järjestus"
-
 msgid "Source by position"
 msgstr "Allikas asukoha alusel"
 
@@ -4094,6 +4121,11 @@ msgstr "Spekter"
 #| msgid "Listening"
 msgid "Start Listening"
 msgstr "Kuulan"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start from"
+msgstr "Käivitan…"
 
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
@@ -4209,9 +4241,6 @@ msgstr "Sinakasroheline"
 
 msgid "Techno"
 msgstr "Teknomuusika"
-
-msgid "Template"
-msgstr "Mall"
 
 msgid "Test connection"
 msgstr "Testi ühendust"
@@ -4666,6 +4695,16 @@ msgstr "suurem, kui"
 msgid "after"
 msgstr "pärast"
 
+#, fuzzy
+#| msgid "Small"
+msgid "all"
+msgstr "Väike"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Ükspuha milline"
+
 msgid "before"
 msgstr "enne"
 
@@ -4674,6 +4713,9 @@ msgstr "väiksem, kui"
 
 msgid "contains"
 msgstr "sisaldab"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "ei sisalda"
@@ -4690,6 +4732,9 @@ msgstr "välistab"
 msgid "here"
 msgstr "siin"
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr "on tühi"
 
@@ -4704,6 +4749,17 @@ msgstr "on"
 
 msgid "kbps"
 msgstr "kbps"
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import theme"
+msgid "of these"
+msgstr "Impordi kujundus"
 
 msgid "range"
 msgstr "vahemik on"
@@ -4882,6 +4938,30 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Apply Template"
+#~ msgstr "Rakenda mall"
+
+#~ msgid "Direction"
+#~ msgstr "Suund"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Enimesitatud (igakuiselt)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Enimesitatud (iganädalaselt)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Enimesitatud (igaastaselt)"
+
+#~ msgid "Period"
+#~ msgstr "Ajavahemik"
+
+#~ msgid "Sort"
+#~ msgstr "Järjestus"
+
+#~ msgid "Template"
+#~ msgstr "Mall"
 
 #, fuzzy
 #~| msgid "Guest / public access"

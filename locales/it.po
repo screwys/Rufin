@@ -368,9 +368,6 @@ msgstr "Attività"
 msgid "Add Manually"
 msgstr "Aggiungi Regola"
 
-msgid "Add Rule"
-msgstr "Aggiungi Regola"
-
 msgid "Add Source"
 msgstr "Aggiungi Sorgente"
 
@@ -402,6 +399,11 @@ msgid "Add folder"
 msgstr "Aggiungi cartella"
 
 #, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Aggiungi Sorgente"
+
+#, fuzzy
 #| msgid "Add a title"
 msgid "Add image"
 msgstr "Aggiungi un titolo"
@@ -410,6 +412,11 @@ msgstr "Aggiungi un titolo"
 #| msgid "Add a music folder"
 msgid "Add music"
 msgstr "Aggiungi una cartella con la musica"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Aggiungi Regola"
 
 msgid "Add to Favorites"
 msgstr "Aggiungi ai Preferiti"
@@ -560,9 +567,6 @@ msgstr "Nome dell'applicazione"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
-msgid "Apply Template"
-msgstr "Applica Template"
-
 msgid "Apply"
 msgstr ""
 
@@ -624,6 +628,11 @@ msgstr "Copertina"
 
 msgid "Artwork"
 msgstr "Copertina"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Discendente"
 
 msgid "Audio effects"
 msgstr ""
@@ -1490,9 +1499,6 @@ msgstr "Log di diagnostica"
 msgid "Direct"
 msgstr "Direzione"
 
-msgid "Direction"
-msgstr "Direzione"
-
 msgid "Disable private mode"
 msgstr "Disabilita modalità privata"
 
@@ -2211,6 +2217,11 @@ msgstr ""
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "In playlist"
+msgstr "Cancella Playlist"
+
 msgid "Inactive at this sample rate"
 msgstr ""
 
@@ -2541,6 +2552,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Cached"
+msgid "Match"
+msgstr "In cache"
+
+#, fuzzy
+#| msgid "Cached"
 msgid "Matched"
 msgstr "In cache"
 
@@ -2638,15 +2654,6 @@ msgid "More actions"
 msgstr ""
 
 msgid "More"
-msgstr ""
-
-msgid "Most Played (Monthly)"
-msgstr ""
-
-msgid "Most Played (Weekly)"
-msgstr ""
-
-msgid "Most Played (Yearly)"
 msgstr ""
 
 msgid "Most Played"
@@ -2779,6 +2786,9 @@ msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
+msgstr ""
+
+msgid "Never played"
 msgstr ""
 
 msgid "New Playlist"
@@ -3106,6 +3116,9 @@ msgstr "Azioni"
 msgid "Orange"
 msgstr ""
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr ""
 
@@ -3182,9 +3195,6 @@ msgid "Perceptual"
 msgstr ""
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3313,6 +3323,9 @@ msgid "Playlist"
 msgstr ""
 
 msgid "Playlists"
+msgstr ""
+
+msgid "Plays from"
 msgstr ""
 
 msgid "Plays"
@@ -3456,6 +3469,9 @@ msgstr ""
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr ""
 
@@ -3473,6 +3489,11 @@ msgstr ""
 
 msgid "Recent searches"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Recently added"
+msgstr "Seleziona un indirizzo"
 
 msgid "Recently played"
 msgstr ""
@@ -3617,6 +3638,11 @@ msgstr "Aggiungi cartella"
 #, fuzzy
 #| msgid "Add folder"
 msgid "Remove from folder"
+msgstr "Aggiungi cartella"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Remove group"
 msgstr "Aggiungi cartella"
 
 msgid "Remove rule"
@@ -4250,9 +4276,6 @@ msgstr "Nome dell'artista"
 msgid "Sort title"
 msgstr ""
 
-msgid "Sort"
-msgstr ""
-
 msgid "Source by position"
 msgstr ""
 
@@ -4291,6 +4314,9 @@ msgstr ""
 #| msgid "Connecting to {device}..."
 msgid "Start Listening"
 msgstr "Connettendo a {device}..."
+
+msgid "Start from"
+msgstr ""
 
 msgid "Start minimized"
 msgstr ""
@@ -4408,9 +4434,6 @@ msgid "Teal"
 msgstr ""
 
 msgid "Techno"
-msgstr ""
-
-msgid "Template"
 msgstr ""
 
 #, fuzzy
@@ -4872,6 +4895,16 @@ msgstr ""
 msgid "after"
 msgstr ""
 
+#, fuzzy
+#| msgid "All"
+msgid "all"
+msgstr "Tutto"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Qualunque"
+
 msgid "before"
 msgstr ""
 
@@ -4879,6 +4912,9 @@ msgid "below"
 msgstr ""
 
 msgid "contains"
+msgstr ""
+
+msgid "days"
 msgstr ""
 
 msgid "does not contain"
@@ -4896,6 +4932,9 @@ msgstr ""
 msgid "here"
 msgstr ""
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr ""
 
@@ -4909,6 +4948,15 @@ msgid "is"
 msgstr ""
 
 msgid "kbps"
+msgstr ""
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+msgid "of these"
 msgstr ""
 
 msgid "range"
@@ -5074,6 +5122,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Apply Template"
+#~ msgstr "Applica Template"
+
+#~ msgid "Direction"
+#~ msgstr "Direzione"
 
 #, fuzzy
 #~| msgid "Artwork"
