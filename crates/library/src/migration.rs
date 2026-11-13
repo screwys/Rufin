@@ -1,5 +1,7 @@
-//! Converts released 0.15.0-0.16.6 Stores into the current schema.
+//! Brings a Store another version wrote to the current schema: `current` imports released
+//! 0.15.0-0.16.6 Stores and rebuilds unknown ones, `steps` upgrades 0.17 and later in place.
 pub(crate) mod current;
+pub(crate) mod steps;
 use crate::LibraryResult;
 pub(crate) use current::import as import_current;
 use sqlx::{Row, sqlite::SqliteRow};
