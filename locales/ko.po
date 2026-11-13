@@ -474,9 +474,6 @@ msgstr ""
 msgid "Appearance"
 msgstr ""
 
-msgid "Appears On"
-msgstr ""
-
 msgid "Application name"
 msgstr ""
 
@@ -1236,6 +1233,12 @@ msgid "Delete"
 msgstr ""
 
 msgid "Delivery"
+msgstr ""
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
 msgstr ""
 
 msgid "Descending"
@@ -2127,6 +2130,9 @@ msgid "Listening overview"
 msgstr ""
 
 msgid "Listening"
+msgstr ""
+
+msgid "Live"
 msgstr ""
 
 msgid "Load file contents"
@@ -3250,6 +3256,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr ""
 
@@ -3606,6 +3618,9 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
+msgid "Secondary release types"
+msgstr ""
+
 msgid "Secret storage"
 msgstr ""
 
@@ -3908,6 +3923,12 @@ msgid "Sort name"
 msgstr ""
 
 msgid "Sort title"
+msgstr ""
+
+msgid "Soundtrack"
+msgstr ""
+
+msgid "Soundtracks"
 msgstr ""
 
 msgid "Source by position"

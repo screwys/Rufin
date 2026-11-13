@@ -567,9 +567,6 @@ msgstr "Настройки приложения"
 msgid "Appearance"
 msgstr "Оформление"
 
-msgid "Appears On"
-msgstr "Появляется в"
-
 msgid "Application name"
 msgstr "Название приложения"
 
@@ -1341,6 +1338,12 @@ msgstr "Удалить"
 
 msgid "Delivery"
 msgstr "Доставка"
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
 
 msgid "Descending"
 msgstr "По убыванию"
@@ -2255,6 +2258,9 @@ msgstr "Обзор прослушивания"
 
 msgid "Listening"
 msgstr "Прослушивание"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Загрузить содержимое файла"
@@ -3406,6 +3412,12 @@ msgstr "Перегрузка для применения изменений"
 msgid "Reload"
 msgstr "Перезагрузить"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
 
@@ -3769,6 +3781,11 @@ msgstr "Поиск начнётся автоматически"
 msgid "Searching..."
 msgstr "Выполняется поиск..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Открыть примечания к выпуску"
+
 msgid "Secret storage"
 msgstr "Скрытое хранилище"
 
@@ -4078,6 +4095,17 @@ msgstr "Сортировать по имени"
 
 msgid "Sort title"
 msgstr "Сортировать по названию"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} трек"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Треки по настроениям"
 
 msgid "Source by position"
 msgstr "Источник по позиции"
@@ -4937,6 +4965,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Appears On"
+#~ msgstr "Появляется в"
 
 #~ msgid "Select"
 #~ msgstr "Выбрать"

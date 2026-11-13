@@ -577,9 +577,6 @@ msgstr "Lietotnes iestatījumi"
 msgid "Appearance"
 msgstr "Izskats"
 
-msgid "Appears On"
-msgstr "Parādās ierakstos"
-
 msgid "Application name"
 msgstr "Lietotnes nosaukums"
 
@@ -1503,6 +1500,12 @@ msgid "Delete"
 msgstr "Dzēst"
 
 msgid "Delivery"
+msgstr ""
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
 msgstr ""
 
 msgid "Descending"
@@ -2548,6 +2551,9 @@ msgstr "Tiek meklētas ierīces..."
 #| msgid "ListenBrainz"
 msgid "Listening"
 msgstr "ListenBrainz"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Ielādēt faila saturu"
@@ -3820,6 +3826,12 @@ msgstr ""
 msgid "Reload"
 msgstr "Pārlādēt"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Attālināti teksti"
 
@@ -4231,6 +4243,11 @@ msgstr "Meklēšana tiks automātiski uzsākta"
 msgid "Searching..."
 msgstr "Tiek veikta meklēšana..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Atvērt izdevuma piezīmes"
+
 msgid "Secret storage"
 msgstr "Slēptā krātuve"
 
@@ -4573,6 +4590,17 @@ msgstr "Izpildītāja nosaukums"
 
 msgid "Sort title"
 msgstr "Kārto pēc nosaukuma"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} dziesmas"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Noskaņu dziesmas"
 
 msgid "Source by position"
 msgstr "Avots pēc pozīcijas"
@@ -5543,6 +5571,9 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Appears On"
+#~ msgstr "Parādās ierakstos"
 
 #, fuzzy
 #~| msgid "Selection"

@@ -537,9 +537,6 @@ msgstr "Sovelluksen asetukset"
 msgid "Appearance"
 msgstr "Ulkoasu"
 
-msgid "Appears On"
-msgstr ""
-
 msgid "Application name"
 msgstr "Sovelluksen nimi"
 
@@ -1469,6 +1466,12 @@ msgid "Delete"
 msgstr "Poista"
 
 msgid "Delivery"
+msgstr ""
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
 msgstr ""
 
 msgid "Descending"
@@ -2502,6 +2505,9 @@ msgstr "Haetaan laitteita..."
 #| msgid "ListenBrainz"
 msgid "Listening"
 msgstr "ListenBrainz"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr ""
@@ -3801,6 +3807,12 @@ msgstr "Lataa uudelleen toteuttaaksesi muutokset"
 msgid "Reload"
 msgstr "Lataa uudelleen"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Etäsanoitukset"
 
@@ -4219,6 +4231,11 @@ msgstr "Haku käynnistyy automaattisesti"
 msgid "Searching..."
 msgstr "Haetaan..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Avaa julkaisutiedot"
+
 msgid "Secret storage"
 msgstr "Salaisuuden tallennustila"
 
@@ -4566,6 +4583,17 @@ msgstr "Esittäjän nimi"
 
 msgid "Sort title"
 msgstr ""
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} kappale"
+
+#, fuzzy
+#| msgid "Tracks"
+msgid "Soundtracks"
+msgstr "Kappaleet"
 
 msgid "Source by position"
 msgstr ""

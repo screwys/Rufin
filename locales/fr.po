@@ -568,9 +568,6 @@ msgstr "Paramètres de l’application"
 msgid "Appearance"
 msgstr "Apparence"
 
-msgid "Appears On"
-msgstr "Apparaît sur"
-
 msgid "Application name"
 msgstr "Nom de l'application"
 
@@ -1347,6 +1344,12 @@ msgstr "Supprimer"
 
 msgid "Delivery"
 msgstr "Livraison"
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
 
 msgid "Descending"
 msgstr "Descendant"
@@ -2263,6 +2266,9 @@ msgstr "Aperçu de l'écoute"
 
 msgid "Listening"
 msgstr "Écoute"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Charger le contenu du fichier"
@@ -3416,6 +3422,12 @@ msgstr "Recharger pour appliquer les modifications"
 msgid "Reload"
 msgstr "Recharger"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Paroles à distance"
 
@@ -3778,6 +3790,11 @@ msgstr "La recherche commencera automatiquement"
 msgid "Searching..."
 msgstr "Recherche..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Ouvrir les notes de version"
+
 msgid "Secret storage"
 msgstr "Stockage des secrets"
 
@@ -4088,6 +4105,17 @@ msgstr "Nom de tri"
 
 msgid "Sort title"
 msgstr "Titre de tri"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} morceau"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Morceaux d’ambiance"
 
 msgid "Source by position"
 msgstr "Source par position"
@@ -4933,6 +4961,9 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "Appears On"
+#~ msgstr "Apparaît sur"
 
 #~ msgid "Select"
 #~ msgstr "Sélectionner"

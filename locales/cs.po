@@ -550,9 +550,6 @@ msgstr "Nastavení aplikace"
 msgid "Appearance"
 msgstr "Vzhled"
 
-msgid "Appears On"
-msgstr "Objevuje se v"
-
 msgid "Application name"
 msgstr "Název aplikace"
 
@@ -1538,6 +1535,12 @@ msgid "Delete"
 msgstr "Smazat"
 
 msgid "Delivery"
+msgstr ""
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
 msgstr ""
 
 msgid "Descending"
@@ -2605,6 +2608,9 @@ msgstr "Hledání zařízení..."
 #| msgid "ListenBrainz"
 msgid "Listening"
 msgstr "ListenBrainz"
+
+msgid "Live"
+msgstr ""
 
 #, fuzzy
 #| msgid "Local File Access"
@@ -3962,6 +3968,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Vzdálené texty skladeb"
 
@@ -4401,6 +4413,11 @@ msgstr "Vyhledávání se spustí automaticky"
 msgid "Searching..."
 msgstr "Hledání..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Otevřít poznámky k verzi"
+
 msgid "Secret storage"
 msgstr "Tajné úložiště"
 
@@ -4757,6 +4774,17 @@ msgstr "Jméno interpreta"
 
 msgid "Sort title"
 msgstr "Seřadit podle názvu"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} skladba"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Skladby podle nálady"
 
 #, fuzzy
 #| msgid "Sidebar route by position"
@@ -5718,6 +5746,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Appears On"
+#~ msgstr "Objevuje se v"
 
 #, fuzzy
 #~| msgid "Selection"

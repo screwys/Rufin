@@ -9,8 +9,8 @@ msgstr ""
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-13 08:03+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
-"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
-"\n"
+"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/"
+">\n"
 "Language: id\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -570,9 +570,6 @@ msgstr "Pengaturan aplikasi"
 
 msgid "Appearance"
 msgstr "Tampilan"
-
-msgid "Appears On"
-msgstr "Muncul di"
 
 msgid "Application name"
 msgstr "Nama aplikasi"
@@ -1357,6 +1354,12 @@ msgstr "Hapus"
 
 msgid "Delivery"
 msgstr "Metode pemutaran"
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
 
 msgid "Descending"
 msgstr "Menurun"
@@ -2299,6 +2302,9 @@ msgstr "Ringkasan Mendengarkan"
 
 msgid "Listening"
 msgstr "Mendengarkan"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Muat isi file"
@@ -3427,6 +3433,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Lirik online"
 
@@ -3782,6 +3794,9 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
+msgid "Secondary release types"
+msgstr ""
+
 msgid "Secret storage"
 msgstr ""
 
@@ -4088,6 +4103,14 @@ msgstr ""
 
 msgid "Sort title"
 msgstr ""
+
+msgid "Soundtrack"
+msgstr ""
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Soundtracks"
+msgstr "Lagu album"
 
 msgid "Source by position"
 msgstr ""
@@ -4912,6 +4935,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Appears On"
+#~ msgstr "Muncul di"
 
 #~ msgid "Apply Template"
 #~ msgstr "Terapkan Template"

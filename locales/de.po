@@ -579,9 +579,6 @@ msgstr "App-Einstellungen"
 msgid "Appearance"
 msgstr "Darstellung"
 
-msgid "Appears On"
-msgstr "Erscheint auf"
-
 msgid "Application name"
 msgstr "Anwendungsname"
 
@@ -1361,6 +1358,12 @@ msgstr "Löschen"
 
 msgid "Delivery"
 msgstr "Bereitstellung"
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
 
 msgid "Descending"
 msgstr "Absteigend"
@@ -2290,6 +2293,9 @@ msgstr "Höraktivität"
 
 msgid "Listening"
 msgstr "Hören"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Dateiinhalt laden"
@@ -3460,6 +3466,12 @@ msgstr "Neu laden, um Änderungen anzuwenden"
 msgid "Reload"
 msgstr "Neu laden"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Externe Liedtexte"
 
@@ -3826,6 +3838,11 @@ msgstr "Die Suche startet automatisch"
 msgid "Searching..."
 msgstr "Suche …"
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Versionshinweise öffnen"
+
 msgid "Secret storage"
 msgstr "Anmeldedaten-Speicher"
 
@@ -4141,6 +4158,17 @@ msgstr "Sortiername"
 
 msgid "Sort title"
 msgstr "Sortiertitel"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} Titel"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Titel nach Stimmung"
 
 msgid "Source by position"
 msgstr "Quelle nach Position"
@@ -5009,6 +5037,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Appears On"
+#~ msgstr "Erscheint auf"
 
 #, fuzzy
 #~| msgid "Selection"

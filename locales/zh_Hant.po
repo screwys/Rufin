@@ -535,9 +535,6 @@ msgstr "應用程式設定"
 msgid "Appearance"
 msgstr "外觀"
 
-msgid "Appears On"
-msgstr ""
-
 msgid "Application name"
 msgstr "應用程式名稱"
 
@@ -1501,6 +1498,12 @@ msgid "Delete"
 msgstr "刪除"
 
 msgid "Delivery"
+msgstr ""
+
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
 msgstr ""
 
 msgid "Descending"
@@ -2544,6 +2547,9 @@ msgstr "正在尋找裝置..."
 #| msgid "ListenBrainz"
 msgid "Listening"
 msgstr "ListenBrainz"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr ""
@@ -3872,6 +3878,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "遠端歌詞"
 
@@ -4299,6 +4311,11 @@ msgstr ""
 msgid "Searching..."
 msgstr "正在搜尋..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "開啟更新記錄"
+
 msgid "Secret storage"
 msgstr "私密儲存空間"
 
@@ -4649,6 +4666,17 @@ msgstr "藝人名稱"
 
 msgid "Sort title"
 msgstr ""
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} 首曲目"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "氛圍曲目"
 
 #, fuzzy
 #| msgid "Sidebar route by position"
