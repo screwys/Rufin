@@ -1,6 +1,4 @@
-use library::{
-    AlbumReleaseResult, FavoriteTarget, Item, LibraryField, ReadCancellation, SearchRequest,
-};
+use library::{FavoriteTarget, Item, LibraryField, ReadCancellation, SearchRequest};
 
 use super::support::{Views, connection, fixture, items, tag, tracks, uris};
 
@@ -9,8 +7,8 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::raw_sql("UPDATE sources SET kind='subsonic';
-      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
+      INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+      SELECT media_uri,'lifetime',CASE object_id WHEN 'track-0' THEN 7 ELSE 99 END,0,CASE object_id WHEN 'track-0' THEN 100 ELSE 900 END FROM tracks WHERE object_id IN('track-0','track-1');
       UPDATE tracks SET native_play_count=3,native_last_played=200 WHERE object_id='track-1';")
         .execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
@@ -799,127 +797,6 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(album_rows[0].metadata.is_compilation, Some(true));
     assert_eq!(album_rows[0].metadata.release_types, ["Album".to_string()]);
-    let candidates = fixture
-        .catalog
-        .album_release_candidates(fixture.source, 100, &cancel)
-        .await
-        .expect("Album release candidates");
-    assert_eq!(candidates.len(), 2);
-    let first = candidates
-        .iter()
-        .find(|candidate| candidate.album_key == fixture.albums[0])
-        .unwrap();
-    assert_eq!(first.lookup_identity, "release-group:group-a");
-    assert_eq!(
-        fixture
-            .catalog
-            .accept_album_release_result(
-                fixture.source,
-                first.album_key,
-                &first.lookup_identity,
-                AlbumReleaseResult::Missing
-            )
-            .await
-            .expect("accept missing Album release"),
-        Some(first.album_key)
-    );
-    let missing_row = fixture
-        .catalog
-        .albums(&[first.album_key], true, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(missing_row.metadata.release_types, ["Album".to_string()]);
-
-    let mut scan_observation = fixture.catalog.observe("source").await.unwrap();
-    let write = library::CatalogBatch {
-        albums: vec![library::AlbumObservation {
-            user_data: library::NativeUserState {
-                favorite: Some(false),
-                ..Default::default()
-            },
-            metadata: library::AlbumMetadata {
-                title: "Album A".into(),
-                artist: "Artist A".into(),
-                sort_text: "album a".into(),
-                year: Some(2024),
-                release_date: Some("2024-01-02".into()),
-                date_added: Some("2024-01-02".into()),
-                musicbrainz_release_group_id: Some("group-a2".into()),
-                is_compilation: Some(true),
-                album_artists: vec![library::ArtistCredit {
-                    object_id: "artist-a".into(),
-                    name: "Artist A".into(),
-                    ..Default::default()
-                }],
-                genres: vec![library::TagReference {
-                    object_id: "genre".into(),
-                    name: "Rock".into(),
-                    ..Default::default()
-                }],
-                release_types: vec!["Album".into()],
-                ..Default::default()
-            },
-            object_id: "album-a".into(),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-    scan_observation.apply_catalog(&write, true).await.unwrap();
-    assert!(scan_observation.changed());
-    drop(scan_observation);
-    let changed = fixture
-        .catalog
-        .album_release_candidates(fixture.source, 100, &cancel)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|candidate| candidate.album_key == first.album_key)
-        .unwrap();
-    assert_eq!(changed.lookup_identity, "release-group:group-a2");
-    assert_eq!(
-        fixture
-            .catalog
-            .accept_album_release_result(
-                fixture.source,
-                first.album_key,
-                &first.lookup_identity,
-                AlbumReleaseResult::Found {
-                    release_types: vec!["Stale".to_string()]
-                }
-            )
-            .await
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .accept_album_release_result(
-                fixture.source,
-                changed.album_key,
-                &changed.lookup_identity,
-                AlbumReleaseResult::Found {
-                    release_types: vec!["Compilation".to_string(), "Remix".to_string()]
-                }
-            )
-            .await
-            .unwrap(),
-        Some(changed.album_key)
-    );
-    let found = fixture
-        .catalog
-        .albums(&[changed.album_key], true, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(
-        found.metadata.release_types,
-        ["Compilation".to_string(), "Remix".to_string()]
-    );
-
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE track_links SET target=?3 WHERE role=0 AND track_key IN (?1,?2)")
         .bind(fixture.tracks[0])

@@ -416,13 +416,7 @@
         <property name="visible">false</property>
         <property name="halign">center</property>
         <property name="valign">end</property>
-        <property name="wrap">true</property>
-        <property name="margin-bottom">24</property>
-        <property name="margin-start">18</property>
-        <property name="margin-end">18</property>
-        <style>
-          <class name="control-feedback-toast" />
-        </style>
+        <property name="margin-bottom">133</property>
       </object>
     </child>
   </object>

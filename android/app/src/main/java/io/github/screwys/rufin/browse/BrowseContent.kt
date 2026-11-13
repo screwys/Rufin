@@ -406,7 +406,7 @@ internal val LocalListPane = compositionLocalOf { false }
 private fun PaneRow(item: BrowseItem, player: PlayerConnection, onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit) {
     val shown = favoriteItem(player.model, item)
     val artwork = rememberBrowseArtwork(item, player, 40.dp)
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(52.dp).playlistFolderDrop(item, player.model).pickedRow(item)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(52.dp).pickedRow(item)
         .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(shown) }).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(40.dp).clip(CoverShape))
@@ -710,7 +710,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !oneLine) {
-        Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).focusRing(CoverShape).combinedClickable(onClick = { onActivate(item) },
+        Column(Modifier.fillMaxWidth().focusRing(CoverShape).combinedClickable(onClick = { onActivate(item) },
             onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
@@ -720,7 +720,6 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                 // Cards carry no download badge; list rows do.
                 BrowseTitle(shown, Modifier.weight(1f), maxLines = if (oneLine) 1 else 2,
                     style = MaterialTheme.typography.titleSmall, player = player, showDownloadBadge = false)
-                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
             // The labels under the title: the list's grid fields, one per line.
             shown.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
@@ -823,7 +822,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     val artwork = rememberBrowseArtwork(item, player, imageSize)
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (displaySize == DisplaySize.COMPACT) 48.dp else 64.dp)
-        .playlistFolderDrop(item, player.model).pickedRow(item)
+        .pickedRow(item)
         .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))
@@ -836,8 +835,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
         Row(verticalAlignment = Alignment.CenterVertically) {
                 if (item.row.isTrack && item.row.durationMillis > 0UL) Text(item.row.durationText,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
-                    ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(36.dp), iconSize = 20.dp)
+                PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(36.dp), iconSize = 20.dp)
         }
     }
     }

@@ -79,6 +79,8 @@
     "POST /api/preferences": "Change a preference with {operation:set,path:JSON pointer from GET /api/preferences,value}, a sidebar entry with {operation:route,item,visible?,delta?} a Home block with {operation:home_block,block,visible?,delta?} or a theme with {operation:theme,theme:preference,accent?}, where accent picks one of a named theme's own accents. Delta moves the entry. Returns what GET returns.",
     "GET /api/preferences/storage": "Read cached data sizes as {total_bytes,errors,caches:[{kind:waveforms|loudness|fingerprints|metadata_lookups|artwork|lyrics|japanese_dictionary,entries,bytes}]}.",
     "POST /api/preferences/storage": "Clear one cache with {kind}. Returns the sizes afterwards.",
+    "GET /api/activity/export?format=&source=": "Download the listening history as lastfm or listenbrainz CSV or Rufin jsonl, for every source or one source id.",
+    "POST /api/activity/import": "Import the file in the request body: a ListenBrainz export, a Last.fm or Rufin export, or a CSV of play counts. Returns {message}.",
     "POST /api/metadata": "Open a metadata editor for {kind:track|album|artist,uri}, for a page's selected rows {page,ranges} or for tracks {uris}. An album or artist on a file source edits its tracks together. Returns the editor {id,fields:[{key,label,kind,value,writable,mixed,changed,original,mixed_label}],locked,lock_writable,has_changes,track_count,...}; the editor keeps its changes until saved or closed.",
     "PATCH /api/metadata?id=": "Change the editor's draft with {operation:set,key,value}, {operation:reset,key} or {operation:lock,locked}. Returns the editor.",
     "DELETE /api/metadata?id=": "Close an editor without saving.",
@@ -216,6 +218,10 @@
     },
     "GET /api/smart-playlists?source=...": "Browse saved smart playlists and their folders (rows of kind playlist-folder; open one with playlist_folder=ID), up to 64 at a time. Source is optional; use q, sort and descending.",
     "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and limit. Use source, q, offset, limit (up to 256), sort and descending. Sort accepts track_sort choices or definition for the saved playlist order. An opened smart playlist keeps the members it opened with: pass opened (Unix seconds of the first read) on every later read of the page, so plays, ratings and syncs change its members only when it is opened again.",
+    "GET /api/smart-playlists/editor?key=": "The smart playlist editor's choices, translated: fields [{field,title,section,placeholder,scale,suggests,reads_plays,rule,operators:[{operator,title,kind,min,max,default}]}] in menu order, sorts [{sort,title,reads_plays}], periods, matches, sources and templates [{name,definition}], with the name and definition of the smart playlist key names, or a new one's. kind is None, Text, Number, NumberRange, Days, Date, DateRange, Bool or Playlist; scale is how many stored units one shown unit is (ratings are stored in half stars).",
+    "GET /api/smart-playlists/values?field=&q=&source=&folder=&from=": "The values of a rule field whose names hold q, first 200, as {values:[{value,name,tracks}]}, read in the library source and folder name; from is the smart playlist's own source. A Playlist value is the playlist's object_id.",
+    "POST /api/smart-playlists/count": "How many tracks {definition,source,folder} matches now, as {count,text}.",
+    "POST /api/smart-playlists": "Create a smart playlist with {name,definition,folder}, folder being an optional smart playlist folder ID, or save one with {key,name,definition}. Returns {id}. definition is the saved form: {source_id,matching:All|Any,conditions:[{Rule:{field,operator,value}}|{Group:{matching,rules}}],sort_field,descending,activity_period,limit}; value is {Text}, {Number}, {NumberRange:{min,max}}, {Bool}, {Date}, {DateRange:{start,end}} or {Playlist}, or null.",
     "POST /api/queue/artist": {
       "id": 1,
       "mode": "replace"

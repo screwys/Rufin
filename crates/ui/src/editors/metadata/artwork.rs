@@ -164,7 +164,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
         .filter(|entry| fields.contains(&entry.field.as_str()))
     {
         let weak = Rc::downgrade(editor);
-        entry.entry.connect_changed(move |_| {
+        entry.control.connect_changed(move |_| {
             if let Some(editor) = weak.upgrade() {
                 seed_search(&editor);
             }

@@ -133,7 +133,7 @@ pub(crate) static ALBUMS: Table = Table {
         Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
         Held cached_local, Held title, Held display_artist, Held sort_text, Read year,
         Read release_date, Read date_added, Held released, Held added_at, Read is_compilation,
-        Read first_seen_at, Read release_identity, Read release_lookup_identity,
+        Read first_seen_at, Read release_identity,
         Read native_favorite, Read native_rating, Read native_play_count,
         Read native_last_played, Read native_artwork, Held flags, Json input_metadata, Json metadata,
     ],
@@ -821,7 +821,6 @@ impl Row for Album {
             int(facts.compilation.map(i64::from)),
             int(self.first_seen),
             text(self.release_identity.as_deref()),
-            text(self.release_lookup_identity.as_deref()),
         ];
         cells.extend(state_cells(&self.state));
         cells.extend([
@@ -871,7 +870,6 @@ impl Row for Album {
             },
             first_seen: row.try_get("first_seen_at")?,
             release_identity: row.try_get("release_identity")?,
-            release_lookup_identity: row.try_get("release_lookup_identity")?,
             state: native_state(row)?,
             binding: row.try_get("native_artwork")?,
             input: record.flags & INPUT != 0,

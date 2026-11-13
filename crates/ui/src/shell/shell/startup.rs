@@ -31,11 +31,6 @@ impl Shell {
         }
         self.startup.initial_launch.set(false);
         self.chrome.startup_loading_host.set_visible(false);
-        if let Some(selected) = self.selected_library() {
-            self.products
-                .source
-                .selected_library_revealed(selected.source_id.clone());
-        }
         self.update_layout();
     }
 

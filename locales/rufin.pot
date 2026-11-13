@@ -65,6 +65,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -314,9 +319,6 @@ msgstr ""
 msgid "Add Manually"
 msgstr ""
 
-msgid "Add Rule"
-msgstr ""
-
 msgid "Add Source"
 msgstr ""
 
@@ -347,10 +349,16 @@ msgstr ""
 msgid "Add folder"
 msgstr ""
 
+msgid "Add group"
+msgstr ""
+
 msgid "Add image"
 msgstr ""
 
 msgid "Add music"
+msgstr ""
+
+msgid "Add rule"
 msgstr ""
 
 msgid "Add to Favorites"
@@ -470,16 +478,10 @@ msgstr ""
 msgid "Appearance"
 msgstr ""
 
-msgid "Appears On"
-msgstr ""
-
 msgid "Application name"
 msgstr ""
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
-
-msgid "Apply Template"
 msgstr ""
 
 msgid "Apply"
@@ -535,6 +537,9 @@ msgid "Artwork storage"
 msgstr ""
 
 msgid "Artwork"
+msgstr ""
+
+msgid "Ascending"
 msgstr ""
 
 msgid "Audio effects"
@@ -1252,6 +1257,12 @@ msgstr ""
 msgid "Delivery"
 msgstr ""
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr ""
 
@@ -1283,9 +1294,6 @@ msgid "Diagnostic log"
 msgstr ""
 
 msgid "Direct"
-msgstr ""
-
-msgid "Direction"
 msgstr ""
 
 msgid "Disable private mode"
@@ -1403,6 +1411,9 @@ msgid "Downloading"
 msgstr ""
 
 msgid "Downloads"
+msgstr ""
+
+msgid "Drag to a folder"
 msgstr ""
 
 msgid "Drag to reorder"
@@ -1941,6 +1952,9 @@ msgstr ""
 msgid "Image"
 msgstr ""
 
+msgid "Import Activity"
+msgstr ""
+
 msgid "Import Backup"
 msgstr ""
 
@@ -1956,7 +1970,16 @@ msgstr ""
 msgid "Import"
 msgstr ""
 
+#, rust-format
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
+msgid "In playlist"
 msgstr ""
 
 msgid "Inactive at this sample rate"
@@ -2145,6 +2168,9 @@ msgstr ""
 msgid "Listening"
 msgstr ""
 
+msgid "Live"
+msgstr ""
+
 msgid "Load file contents"
 msgstr ""
 
@@ -2272,7 +2298,13 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+msgid "Match"
+msgstr ""
+
 msgid "Matched"
+msgstr ""
+
+msgid "Matching tracks..."
 msgstr ""
 
 msgid "Maximum frequency (Hz)"
@@ -2370,15 +2402,6 @@ msgid "More actions"
 msgstr ""
 
 msgid "More"
-msgstr ""
-
-msgid "Most Played (Monthly)"
-msgstr ""
-
-msgid "Most Played (Weekly)"
-msgstr ""
-
-msgid "Most Played (Yearly)"
 msgstr ""
 
 msgid "Most Played"
@@ -2505,6 +2528,9 @@ msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
+msgstr ""
+
+msgid "Never played"
 msgstr ""
 
 msgid "New Playlist"
@@ -2819,6 +2845,9 @@ msgstr ""
 msgid "Orange"
 msgstr ""
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr ""
 
@@ -2897,9 +2926,6 @@ msgid "Perceptual"
 msgstr ""
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3028,6 +3054,9 @@ msgid "Playlist"
 msgstr ""
 
 msgid "Playlists"
+msgstr ""
+
+msgid "Plays from"
 msgstr ""
 
 msgid "Plays"
@@ -3165,6 +3194,9 @@ msgstr ""
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr ""
 
@@ -3181,6 +3213,9 @@ msgid "Receiving profile"
 msgstr ""
 
 msgid "Recent searches"
+msgstr ""
+
+msgid "Recently added"
 msgstr ""
 
 msgid "Recently played"
@@ -3267,6 +3302,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr ""
 
@@ -3316,6 +3357,9 @@ msgid "Remove from Saved"
 msgstr ""
 
 msgid "Remove from folder"
+msgstr ""
+
+msgid "Remove group"
 msgstr ""
 
 msgid "Remove rule"
@@ -3624,6 +3668,9 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
+msgid "Secondary release types"
+msgstr ""
+
 msgid "Secret storage"
 msgstr ""
 
@@ -3666,9 +3713,6 @@ msgstr ""
 
 #, rust-format
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"
@@ -3730,6 +3774,12 @@ msgstr ""
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
+
+#, rust-format
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "Settings and sources"
 msgstr ""
@@ -3933,7 +3983,10 @@ msgstr ""
 msgid "Sort title"
 msgstr ""
 
-msgid "Sort"
+msgid "Soundtrack"
+msgstr ""
+
+msgid "Soundtracks"
 msgstr ""
 
 msgid "Source by position"
@@ -3967,6 +4020,9 @@ msgid "Spectrum"
 msgstr ""
 
 msgid "Start Listening"
+msgstr ""
+
+msgid "Start from"
 msgstr ""
 
 msgid "Start minimized"
@@ -4075,9 +4131,6 @@ msgid "Teal"
 msgstr ""
 
 msgid "Techno"
-msgstr ""
-
-msgid "Template"
 msgstr ""
 
 msgid "Test connection"
@@ -4515,6 +4568,12 @@ msgstr ""
 msgid "after"
 msgstr ""
 
+msgid "all"
+msgstr ""
+
+msgid "any"
+msgstr ""
+
 msgid "before"
 msgstr ""
 
@@ -4522,6 +4581,9 @@ msgid "below"
 msgstr ""
 
 msgid "contains"
+msgstr ""
+
+msgid "days"
 msgstr ""
 
 msgid "does not contain"
@@ -4539,6 +4601,9 @@ msgstr ""
 msgid "here"
 msgstr ""
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr ""
 
@@ -4552,6 +4617,15 @@ msgid "is"
 msgstr ""
 
 msgid "kbps"
+msgstr ""
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+msgid "of these"
 msgstr ""
 
 msgid "range"
@@ -4587,6 +4661,12 @@ msgstr[0] ""
 msgstr[1] ""
 
 #, rust-format
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
 msgid "{count} entry"
 msgid_plural "{count} entries"
 msgstr[0] ""
@@ -4595,6 +4675,18 @@ msgstr[1] ""
 #, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
 msgstr[0] ""
 msgstr[1] ""
 

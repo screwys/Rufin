@@ -318,7 +318,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
         );
     }
     let mut rows = handle.prepare(
-        "SELECT track.track_key,legacy.play_count,legacy.skip_count,legacy.last_played_at FROM legacy_activity legacy JOIN sources source ON source.object_id=legacy.source_id JOIN tracks track ON track.source_key=source.source_key AND track.object_id=legacy.track_object_id WHERE legacy.period='lifetime' AND legacy.item_kind='track'",
+        "SELECT track.track_key,counted.plays,counted.skips,counted.last_played_at FROM play_counts counted JOIN tracks track USING(media_uri) WHERE counted.period='lifetime'",
     )?;
     while rows.step()? {
         let counted = listened.entry(rows.int(0)).or_insert((0, 0, None));
@@ -358,7 +358,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
             rows.flag(2),
             rows.flag(3),
             rows.text(4).to_owned(),
-            rows.optional_int(5),
+            rows.text(5).to_owned(),
             rows.int(6),
             rows.flag(7),
             rows.flag(8),
@@ -378,15 +378,14 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
         let smart = write::smart_playlist((
             rows.int(0),
             rows.text(1).to_owned(),
-            rows.optional_int(2),
+            rows.text(2).to_owned(),
             rows.int(3),
             rows.text(4).to_owned(),
             rows.text(5).to_owned(),
         ));
         snapshot.smart_playlists.insert(smart.key, smart);
     }
-    let mut rows =
-        handle.prepare("SELECT folder_key,object_id,name,smart FROM playlist_folders")?;
+    let mut rows = handle.prepare("SELECT folder_key,object_id,name FROM playlist_folders")?;
     while rows.step()? {
         let key = rows.int(0);
         snapshot.playlist_folders.insert(
@@ -395,7 +394,6 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
                 key,
                 object: rows.text(1).to_owned(),
                 name: rows.text(2).to_owned(),
-                smart: rows.flag(3),
             },
         );
     }

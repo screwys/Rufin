@@ -43,6 +43,20 @@ const EXTRA_FIELDS: &[(&str, &str, &str, crate::MetadataFieldKind, u8)] = &[
         7,
     ),
     (
+        "format[0].tag",
+        "Release type",
+        "Format",
+        crate::MetadataFieldKind::Text,
+        2,
+    ),
+    (
+        "subformat[0].tag",
+        "Secondary release types",
+        "Subformat",
+        crate::MetadataFieldKind::List,
+        2,
+    ),
+    (
         "originallyAvailableAt",
         "Release date",
         "originallyAvailableAt",
@@ -83,19 +97,34 @@ fn extra_fields(item: &Value, writable: bool, scope: u8) -> Vec<crate::MetadataF
     EXTRA_FIELDS
         .iter()
         .filter(|(_, _, _, _, scopes)| scopes & scope != 0)
-        .map(|&(key, label, json, kind, _)| crate::MetadataField {
-            key: key.into(),
-            label: label.into(),
-            kind,
-            value: if kind == crate::MetadataFieldKind::List {
-                tags(item, json)
-            } else {
-                text(item, json)
+        .map(|&(key, label, json, kind, _)| {
+            crate::MetadataField {
+                key: key.into(),
+                label: label.into(),
+                kind,
+                value: if kind == crate::MetadataFieldKind::List {
+                    tags(item, json)
+                } else {
+                    text(item, json)
+                }
+                .unwrap_or_default(),
+                writable,
+                mixed: false,
+                suggestion: None,
+                options: Vec::new(),
             }
-            .unwrap_or_default(),
-            writable,
-            mixed: false,
-            suggestion: None,
+            .with_options(match key {
+                "format[0].tag" => &["Album", "EP", "Single"],
+                "subformat[0].tag" => &[
+                    "Compilation",
+                    "Live",
+                    "Soundtrack",
+                    "Remix",
+                    "Demo",
+                    "DJ Mix",
+                ],
+                _ => &[],
+            })
         })
         .collect()
 }

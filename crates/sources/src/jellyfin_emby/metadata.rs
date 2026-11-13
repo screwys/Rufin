@@ -342,6 +342,7 @@ fn extra_fields(
                 writable: true,
                 mixed: false,
                 suggestion: None,
+                options: Vec::new(),
             }
         })
         .collect::<Vec<_>>();
@@ -381,6 +382,7 @@ fn extra_fields(
             writable: true,
             mixed: false,
             suggestion: None,
+            options: Vec::new(),
         });
     }
     fields

@@ -158,8 +158,9 @@ async fn drop_dangling(connection: &mut SqliteConnection) -> LibraryResult<()> {
     }
 }
 
-/// Rebuilds a damaged or newer Store in place, in one transaction: every table takes this
-/// schema's shape and keeps the columns it shares with it.
+/// Rebuilds in place, in one transaction, a Store no step upgrades: one a newer version wrote,
+/// or one with other tables than its version's. Every table takes this schema's shape and
+/// keeps the columns it shares with it.
 pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
     let mut connection = crate::db::open_writer(path).await?;
     let recovered = async {
@@ -189,6 +190,8 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
                     .execute(&mut *transaction).await?;
                 copy_table(&mut transaction, "main", &format!("recovered_{table}"), table, &[], "true").await?;
             }
+        }
+        for table in &old {
             sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
                 .execute(&mut *transaction).await?;
         }
@@ -480,11 +483,10 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 release_types,
             };
-            let lookup = text(row, "release_lookup_identity");
             let artwork = binding(row)?;
             let first_seen = number(row, "first_seen_at");
-            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
-                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,?19,?20,?21)")
+            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
+                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,jsonb(?15),jsonb(?16),?17,?18,?19,?20)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -497,7 +499,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(&metadata.date_added)
                 .bind(metadata.is_compilation)
                 .bind(first_seen)
-                .bind(&lookup)
                 .bind(number(row, "source_favorite"))
                 .bind(number(row, "source_rating"))
                 .bind(metadata.details_json()?)
@@ -508,14 +509,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(picture_flag(artwork.as_deref()))
                 .execute(&mut *connection)
                 .await?;
-            if let Some(identity) = lookup {
-                sqlx::query("INSERT INTO album_release_observations VALUES(?1,?2,jsonb(?3))")
-                    .bind(entity.key)
-                    .bind(identity)
-                    .bind(serde_json::to_string(&metadata.release_types)?)
-                    .execute(&mut *connection)
-                    .await?;
-            }
         }
     }
 }
@@ -917,44 +910,6 @@ async fn reduce_metadata(connection: &mut SqliteConnection) -> LibraryResult<()>
     Ok(())
 }
 
-/// Carried-over counts keep the names they were counted under, so they need no track row.
-async fn legacy_copies(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let mut after = (String::new(), String::new(), String::new(), String::new());
-    loop {
-        let rows: Vec<(String, String, String, String)> = sqlx::query_as("SELECT source_id,period,item_kind,track_object_id FROM legacy_activity WHERE (source_id,period,item_kind,track_object_id)>(?1,?2,?3,?4) ORDER BY source_id,period,item_kind,track_object_id LIMIT 256")
-            .bind(&after.0).bind(&after.1).bind(&after.2).bind(&after.3)
-            .fetch_all(&mut *connection).await?;
-        let Some(last) = rows.last().cloned() else {
-            return Ok(());
-        };
-        after = last;
-        for (source, period, kind, object) in rows {
-            let copy: Option<(String, String, String)> = match kind.as_str() {
-                "track" => {
-                    let uri = crate::normalize_direct_media_uri(&object)
-                        .unwrap_or_else(|| source_entity_uri(&SourceId::new(&source), "track", &object));
-                    sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH track AS(SELECT * FROM(SELECT title,display_artist,display_album FROM tracks WHERE media_uri=?1 UNION ALL SELECT title,display_artist,display_album FROM tracks WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?2) AND object_id=?3) LIMIT 1)
-                        SELECT coalesce((SELECT nullif(title,'') FROM track),{},''),coalesce((SELECT nullif(display_artist,'') FROM track),{},''),coalesce((SELECT nullif(display_album,'') FROM track),{},'')",
-                        best("title", "?1"), best("display_artist", "?1"), best("display_album", "?1"))))
-                        .bind(&uri).bind(&source).bind(&object)
-                        .fetch_optional(&mut *connection).await?
-                }
-                "artist" => sqlx::query_as("SELECT artist.name,artist.name,'' FROM artists artist JOIN sources owner USING(source_key) WHERE owner.object_id=?1 AND artist.object_id=?2")
-                    .bind(&source).bind(&object).fetch_optional(&mut *connection).await?,
-                "genre" => sqlx::query_as("SELECT tag.name,'','' FROM tags tag JOIN sources owner USING(source_key) WHERE owner.object_id=?1 AND tag.kind=0 AND tag.object_id=?2")
-                    .bind(&source).bind(&object).fetch_optional(&mut *connection).await?,
-                _ => None,
-            };
-            if let Some((title, artist, album)) = copy {
-                sqlx::query("UPDATE legacy_activity SET title=?5,artist=?6,album=?7 WHERE source_id=?1 AND period=?2 AND item_kind=?3 AND track_object_id=?4")
-                    .bind(&source).bind(&period).bind(&kind).bind(&object)
-                    .bind(title).bind(artist).bind(album)
-                    .execute(&mut *connection).await?;
-            }
-        }
-    }
-}
-
 async fn copy_native_playlists(connection: &mut SqliteConnection) -> LibraryResult<()> {
     if !has_table(connection, "old_catalog", "native_playlists").await? {
         return Ok(());
@@ -1296,12 +1251,7 @@ pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> Libr
     saved_candidates(&mut transaction).await?;
     reduce_metadata(&mut transaction).await?;
     playlists(&mut transaction, has_catalog).await?;
-    for table in [
-        "smart_playlists",
-        "listens",
-        "listen_outbox",
-        "legacy_activity",
-    ] {
+    for table in ["smart_playlists", "listens", "listen_outbox"] {
         copy_table(&mut transaction, "old_store", table, table, &[], "true").await?;
     }
     user_data(&mut transaction, has_catalog).await?;
@@ -1311,7 +1261,15 @@ pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> Libr
     sqlx::query("DELETE FROM local_locators WHERE origin='import' AND path IN(SELECT path FROM files WHERE root IN(SELECT file.root FROM tracks track CROSS JOIN track_details details USING(track_key) CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE track.indexed=1 AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import')))")
         .execute(&mut *transaction)
         .await?;
-    legacy_copies(&mut transaction).await?;
+    if has_table(&mut transaction, "old_store", "legacy_activity").await? {
+        let counts = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "{} FROM old_store.legacy_activity",
+            crate::activity::RELEASED_COUNTS
+        )))
+        .fetch_all(&mut *transaction)
+        .await?;
+        crate::activity::carry_released_counts(&mut transaction, counts).await?;
+    }
     sqlx::query("DROP TABLE migration_metadata")
         .execute(&mut *transaction)
         .await?;

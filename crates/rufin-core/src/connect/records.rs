@@ -33,7 +33,7 @@ const ORDER: [&str; 15] = [
     "state",
     "lyrics",
     "listen",
-    "legacy",
+    "plays",
     "analysis",
     "album-loudness",
     "session",
@@ -45,7 +45,7 @@ const ORDER: [&str; 15] = [
 const COMPARED: [(&str, bool); 9] = [
     ("state", true),
     ("lyrics", true),
-    ("legacy", true),
+    ("plays", true),
     ("folder", true),
     ("playlist", true),
     ("entry", true),
@@ -133,20 +133,19 @@ struct LyricsValue {
     lyrics: String,
 }
 
+/// A track's plays counted outside Rufin's listens for one period, under
+/// `plays:{period}:{uri}`.
 #[derive(Serialize, Deserialize)]
-struct LegacyValue {
-    play_count: i64,
-    skip_count: i64,
+struct PlaysValue {
+    plays: i64,
+    skips: i64,
     last_played_at: Option<i64>,
-    title: String,
-    artist: String,
-    album: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct PlaylistValue {
     name: String,
-    folder: Option<String>,
+    folders: Vec<String>,
     created_at: i64,
     mosaic: Option<Vec<String>>,
 }
@@ -171,13 +170,12 @@ pub(super) struct Copy {
 #[derive(Serialize, Deserialize)]
 struct FolderValue {
     name: String,
-    smart: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 struct SmartValue {
     name: String,
-    folder: Option<String>,
+    folders: Vec<String>,
     definition: String,
     mosaic: Option<Vec<String>>,
 }
@@ -701,8 +699,8 @@ impl Records {
         Ok(changes)
     }
 
-    /// The listens of tracks heard: new ones, and ones written again with a longer listening
-    /// time.
+    /// The listens and play counts of tracks whose plays changed: new listens, ones written
+    /// again with a longer listening time, and new or changed counts.
     async fn heard_listens(
         &self,
         tracks: &[library::TrackKey],
@@ -712,7 +710,13 @@ impl Records {
             .listens(&[], tracks)
             .await
             .map_err(string_error)?;
-        let items = self.encode_listens(listens).await?;
+        let counts = self
+            .catalog
+            .play_counts(Some(&[]), tracks)
+            .await
+            .map_err(string_error)?;
+        let mut items = self.encode_listens(listens).await?;
+        items.extend(self.encode_plays(counts, None).await?);
         let ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
         self.diff(items, Select::Ids(&ids), false).await
     }
@@ -757,16 +761,29 @@ impl Records {
                 }
                 None => Vec::new(),
             },
-            "legacy" => {
-                let keys = objects
-                    .map(|keys| {
-                        keys.iter()
-                            .map(|key| legacy_key(key))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .transpose()?;
-                self.legacy_items(keys.as_deref()).await?
-            }
+            "plays" => match objects {
+                Some(objects) => {
+                    let uris = objects
+                        .iter()
+                        .map(|object| Ok(plays_key(object)?.1))
+                        .collect::<Result<Vec<_>, String>>()?;
+                    let (uris, portable) = self.local_named(&uris).await?;
+                    let counts = self
+                        .catalog
+                        .play_counts(Some(&uris), &[])
+                        .await
+                        .map_err(string_error)?;
+                    self.encode_plays(counts, Some(portable)).await?
+                }
+                None => {
+                    let counts = self
+                        .catalog
+                        .play_counts(None, &[])
+                        .await
+                        .map_err(string_error)?;
+                    self.encode_plays(counts, None).await?
+                }
+            },
             "lyrics" => match objects {
                 Some(objects) => {
                     let (uris, portable) = self.local_named(objects).await?;
@@ -965,29 +982,36 @@ impl Records {
             .collect()
     }
 
-    async fn legacy_items(
+    /// Play counts, under their portable URIs. `portable` names their URIs when the caller
+    /// already looked them up.
+    async fn encode_plays(
         &self,
-        keys: Option<&[library::LegacyActivityKey]>,
+        counts: Vec<library::PlayCount>,
+        portable: Option<HashMap<String, String>>,
     ) -> Result<Vec<Item>, String> {
-        self.catalog
-            .legacy_activity(keys)
-            .await
-            .map_err(string_error)?
+        let portable = match portable {
+            Some(portable) => portable,
+            None => {
+                self.portable(
+                    &counts
+                        .iter()
+                        .map(|count| count.media_uri.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await?
+            }
+        };
+        counts
             .into_iter()
-            .map(|record| {
+            .map(|count| {
+                let uri = portable.get(&count.media_uri).unwrap_or(&count.media_uri);
                 Item::new(
-                    format!(
-                        "legacy:{}/{}/{}/{}",
-                        record.source_id, record.period, record.item_kind, record.track_object_id
-                    ),
+                    format!("plays:{}:{uri}", count.period),
                     None,
-                    &LegacyValue {
-                        play_count: record.play_count,
-                        skip_count: record.skip_count,
-                        last_played_at: record.last_played_at,
-                        title: record.title,
-                        artist: record.artist,
-                        album: record.album,
+                    &PlaysValue {
+                        plays: count.plays,
+                        skips: count.skips,
+                        last_played_at: count.last_played_at,
                     },
                 )
             })
@@ -1041,10 +1065,7 @@ impl Records {
                 Item::new(
                     format!("folder:{}", folder.object_id),
                     None,
-                    &FolderValue {
-                        name: folder.name,
-                        smart: folder.smart,
-                    },
+                    &FolderValue { name: folder.name },
                 )
             })
             .collect()
@@ -1061,13 +1082,10 @@ impl Records {
             let mosaic = self.portable_mosaic(playlist.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("playlist:{}", playlist.object_id),
-                playlist
-                    .folder
-                    .as_ref()
-                    .map(|folder| format!("folder:{folder}")),
+                None,
                 &PlaylistValue {
                     name: playlist.name,
-                    folder: playlist.folder,
+                    folders: playlist.folders,
                     created_at: playlist.created_at,
                     mosaic,
                 },
@@ -1153,13 +1171,10 @@ impl Records {
             let mosaic = self.portable_mosaic(smart.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("smart:{}", smart.object_id),
-                smart
-                    .folder
-                    .as_ref()
-                    .map(|folder| format!("folder:{folder}")),
+                None,
                 &SmartValue {
                     name: smart.name,
-                    folder: smart.folder,
+                    folders: smart.folders,
                     definition: smart.definition,
                     mosaic,
                 },
@@ -1388,9 +1403,9 @@ impl Records {
         Ok((applied, held))
     }
 
-    /// Splits rows into those that can apply now and those that wait for their parent. When
-    /// settling, playlists apply without their folder and children of a gone playlist are
-    /// dropped. A device that left or was removed cannot trust itself again; only a record of
+    /// Splits rows into those that can apply now and those that wait for their parents. When
+    /// settling, playlists apply without the folders that are not here and children of a gone
+    /// playlist are dropped. A device that left or was removed cannot trust itself again; only a record of
     /// a later pairing does.
     #[allow(clippy::type_complexity)]
     async fn parents(
@@ -1445,31 +1460,45 @@ impl Records {
                 .collect::<HashSet<_>>(),
             _ => return Ok((rows, Vec::new())),
         };
-        let parent = |row: &Row| -> Option<String> {
-            let value = row.value.as_ref().filter(|_| !row.deleted)?;
+        let parents = |row: &Row| -> Vec<String> {
+            let Some(value) = row.value.as_ref().filter(|_| !row.deleted) else {
+                return Vec::new();
+            };
+            let text = |value: &Value| value.as_str().map(str::to_owned);
             match kind {
-                "playlist" | "smart" => value["folder"].as_str().map(str::to_owned),
-                "entry" => value["playlist"].as_str().map(str::to_owned),
-                _ => row.id.strip_prefix("artwork:").map(str::to_owned),
+                "playlist" | "smart" => value["folders"]
+                    .as_array()
+                    .map(|folders| folders.iter().filter_map(text).collect())
+                    .unwrap_or_default(),
+                "entry" => text(&value["playlist"]).into_iter().collect(),
+                _ => row
+                    .id
+                    .strip_prefix("artwork:")
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect(),
             }
         };
         let mut ready = Vec::new();
         let mut waiting = Vec::new();
         for (from, mut row) in rows {
-            match parent(&row) {
-                Some(parent) if !present.contains(&parent) => {
-                    if !settle {
-                        waiting.push((from, row));
-                    } else if matches!(kind, "playlist" | "smart") {
-                        if let Some(value) = &mut row.value {
-                            value["folder"] = Value::Null;
-                        }
-                        ready.push((from, row));
-                    } else {
-                        tracing::debug!(id = row.id, "Connect record of a gone playlist");
-                    }
+            let parents = parents(&row);
+            if parents.iter().all(|parent| present.contains(parent)) {
+                ready.push((from, row));
+            } else if !settle {
+                waiting.push((from, row));
+            } else if matches!(kind, "playlist" | "smart") {
+                if let Some(value) = &mut row.value {
+                    value["folders"] = Value::from(
+                        parents
+                            .into_iter()
+                            .filter(|parent| present.contains(parent))
+                            .collect::<Vec<_>>(),
+                    );
                 }
-                _ => ready.push((from, row)),
+                ready.push((from, row));
+            } else {
+                tracing::debug!(id = row.id, "Connect record of a gone playlist");
             }
         }
         Ok((ready, waiting))
@@ -1494,7 +1523,6 @@ impl Records {
                         Ok(library::PlaylistFolderCopy {
                             object_id: object(row, "folder:")?,
                             name: value.name,
-                            smart: value.smart,
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
@@ -1522,7 +1550,7 @@ impl Records {
                     playlists.push(library::PlaylistCopy {
                         object_id: object(row, "playlist:")?,
                         name: value.name,
-                        folder: value.folder,
+                        folders: value.folders,
                         created_at: value.created_at,
                         mosaic: self.local_mosaic(value.mosaic).await?,
                     });
@@ -1551,7 +1579,7 @@ impl Records {
                     playlists.push(library::SmartPlaylistCopy {
                         object_id: object(row, "smart:")?,
                         name: value.name,
-                        folder: value.folder,
+                        folders: value.folders,
                         definition: value.definition,
                         mosaic: self.local_mosaic(value.mosaic).await?,
                     });
@@ -1723,35 +1751,36 @@ impl Records {
                     .await
                     .map_err(string_error)
             }
-            "legacy" => {
-                let mut records = Vec::new();
-                for row in live {
-                    let value: LegacyValue = decode(row)?;
-                    let (source_id, period, item_kind, track_object_id) =
-                        legacy_key(&object(row, "legacy:")?)?;
-                    records.push(library::LegacyActivityRecord {
-                        source_id,
+            "plays" => {
+                let keys = rows
+                    .iter()
+                    .map(|row| plays_key(&object(row, "plays:")?))
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self
+                    .local(&keys.iter().map(|(_, uri)| uri.clone()).collect::<Vec<_>>())
+                    .await?;
+                let (mut counts, mut gone) = (Vec::new(), Vec::new());
+                for (row, (period, uri)) in rows.iter().zip(keys) {
+                    let uri = local.get(&uri).cloned().unwrap_or(uri);
+                    if row.deleted {
+                        gone.push((uri, period));
+                        continue;
+                    }
+                    let value: PlaysValue = decode(row)?;
+                    counts.push(library::PlayCount {
+                        media_uri: uri,
                         period,
-                        item_kind,
-                        track_object_id,
-                        play_count: value.play_count,
-                        skip_count: value.skip_count,
+                        plays: value.plays,
+                        skips: value.skips,
                         last_played_at: value.last_played_at,
-                        title: value.title,
-                        artist: value.artist,
-                        album: value.album,
                     });
                 }
                 catalog
-                    .put_legacy_activity(&records)
+                    .put_play_counts(&counts)
                     .await
                     .map_err(string_error)?;
-                let keys = gone("legacy:")
-                    .iter()
-                    .map(|key| legacy_key(key))
-                    .collect::<Result<Vec<_>, String>>()?;
                 catalog
-                    .delete_legacy_activity(&keys)
+                    .delete_play_counts(&gone)
                     .await
                     .map_err(string_error)
             }
@@ -2188,14 +2217,11 @@ fn unhex(text: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-fn legacy_key(key: &str) -> Result<library::LegacyActivityKey, String> {
-    let mut parts = key.splitn(4, '/').map(str::to_owned);
-    match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(source), Some(period), Some(kind), Some(object)) => {
-            Ok((source, period, kind, object))
-        }
-        _ => Err(format!("Invalid activity key {key}")),
-    }
+/// The period and URI of a play count's record id without its kind.
+fn plays_key(key: &str) -> Result<(String, String), String> {
+    key.split_once(':')
+        .map(|(period, uri)| (period.to_owned(), uri.to_owned()))
+        .ok_or_else(|| format!("Invalid play count key {key}"))
 }
 
 fn source_value(

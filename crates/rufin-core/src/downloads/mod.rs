@@ -655,6 +655,7 @@ async fn rule_media_uris(
                 members: Box::new(library::MemberRead::new(library::Collection::Album(
                     library::AlbumKey::from_raw(0),
                 ))),
+                smart: None,
             };
             let mut selections = vec![query.selection()];
             if favorites {

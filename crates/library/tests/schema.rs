@@ -70,7 +70,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     .await;
     let mut raw = connection(&path, false).await;
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(NULL,'source',?1,'Snapshot','Artist','Album',100,'1970-01',100000,90000,0)").bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at) VALUES('rufin:source/track/source/track-a','lifetime',4,2,90);").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     fixture.catalog.close().await.unwrap();
     let mut before = durable_rows(&path).await;
@@ -311,6 +311,127 @@ async fn newer_store_keeps_its_compatible_columns() {
     assert_eq!(durable_rows(&path).await, expected);
 }
 
+/// The tables, columns in their order, and indexes of a Store.
+async fn shape(path: &Path) -> Vec<String> {
+    let mut raw = connection(path, false).await;
+    sqlx::query_scalar("SELECT s.type||' '||s.tbl_name||' '||s.name||' '||coalesce((SELECT group_concat(c.name||' '||c.type||' '||c.\"notnull\"||' '||coalesce(c.dflt_value,'')||' '||c.pk,',') FROM pragma_table_info(s.name) c),'')
+        FROM sqlite_schema s WHERE s.name NOT LIKE 'sqlite_%' AND s.name NOT LIKE 'lyrics_fts%' AND (s.type='table' OR s.sql IS NOT NULL) ORDER BY 1")
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn store_of_0_17_upgrades_in_place_to_a_new_stores_shape() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let mut raw = connection(&path, true).await;
+    // 0.17 kept counts by source and object id, a file-library track's 0.16 baseline as a
+    // native count it never shows, a playlist's one folder in its row, and MusicBrainz's
+    // release types per album.
+    sqlx::raw_sql(include_str!("fixtures/store-0.17.1.sql"))
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::raw_sql(r#"INSERT INTO sources(source_key,object_id,kind) VALUES (1,'files','local'),(2,'server','jellyfin');
+        INSERT INTO albums(album_key,source_key,object_id,media_uri,release_identity,release_lookup_identity) VALUES
+            (1,2,'al1','rufin:source/album/server/al1','release-group:rg1','release-group:rg1');
+        INSERT INTO album_release_observations VALUES(1,'release-group:rg1',jsonb('["album","live"]'));
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,indexed,native_play_count,native_last_played) VALUES
+            (1,1,'local:track:1','file:///one.flac','One',1,100,50),
+            (2,2,'s1','rufin:source/track/server/s1','Server',1,7,20);
+        INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES
+            ('files','lifetime','track','local:track:1',3,1,40),
+            ('server','2024-05','track','gone',2,0,30),
+            ('server','lifetime','artist','a',9,0,NULL);
+        INSERT INTO playlist_folders(folder_key,object_id,name,smart) VALUES (1,'f1','Mixes',0),(2,'f2','Rules',1);
+        INSERT INTO playlists(playlist_key,object_id,name,playlist_folder_key) VALUES (1,'p1','One',1),(2,'p2','Two',NULL);
+        INSERT INTO smart_playlists(smart_playlist_key,object_id,name,normalized_name,playlist_folder_key,definition_json,position)
+            VALUES (1,'s1','Rule','rule',2,'{}',0);"#)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    let open = |path: std::path::PathBuf| async move {
+        Catalog::open_installation(
+            &path,
+            &path.with_extension("released.sqlite"),
+            &path.with_extension("catalog.sqlite"),
+        )
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    };
+    open(path.clone()).await;
+    let new = directory.path().join("new.sqlite3");
+    open(new.clone()).await;
+    assert_eq!(shape(&path).await, shape(&new).await);
+
+    let mut raw = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, i64, i64, Option<i64>)>(
+            "SELECT media_uri,period,plays,skips,last_played_at FROM play_counts ORDER BY media_uri"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![
+            (
+                "file:///one.flac".into(),
+                "lifetime".into(),
+                103,
+                1,
+                Some(50)
+            ),
+            (
+                "rufin:source/track/server/gone".into(),
+                "2024-05".into(),
+                2,
+                0,
+                Some(30)
+            ),
+        ]
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (Option<i64>,)>(
+            "SELECT native_play_count FROM tracks ORDER BY track_key"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![(None,), (Some(7),)]
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT playlist_key,folder_key FROM playlist_folder_playlists"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![(1, 1)]
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT smart_playlist_key,folder_key FROM playlist_folder_smart_playlists"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![(1, 2)]
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT identity,json(release_types) FROM musicbrainz_release_types"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![("release-group:rg1".into(), r#"["album","live"]"#.into())]
+    );
+}
+
 #[tokio::test]
 async fn released_store_imports_old_playlist_artwork_and_files() {
     let directory = tempfile::tempdir().unwrap();
@@ -373,7 +494,7 @@ async fn released_store_imports_old_playlist_artwork_and_files() {
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT play_count FROM legacy_activity WHERE track_object_id='played'"
+            "SELECT plays FROM play_counts WHERE media_uri='rufin:source/track/source/played'"
         )
         .fetch_one(&mut raw)
         .await
@@ -431,7 +552,7 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            60,
+            63,
             "{version}"
         );
         // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.
@@ -471,13 +592,16 @@ async fn released_stores_upgrade_with_their_user_data() {
             [r#"["rufin:source/track/server/s1","favorite",0]"#],
             "{version}"
         );
-        // Carried-over counts keep their names, also for tracks the catalog no longer has.
+        // Track counts become play counts, also for tracks the catalog no longer has.
         assert_eq!(
-            values(&mut raw, "SELECT json_array(period,item_kind,track_object_id,play_count,title,artist,album) FROM legacy_activity ORDER BY period,item_kind").await,
+            values(
+                &mut raw,
+                "SELECT json_array(media_uri,period,plays,skips) FROM play_counts ORDER BY period"
+            )
+            .await,
             [
-                r#"["2017-07","track","vanished",2,"Vanished","Lost Artist","Lost Album"]"#,
-                r#"["lifetime","artist","ar2",9,"Server Artist","Server Artist",""]"#,
-                r#"["lifetime","track","s2",5,"Server Two","Server Artist","Server Album"]"#,
+                r#"["rufin:source/track/server/vanished","2017-07",2,0]"#,
+                r#"["rufin:source/track/server/s2","lifetime",5,1]"#,
             ],
             "{version}"
         );
@@ -622,4 +746,116 @@ async fn released_stores_upgrade_with_their_user_data() {
         );
         raw.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn store_missing_a_column_is_rebuilt_on_the_next_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let open = || async {
+        Catalog::open_installation(
+            &path,
+            &path.with_extension("released.sqlite"),
+            &path.with_extension("catalog.sqlite"),
+        )
+        .await
+        .unwrap()
+    };
+    open().await.close().await.unwrap();
+    let new = shape(&path).await;
+    // The Store lacks a column the Catalog loads, under this version's number.
+    let mut raw = connection(&path, false).await;
+    sqlx::raw_sql("INSERT INTO playlists(playlist_key,object_id,name) VALUES (1,'keep','Keep me');
+        INSERT INTO sources(source_key,object_id,kind) VALUES (1,'source','local');
+        INSERT INTO albums(album_key,source_key,object_id,media_uri,title) VALUES (1,1,'al','file:///al','Album');
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,album_key,title,indexed) VALUES (1,1,'one','file:///one.flac',1,'One',1);
+        ALTER TABLE albums DROP COLUMN display_artist;")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    for entry in std::fs::read_dir(directory.path()).unwrap() {
+        let file = entry.unwrap().path();
+        if file
+            .extension()
+            .is_some_and(|extension| extension == "image")
+        {
+            std::fs::remove_file(file).unwrap();
+        }
+    }
+    let catalog = open().await;
+    catalog.loaded().await;
+    catalog.close().await.unwrap();
+    assert_ne!(shape(&path).await, new);
+    let mut raw = connection(&path, false).await;
+    // The Store is marked for the rebuild.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        -1
+    );
+    raw.close().await.unwrap();
+    open().await.close().await.unwrap();
+    assert_eq!(shape(&path).await, new);
+    let mut raw = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT name FROM playlists")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap(),
+        ["Keep me"]
+    );
+}
+
+#[tokio::test]
+async fn store_with_a_damaged_page_is_set_aside_and_replaced() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let open = || async {
+        Catalog::open_installation(
+            &path,
+            &path.with_extension("released.sqlite"),
+            &path.with_extension("catalog.sqlite"),
+        )
+        .await
+        .unwrap()
+    };
+    open().await.close().await.unwrap();
+    let mut raw = connection(&path, false).await;
+    sqlx::raw_sql("INSERT INTO sources(source_key,object_id,kind) VALUES (1,'source','local');
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,indexed) VALUES (1,1,'one','file:///one.flac','One',1);
+        PRAGMA wal_checkpoint(TRUNCATE);")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let (page, size): (i64, i64) = sqlx::query_as(
+        "SELECT rootpage,(SELECT page_size FROM pragma_page_size) FROM sqlite_schema WHERE name='tracks'",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let start = ((page - 1) * size) as usize;
+    bytes[start..start + size as usize].fill(0xa5);
+    std::fs::write(&path, bytes).unwrap();
+    let _ = std::fs::remove_file(path.with_extension("image"));
+    // The load finds the page; the next start cannot rebuild the Store and replaces it.
+    let catalog = open().await;
+    catalog.loaded().await;
+    catalog.close().await.unwrap();
+    let catalog = open().await;
+    catalog.loaded().await;
+    catalog.close().await.unwrap();
+    assert!(path.with_extension("unreadable").exists());
+    let mut raw = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        0
+    );
 }

@@ -528,7 +528,8 @@ impl Catalog {
     /// Opens the installed Store. Without one, it imports the Store a release wrote at
     /// `released` and leaves that file as it was, so the release still opens it after a
     /// downgrade. A Store imported from a released one gets its albums resolved once, since the
-    /// import copies only the facts albums are resolved from.
+    /// import copies only the facts albums are resolved from. A Store 0.17 or later wrote is
+    /// upgraded in place by its steps; any other that is not this version's is rebuilt.
     pub async fn open_installation(
         path: &Path,
         released: &Path,
@@ -564,15 +565,21 @@ impl Catalog {
         // The release's catalog file is a cache it rebuilds after a downgrade.
         let _ = move_store(catalog, None);
         let opened = async {
-            if path.exists() {
-                Self::check_version(path).await?;
+            let upgraded = match path.exists() {
+                true => crate::migration::steps::upgrade(path).await?,
+                false => None,
+            };
+            // The image is of the Store before its steps.
+            if upgraded.is_some() {
+                image::remove(path);
             }
-            Self::open(path).await
+            let resolve = imported || upgraded == Some(true);
+            LibraryResult::Ok((Self::open(path).await?, resolve))
         }
         .await;
-        let (opened, imported) = match opened {
+        let (opened, resolve) = match opened {
             Err(error) if path.exists() && !error.is_store_unavailable() => {
-                tracing::warn!(%error, "could not open the Store; keeping its compatible columns");
+                tracing::warn!(%error, "rebuilding the Store from the columns this version knows");
                 image::remove(path);
                 if let Err(error) = crate::migration::current::recover_columns(path).await {
                     if error.is_store_unavailable() {
@@ -583,9 +590,9 @@ impl Catalog {
                 }
                 (Self::open(path).await?, true)
             }
-            opened => (opened?, imported),
+            opened => opened?,
         };
-        if imported {
+        if resolve {
             crate::catalog::albums::resolve_all(&opened).await?;
         }
         Ok(opened)
@@ -607,16 +614,6 @@ impl Catalog {
             }
             version => Err(LibraryError::Migration(format!(
                 "unsupported released library schema {version}"
-            ))),
-        }
-    }
-
-    /// Fails for a Store another version wrote, which is then recovered.
-    async fn check_version(path: &Path) -> LibraryResult<()> {
-        match Self::version(path).await? {
-            0 | schema::STORE_VERSION => Ok(()),
-            version => Err(LibraryError::Migration(format!(
-                "unsupported library schema {version}"
             ))),
         }
     }
@@ -783,6 +780,17 @@ impl CatalogInner {
             Err(error) => {
                 tracing::warn!(%error, "could not load the Catalog; the next write reloads it");
                 self.reload.store(true, Ordering::Release);
+                let condemned = futures_executor::block_on(async {
+                    match self.store.writer.lock().await.as_mut() {
+                        Some(writer) => crate::migration::steps::condemn(writer, &error).await,
+                        None => Ok(false),
+                    }
+                });
+                if matches!(condemned, Ok(true)) {
+                    tracing::warn!(
+                        "the Store does not read as this version's; the next start rebuilds it"
+                    );
+                }
                 self.snapshot
                     .read()
                     .unwrap_or_else(PoisonError::into_inner)

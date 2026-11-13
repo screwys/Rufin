@@ -1,4 +1,5 @@
 import { openMetadata } from "./metadata.js";
+import { openSmartPlaylist } from "./smart-playlists.js";
 import { tr } from "./ui.js";
 import {
   closeFullscreen,
@@ -33,7 +34,14 @@ import {
 
 import { openWelcome, sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
-import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
+import {
+  acceptsPlaylists,
+  bindDrag,
+  draggedMedia,
+  mediaSelection,
+  playlistMember,
+  queueMedia,
+} from "./drag.js";
 
 let viewRequest = null;
 
@@ -281,6 +289,7 @@ function showPage(data) {
   $("library-toolbar").hidden = data.section === "Home";
   $("play-collection").hidden = data.play !== "true";
   $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
+  $("new-smart-playlist").hidden = !(opened.route === "SmartPlaylists" || opened.route.PlaylistFolder?.smart);
   if (data.sorts) {
     $("sort").replaceChildren(
       ...JSON.parse(data.sorts).map(([name, title]) => new Option(title, name)),
@@ -685,6 +694,10 @@ function init() {
   );
   $("play-collection").addEventListener("click", () => run(playCollection));
   $("new-playlist").addEventListener("click", () => run(() => openName()));
+  // New Smart Playlist goes into the smart playlist folder the page shows, as on GTK.
+  $("new-smart-playlist").addEventListener("click", () =>
+    run(() => openSmartPlaylist({ folder: opened.route.PlaylistFolder?.key ?? null })),
+  );
 }
 
 function bindCards(host) {
@@ -709,6 +722,37 @@ function fitActions(actions) {
   form.style.setProperty("--gap", `${Math.floor(spacing)}px`);
 }
 
+// Playlists dropped on a folder's card go into it; dropped on another playlist's, they go into
+// a new folder with it, as on GTK and Android.
+function bindPlaylistDrop(card, kind, row) {
+  const target = kind === "playlist-folder" ? null : playlistMember(mediaSelection(kind, row));
+  if (kind !== "playlist-folder" && !target) return;
+  card.addEventListener("dragover", (event) => {
+    if (!acceptsPlaylists(event)) return;
+    event.preventDefault();
+    card.classList.add("pin-drop");
+  });
+  card.addEventListener("dragleave", () => card.classList.remove("pin-drop"));
+  card.addEventListener("drop", (event) => {
+    if (!acceptsPlaylists(event)) return;
+    event.preventDefault();
+    card.classList.remove("pin-drop");
+    const payload = draggedMedia();
+    run(async () => {
+      const dragged = playlistMember(await payload);
+      if (!dragged) return;
+      if (!target) {
+        await api("/playlist-folders/members", "POST", { folder: row.id, members: [dragged] });
+        return;
+      }
+      // A playlist dropped on itself makes no folder.
+      if (JSON.stringify(dragged) === JSON.stringify(target)) return;
+      const name = prompt(tr("Folder name"), "")?.trim();
+      if (name) await api("/playlist-folders", "POST", { name, members: [dragged, target] });
+    });
+  });
+}
+
 function bindCard(card) {
   for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts, .detail-below > .detail-facts")) slideText(node);
   // The header's width, not the row's, which the fitting itself changes.
@@ -721,8 +765,10 @@ function bindCard(card) {
     bindHoverControls(card);
     const row = mediaRow(card),
       kind = card.dataset.kind;
-    if (!card.classList.contains("pin-row"))
+    if (!card.classList.contains("pin-row")) {
       bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
+      bindPlaylistDrop(card, kind, row);
+    }
     const open = () => {
       if (row.page) return navigate(row.page);
       host
@@ -747,7 +793,8 @@ function bindCard(card) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite(row, kind),
         ]);
-      // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
+      // The web's playlist dialogs edit, export and delete playlists and edit smart ones, not
+      // folders.
       if (options.export && kind === "playlist")
         actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
       if (options.remove_unavailable)
@@ -757,6 +804,8 @@ function bindCard(card) {
           "rufin-user-trash-symbolic",
         ]);
       if (options.edit && kind === "playlist") actions.push([tr("Edit"), () => openName(row)]);
+      if (options.edit && kind === "smart-playlist")
+        actions.push([tr("Edit"), () => openSmartPlaylist({ key: row.id })]);
       if (options.delete && kind === "playlist")
         actions.push([
           tr("Delete Playlist"),

@@ -124,7 +124,7 @@ async fn listens_accept_empty_optional_recording_ids() {
     let mut exported = Vec::new();
     fixture
         .catalog
-        .export_activity_jsonl(&mut exported, None)
+        .export_activity(&mut exported, library::ActivityExportFormat::Jsonl, None)
         .await
         .unwrap();
     let rows = String::from_utf8(exported)
@@ -144,9 +144,14 @@ async fn listens_accept_empty_optional_recording_ids() {
 async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
     let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count)
-        SELECT object_id,'2025-06','track','track-0',9,2 FROM sources WHERE source_key=?1")
-        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    sqlx::query(
+        "INSERT INTO play_counts(media_uri,period,plays,skips)
+        SELECT media_uri,'2025-06',9,2 FROM tracks WHERE source_key=?1 AND object_id='track-0'",
+    )
+    .bind(fixture.source)
+    .execute(&mut raw)
+    .await
+    .unwrap();
     for index in 0..7 {
         sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES (?1,0,COALESCE(?2,''),COALESCE('Retained artist',''),COALESCE('Retained album',''),COALESCE(180000,0))")
             .bind(format!("file:///retained-{index}.flac")).bind(format!("Retained {index}")).execute(&mut raw).await.unwrap();
@@ -285,7 +290,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .await
             .expect("read accepted skip")
     );
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) SELECT object_id,'lifetime','track','track-0',3,1,1600000000 FROM sources WHERE source_key=?1")
+    sqlx::query("INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at) SELECT media_uri,'lifetime',3,1,1600000000 FROM tracks WHERE source_key=?1 AND object_id='track-0'")
         .bind(fixture.source)
         .execute(&mut raw)
         .await
@@ -300,7 +305,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .create_smart_playlist(
             "Local never played",
             &library::SmartPlaylistDefinition {
-                match_all: vec![
+                conditions: vec![
                     library::SmartPlaylistRule {
                         field: library::SmartPlaylistRuleField::Played,
                         operator: library::SmartPlaylistRuleOperator::Is,
@@ -311,7 +316,10 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                         operator: library::SmartPlaylistRuleOperator::Equals,
                         value: Some(library::SmartPlaylistRuleValue::Number(0)),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(library::SmartPlaylistCondition::Rule)
+                .collect(),
                 ..library::SmartPlaylistDefinition::default()
             },
             None,
@@ -839,7 +847,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert_eq!(
         fixture
             .catalog
-            .export_activity_jsonl(&mut exported, None)
+            .export_activity(&mut exported, library::ActivityExportFormat::Jsonl, None)
             .await
             .unwrap(),
         1
@@ -879,7 +887,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert_eq!(history[0].title, input.listen.title);
     let mut again = Vec::new();
     catalog
-        .export_activity_jsonl(&mut again, None)
+        .export_activity(&mut again, library::ActivityExportFormat::Jsonl, None)
         .await
         .unwrap();
     assert_eq!(again, exported);
@@ -893,7 +901,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let mut csv = Vec::new();
     assert_eq!(
         catalog
-            .export_activity_csv(&mut csv, library::ActivityCsvFormat::LastFm, None)
+            .export_activity(&mut csv, library::ActivityExportFormat::LastFm, None)
             .await
             .unwrap(),
         1
@@ -909,7 +917,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert!(!csv.contains("example.org"));
     let mut csv = Vec::new();
     catalog
-        .export_activity_csv(&mut csv, library::ActivityCsvFormat::ListenBrainz, None)
+        .export_activity(&mut csv, library::ActivityExportFormat::ListenBrainz, None)
         .await
         .unwrap();
     assert_eq!(
@@ -936,7 +944,11 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let mut scoped = Vec::new();
     assert_eq!(
         catalog
-            .export_activity_jsonl(&mut scoped, Some(&source))
+            .export_activity(
+                &mut scoped,
+                library::ActivityExportFormat::Jsonl,
+                Some(&source)
+            )
             .await
             .unwrap(),
         1
@@ -944,7 +956,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert_eq!(scoped, exported);
     assert_eq!(
         catalog
-            .export_activity_jsonl(std::io::sink(), None)
+            .export_activity(std::io::sink(), library::ActivityExportFormat::Jsonl, None)
             .await
             .unwrap(),
         3
@@ -952,19 +964,23 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let missing = SourceId::new("missing");
     assert_eq!(
         catalog
-            .export_activity_jsonl(std::io::sink(), Some(&missing))
+            .export_activity(
+                std::io::sink(),
+                library::ActivityExportFormat::Jsonl,
+                Some(&missing)
+            )
             .await
             .unwrap(),
         0
     );
     for format in [
-        library::ActivityCsvFormat::LastFm,
-        library::ActivityCsvFormat::ListenBrainz,
+        library::ActivityExportFormat::LastFm,
+        library::ActivityExportFormat::ListenBrainz,
     ] {
         let mut scoped = Vec::new();
         assert_eq!(
             catalog
-                .export_activity_csv(&mut scoped, format, Some(&source))
+                .export_activity(&mut scoped, format, Some(&source))
                 .await
                 .unwrap(),
             1
@@ -974,14 +990,14 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         assert!(!scoped.contains("Extra"));
         assert_eq!(
             catalog
-                .export_activity_csv(std::io::sink(), format, None)
+                .export_activity(std::io::sink(), format, None)
                 .await
                 .unwrap(),
             3
         );
         assert_eq!(
             catalog
-                .export_activity_csv(std::io::sink(), format, Some(&missing))
+                .export_activity(std::io::sink(), format, Some(&missing))
                 .await
                 .unwrap(),
             0
@@ -994,4 +1010,81 @@ fn listened(change: &library::Change) -> bool {
         .scopes
         .iter()
         .any(|scope| matches!(scope, library::Scope::Listened { .. }))
+}
+
+#[tokio::test]
+async fn import_matches_each_format_to_library_tracks_once() {
+    use std::io::Write;
+    let mut fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE sources SET kind='local'")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    async fn plays(catalog: &library::Catalog, track: library::TrackKey) -> i64 {
+        let cancel = ReadCancellation::new();
+        i64::from(
+            catalog.tracks(&[track], &cancel).await.unwrap()[0]
+                .state
+                .play_count,
+        )
+    }
+    let report = |report: library::ActivityImportReport| {
+        (
+            report.listens,
+            report.known,
+            report.play_counts,
+            report.unmatched,
+            report.unreadable,
+        )
+    };
+    let [alpha, beta, gamma, ..] = fixture.tracks[..] else {
+        unreachable!()
+    };
+
+    // A ListenBrainz export names tracks by their names, in any case.
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    archive.start_file("user.json", options).unwrap();
+    archive.write_all(b"{}").unwrap();
+    archive.start_file("listens/2024/1.jsonl", options).unwrap();
+    archive
+        .write_all(
+            br#"{"listened_at":1704067200.0,"track_metadata":{"artist_name":"artist a","track_name":"ALPHA","release_name":"Album A"}}
+{"listened_at":1704070800.0,"track_metadata":{"artist_name":"Artist A","track_name":"Alpha"}}
+{"listened_at":1704074400.0,"track_metadata":{"artist_name":"Nobody","track_name":"Unknown"}}
+"#,
+        )
+        .unwrap();
+    let export = archive.finish().unwrap().into_inner();
+    let imported = fixture
+        .catalog
+        .import_activity(&export, None)
+        .await
+        .unwrap();
+    assert_eq!(report(imported), (2, 0, 0, 1, 0));
+    assert_eq!(plays(&fixture.catalog, alpha).await, 2);
+
+    // The same history scrobbled to Last.fm adds only what Rufin does not have.
+    let lastfm = b"\"Artist A\",\"Album A\",\"Alpha\",\"2024-01-01T00:00:20Z\"\r\n\"Artist A\",\"Album A\",\"Beta\",\"2024-01-01T00:00:00Z\"\r\nbroken\r\n";
+    let imported = fixture.catalog.import_activity(lastfm, None).await.unwrap();
+    assert_eq!(report(imported), (1, 1, 0, 0, 1));
+    assert_eq!(plays(&fixture.catalog, alpha).await, 2);
+    assert_eq!(plays(&fixture.catalog, beta).await, 1);
+
+    // Another player's counts replace the track's count on every import.
+    for count in [100, 40] {
+        let counts = format!(
+            "artist,album,title,plays,last_played\nArtist B,Album B,Gamma,{count},2024-05-01T12:00:00Z\n"
+        );
+        let imported = fixture
+            .catalog
+            .import_activity(counts.as_bytes(), None)
+            .await
+            .unwrap();
+        assert_eq!(report(imported), (0, 0, 1, 0, 0));
+        assert_eq!(plays(&fixture.catalog, gamma).await, count);
+    }
 }

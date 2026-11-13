@@ -50,7 +50,7 @@ jobs:
 
       - name: Set up MSYS2
         id: msys2
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           update: true
@@ -178,7 +178,7 @@ jobs:
             -Compiler "$(cygpath -m "$(command -v makensis)")"
 
       - name: Retain executable symbols
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: Rufin-windows-unstripped
           path: .local/target/release/rufin.exe
@@ -188,7 +188,7 @@ jobs:
           retention-days: ${{ inputs.release_tag != '' && 90 || 7 }}
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: Rufin-setup.exe
           path: dist/Rufin*-setup.exe

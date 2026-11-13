@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <object class="GtkListBoxRow" id="row">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <property name="child">
+      <object class="GtkGrid" id="grid">
+        <property name="column-spacing">8</property>
+        <property name="row-spacing">8</property>
+        <property name="margin-top">8</property>
+        <property name="margin-bottom">8</property>
+        <property name="margin-start">10</property>
+        <property name="margin-end">8</property>
+        <child>
+          <object class="GtkDropDown" id="field">
+            <property name="valign">center</property>
+            <layout><property name="column">0</property><property name="row">0</property></layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkDropDown" id="operator">
+            <property name="valign">center</property>
+            <layout><property name="column">1</property><property name="row">0</property></layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="value">
+            <property name="spacing">6</property>
+            <property name="hexpand">true</property>
+            <property name="valign">center</property>
+            <layout><property name="column">2</property><property name="row">0</property></layout>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="remove">
+            <property name="icon-name">rufin-list-remove-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Remove rule</property>
+            <property name="halign">end</property>
+            <property name="valign">center</property>
+            <style><class name="flat"/></style>
+            <layout><property name="column">3</property><property name="row">0</property></layout>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

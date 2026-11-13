@@ -191,19 +191,26 @@ pub fn album_release_title(value: library::AlbumReleaseClass) -> &'static str {
         library::AlbumReleaseClass::Album => msgid("Album"),
         library::AlbumReleaseClass::Ep => msgid("EP"),
         library::AlbumReleaseClass::Single => msgid("Single"),
+        library::AlbumReleaseClass::Live => msgid("Live"),
         library::AlbumReleaseClass::Collection => msgid("Collection"),
+        library::AlbumReleaseClass::Soundtrack => msgid("Soundtrack"),
+        library::AlbumReleaseClass::Remix => msgid("Remix"),
+        library::AlbumReleaseClass::Demo => msgid("Demo"),
         library::AlbumReleaseClass::Other => msgid("Release"),
     }
 }
 
-/// An artist page's release groups in their order: each release class, then Appears On.
-pub const ARTIST_RELEASE_TITLES: [&str; 6] = [
+/// An artist page's release groups, one per release class in its order.
+pub const ARTIST_RELEASE_TITLES: [&str; library::AlbumReleaseClass::COUNT] = [
     msgid("Albums"),
     msgid("EPs"),
     msgid("Singles"),
+    msgid("Live"),
     msgid("Collections"),
+    msgid("Soundtracks"),
+    msgid("Remixes"),
+    msgid("Demos"),
     msgid("Other releases"),
-    msgid("Appears On"),
 ];
 
 /// The title a list's sort choice shows for `field`.
@@ -269,8 +276,8 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
 }
 
 use library::{
-    SmartPlaylistActivityPeriod, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
-    SmartPlaylistSort,
+    SmartPlaylistActivityPeriod, SmartPlaylistFieldSection, SmartPlaylistMatch,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistSort,
 };
 
 pub fn smart_rule_field_title(field: SmartPlaylistRuleField) -> &'static str {
@@ -290,6 +297,45 @@ pub fn smart_rule_field_title(field: SmartPlaylistRuleField) -> &'static str {
         SmartPlaylistRuleField::SkipCount => msgid("Skip count"),
         SmartPlaylistRuleField::LastPlayed => msgid("Last played"),
         SmartPlaylistRuleField::DateAdded => msgid("Date added"),
+        SmartPlaylistRuleField::Compilation => msgid("Compilation"),
+        SmartPlaylistRuleField::Playlist => msgid("In playlist"),
+    }
+}
+
+pub fn smart_field_section_title(section: SmartPlaylistFieldSection) -> &'static str {
+    match section {
+        SmartPlaylistFieldSection::Track => msgid("Track"),
+        SmartPlaylistFieldSection::Library => msgid("Library"),
+        SmartPlaylistFieldSection::Listening => msgid("Listening"),
+    }
+}
+
+pub fn smart_match_title(matching: SmartPlaylistMatch) -> &'static str {
+    match matching {
+        SmartPlaylistMatch::All => msgid("all"),
+        SmartPlaylistMatch::Any => msgid("any"),
+    }
+}
+
+/// The hint a text value's entry shows.
+pub fn smart_value_placeholder(field: SmartPlaylistRuleField) -> &'static str {
+    match field {
+        SmartPlaylistRuleField::Artist => msgid("Artist name"),
+        SmartPlaylistRuleField::Album => msgid("Album title"),
+        SmartPlaylistRuleField::Genre => msgid("Genre"),
+        SmartPlaylistRuleField::Mood => msgid("Mood"),
+        SmartPlaylistRuleField::Comment => msgid("Comment text"),
+        _ => msgid("Text"),
+    }
+}
+
+/// How many stored units one shown unit of a number rule is: ratings are kept in half stars and
+/// shown in stars.
+pub fn smart_number_scale(field: SmartPlaylistRuleField) -> i64 {
+    if field == SmartPlaylistRuleField::Rating {
+        2
+    } else {
+        1
     }
 }
 
@@ -306,6 +352,7 @@ pub fn smart_sort_title(field: SmartPlaylistSort) -> &'static str {
         SmartPlaylistSort::Bpm => msgid("BPM"),
         SmartPlaylistSort::Rating => msgid("Rating"),
         SmartPlaylistSort::Duration => msgid("Duration"),
+        SmartPlaylistSort::Random => msgid("Random"),
     }
 }
 
@@ -333,6 +380,8 @@ pub fn smart_operator_title(
         (_, SmartPlaylistRuleOperator::IsNot) => msgid("is not"),
         (_, SmartPlaylistRuleOperator::Before) => msgid("before"),
         (_, SmartPlaylistRuleOperator::After) => msgid("after"),
+        (_, SmartPlaylistRuleOperator::InTheLast) => msgid("in the last"),
+        (_, SmartPlaylistRuleOperator::NotInTheLast) => msgid("not in the last"),
         (_, SmartPlaylistRuleOperator::IsEmpty) => msgid("is empty"),
         (_, SmartPlaylistRuleOperator::IsNotEmpty) => msgid("is not empty"),
     }

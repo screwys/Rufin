@@ -15,6 +15,7 @@ uniffi::custom_type!(LibraryIndex, u64, {
 mod audio;
 pub use audio::*;
 mod activity;
+mod activity_import;
 mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
@@ -84,9 +85,10 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityKey,
-    LegacyActivityRecord, ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityExportFormat, ActivityRecord, CalendarActivityPeriod, ListenDeliveryTarget,
+    ListenWrite, PendingListenDelivery, PlayCount, PlayCountKey,
 };
+pub use activity_import::ActivityImportReport;
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
     authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,
@@ -99,9 +101,8 @@ pub use catalog::{
     StoredFile, TagObservation, TrackObservation, walk_key,
 };
 pub use collections::{
-    AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
-    AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice,
-    normalize_release_types,
+    AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseClass, AlbumView, ArtistView,
+    CollectionSummary, FolderChoice, GenreChoice, normalize_release_types,
 };
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
@@ -142,10 +143,10 @@ pub use queue::{
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistCopy, SmartPlaylistDefinition, SmartPlaylistRow,
+    SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,
+    SmartPlaylistDefinition, SmartPlaylistFieldSection, SmartPlaylistMatch, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
-    SmartPlaylistWrite,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueChoice, SmartPlaylistWrite,
 };
 pub use tracks::{TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView};
 
@@ -160,10 +161,12 @@ pub enum LibraryError {
     Io(#[from] std::io::Error),
     #[error("stored JSON failed: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("known Store migration failed: {0}")]
+    #[error("Store migration: {0}")]
     Migration(String),
     #[error("invalid Library Store: {0}")]
     InvalidStore(String),
+    #[error("the Library Store is damaged: {0}")]
+    Damaged(String),
     #[error("Library request is invalid: {0}")]
     InvalidRequest(String),
     #[error("Playlist only accepts Tracks from Source {0}")]
