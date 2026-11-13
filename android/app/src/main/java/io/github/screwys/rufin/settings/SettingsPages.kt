@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
@@ -40,7 +41,6 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlaybackPreferences
-import io.github.screwys.rufin.sources.SourcesPage
 import kotlin.math.round
 import kotlin.math.roundToInt
 
@@ -52,10 +52,11 @@ internal fun SettingsLink(icon: String?, title: String, summary: String? = null,
 }
 
 @Composable
-internal fun SettingsSwitch(title: String, checked: Boolean, summary: String? = null, change: (Boolean) -> Unit) {
+internal fun SettingsSwitch(title: String, checked: Boolean, summary: String? = null, enabled: Boolean = true,
+    change: (Boolean) -> Unit) {
     SettingsRow(title, summary = summary,
-        trailing = { Switch(checked, null) },
-        modifier = Modifier.toggleable(checked, role = Role.Switch, onValueChange = change))
+        trailing = { Switch(checked, null, enabled = enabled) },
+        modifier = Modifier.alpha(if (enabled) 1f else .38f).toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = change))
 }
 
 @Composable
@@ -111,8 +112,7 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
 
 @Composable
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,
-    player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, addSource: () -> Unit, editSource: (String) -> Unit,
-    navigate: (MoreDestination) -> Unit) {
+    player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, navigate: (MoreDestination) -> Unit) {
     var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
     LaunchedEffect(destination, model.ready, player.bridge) {
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
@@ -144,22 +144,9 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 SettingsGroup(translate("Metadata")) {
                     SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference { setPreferDistinctTrackCovers(it) } }
                     SettingsSwitch(translate("Use sort tags"), state.useSortTags) { preferences.changePreference { setUseSortTags(it) } }
-                    SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference { setExternalMetadataEnabled(it) } }
-                    player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
             }
             MoreDestination.Playback -> PlaybackPreferences(player, preferences, output)
-            MoreDestination.Integrations -> {
-                ScrobblingPage(preferences, embedded = true)
-                val links = state.externalSiteLinks
-                SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(enabled = it)) } }
-                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(lastfm = it)) } }
-                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(musicbrainz = it)) } }
-                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(server = it)) } }
-                }
-                SourcesPage(model, addSource, editSource, embedded = true, connectionsOnly = true)
-            }
             MoreDestination.Privacy -> {
                 SettingsGroup {
                     SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference { setPrivateMode(it) } }

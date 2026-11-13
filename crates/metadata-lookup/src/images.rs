@@ -5,6 +5,11 @@ use serde_json::Value;
 
 use crate::http::{client, download, fetch_json, fetch_optional_json, ipv4_client};
 use crate::musicbrainz::{fetch_musicbrainz_entity, fetch_musicbrainz_json};
+use crate::{ArtistImageProvider, LookupPolicy};
+
+const FANART_URL: &str = "https://webservice.fanart.tv/v3/music";
+/// Rufin's fanart.tv project key, which ships in the binary.
+const FANART_PROJECT_KEY: &str = "733c108ee90839310bfe200ce13f6435";
 
 #[derive(Clone, Debug)]
 pub enum ArtworkQuery {
@@ -167,68 +172,131 @@ pub fn search_artwork(query: &ArtworkQuery) -> Result<Vec<ArtworkResult>, String
         ArtworkQuery::Artist {
             name,
             musicbrainz_id,
-        } => artist_results(name, musicbrainz_id.as_deref(), false, Some(512)),
+        } => artist_results(name, musicbrainz_id.as_deref(), Some(512)),
     }
 }
 
+/// Finds an artist portrait from the providers in the policy's order. fanart.tv and
+/// Wikimedia Commons take the artist's MusicBrainz ID: the one in the tags, or the first
+/// MusicBrainz search result.
 pub fn lookup_artist_image(
     name: &str,
     musicbrainz_id: Option<&str>,
     size: Option<u32>,
+    policy: &LookupPolicy,
 ) -> Result<Option<Vec<u8>>, String> {
-    for result in artist_results(name, musicbrainz_id, true, size)? {
-        if let Some(bytes) = download(
-            client()?,
-            if size.is_none() {
-                &result.image_url
-            } else {
-                &result.thumbnail_url
+    let mut failures = Vec::new();
+    let mut artist_id = None;
+    let mut resolve = |failures: &mut Vec<String>| -> Option<String> {
+        artist_id
+            .get_or_insert_with(|| match musicbrainz_artist_id(name, musicbrainz_id) {
+                Ok(id) => id,
+                Err(error) => {
+                    failures.push(error);
+                    None
+                }
+            })
+            .clone()
+    };
+    for provider in &policy.artist_images {
+        let urls = match provider {
+            ArtistImageProvider::FanartTv => match resolve(&mut failures) {
+                Some(id) => fanart_url(&id, size, &policy.fanart_api_key).map(Vec::from_iter),
+                None => continue,
             },
-            "artist portrait",
-        )? {
-            return Ok(Some(bytes));
+            ArtistImageProvider::WikimediaCommons => match resolve(&mut failures) {
+                Some(id) => artist_images(&id, name, "", size).map(|images| {
+                    images
+                        .into_iter()
+                        .map(|image| {
+                            if size.is_none() {
+                                image.image_url
+                            } else {
+                                image.thumbnail_url
+                            }
+                        })
+                        .collect()
+                }),
+                None => continue,
+            },
+        };
+        match urls {
+            Ok(urls) => {
+                for url in urls {
+                    match download(client()?, &url, "artist portrait") {
+                        Ok(Some(bytes)) => return Ok(Some(bytes)),
+                        Ok(None) => {}
+                        Err(error) => failures.push(error),
+                    }
+                }
+            }
+            Err(error) => failures.push(error),
         }
     }
-    Ok(None)
+    if failures.is_empty() {
+        Ok(None)
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+/// The artist's MusicBrainz ID: the tagged one, or the first search result.
+fn musicbrainz_artist_id(name: &str, tagged: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(id) = tagged.and_then(library::AlbumCover::usable_mbid) {
+        return Ok(Some(id.to_string()));
+    }
+    Ok(musicbrainz_artists(name, 1)?
+        .into_iter()
+        .next()
+        .map(|(id, _, _)| id))
+}
+
+/// The best rated artist thumbnail fanart.tv has for a MusicBrainz artist.
+fn fanart_url(id: &str, size: Option<u32>, personal_key: &str) -> Result<Option<String>, String> {
+    let mut url = Url::parse_with_params(
+        &format!("{FANART_URL}/{id}"),
+        [("api_key", FANART_PROJECT_KEY)],
+    )
+    .map_err(|error| error.to_string())?;
+    if !personal_key.trim().is_empty() {
+        url.query_pairs_mut()
+            .append_pair("client_key", personal_key.trim());
+    }
+    let Some(data) = fetch_optional_json(client()?, url, "fanart.tv artist images")? else {
+        return Ok(None);
+    };
+    let best = data["artistthumb"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|image| {
+            let likes = image["likes"]
+                .as_str()
+                .and_then(|likes| likes.parse::<u64>().ok())
+                .unwrap_or_default();
+            Some((likes, image["url"].as_str()?))
+        })
+        .max_by_key(|(likes, _)| *likes)
+        .map(|(_, url)| url.replacen("http://", "https://", 1));
+    // fanart.tv serves a small preview of every image beside the original.
+    Ok(best.map(|url| match size {
+        Some(size) if size <= 250 => url.replacen("/fanart/", "/preview/", 1),
+        _ => url,
+    }))
 }
 
 fn artist_results(
     name: &str,
     musicbrainz_id: Option<&str>,
-    automatic: bool,
     size: Option<u32>,
 ) -> Result<Vec<ArtworkResult>, String> {
     let mut artists = Vec::new();
     if let Some(id) = musicbrainz_id.and_then(library::AlbumCover::usable_mbid) {
         artists.push((id.to_string(), name.to_string(), String::new()));
     }
-    if (!automatic || artists.is_empty()) && !name.trim().is_empty() {
-        let query = format!("artist:\"{}\"", phrase(name));
-        let url = Url::parse_with_params(
-            "https://musicbrainz.org/ws/2/artist/",
-            [
-                ("query", query.as_str()),
-                ("fmt", "json"),
-                ("limit", if automatic { "1" } else { "8" }),
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-        let data = fetch_musicbrainz_json(ipv4_client()?, url, "MusicBrainz artist search")?;
-        for artist in data["artists"].as_array().into_iter().flatten() {
-            let Some(id) = artist["id"]
-                .as_str()
-                .and_then(library::AlbumCover::usable_mbid)
-            else {
-                continue;
-            };
-            if artists.iter().any(|(current, _, _)| current == id) {
-                continue;
-            }
-            artists.push((
-                id.into(),
-                artist["name"].as_str().unwrap_or(name).into(),
-                artist["disambiguation"].as_str().unwrap_or_default().into(),
-            ));
+    for artist in musicbrainz_artists(name, 8)? {
+        if !artists.iter().any(|(current, _, _)| *current == artist.0) {
+            artists.push(artist);
         }
     }
     let mut results = Vec::new();
@@ -245,6 +313,39 @@ fn artist_results(
         return Err(error);
     }
     Ok(results)
+}
+
+/// MusicBrainz artists named like `name`: their IDs, names and disambiguations.
+fn musicbrainz_artists(name: &str, limit: u8) -> Result<Vec<(String, String, String)>, String> {
+    if name.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let query = format!("artist:\"{}\"", phrase(name));
+    let url = Url::parse_with_params(
+        "https://musicbrainz.org/ws/2/artist/",
+        [
+            ("query", query.as_str()),
+            ("fmt", "json"),
+            ("limit", &limit.to_string()),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    let data = fetch_musicbrainz_json(ipv4_client()?, url, "MusicBrainz artist search")?;
+    Ok(data["artists"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|artist| {
+            let id = artist["id"]
+                .as_str()
+                .and_then(library::AlbumCover::usable_mbid)?;
+            Some((
+                id.into(),
+                artist["name"].as_str().unwrap_or(name).into(),
+                artist["disambiguation"].as_str().unwrap_or_default().into(),
+            ))
+        })
+        .collect())
 }
 
 fn artist_images(

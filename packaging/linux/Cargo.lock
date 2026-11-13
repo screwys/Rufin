@@ -9065,7 +9065,6 @@ name = "ui"
 version = "0.17.1"
 dependencies = [
  "app-identity",
- "artwork",
  "ashpd",
  "async-channel",
  "audio-processing",
@@ -9076,7 +9075,6 @@ dependencies = [
  "libadwaita",
  "library",
  "localization",
- "lyrics",
  "playback",
  "process-memory",
  "proptest",
@@ -9569,7 +9567,6 @@ dependencies = [
 name = "web"
 version = "0.17.1"
 dependencies = [
- "artwork",
  "askama",
  "async-channel",
  "axum",
@@ -9585,7 +9582,6 @@ dependencies = [
  "image",
  "library",
  "localization",
- "lyrics",
  "playback",
  "playback-cast",
  "reqwest 0.13.5",

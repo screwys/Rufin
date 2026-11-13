@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="AdwDialog" id="sidebar_dialog">
+    <property name="title" translatable="yes">Sidebar items</property>
+    <property name="content-width">480</property>
+    <property name="content-height">700</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar" id="sidebar_header" />
+        </child>
+        <property name="content">
+          <object class="AdwPreferencesPage">
+            <child>
+              <object class="AdwPreferencesGroup">
+                <child>
+                  <object class="AdwSwitchRow" id="saved_row">
+                    <property name="title" translatable="yes">Saved</property>
+                    <property name="subtitle" translatable="yes">Fixed position</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="sidebar_group">
+                <property name="title" translatable="yes">Pages</property>
+                <property name="description" translatable="yes">Drag to reorder.</property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+  <object class="AdwDialog" id="home_dialog">
+    <property name="title" translatable="yes">Home blocks</property>
+    <property name="content-width">480</property>
+    <property name="content-height">560</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar" id="home_header" />
+        </child>
+        <property name="content">
+          <object class="AdwPreferencesPage">
+            <child>
+              <object class="AdwPreferencesGroup" id="home_group">
+                <property name="description" translatable="yes">Drag to reorder.</property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

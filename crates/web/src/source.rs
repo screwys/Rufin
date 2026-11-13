@@ -44,6 +44,10 @@ pub(super) fn routes() -> Router<ProductHandles> {
                 .post(add_file_integration)
                 .patch(update_file_integration),
         )
+        .route(
+            "/api/integrations/files/status",
+            get(file_integrations_status),
+        )
         .route("/api/integrations/files/edit", get(edit_file_integration))
 }
 
@@ -117,6 +121,22 @@ async fn file_integrations(
     State(products): State<ProductHandles>,
 ) -> axum::Json<Vec<rufin_core::source::FileIntegration>> {
     axum::Json(products.source.file_integrations())
+}
+
+/// The Remote folders status lines, worded by the host's catalog.
+async fn file_integrations_status(
+    State(products): State<ProductHandles>,
+) -> axum::Json<serde_json::Value> {
+    let connections = products.source.file_integrations();
+    let count = |smb: bool| {
+        localization::folder_count_text(
+            connections
+                .iter()
+                .filter(|connection| (connection.kind == "smb") == smb)
+                .count() as u64,
+        )
+    };
+    axum::Json(json!({"webdav": count(false), "smb": count(true)}))
 }
 
 async fn add_file_integration(

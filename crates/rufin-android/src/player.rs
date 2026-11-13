@@ -148,9 +148,12 @@ impl AndroidPlayer {
         }
     }
 
-    fn artwork_request(&self, binding: &[u8], size: u32) -> artwork::ArtworkRequest {
-        artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(binding), size)
-            .with_external(self.products.settings.load().artwork_policy())
+    fn artwork_request(&self, binding: &[u8], size: u32) -> rufin_core::artwork::ArtworkRequest {
+        rufin_core::artwork::ArtworkRequest::new(
+            rufin_core::artwork::ArtworkBinding::opaque(binding),
+            size,
+        )
+        .with_external(self.products.settings.load().artwork_policy())
     }
 }
 
@@ -517,11 +520,17 @@ impl AndroidPlayer {
             .image()
     }
 
+    /// Asks the external lookups again for the artwork they did not find, after a lookup
+    /// setting changed.
+    pub fn retry_external_artwork(&self) -> Result<(), AndroidError> {
+        self.products.artwork.retry_external().map_err(error)
+    }
+
     pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<AndroidArtwork> {
         self.products
             .artwork
             .preview(
-                artwork::ArtworkBinding::opaque(&identity),
+                rufin_core::artwork::ArtworkBinding::opaque(&identity),
                 self.products
                     .settings
                     .load()
@@ -542,11 +551,14 @@ impl AndroidPlayer {
             .runtime
             .spawn(async move {
                 let image = match artwork.load(request).finish().await {
-                    artwork::ArtworkOutcome::Ready(image) => image,
-                    artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Invalidated => {
+                    rufin_core::artwork::ArtworkOutcome::Ready(image) => image,
+                    rufin_core::artwork::ArtworkOutcome::Missing
+                    | rufin_core::artwork::ArtworkOutcome::Invalidated => {
                         return Ok(None);
                     }
-                    artwork::ArtworkOutcome::Failed(message) => return Err(error(message)),
+                    rufin_core::artwork::ArtworkOutcome::Failed(message) => {
+                        return Err(error(message));
+                    }
                 };
                 Ok(Some(AndroidArtwork::from(image.pixels())))
             })
@@ -592,9 +604,9 @@ pub struct AndroidArtwork {
     pub band: Vec<AndroidRgb>,
 }
 
-impl From<&artwork::RgbaImage> for AndroidArtwork {
-    fn from(image: &artwork::RgbaImage) -> Self {
-        let band = artwork::showcase_band(
+impl From<&rufin_core::artwork::RgbaImage> for AndroidArtwork {
+    fn from(image: &rufin_core::artwork::RgbaImage) -> Self {
+        let band = rufin_core::artwork::showcase_band(
             image.rgba(),
             image.width(),
             image.height(),
@@ -626,7 +638,7 @@ impl From<&artwork::RgbaImage> for AndroidArtwork {
 
 #[uniffi::export]
 pub fn decode_artwork(bytes: Vec<u8>, size: u32) -> Result<AndroidArtwork, AndroidError> {
-    artwork::decode_cover(&bytes, size)
+    rufin_core::artwork::decode_cover(&bytes, size)
         .map(|image| AndroidArtwork::from(&image))
         .map_err(error)
 }
@@ -653,7 +665,7 @@ pub struct AndroidLyricsCueLine {
 
 #[derive(uniffi::Record)]
 pub struct AndroidJapaneseReading {
-    pub segments: Vec<lyrics::JapaneseReadingSegment>,
+    pub segments: Vec<rufin_core::lyrics::JapaneseReadingSegment>,
     pub romanization: String,
     pub romanization_spans: Vec<AndroidRomanizationSpan>,
 }
@@ -680,8 +692,8 @@ pub struct AndroidLyricsFrame {
     pub update_after_millis: Option<u64>,
 }
 
-impl From<&lyrics::JapaneseReading> for AndroidJapaneseReading {
-    fn from(reading: &lyrics::JapaneseReading) -> Self {
+impl From<&rufin_core::lyrics::JapaneseReading> for AndroidJapaneseReading {
+    fn from(reading: &rufin_core::lyrics::JapaneseReading) -> Self {
         let mut remaining = reading.romanization.as_str();
         let mut cursor = 0;
         let romanization_spans = reading
@@ -716,15 +728,18 @@ pub struct AndroidLyricsCue {
 
 #[derive(uniffi::Record)]
 pub struct AndroidLyricsDocument {
-    pub role: lyrics::LyricsRole,
+    pub role: rufin_core::lyrics::LyricsRole,
     pub language: Option<String>,
     pub offset_millis: i64,
     pub lines: Vec<AndroidLyricsLine>,
-    pub agents: Vec<lyrics::LyricsAgent>,
+    pub agents: Vec<rufin_core::lyrics::LyricsAgent>,
 }
 
 impl AndroidLyricsDocument {
-    fn from_prepared(document: &lyrics::LyricsDocument, prepared: &lyrics::PreparedLyrics) -> Self {
+    fn from_prepared(
+        document: &rufin_core::lyrics::LyricsDocument,
+        prepared: &rufin_core::lyrics::PreparedLyrics,
+    ) -> Self {
         Self {
             role: document.role,
             language: document.language.clone(),
@@ -777,8 +792,8 @@ impl AndroidLyricsDocument {
 
 #[derive(uniffi::Object)]
 pub struct AndroidLyricsSnapshot {
-    document: Arc<lyrics::LyricsDocument>,
-    prepared: Arc<lyrics::PreparedLyrics>,
+    document: Arc<rufin_core::lyrics::LyricsDocument>,
+    prepared: Arc<rufin_core::lyrics::PreparedLyrics>,
 }
 
 #[uniffi::export]
@@ -793,7 +808,7 @@ impl AndroidLyricsSnapshot {
         last_line: u32,
     ) -> AndroidLyricsFrame {
         let position = i128::from(position) + i128::from(offset);
-        let active = lyrics::active_lyrics_line_index(&self.document.lines, position);
+        let active = rufin_core::lyrics::active_lyrics_line_index(&self.document.lines, position);
         let range = if current_line_only {
             active.map(|index| index..=index)
         } else {
@@ -801,7 +816,7 @@ impl AndroidLyricsSnapshot {
         };
         let mut highlights = std::collections::HashMap::new();
         if karaoke && let Some(range) = range {
-            let progress = |timings: &Vec<lyrics::KaraokeTiming>| {
+            let progress = |timings: &Vec<rufin_core::lyrics::KaraokeTiming>| {
                 timings
                     .iter()
                     .map(|timing| timing.progress(position))
@@ -841,9 +856,13 @@ impl AndroidLyricsSnapshot {
         AndroidLyricsFrame {
             active_line: active.map(|index| index as u32),
             scroll_line: active
-                .or_else(|| lyrics::intro_lyrics_line_index(&self.document.lines, position))
+                .or_else(|| {
+                    rufin_core::lyrics::intro_lyrics_line_index(&self.document.lines, position)
+                })
                 .map(|index| index as u32),
-            highlight_all: lyrics::should_highlight_all_lyrics_lines(&self.document.lines),
+            highlight_all: rufin_core::lyrics::should_highlight_all_lyrics_lines(
+                &self.document.lines,
+            ),
             highlights,
             update_after_millis: self
                 .prepared

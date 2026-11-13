@@ -302,7 +302,10 @@ async fn lyrics_events(State(products): State<ProductHandles>) -> Response<Body>
     event_response(Body::new(StreamBody::new(stream)))
 }
 
-pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) -> Value {
+pub(super) fn lyrics_json(
+    current: &CurrentLyrics,
+    settings: &rufin_core::lyrics::Settings,
+) -> Value {
     let mut value = match current {
         CurrentLyrics::Cleared => json!({"state":"empty"}),
         CurrentLyrics::Loading { .. } => json!({"state":"loading"}),
@@ -314,8 +317,8 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
                 ..
             }) => {
                 let readings = document.lines.iter().map(|line| {
-                    let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
-                    let reading = if settings.preferences.show_furigana { supplied.and_then(|supplied|lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
+                    let supplied = rufin_core::lyrics::pronunciation_line_for(line, pronunciation.as_deref());
+                    let reading = if settings.preferences.show_furigana { supplied.and_then(|supplied|rufin_core::lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
                     json!({"segments":reading.map(|reading|reading.segments.into_iter().map(|segment|json!({"surface":segment.surface,"furigana":segment.furigana})).collect::<Vec<_>>()),"romanization":if settings.preferences.show_romanization { supplied.map(|line|&line.text) } else { None }})
                 }).collect::<Vec<_>>();
                 json!({"state":"ready","document":document,"pronunciation":pronunciation,"readings":readings,"show_romanization":settings.preferences.show_romanization,"font_size":settings.preferences.lyrics_font_size.unwrap_or(19)})
@@ -429,7 +432,7 @@ async fn artwork(
     }
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
     let external = products.settings.load().artwork_policy();
-    let binding = artwork::ArtworkBinding::opaque(&binding);
+    let binding = rufin_core::artwork::ArtworkBinding::opaque(&binding);
     let size = parameters
         .get("size")
         .map(|value| value.parse::<u32>())
@@ -441,9 +444,9 @@ async fn artwork(
         .get("original")
         .is_some_and(|value| value == "true");
     let request = if original {
-        artwork::ArtworkRequest::original(binding, size)
+        rufin_core::artwork::ArtworkRequest::original(binding, size)
     } else {
-        artwork::ArtworkRequest::new(binding, size)
+        rufin_core::artwork::ArtworkRequest::new(binding, size)
     }
     .with_external(external);
     let (bytes, mime) = if original {
@@ -453,16 +456,17 @@ async fn artwork(
             .await
             .map_err(internal)?
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
-        let mime = artwork::image_mime(&bytes)
+        let mime = rufin_core::artwork::image_mime(&bytes)
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
         (bytes, mime)
     } else {
         let image = match products.artwork.load(request).finish().await {
-            artwork::ArtworkOutcome::Ready(image) => image,
-            artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Invalidated => {
+            rufin_core::artwork::ArtworkOutcome::Ready(image) => image,
+            rufin_core::artwork::ArtworkOutcome::Missing
+            | rufin_core::artwork::ArtworkOutcome::Invalidated => {
                 return Err(error(StatusCode::NOT_FOUND, "No cover image"));
             }
-            artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
+            rufin_core::artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
         };
         let png = tokio::task::spawn_blocking(move || {
             image.pixels().resized_to_cover(size)?.encode_png()

@@ -13,7 +13,7 @@ pub struct LyricsSearchDialog {
 }
 
 use adw::prelude::*;
-use lyrics::LyricsQuery;
+use rufin_core::lyrics::LyricsQuery;
 use tracing::debug;
 
 use crate::player::PlayerUi;
@@ -142,7 +142,8 @@ pub fn clear_list_box(list: &gtk::ListBox) {
 
 #[cfg(test)]
 mod tests {
-    use lyrics::{ExternalLyricsProvider, LyricsSearchContent, LyricsSearchResult};
+    use rufin_core::lyrics::{LyricsSearchContent, LyricsSearchResult};
+    use rufin_core::settings::ExternalLyricsProvider;
 
     use super::lyrics_search_response_matches_query;
     use crate::widgets::lyrics_editor::{

@@ -5,10 +5,10 @@ use std::{
 
 use ::library::{AlbumRow, AlbumView, ArtistView, Row};
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
 use localization::{msgid, tr};
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 use tracing::warn;
 
@@ -299,7 +299,8 @@ impl DetailShowcaseView {
         crate::widgets::text_slide::install(&imp.detail_slide, &imp.detail_viewport, &*imp.detail);
         // The facts slide as the title does when they are wider than the room.
         crate::widgets::text_slide::install(&imp.facts_slide, &imp.facts_viewport, &*imp.summary);
-        imp.band_stops.set(::artwork::showcase_band(&[], 0, 0, 0));
+        imp.band_stops
+            .set(rufin_core::artwork::showcase_band(&[], 0, 0, 0));
         let weak = view.downgrade();
         imp.band.set_draw_func(move |_, cairo, width, height| {
             if let Some(view) = weak.upgrade() {
@@ -365,7 +366,7 @@ impl DetailShowcaseView {
         let mut downloader = gtk::gdk::TextureDownloader::new(texture);
         downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
         let (pixels, stride) = downloader.download_bytes();
-        let stops = ::artwork::showcase_band(
+        let stops = rufin_core::artwork::showcase_band(
             &pixels,
             texture.width().max(0) as u32,
             texture.height().max(0) as u32,

@@ -103,6 +103,12 @@ pub fn track_count_text(count: u64) -> String {
     localization::track_count_text(count)
 }
 
+/// How many remote folders of a kind there are, as Integrations lists them.
+#[uniffi::export]
+pub fn folder_count_text(count: u64) -> String {
+    localization::folder_count_text(count)
+}
+
 #[uniffi::export]
 pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -> bool {
     rufin_core::playback::seek_preview_matches_position(target_millis, position_millis)

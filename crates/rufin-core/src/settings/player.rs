@@ -209,7 +209,7 @@ macro_rules! native_preference_setters {
     };
 }
 
-use lyrics::ExternalLyricsProvider;
+pub use lyrics::ExternalLyricsProvider;
 use visualizer::{
     VisualizerColors, VisualizerFrequencyScale, VisualizerStyle, VisualizerWeighting,
 };

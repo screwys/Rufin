@@ -965,7 +965,7 @@ fn install_track_column_drag_source<T: TrackPresentation>(
             item_at_from_item::<T>(&item).map(|track| {
                 let artwork = track
                     .artwork()
-                    .map(artwork::ArtworkBinding::opaque)
+                    .map(rufin_core::artwork::ArtworkBinding::opaque)
                     .unwrap_or_default();
                 (
                     item.position(),

@@ -563,7 +563,7 @@ function initLayout() {
     $("main-menu").hidePopover();
     $("about-dialog").showModal();
   });
-  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["sleep-timer-button", "sleep-timer"], ["playback-settings-button", "playback-settings"], ["fullscreen-customize", "fullscreen-settings"]]) {
+  for (const [anchor, popup] of [["main-menu-button", "main-menu"], ["sleep-timer-button", "sleep-timer"], ["playback-settings-button", "playback-settings"]]) {
     $(anchor).removeAttribute("popovertarget");
     $(anchor).addEventListener("click", () => {
       if ($(popup).matches(":popover-open")) $(popup).hidePopover();

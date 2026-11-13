@@ -10,7 +10,7 @@ use super::ArtworkTile;
 
 #[derive(Default)]
 pub(super) struct Animations {
-    sessions: HashMap<artwork::ArtworkKey, Weak<Session>>,
+    sessions: HashMap<rufin_core::artwork::ArtworkKey, Weak<Session>>,
 }
 
 pub(super) struct Target {
@@ -38,7 +38,7 @@ pub(super) struct Lease {
 impl Animations {
     pub fn attach(
         &mut self,
-        key: artwork::ArtworkKey,
+        key: rufin_core::artwork::ArtworkKey,
         bytes: Arc<[u8]>,
         tile: &ArtworkTile,
         generation: u64,
@@ -72,7 +72,7 @@ impl Animations {
 
     pub fn existing(
         &self,
-        key: &artwork::ArtworkKey,
+        key: &rufin_core::artwork::ArtworkKey,
         tile: &ArtworkTile,
         generation: u64,
         scale: f64,
@@ -144,7 +144,7 @@ impl Session {
             let Ok(mut size) = request_rx.recv_blocking() else {
                 return;
             };
-            let mut animation = match artwork::Animation::new(bytes, size) {
+            let mut animation = match rufin_core::artwork::Animation::new(bytes, size) {
                 Ok(Some(animation)) => animation,
                 Ok(None) => return,
                 Err(error) => {

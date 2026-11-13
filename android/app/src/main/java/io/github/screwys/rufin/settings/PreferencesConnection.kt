@@ -27,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
 internal class PreferencesConnection(private val connection: RufinConnection, context: Context) {
     private val context = context.applicationContext
     private val packaged = context.assets.list("").orEmpty().filter { it.endsWith(".po") }.toSet()
+    val accounts = ScrobblingAccounts(connection, this, this.context)
     var state by mutableStateOf<AndroidPreferencesState?>(null)
         private set
     var translationRevision by mutableIntStateOf(0)

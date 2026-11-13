@@ -13,9 +13,8 @@ use crate::source::SourceOwner;
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Menu {
+    /// The Play group: Play, Play Next and Play Later, each also shuffled.
     pub play: bool,
-    pub play_next: bool,
-    pub play_later: bool,
     pub radio: Option<RadioSeed>,
     pub add_to_playlist: bool,
     /// Add to or Remove from Favorites.
@@ -99,8 +98,6 @@ fn offered(
     let plays = crate::view::PlayTarget::plays(row);
     let mut menu = Menu {
         play: plays && shown(ContextMenuItem::Play),
-        play_next: plays && shown(ContextMenuItem::PlayNext),
-        play_later: plays && shown(ContextMenuItem::PlayLater),
         ..Menu::default()
     };
     let (add_to_playlist, rated) = match row {
@@ -178,8 +175,6 @@ pub fn selection(settings: &Settings) -> Menu {
     let shown = |item| settings.application.context_menu.is_visible(item);
     Menu {
         play: shown(ContextMenuItem::Play),
-        play_next: shown(ContextMenuItem::PlayNext),
-        play_later: shown(ContextMenuItem::PlayLater),
         add_to_playlist: shown(ContextMenuItem::AddToPlaylist),
         edit_metadata: shown(ContextMenuItem::EditMetadata),
         download: shown(ContextMenuItem::Download),

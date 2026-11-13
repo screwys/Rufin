@@ -22,7 +22,7 @@ struct Session {
     editor: Arc<MetadataEditor>,
     batch: Option<Arc<MetadataBatch>>,
     artwork_results: Vec<rufin_core::metadata::ArtworkResult>,
-    lyrics_results: Vec<lyrics::LyricsSearchResult>,
+    lyrics_results: Vec<rufin_core::lyrics::LyricsSearchResult>,
     /// The online lookup the editor runs, as GTK's Lookup dialog does.
     review: Option<Arc<MetadataLookupReview>>,
 }

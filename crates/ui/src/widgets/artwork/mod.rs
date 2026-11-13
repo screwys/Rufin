@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use artwork::{ArtworkBinding, ArtworkRequest};
 use gtk::glib;
+use rufin_core::artwork::{ArtworkBinding, ArtworkRequest};
 use sources::ImageSize;
 use tracing::warn;
 
@@ -46,7 +46,7 @@ fn cover_fetch_size(render_size: u32) -> u32 {
 }
 
 pub struct ArtworkState {
-    service: artwork::Artwork,
+    service: rufin_core::artwork::Artwork,
     settings: Rc<SettingsState>,
     scale: Box<dyn Fn() -> f64>,
     playback_ready: Box<dyn Fn()>,
@@ -56,7 +56,7 @@ pub struct ArtworkState {
 
 impl ArtworkState {
     pub fn new(
-        service: artwork::Artwork,
+        service: rufin_core::artwork::Artwork,
         settings: Rc<SettingsState>,
         scale: Box<dyn Fn() -> f64>,
         playback_ready: Box<dyn Fn()>,
@@ -176,11 +176,11 @@ impl ArtworkState {
         }
         let immediate = refresh_desktop_on_ready || request.cache_only;
         let load = immediate.then(|| self.service.load(request.clone()));
-        if let Some(artwork::ArtworkLoad::Ready(image)) = load.as_ref() {
+        if let Some(rufin_core::artwork::ArtworkLoad::Ready(image)) = load.as_ref() {
             self.apply_artwork(
                 tile,
                 generation,
-                artwork::ArtworkOutcome::Ready(Arc::clone(image)),
+                rufin_core::artwork::ArtworkOutcome::Ready(Arc::clone(image)),
                 refresh_desktop_on_ready,
             );
             return;
@@ -216,9 +216,13 @@ impl ArtworkState {
                     service.load(request)
                 };
                 let outcome = match load {
-                    artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
-                    artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
-                    artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
+                    rufin_core::artwork::ArtworkLoad::Ready(image) => {
+                        rufin_core::artwork::ArtworkOutcome::Ready(image)
+                    }
+                    rufin_core::artwork::ArtworkLoad::Missing => {
+                        rufin_core::artwork::ArtworkOutcome::Missing
+                    }
+                    rufin_core::artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
                 };
                 let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
                     return;
@@ -226,10 +230,11 @@ impl ArtworkState {
                 if tile.has_preview(generation)
                     && matches!(
                         outcome,
-                        artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Failed(_)
+                        rufin_core::artwork::ArtworkOutcome::Missing
+                            | rufin_core::artwork::ArtworkOutcome::Failed(_)
                     )
                 {
-                    if let artwork::ArtworkOutcome::Failed(error) = outcome {
+                    if let rufin_core::artwork::ArtworkOutcome::Failed(error) = outcome {
                         warn!(%error, "cover request failed");
                     }
                     return;
@@ -248,11 +253,11 @@ impl ArtworkState {
         self: &Rc<Self>,
         tile: &ArtworkTile,
         generation: u64,
-        outcome: artwork::ArtworkOutcome,
+        outcome: rufin_core::artwork::ArtworkOutcome,
         animate: bool,
     ) -> bool {
         match outcome {
-            artwork::ArtworkOutcome::Ready(loaded) => {
+            rufin_core::artwork::ArtworkOutcome::Ready(loaded) => {
                 let key = loaded.key().clone();
                 if let Some(texture) = self.texture_for_decoded(Arc::clone(&loaded)) {
                     let current = tile.set_texture_if_current(generation, texture.clone());
@@ -276,16 +281,16 @@ impl ArtworkState {
                     false
                 }
             }
-            artwork::ArtworkOutcome::Missing => {
+            rufin_core::artwork::ArtworkOutcome::Missing => {
                 tile.set_missing_if_current(generation);
                 false
             }
-            artwork::ArtworkOutcome::Failed(error) => {
+            rufin_core::artwork::ArtworkOutcome::Failed(error) => {
                 warn!(%error, "artwork request failed");
                 tile.set_fallback_if_current(generation);
                 false
             }
-            artwork::ArtworkOutcome::Invalidated => {
+            rufin_core::artwork::ArtworkOutcome::Invalidated => {
                 tile.set_fallback_if_current(generation);
                 false
             }
@@ -312,13 +317,17 @@ impl ArtworkState {
         }
         .with_external(self.settings.current.borrow().artwork_policy());
         let outcome = match self.service.load(request) {
-            artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
-            artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
-            artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
+            rufin_core::artwork::ArtworkLoad::Ready(image) => {
+                rufin_core::artwork::ArtworkOutcome::Ready(image)
+            }
+            rufin_core::artwork::ArtworkLoad::Missing => {
+                rufin_core::artwork::ArtworkOutcome::Missing
+            }
+            rufin_core::artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
         };
         match outcome {
-            artwork::ArtworkOutcome::Ready(image) => self.texture_for_decoded(image),
-            artwork::ArtworkOutcome::Failed(error) => {
+            rufin_core::artwork::ArtworkOutcome::Ready(image) => self.texture_for_decoded(image),
+            rufin_core::artwork::ArtworkOutcome::Failed(error) => {
                 warn!(%error, "artwork request failed");
                 None
             }
@@ -326,7 +335,10 @@ impl ArtworkState {
         }
     }
 
-    fn texture_for_decoded(&self, image: Arc<artwork::DecodedImage>) -> Option<gtk::gdk::Texture> {
+    fn texture_for_decoded(
+        &self,
+        image: Arc<rufin_core::artwork::DecodedImage>,
+    ) -> Option<gtk::gdk::Texture> {
         self.textures.borrow_mut().texture(image)
     }
 
@@ -350,8 +362,8 @@ impl ArtworkState {
     }
 }
 
-fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
-    artwork::ExternalPolicy::new(true, false, String::new()).with_musicbrainz(false)
+fn cache_only_artwork_external_policy() -> rufin_core::artwork::ExternalPolicy {
+    rufin_core::artwork::ExternalPolicy::new(true, false, Default::default())
 }
 
 #[cfg(test)]
@@ -376,7 +388,7 @@ mod tests {
         let policy = cache_only_artwork_external_policy();
         assert!(policy.allow_cached);
         assert!(!policy.allow_network);
-        assert!(!policy.allow_musicbrainz);
+        assert!(policy.lookups.covers.is_empty());
     }
 }
 
@@ -384,10 +396,11 @@ pub async fn texture_from_image(
     image: Arc<sources::ImageBytes>,
     size: u32,
 ) -> Result<gtk::gdk::Texture, String> {
-    let pixels = gtk::gio::spawn_blocking(move || ::artwork::decode_rgba(&image.bytes, size))
-        .await
-        .expect("artwork decoder worker completed")
-        .map_err(|error| error.to_string())?;
+    let pixels =
+        gtk::gio::spawn_blocking(move || rufin_core::artwork::decode_rgba(&image.bytes, size))
+            .await
+            .expect("artwork decoder worker completed")
+            .map_err(|error| error.to_string())?;
     let width = pixels.width() as i32;
     let height = pixels.height() as i32;
     let stride = pixels.row_stride() as usize;

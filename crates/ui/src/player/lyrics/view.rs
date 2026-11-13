@@ -1,4 +1,4 @@
-use lyrics::{
+use rufin_core::lyrics::{
     LYRICS_USER_SCROLL_PAUSE_MS, active_lyrics_line_index, intro_lyrics_line_index,
     lyric_line_has_text, should_highlight_all_lyrics_lines,
 };
@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 use gtk::glib;
 use gtk::prelude::*;
 use localization::{msgid, tr};
-use lyrics::{
+use rufin_core::lyrics::{
     JapaneseReadingSegment, LyricsAgentRole, LyricsDocument, LyricsLine, PreparedCueLine,
     PreparedLyrics, PreparedLyricsLine,
 };
 
 use super::wrapping_line::WrappingLine;
-use lyrics::KaraokeTiming;
+use rufin_core::lyrics::KaraokeTiming;
 
 const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
 const MIN_LYRICS_SCROLL_ANIMATION_MS: u64 = 80;
@@ -1481,7 +1481,7 @@ mod tests {
         lyrics_follow_scroll_pause_state, lyrics_follow_scroll_target,
         lyrics_scroll_animation_millis, should_highlight_all_lyrics_lines,
     };
-    use lyrics::LyricsLine as LyricLine;
+    use rufin_core::lyrics::LyricsLine as LyricLine;
     use std::time::{Duration, Instant};
 
     #[test]

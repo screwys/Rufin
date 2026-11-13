@@ -20,6 +20,9 @@ import io.github.screwys.rufin.connect.ConnectPage
 import io.github.screwys.rufin.sources.SourcesPage
 import io.github.screwys.rufin.settings.AppSettingsPage
 import io.github.screwys.rufin.settings.HomeSettingsPage
+import io.github.screwys.rufin.settings.IntegrationDetailPage
+import io.github.screwys.rufin.settings.IntegrationPage
+import io.github.screwys.rufin.settings.IntegrationsPage
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsLink
@@ -38,16 +41,17 @@ import io.github.screwys.rufin.core.translate
 internal enum class MoreDestination(val title: String) {
     Root("Settings"), Overview("Listening overview"), OverviewSettings("Listening overview"),
     Versions("Version History"), Troubleshooting("Troubleshooting"),
-    General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"),
+    General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"), Integration("Integrations"),
     Playback("Playback"), Equalizer("Equalizer"), Library("Library"), Downloads("Downloads"),
     Connect("Connect"), Controller("Controller"), Storage("Storage"), Privacy("Privacy & Security"),
-    Routes("Library"), DownloadSettings("Downloads"),
-    BackupSettings("Backup Settings"), HomeSettings("Home Blocks");
+    Routes("Library items"), DownloadSettings("Downloads"),
+    BackupSettings("Backup Settings"), HomeSettings("Home blocks");
 
     // The sidebar's ☰ menu opens Settings and these three pages directly.
     val parent get() = when (this) {
         Root, Overview, Versions, Troubleshooting -> null
         Routes, HomeSettings -> Customization
+        Integration -> Integrations
         BackupSettings -> Privacy
         OverviewSettings -> General
         DownloadSettings -> Downloads
@@ -59,6 +63,8 @@ internal enum class MoreDestination(val title: String) {
 @Composable
 internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnection, player: PlayerConnection, browse: BrowseConnection,
     destination: MoreDestination, navigate: (MoreDestination) -> Unit,
+    /** The integration page Integration shows, and how one opens. */
+    integration: IntegrationPage?, openIntegration: (IntegrationPage) -> Unit, back: () -> Unit,
     onAddSource: () -> Unit, onEditSource: (String) -> Unit, onOpen: () -> Unit, onSaveLog: () -> Unit, onOutput: () -> Unit,
     navigationDepth: Int,
 ) {
@@ -93,14 +99,18 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
             }
         }
         MoreDestination.Library -> SourcesPage(model, onAddSource, onEditSource)
-        MoreDestination.General, MoreDestination.Playback, MoreDestination.Integrations,
-        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, onOutput, onAddSource, onEditSource, navigate)
+        MoreDestination.General, MoreDestination.Playback,
+        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, onOutput, navigate)
+        MoreDestination.Integrations -> IntegrationsPage(model, preferences, player, openIntegration)
+        MoreDestination.Integration -> integration?.let { page -> key(page.id) {
+            IntegrationDetailPage(model, preferences, player, page, openIntegration, back)
+        } } ?: LaunchedEffect(Unit) { back() }
         MoreDestination.Downloads -> DownloadsPage(model, player) { navigate(MoreDestination.DownloadSettings) }
         MoreDestination.DownloadSettings -> DownloadSettingsPage(model, preferences)
         MoreDestination.BackupSettings -> BackupSettingsPage(model, preferences)
         MoreDestination.OverviewSettings -> OverviewSettingsPage(preferences)
         MoreDestination.HomeSettings -> HomeSettingsPage(preferences)
-        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player)
+        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player, navigate)
         MoreDestination.Theme -> ThemeSettingsPage(preferences)
         MoreDestination.Storage -> StorageSettingsPage(model, preferences)
         MoreDestination.Routes -> RouteSettingsPage(browse)
