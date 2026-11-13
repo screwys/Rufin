@@ -18,6 +18,8 @@ mod allocation_owner_imp {
     pub struct AllocationOwner {
         pub(super) preferred_width: Cell<i32>,
         pub(super) on_width: RefCell<Option<Rc<dyn Fn(i32)>>>,
+        /// The child's narrowest width, which the width callback cannot make narrower.
+        pub(super) minimum_width: RefCell<Option<Rc<dyn Fn() -> i32>>>,
         pub(super) on_size: RefCell<Option<Rc<dyn Fn(i32, i32)>>>,
         pub(super) after_size: RefCell<Option<Rc<dyn Fn()>>>,
         /// How far the child shows moved sideways, as a touch slide moves it.
@@ -34,6 +36,7 @@ mod allocation_owner_imp {
     impl ObjectImpl for AllocationOwner {
         fn dispose(&self) {
             self.on_width.take();
+            self.minimum_width.take();
             self.on_size.take();
             self.after_size.take();
             while let Some(child) = self.obj().first_child() {
@@ -62,7 +65,9 @@ mod allocation_owner_imp {
                     // The stable parent grants this owner its width. Propagating
                     // the child's pre-responsive minimum would prevent GTK from
                     // ever measuring the narrower child state.
-                    return (1, 1, -1, -1);
+                    let minimum_width = self.minimum_width.borrow().clone();
+                    let minimum = minimum_width.map_or(1, |minimum| minimum().max(1));
+                    return (minimum, minimum, -1, -1);
                 }
                 if for_size > 1 {
                     self.apply_width(for_size);
@@ -132,6 +137,16 @@ impl AllocationOwner {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
 
         self.imp().on_width.replace(on_width);
+        self.queue_resize();
+    }
+
+    /// Reports `minimum` as the child's narrowest width instead of none.
+    pub fn set_minimum_width_callback(&self, minimum: impl Fn() -> i32 + 'static) {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp()
+            .minimum_width
+            .replace(Some(std::rc::Rc::new(minimum)));
         self.queue_resize();
     }
 

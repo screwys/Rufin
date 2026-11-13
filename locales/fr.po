@@ -86,6 +86,11 @@ msgstr ""
 "saisis ou l'accès invité"
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -400,9 +405,6 @@ msgstr "Activité"
 msgid "Add Manually"
 msgstr "Ajouter manuellement"
 
-msgid "Add Rule"
-msgstr "Ajouter une règle"
-
 msgid "Add Source"
 msgstr "Ajouter une source"
 
@@ -433,11 +435,21 @@ msgstr "Ajouter l’élément en cours"
 msgid "Add folder"
 msgstr "Ajouter un dossier"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Ajouter une source"
+
 msgid "Add image"
 msgstr "Ajouter une image"
 
 msgid "Add music"
 msgstr "Ajouter de la musique"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Ajouter une règle"
 
 msgid "Add to Favorites"
 msgstr "Ajouter aux favoris"
@@ -565,9 +577,6 @@ msgstr "Nom de l'application"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "S'applique séparément à la barre latérale et au plein écran"
 
-msgid "Apply Template"
-msgstr "Appliquer le modèle"
-
 msgid "Apply"
 msgstr "Appliquer"
 
@@ -623,6 +632,11 @@ msgstr "Stockage des illustrations"
 
 msgid "Artwork"
 msgstr "Illustration"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Descendant"
 
 msgid "Audio effects"
 msgstr "Effets audio"
@@ -1367,9 +1381,6 @@ msgstr "Journal de diagnostic"
 msgid "Direct"
 msgstr "Direct"
 
-msgid "Direction"
-msgstr "Direction"
-
 msgid "Disable private mode"
 msgstr "Désactiver le mode privé"
 
@@ -2024,6 +2035,11 @@ msgstr "Fichiers image"
 msgid "Image"
 msgstr "Image"
 
+#, fuzzy
+#| msgid "Export Activity"
+msgid "Import Activity"
+msgstr "Exporter l'activité"
+
 msgid "Import Backup"
 msgstr "Importer une sauvegarde"
 
@@ -2039,10 +2055,23 @@ msgstr "Importer un thème"
 msgid "Import"
 msgstr "Importer"
 
+#, fuzzy
+#| msgid "Delete {count} playlist?"
+#| msgid_plural "Delete {count} playlists?"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "Supprimer {count} playlist ?"
+msgstr[1] "Supprimer {count} playlists ?"
+
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Importe des fichiers dans la bibliothèque et surveille les modifications des "
 "dossiers ajoutés."
+
+#, fuzzy
+#| msgid "New playlist"
+msgid "In playlist"
+msgstr "Nouvelle playlist"
 
 msgid "Inactive at this sample rate"
 msgstr "Inactif à cette fréquence d’échantillonnage"
@@ -2364,8 +2393,18 @@ msgstr "Chemin local mappé"
 msgid "March {year}"
 msgstr "Mars {year}"
 
+#, fuzzy
+#| msgid "Matched"
+msgid "Match"
+msgstr "Correspondance"
+
 msgid "Matched"
 msgstr "Correspondance"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Matching tracks..."
+msgstr "Aucune piste correspondante"
 
 msgid "Maximum frequency (Hz)"
 msgstr "Fréquence maximale (Hz)"
@@ -2466,15 +2505,6 @@ msgstr "Autres actions"
 
 msgid "More"
 msgstr "Plus"
-
-msgid "Most Played (Monthly)"
-msgstr "Le plus écouté (mensuel)"
-
-msgid "Most Played (Weekly)"
-msgstr "Le plus écouté (hebdomadaire)"
-
-msgid "Most Played (Yearly)"
-msgstr "Le plus écouté (annuel)"
 
 msgid "Most Played"
 msgstr "Le plus écouté"
@@ -2602,6 +2632,11 @@ msgstr ""
 "diffusion"
 
 msgid "Never Played"
+msgstr "Jamais écouté"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Jamais écouté"
 
 msgid "New Playlist"
@@ -2915,6 +2950,9 @@ msgstr "Options"
 msgid "Orange"
 msgstr "Orange"
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr "Audio original"
 
@@ -2994,9 +3032,6 @@ msgstr "Perceptuel"
 
 msgid "Performer"
 msgstr "Interprète"
-
-msgid "Period"
-msgstr "Période"
 
 msgid "Pink"
 msgstr "Rose"
@@ -3123,6 +3158,11 @@ msgstr "Playlist"
 
 msgid "Playlists"
 msgstr "Playlists"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Plays from"
+msgstr "Lecture depuis"
 
 msgid "Plays"
 msgstr "Lectures"
@@ -3261,6 +3301,9 @@ msgstr "Quitter"
 msgid "Radio"
 msgstr "Radio"
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Sélection de plage"
 
@@ -3278,6 +3321,11 @@ msgstr "Réception du profil"
 
 msgid "Recent searches"
 msgstr "Recherches récentes"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Écoutés récemment"
 
 msgid "Recently played"
 msgstr "Écoutés récemment"
@@ -3413,6 +3461,11 @@ msgstr "Retirer des éléments enregistrés"
 
 msgid "Remove from folder"
 msgstr "Retirer du dossier"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Supprimer la règle"
 
 msgid "Remove rule"
 msgstr "Supprimer la règle"
@@ -3822,6 +3875,14 @@ msgstr "Serveur"
 msgid "Set the Discord activity type to Listening"
 msgstr "Définir le type d’activité Discord sur \"Écoute\""
 
+#, fuzzy
+#| msgid "{count} play"
+#| msgid_plural "{count} plays"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} lecture"
+msgstr[1] "{count} lectures"
+
 msgid "Settings and sources"
 msgstr "Paramètres et sources"
 
@@ -4026,9 +4087,6 @@ msgstr "Nom de tri"
 msgid "Sort title"
 msgstr "Titre de tri"
 
-msgid "Sort"
-msgstr "Trier"
-
 msgid "Source by position"
 msgstr "Source par position"
 
@@ -4061,6 +4119,11 @@ msgstr "Spectre"
 
 msgid "Start Listening"
 msgstr "Commencez l'écoute"
+
+#, fuzzy
+#| msgid "Start"
+msgid "Start from"
+msgstr "Démarrer"
 
 msgid "Start minimized"
 msgstr "Démarrer réduit"
@@ -4171,9 +4234,6 @@ msgstr "Sarcelle"
 
 msgid "Techno"
 msgstr "Techno"
-
-msgid "Template"
-msgstr "Modèle"
 
 msgid "Test connection"
 msgstr "Test de connexion"
@@ -4609,6 +4669,16 @@ msgstr "au-dessus de"
 msgid "after"
 msgstr "après"
 
+#, fuzzy
+#| msgid "Small"
+msgid "all"
+msgstr "Petit"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Tout"
+
 msgid "before"
 msgstr "avant"
 
@@ -4617,6 +4687,9 @@ msgstr "en dessous de"
 
 msgid "contains"
 msgstr "contient"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "ne contient pas"
@@ -4633,6 +4706,11 @@ msgstr "exclut"
 msgid "here"
 msgstr "ici"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "in the last"
+msgstr "Terminer le dernier morceau"
+
 msgid "is empty"
 msgstr "est vide"
 
@@ -4647,6 +4725,19 @@ msgstr "est"
 
 msgid "kbps"
 msgstr "kbps"
+
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "not in the last"
+msgstr "Terminer le dernier morceau"
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import theme"
+msgid "of these"
+msgstr "Importer un thème"
 
 msgid "range"
 msgstr "plage"
@@ -4676,6 +4767,11 @@ msgid_plural "{count} days ago"
 msgstr[0] "il y a {count} jour"
 msgstr[1] "il y a {count} jours"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "{count} entry"
 msgid_plural "{count} entries"
 msgstr[0] "{count} entrée"
@@ -4685,6 +4781,18 @@ msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "{count} dossier sélectionné"
 msgstr[1] "{count} dossiers sélectionnés"
+
+#, fuzzy
+#| msgid "Some playlist entries could not be imported"
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] "Certaines entrées de playlist n’ont pas pu être importées"
+msgstr[1] "Certaines entrées de playlist n’ont pas pu être importées"
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
@@ -4823,6 +4931,30 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "Apply Template"
+#~ msgstr "Appliquer le modèle"
+
+#~ msgid "Direction"
+#~ msgstr "Direction"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Le plus écouté (mensuel)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Le plus écouté (hebdomadaire)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Le plus écouté (annuel)"
+
+#~ msgid "Period"
+#~ msgstr "Période"
+
+#~ msgid "Sort"
+#~ msgstr "Trier"
+
+#~ msgid "Template"
+#~ msgstr "Modèle"
 
 #, fuzzy
 #~| msgid "Guest / public access"

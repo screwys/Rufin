@@ -12,6 +12,7 @@ import { init as connect } from "./connect.js";
 import { init as equalizer } from "./equalizer.js";
 import { init as preferences } from "./preferences.js";
 import { init as metadata } from "./metadata.js";
+import { init as smartPlaylists } from "./smart-playlists.js";
 
 ui();
 library();
@@ -27,3 +28,4 @@ connect();
 equalizer();
 preferences();
 metadata();
+smartPlaylists();

@@ -78,6 +78,11 @@ msgstr ""
 "datus vai viesrežīmu"
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -379,9 +384,6 @@ msgstr "Aktivitāte"
 msgid "Add Manually"
 msgstr "Pievienot noteikumu"
 
-msgid "Add Rule"
-msgstr "Pievienot noteikumu"
-
 msgid "Add Source"
 msgstr "Pievienot avotu"
 
@@ -417,6 +419,11 @@ msgid "Add folder"
 msgstr "Pievienot mapi"
 
 #, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Pievienot avotu"
+
+#, fuzzy
 #| msgid "Add a title"
 msgid "Add image"
 msgstr "Pievienot nosaukumu"
@@ -425,6 +432,11 @@ msgstr "Pievienot nosaukumu"
 #| msgid "My music"
 msgid "Add music"
 msgstr "Mana mūzika"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Pievienot noteikumu"
 
 msgid "Add to Favorites"
 msgstr "Pievienot izlasei"
@@ -574,9 +586,6 @@ msgstr "Lietotnes nosaukums"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
-msgid "Apply Template"
-msgstr "Lietot veidni"
-
 msgid "Apply"
 msgstr "Pielietot"
 
@@ -640,6 +649,11 @@ msgstr "Slēptā krātuve"
 
 msgid "Artwork"
 msgstr "Attēls"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Dilstošā secībā"
 
 msgid "Audio effects"
 msgstr ""
@@ -1534,9 +1548,6 @@ msgstr "Diagnostikas žurnāls"
 msgid "Direct"
 msgstr "Virziens"
 
-msgid "Direction"
-msgstr "Virziens"
-
 msgid "Disable private mode"
 msgstr "Atslēgt privāto režīmu"
 
@@ -2283,6 +2294,11 @@ msgstr "Mainīt profilu"
 msgid "Image"
 msgstr "Attēls"
 
+#, fuzzy
+#| msgid "Export Activity"
+msgid "Import Activity"
+msgstr "Eksportēt aktivitātes"
+
 msgid "Import Backup"
 msgstr "Importēt rezerves kopiju"
 
@@ -2302,8 +2318,21 @@ msgstr "Importēt"
 msgid "Import"
 msgstr "Importēt"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "Dzēst atskaņošanas sarakstu"
+msgstr[1] "Dzēst atskaņošanas sarakstu"
+msgstr[2] "Dzēst atskaņošanas sarakstu"
+
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "In playlist"
+msgstr "Jauns atskaņošanas saraksts"
 
 msgid "Inactive at this sample rate"
 msgstr ""
@@ -2656,8 +2685,18 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Match"
+msgid "Match"
+msgstr "Atbilstība"
+
+#, fuzzy
+#| msgid "Match"
 msgid "Matched"
 msgstr "Atbilstība"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Matching tracks..."
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 msgid "Maximum frequency (Hz)"
 msgstr ""
@@ -2770,15 +2809,6 @@ msgstr "Vēl darbības"
 
 msgid "More"
 msgstr ""
-
-msgid "Most Played (Monthly)"
-msgstr "Visbiežāk atskaņotie (mēneša laikā)"
-
-msgid "Most Played (Weekly)"
-msgstr "Visbiežāk atskaņotie (nedēļas laikā)"
-
-msgid "Most Played (Yearly)"
-msgstr "Visbiežāk atskaņotie (gada laikā)"
 
 msgid "Most Played"
 msgstr "Visbiežāk atskaņotie"
@@ -2920,6 +2950,11 @@ msgstr ""
 "pārraides ierīcēm"
 
 msgid "Never Played"
+msgstr "Nekad neatskaņotie"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Nekad neatskaņotie"
 
 msgid "New Playlist"
@@ -3269,6 +3304,9 @@ msgstr "Darbības"
 msgid "Orange"
 msgstr "Oranžs"
 
+msgid "Order"
+msgstr ""
+
 #, fuzzy
 #| msgid "Original"
 msgid "Original audio"
@@ -3355,9 +3393,6 @@ msgid "Perceptual"
 msgstr "Uztveramais"
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3495,6 +3530,11 @@ msgstr "Atskaņošanas saraksts"
 
 msgid "Playlists"
 msgstr "Atskaņošanas saraksti"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Plays from"
+msgstr "Atskaņot nejaušā secībā"
 
 msgid "Plays"
 msgstr "Atskaņošanas reizes"
@@ -3643,6 +3683,9 @@ msgstr "Iziet"
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Diapazona atlase"
 
@@ -3664,6 +3707,11 @@ msgstr ""
 #| msgid "Recently released"
 msgid "Recent searches"
 msgstr "Nesen izdotie"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Nesen atskaņotie"
 
 msgid "Recently played"
 msgstr "Nesen atskaņotie"
@@ -3825,6 +3873,11 @@ msgstr "Noņemt no izlases"
 #| msgid "Remove folder"
 msgid "Remove from folder"
 msgstr "Dzēst mapi"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Noņemt noteikumu"
 
 msgid "Remove rule"
 msgstr "Noņemt noteikumu"
@@ -4287,6 +4340,15 @@ msgstr "Serveris"
 msgid "Set the Discord activity type to Listening"
 msgstr "Iestatīt Discord aktivitātes veidu uz Klausīšanās"
 
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "pirms {count} dienām"
+msgstr[1] "{count} albums"
+msgstr[2] "pirms {count} dienām"
+
 msgid "Settings and sources"
 msgstr "Iestatījumi un avoti"
 
@@ -4512,9 +4574,6 @@ msgstr "Izpildītāja nosaukums"
 msgid "Sort title"
 msgstr "Kārto pēc nosaukuma"
 
-msgid "Sort"
-msgstr "Kārtot"
-
 msgid "Source by position"
 msgstr "Avots pēc pozīcijas"
 
@@ -4557,6 +4616,11 @@ msgstr "Spektra līnija"
 #| msgid "ListenBrainz"
 msgid "Start Listening"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Starting..."
+msgid "Start from"
+msgstr "Sākas..."
 
 msgid "Start minimized"
 msgstr "Sākt minimizētu"
@@ -4689,9 +4753,6 @@ msgstr "Zilganzaļš"
 
 msgid "Techno"
 msgstr "Tehno"
-
-msgid "Template"
-msgstr "Veidne"
 
 #, fuzzy
 #| msgid "Connection"
@@ -5193,6 +5254,16 @@ msgstr "virs"
 msgid "after"
 msgstr "pēc"
 
+#, fuzzy
+#| msgid "All"
+msgid "all"
+msgstr "Visi"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Jebkurš"
+
 msgid "before"
 msgstr "pirms"
 
@@ -5201,6 +5272,9 @@ msgstr "zem"
 
 msgid "contains"
 msgstr "satur"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "nesatur"
@@ -5217,6 +5291,9 @@ msgstr "izslēdz"
 msgid "here"
 msgstr "šeit"
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr "ir tukšs"
 
@@ -5231,6 +5308,17 @@ msgstr "ir"
 
 msgid "kbps"
 msgstr "kbit/s"
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import"
+msgid "of these"
+msgstr "Importēt"
 
 msgid "range"
 msgstr "diapazons"
@@ -5264,6 +5352,12 @@ msgstr[0] "pirms {count} dienām"
 msgstr[1] "{count} albums"
 msgstr[2] "pirms {count} dienām"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 #, fuzzy
 #| msgid "{count} track"
 #| msgid_plural "{count} tracks"
@@ -5278,6 +5372,20 @@ msgid_plural "{count} folders selected"
 msgstr[0] "izvēlētas {count} mapes"
 msgstr[1] "izvēlētā {count} mape"
 msgstr[2] "izvēlētas {count} mapes"
+
+#, fuzzy
+#| msgid "Some playlist entries could not be imported"
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] "Dažus atskaņošanas saraksta ierakstus neizdevās importēt"
+msgstr[1] "Dažus atskaņošanas saraksta ierakstus neizdevās importēt"
+msgstr[2] "Dažus atskaņošanas saraksta ierakstus neizdevās importēt"
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
@@ -5435,6 +5543,27 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Apply Template"
+#~ msgstr "Lietot veidni"
+
+#~ msgid "Direction"
+#~ msgstr "Virziens"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Visbiežāk atskaņotie (mēneša laikā)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Visbiežāk atskaņotie (nedēļas laikā)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Visbiežāk atskaņotie (gada laikā)"
+
+#~ msgid "Sort"
+#~ msgstr "Kārtot"
+
+#~ msgid "Template"
+#~ msgstr "Veidne"
 
 #, fuzzy
 #~| msgid "Guest / public access"

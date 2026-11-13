@@ -55,12 +55,6 @@ pub struct ActivityRecord {
     pub listen: ListenWrite,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
-pub(crate) struct ActivityImportReport {
-    pub(crate) accepted: u64,
-    pub(crate) skipped: u64,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListenDeliveryTarget {
     pub service: String,
@@ -209,42 +203,37 @@ impl Catalog {
         Ok(())
     }
 
-    /// The historical aggregates released installations recorded, all of them or those of
-    /// `keys`.
-    pub async fn legacy_activity(
+    /// The play counts of these media URIs and those of these tracks, or all of them when
+    /// `uris` is None.
+    pub async fn play_counts(
         &self,
-        keys: Option<&[LegacyActivityKey]>,
-    ) -> LibraryResult<Vec<LegacyActivityRecord>> {
+        uris: Option<&[String]>,
+        tracks: &[TrackKey],
+    ) -> LibraryResult<Vec<PlayCount>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
-            "SELECT * FROM legacy_activity WHERE ?1 IS NULL OR (source_id,period,item_kind,track_object_id) IN
-                 (SELECT value->>0,value->>1,value->>2,value->>3 FROM json_each(?1))
-             ORDER BY source_id,period,item_kind,track_object_id",
+            "SELECT * FROM play_counts WHERE ?1 IS NULL OR media_uri IN(SELECT value FROM json_each(?1))
+                OR media_uri IN(SELECT media_uri FROM tracks WHERE track_key IN(SELECT value FROM json_each(?2)))
+             ORDER BY media_uri,period",
         )
-        .bind(keys.map(serde_json::to_string).transpose()?)
+        .bind(uris.map(serde_json::to_string).transpose()?)
+        .bind(serde_json::to_string(tracks)?)
         .fetch_all(&mut *connection)
         .await?)
     }
 
-    /// Deletes historical aggregates by key, in one Write.
-    pub async fn delete_legacy_activity(&self, keys: &[LegacyActivityKey]) -> LibraryResult<()> {
+    /// Deletes play counts by media URI and period, in one Write.
+    pub async fn delete_play_counts(&self, keys: &[PlayCountKey]) -> LibraryResult<()> {
         if keys.is_empty() {
             return Ok(());
         }
         let mut write = self.write().await?;
-        let removed: Vec<(String, String)> = sqlx::query_as(
-            "DELETE FROM legacy_activity WHERE (source_id,period,item_kind,track_object_id) IN
-                 (SELECT value->>0,value->>1,value->>2,value->>3 FROM json_each(?1))
-             RETURNING source_id,track_object_id",
+        let uris: Vec<String> = sqlx::query_scalar(
+            "DELETE FROM play_counts WHERE (media_uri,period) IN
+                 (SELECT value->>0,value->>1 FROM json_each(?1))
+             RETURNING media_uri",
         )
         .bind(serde_json::to_string(keys)?)
-        .fetch_all(write.connection().await?)
-        .await?;
-        let uris: Vec<String> = sqlx::query_scalar(
-            "SELECT track.media_uri FROM json_each(?1) removed JOIN sources source ON source.object_id=removed.value->>0
-             JOIN tracks track ON track.source_key=source.source_key AND track.object_id=removed.value->>1",
-        )
-        .bind(serde_json::to_string(&removed)?)
         .fetch_all(write.connection().await?)
         .await?;
         write
@@ -254,37 +243,29 @@ impl Catalog {
         Ok(())
     }
 
-    /// Writes historical aggregates in one Write, as a restore does.
-    pub async fn put_legacy_activity(&self, records: &[LegacyActivityRecord]) -> LibraryResult<()> {
+    /// Writes play counts in one Write, each replacing its track's count for its period.
+    pub async fn put_play_counts(&self, counts: &[PlayCount]) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        for record in records.iter().filter(|record| record.valid()) {
-            write_legacy_activity(&mut write, record).await?;
-        }
+        write_play_counts(&mut write, counts).await?;
         write.commit().await?;
         Ok(())
     }
 
-    /// Streams a consistent snapshot without collecting the Activity history in memory.
-    pub async fn export_activity_jsonl(
-        &self,
-        output: impl Write,
-        source_id: Option<&SourceId>,
-    ) -> LibraryResult<u64> {
-        let (_export, mut connection) = self.acquire_export().await?;
-        export_activity_jsonl_on(&mut connection, output, source_id).await
-    }
-
-    /// Service CSV formats exclude source identities and access locators.
-    pub async fn export_activity_csv(
+    /// Streams a consistent snapshot without collecting the Activity history in memory: Rufin's
+    /// own JSONL, or a service CSV without source identities and access locators.
+    pub async fn export_activity(
         &self,
         mut output: impl Write,
-        format: ActivityCsvFormat,
+        format: ActivityExportFormat,
         source_id: Option<&SourceId>,
     ) -> LibraryResult<u64> {
-        if format == ActivityCsvFormat::ListenBrainz {
+        let (_export, mut connection) = self.acquire_export().await?;
+        if format == ActivityExportFormat::Jsonl {
+            return export_activity_jsonl_on(&mut connection, output, source_id).await;
+        }
+        if format == ActivityExportFormat::ListenBrainz {
             output.write_all(b"artist,track,album,time\r\n")?;
         }
-        let (_export, mut connection) = self.acquire_export().await?;
         let mut query = activity_export_query(source_id);
         let mut rows = query
             .build_query_as::<ActivityExportRow>()
@@ -293,10 +274,10 @@ impl Catalog {
         while let Some(row) = rows.try_next().await? {
             let listen = row.listen;
             let fields = match format {
-                ActivityCsvFormat::LastFm => {
+                ActivityExportFormat::Jsonl | ActivityExportFormat::LastFm => {
                     [listen.artist, listen.album, listen.title, row.utc_time]
                 }
-                ActivityCsvFormat::ListenBrainz => [
+                ActivityExportFormat::ListenBrainz => [
                     listen.artist,
                     listen.title,
                     listen.album,
@@ -571,10 +552,14 @@ pub(crate) async fn write_listen(
     Ok((key, changed))
 }
 
+/// The files Activity exports as: Rufin's own JSONL, or the CSV Last.fm or ListenBrainz
+/// importers read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActivityCsvFormat {
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum ActivityExportFormat {
     LastFm,
     ListenBrainz,
+    Jsonl,
 }
 
 #[derive(FromRow)]
@@ -599,12 +584,40 @@ impl From<ActivityExportRow> for ActivityRecord {
     }
 }
 
-/// Shared accepted-Activity import inside an owner transaction.
-pub(crate) async fn import_activity_jsonl_on(
+/// Plays counted outside Rufin's listens for one track and period.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct PlayCount {
+    pub media_uri: String,
+    pub period: String,
+    pub plays: i64,
+    pub skips: i64,
+    pub last_played_at: Option<i64>,
+}
+
+/// A play count's media URI and period.
+pub type PlayCountKey = (String, String);
+
+impl PlayCount {
+    fn valid(&self) -> bool {
+        !self.media_uri.is_empty()
+            && self.plays >= 0
+            && self.skips >= 0
+            && (self.period == "lifetime" || valid_local_period(&self.period))
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(crate) struct RestoreReport {
+    pub(crate) accepted: u64,
+    pub(crate) skipped: u64,
+}
+
+/// Restores the listens of a backup with their keys, into a Store whose listens were cleared.
+pub(crate) async fn restore_listens_jsonl_on(
     write: &mut crate::catalog::write::Write<'_>,
     input: impl BufRead,
-) -> LibraryResult<ActivityImportReport> {
-    let mut report = ActivityImportReport::default();
+) -> LibraryResult<RestoreReport> {
+    let mut report = RestoreReport::default();
     for line in input.lines() {
         let line = line?;
         let record = match serde_json::from_str::<ActivityRecord>(&line) {
@@ -633,41 +646,40 @@ pub(crate) async fn import_activity_jsonl_on(
     Ok(report)
 }
 
-/// Historical aggregate facts from released installations; these are not invented listens.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
-pub struct LegacyActivityRecord {
-    pub source_id: String,
-    pub period: String,
-    pub item_kind: String,
-    pub track_object_id: String,
-    pub play_count: i64,
-    pub skip_count: i64,
-    pub last_played_at: Option<i64>,
-    /// The display copy; backups made before it existed restore with the track's names.
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub artist: String,
-    #[serde(default)]
-    pub album: String,
-}
-
-/// A historical aggregate's key: source id, period, item kind and object id.
-pub type LegacyActivityKey = (String, String, String, String);
-
-impl LegacyActivityRecord {
-    fn valid(&self) -> bool {
-        !self.source_id.is_empty()
-            && !self.track_object_id.is_empty()
-            && self.play_count >= 0
-            && self.skip_count >= 0
-    }
-}
-
-pub(crate) async fn import_legacy_activity_jsonl_on(
+/// Restores the play counts of a backup.
+pub(crate) async fn restore_play_counts_jsonl_on(
     write: &mut crate::catalog::write::Write<'_>,
     input: impl BufRead,
-) -> LibraryResult<ActivityImportReport> {
+) -> LibraryResult<()> {
+    let mut counts = Vec::new();
+    for line in input.lines() {
+        if let Ok(count) = serde_json::from_str(&line?) {
+            counts.push(count);
+        }
+    }
+    write_play_counts(write, &counts).await
+}
+
+/// A count a released version kept by source and object id, as its Store and backups hold it.
+#[derive(Deserialize, FromRow)]
+pub(crate) struct ReleasedCount {
+    source_id: String,
+    period: String,
+    item_kind: String,
+    track_object_id: String,
+    play_count: i64,
+    skip_count: i64,
+    last_played_at: Option<i64>,
+}
+
+pub(crate) const RELEASED_COUNTS: &str =
+    "SELECT source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at";
+
+/// Reads the play counts of a backup a released version made.
+pub(crate) async fn import_released_counts_jsonl_on(
+    write: &mut crate::catalog::write::Write<'_>,
+    input: impl BufRead,
+) -> LibraryResult<()> {
     let mut lines = input.lines();
     let header = lines.next().transpose()?.ok_or_else(|| {
         LibraryError::InvalidRequest("missing historical Activity version".into())
@@ -677,25 +689,61 @@ pub(crate) async fn import_legacy_activity_jsonl_on(
             "unsupported historical Activity version".into(),
         ));
     }
-    let mut report = ActivityImportReport::default();
+    let mut counts = Vec::new();
     for line in lines {
-        let line = line?;
-        let record: LegacyActivityRecord = match serde_json::from_str(&line) {
-            Ok(record) => record,
-            Err(_) => {
-                report.skipped += 1;
-                continue;
-            }
-        };
-        if !record.valid() {
-            report.skipped += 1;
+        if let Ok(count) = serde_json::from_str(&line?) {
+            counts.push(count);
+        }
+    }
+    carry_released_counts(write.connection().await?, counts).await
+}
+
+/// Adds the counts released versions kept to the play counts of their tracks' media URIs: the
+/// track's when it is here, else the URI its source gives the object. Only track counts were
+/// ever shown.
+pub(crate) async fn carry_released_counts(
+    connection: &mut SqliteConnection,
+    counts: Vec<ReleasedCount>,
+) -> LibraryResult<()> {
+    for count in counts {
+        if count.item_kind != "track"
+            || count.source_id.is_empty()
+            || count.track_object_id.is_empty()
+            || count.play_count < 0
+            || count.skip_count < 0
+        {
             continue;
         }
-        write_legacy_activity(write, &record).await?;
-        report.accepted += 1;
+        let uri: Option<String> = sqlx::query_scalar("SELECT track.media_uri FROM tracks track JOIN sources source USING(source_key) WHERE source.object_id=?1 AND track.object_id=?2")
+            .bind(&count.source_id)
+            .bind(&count.track_object_id)
+            .fetch_optional(&mut *connection)
+            .await?;
+        let uri = uri.unwrap_or_else(|| {
+            crate::source_entity_uri(
+                &SourceId::new(&count.source_id),
+                "track",
+                &count.track_object_id,
+            )
+        });
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at) VALUES(?1,?2,?3,?4,?5) {ADD_PLAY_COUNTS}"
+        )))
+        .bind(uri)
+        .bind(&count.period)
+        .bind(count.play_count)
+        .bind(count.skip_count)
+        .bind(count.last_played_at)
+        .execute(&mut *connection)
+        .await?;
     }
-    Ok(report)
+    Ok(())
 }
+
+/// Folds a second count for the same track and period into the first.
+pub(crate) const ADD_PLAY_COUNTS: &str = "ON CONFLICT(media_uri,period) DO UPDATE SET
+    plays=play_counts.plays+excluded.plays,skips=play_counts.skips+excluded.skips,
+    last_played_at=max(coalesce(play_counts.last_played_at,excluded.last_played_at),coalesce(excluded.last_played_at,play_counts.last_played_at))";
 
 fn activity_export_query(source_id: Option<&SourceId>) -> sqlx::QueryBuilder<sqlx::Sqlite> {
     let mut query = sqlx::QueryBuilder::new(ACTIVITY_EXPORT_SELECT);
@@ -727,15 +775,13 @@ pub(crate) async fn export_activity_jsonl_on(
     Ok(count)
 }
 
-pub(crate) async fn export_legacy_activity_jsonl_on(
+pub(crate) async fn export_play_counts_jsonl_on(
     connection: &mut SqliteConnection,
     mut output: impl Write,
 ) -> LibraryResult<u64> {
-    output.write_all(b"{\"version\":1}\n")?;
-    let mut rows = sqlx::query_as::<_, LegacyActivityRecord>(
-        "SELECT * FROM legacy_activity ORDER BY source_id,period,item_kind,track_object_id",
-    )
-    .fetch(&mut *connection);
+    let mut rows =
+        sqlx::query_as::<_, PlayCount>("SELECT * FROM play_counts ORDER BY media_uri,period")
+            .fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &row)?;
@@ -745,28 +791,41 @@ pub(crate) async fn export_legacy_activity_jsonl_on(
     Ok(count)
 }
 
-pub(crate) async fn write_legacy_activity(
+/// Writes play counts, each replacing its track's count for its period, in one statement, and
+/// counts the changed tracks again.
+pub(crate) async fn write_play_counts(
     write: &mut crate::catalog::write::Write<'_>,
-    record: &LegacyActivityRecord,
+    counts: &[PlayCount],
 ) -> LibraryResult<()> {
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at,title,artist,album)
-        SELECT ?1,?2,?3,?4,?5,?6,?7,
-            CASE WHEN ?8<>'' THEN ?8 ELSE coalesce(track.title,'') END,
-            CASE WHEN ?8<>'' THEN ?9 ELSE coalesce(track.display_artist,'') END,
-            CASE WHEN ?8<>'' THEN ?10 ELSE coalesce(track.display_album,'') END
-        FROM (SELECT 1) LEFT JOIN tracks track ON ?3='track' AND track.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND track.object_id=?4
-        WHERE true ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played_at=excluded.last_played_at,title=excluded.title,artist=excluded.artist,album=excluded.album
-        WHERE (legacy_activity.play_count,legacy_activity.skip_count,legacy_activity.last_played_at,legacy_activity.title,legacy_activity.artist,legacy_activity.album) IS NOT (excluded.play_count,excluded.skip_count,excluded.last_played_at,excluded.title,excluded.artist,excluded.album)")
-        .bind(&record.source_id).bind(&record.period).bind(&record.item_kind).bind(&record.track_object_id)
-        .bind(record.play_count).bind(record.skip_count).bind(record.last_played_at)
-        .bind(&record.title).bind(&record.artist).bind(&record.album)
-        .execute(write.connection().await?).await?;
-    let uri: Option<String> = sqlx::query_scalar("SELECT media_uri FROM tracks WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND object_id=?2")
-        .bind(&record.source_id).bind(&record.track_object_id)
-        .fetch_optional(write.connection().await?).await?;
-    if let Some(uri) = uri {
-        write.recount(&[&uri]).await?;
+    let rows = counts
+        .iter()
+        .filter(|count| count.valid())
+        .map(|count| {
+            (
+                &count.media_uri,
+                &count.period,
+                count.plays,
+                count.skips,
+                count.last_played_at,
+            )
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return Ok(());
     }
+    let uris: Vec<String> = sqlx::query_scalar(
+        "INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+         SELECT value->>0,value->>1,value->>2,value->>3,value->>4 FROM json_each(?1) WHERE true
+         ON CONFLICT(media_uri,period) DO UPDATE SET plays=excluded.plays,skips=excluded.skips,last_played_at=excluded.last_played_at
+         WHERE (play_counts.plays,play_counts.skips,play_counts.last_played_at) IS NOT (excluded.plays,excluded.skips,excluded.last_played_at)
+         RETURNING media_uri",
+    )
+    .bind(serde_json::to_string(&rows)?)
+    .fetch_all(write.connection().await?)
+    .await?;
+    write
+        .recount(&uris.iter().map(String::as_str).collect::<Vec<_>>())
+        .await?;
     Ok(())
 }
 

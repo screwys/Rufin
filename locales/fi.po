@@ -71,6 +71,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -341,9 +346,6 @@ msgstr "Aktiviteetti"
 msgid "Add Manually"
 msgstr "Lisää sääntö"
 
-msgid "Add Rule"
-msgstr "Lisää sääntö"
-
 msgid "Add Source"
 msgstr "Lisää lähde"
 
@@ -376,6 +378,11 @@ msgstr "Lisää nykyinen"
 msgid "Add folder"
 msgstr "Lisää kansio"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Lisää lähde"
+
 msgid "Add image"
 msgstr ""
 
@@ -383,6 +390,11 @@ msgstr ""
 #| msgid "My music"
 msgid "Add music"
 msgstr "Oma musiikki"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Lisää sääntö"
 
 msgid "Add to Favorites"
 msgstr "Lisää suosikkeihin"
@@ -534,9 +546,6 @@ msgstr "Sovelluksen nimi"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
-msgid "Apply Template"
-msgstr "Toteuta mallipohja"
-
 msgid "Apply"
 msgstr "Toteuta"
 
@@ -604,6 +613,11 @@ msgstr "Salaisuuden tallennustila"
 
 msgid "Artwork"
 msgstr "Kuvitus"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Laskevasti"
 
 msgid "Audio effects"
 msgstr ""
@@ -1498,9 +1512,6 @@ msgstr "Diagnostiikkaloki"
 msgid "Direct"
 msgstr "Suunta"
 
-msgid "Direction"
-msgstr "Suunta"
-
 msgid "Disable private mode"
 msgstr "Poista yksityinen tila käytöstä"
 
@@ -2243,6 +2254,11 @@ msgstr "Vaihda profiilia"
 msgid "Image"
 msgstr "Kuva"
 
+#, fuzzy
+#| msgid "Activity"
+msgid "Import Activity"
+msgstr "Aktiviteetti"
+
 msgid "Import Backup"
 msgstr "Tuo varmuuskopio"
 
@@ -2264,8 +2280,20 @@ msgstr "Vie"
 msgid "Import"
 msgstr "Vie"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "Poista soittolista"
+msgstr[1] "Poista soittolista"
+
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "In playlist"
+msgstr "Uusi soittolista"
 
 msgid "Inactive at this sample rate"
 msgstr ""
@@ -2609,8 +2637,18 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Cached"
+msgid "Match"
+msgstr "Välimuistissa"
+
+#, fuzzy
+#| msgid "Cached"
 msgid "Matched"
 msgstr "Välimuistissa"
+
+#, fuzzy
+#| msgid "Nothing in this folder"
+msgid "Matching tracks..."
+msgstr "Tässä kansiossa ei ole mitään"
 
 msgid "Maximum frequency (Hz)"
 msgstr ""
@@ -2721,15 +2759,6 @@ msgstr "Lisää toimintoja"
 
 msgid "More"
 msgstr ""
-
-msgid "Most Played (Monthly)"
-msgstr "Eniten toistettu (kuukausittain)"
-
-msgid "Most Played (Weekly)"
-msgstr "Eniten toistettu (viikottain)"
-
-msgid "Most Played (Yearly)"
-msgstr "Eniten toistettu (vuosittain)"
 
 msgid "Most Played"
 msgstr "Eniten toistettu"
@@ -2869,6 +2898,11 @@ msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
+msgstr "Ei koskaan toistettu"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Ei koskaan toistettu"
 
 msgid "New Playlist"
@@ -3231,6 +3265,9 @@ msgstr "Palvelimen toiminnot"
 msgid "Orange"
 msgstr "Oranssi"
 
+msgid "Order"
+msgstr ""
+
 #, fuzzy
 #| msgid "Original"
 msgid "Original audio"
@@ -3315,9 +3352,6 @@ msgid "Perceptual"
 msgstr "Aistillinen"
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3467,6 +3501,11 @@ msgstr "Soittolista"
 
 msgid "Playlists"
 msgstr "Soittolistat"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Plays from"
+msgstr "Toista satunnainen"
 
 msgid "Plays"
 msgstr "Toistokertoja"
@@ -3619,6 +3658,9 @@ msgstr "Lopeta"
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr ""
 
@@ -3640,6 +3682,11 @@ msgstr ""
 #| msgid "Recently released"
 msgid "Recent searches"
 msgstr "Äskettäin julkaistu"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Äskettäin toistettu"
 
 msgid "Recently played"
 msgstr "Äskettäin toistettu"
@@ -3807,6 +3854,11 @@ msgstr "Poista suosikeista"
 #| msgid "Remove Local Folder"
 msgid "Remove from folder"
 msgstr "Poista paikallinen kansio"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Poista sääntö"
 
 msgid "Remove rule"
 msgstr "Poista sääntö"
@@ -4274,6 +4326,14 @@ msgstr "Palvelin"
 msgid "Set the Discord activity type to Listening"
 msgstr ""
 
+#, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} päivä sitten"
+msgstr[1] "{count} päivää sitten"
+
 msgid "Settings and sources"
 msgstr "Asetukset ja lähteet"
 
@@ -4507,9 +4567,6 @@ msgstr "Esittäjän nimi"
 msgid "Sort title"
 msgstr ""
 
-msgid "Sort"
-msgstr "Lajittelu"
-
 msgid "Source by position"
 msgstr ""
 
@@ -4550,6 +4607,11 @@ msgstr ""
 #| msgid "ListenBrainz"
 msgid "Start Listening"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Start from"
+msgstr "Tallennetaan..."
 
 msgid "Start minimized"
 msgstr "Käynnistä pienennettynä"
@@ -4684,9 +4746,6 @@ msgstr "Sinivihreä"
 
 msgid "Techno"
 msgstr ""
-
-msgid "Template"
-msgstr "Mallipohja"
 
 #, fuzzy
 #| msgid "Connection"
@@ -5188,6 +5247,16 @@ msgstr ""
 msgid "after"
 msgstr ""
 
+#, fuzzy
+#| msgid "All"
+msgid "all"
+msgstr "Kaikki"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Mikä tahansa"
+
 msgid "before"
 msgstr ""
 
@@ -5196,6 +5265,9 @@ msgstr ""
 
 msgid "contains"
 msgstr "sisältää"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "ei sisällä"
@@ -5212,6 +5284,9 @@ msgstr ""
 msgid "here"
 msgstr ""
 
+msgid "in the last"
+msgstr ""
+
 msgid "is empty"
 msgstr "on tyhjä"
 
@@ -5226,6 +5301,17 @@ msgstr "on"
 
 msgid "kbps"
 msgstr "kbps"
+
+msgid "not in the last"
+msgstr ""
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Export"
+msgid "of these"
+msgstr "Vie"
 
 msgid "range"
 msgstr ""
@@ -5255,6 +5341,11 @@ msgid_plural "{count} days ago"
 msgstr[0] "{count} päivä sitten"
 msgstr[1] "{count} päivää sitten"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+
 #, fuzzy
 #| msgid "{count} track"
 #| msgid_plural "{count} tracks"
@@ -5267,6 +5358,16 @@ msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "{count} kansio valittu"
 msgstr[1] "{count} kansiota valittu"
+
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
@@ -5411,6 +5512,27 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Apply Template"
+#~ msgstr "Toteuta mallipohja"
+
+#~ msgid "Direction"
+#~ msgstr "Suunta"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Eniten toistettu (kuukausittain)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Eniten toistettu (viikottain)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Eniten toistettu (vuosittain)"
+
+#~ msgid "Sort"
+#~ msgstr "Lajittelu"
+
+#~ msgid "Template"
+#~ msgstr "Mallipohja"
 
 #~ msgid "On this device"
 #~ msgstr "Tällä laitteella"

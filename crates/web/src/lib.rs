@@ -3,6 +3,7 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
+mod activity;
 mod browser;
 mod catalog;
 mod connect;
@@ -14,6 +15,7 @@ mod page;
 mod pins;
 mod playlists;
 mod preferences;
+mod smart_playlists;
 mod source;
 pub use controller::{Controller, ControllerStatus, controller_addresses};
 
@@ -152,7 +154,7 @@ fn routes() -> Router<ProductHandles> {
         )
         .route(
             "/api/smart-playlists",
-            list_route("smart-playlists", (48, 64)),
+            list_route("smart-playlists", (48, 64)).post(smart_playlists::save),
         )
         .route(
             "/api/smart-playlists/tracks",
@@ -179,7 +181,9 @@ fn routes() -> Router<ProductHandles> {
         .merge(connect::routes())
         .merge(equalizer::routes())
         .merge(preferences::routes())
+        .merge(activity::routes())
         .merge(metadata::routes())
+        .merge(smart_playlists::routes())
 }
 
 async fn help() -> Result<Response<Body>, Error> {

@@ -1,7 +1,8 @@
 use library::{
     LibraryField, PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRule,
-    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
+    SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistDefinition,
+    SmartPlaylistMatch, SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
+    SmartPlaylistRuleValue, SmartPlaylistSort,
 };
 
 use super::support::{Views, connection, fixture, items, tracks, uris};
@@ -270,12 +271,15 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     );
     let mut definition = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Contains,
             value: Some(SmartPlaylistRuleValue::Text("signal".to_string())),
-        }],
-        match_any: Vec::new(),
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
+        matching: SmartPlaylistMatch::All,
         sort_field: SmartPlaylistSort::Title,
         descending: false,
         activity_period: SmartPlaylistActivityPeriod::Lifetime,
@@ -409,11 +413,14 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
 
     let mut definition = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Contains,
             value: Some(SmartPlaylistRuleValue::Text("artifact".to_string())),
-        }],
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
         ..SmartPlaylistDefinition::default()
     };
     let smart = fixture
@@ -492,11 +499,13 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
         .pop()
         .unwrap();
     assert_eq!(detail.track_count as usize, order.len());
-    definition.match_all.push(SmartPlaylistRule {
-        field: SmartPlaylistRuleField::Title,
-        operator: SmartPlaylistRuleOperator::Equals,
-        value: Some(SmartPlaylistRuleValue::Text("No match".into())),
-    });
+    definition
+        .conditions
+        .push(SmartPlaylistCondition::Rule(SmartPlaylistRule {
+            field: SmartPlaylistRuleField::Title,
+            operator: SmartPlaylistRuleOperator::Equals,
+            value: Some(SmartPlaylistRuleValue::Text("No match".into())),
+        }));
     fixture
         .catalog
         .update_smart_playlist(key, "Window", &definition, None)
@@ -554,11 +563,14 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut definition = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Equals,
             value: Some(SmartPlaylistRuleValue::Text("Alpha".to_string())),
-        }],
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
         ..SmartPlaylistDefinition::default()
     };
     let smart = fixture
@@ -768,14 +780,21 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         [fixture.track_uris[0].as_str()]
     );
 
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-        SELECT source.object_id,'lifetime','track',track.object_id,
+    sqlx::query(
+        "INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+        SELECT track.media_uri,'lifetime',
             CASE track.track_key WHEN ?2 THEN 4 WHEN ?3 THEN 1 ELSE 20 END,0,
             CASE track.track_key WHEN ?2 THEN 50 WHEN ?3 THEN 500 ELSE 600 END
-        FROM tracks track JOIN sources source USING(source_key)
-        WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)")
-        .bind(fixture.source).bind(fixture.tracks[0]).bind(fixture.tracks[1]).bind(fixture.tracks[2])
-        .execute(&mut raw).await.unwrap();
+        FROM tracks track
+        WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)",
+    )
+    .bind(fixture.source)
+    .bind(fixture.tracks[0])
+    .bind(fixture.tracks[1])
+    .bind(fixture.tracks[2])
+    .execute(&mut raw)
+    .await
+    .unwrap();
     sqlx::query("UPDATE tracks SET native_play_count=9,native_last_played=700 WHERE track_key=?1")
         .bind(fixture.tracks[1])
         .execute(&mut raw)
@@ -1544,11 +1563,14 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap()
         .0;
     let mut definition = SmartPlaylistDefinition {
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Contains,
             value: Some(SmartPlaylistRuleValue::Text("Toolbar".into())),
-        }],
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
         descending: true,
         ..SmartPlaylistDefinition::default()
     };
@@ -1868,11 +1890,14 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
             "Added",
             &SmartPlaylistDefinition {
                 source_id: None,
-                match_all: vec![SmartPlaylistRule {
+                conditions: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::DateAdded,
                     operator: SmartPlaylistRuleOperator::Equals,
                     value: Some(SmartPlaylistRuleValue::Date("1970-01-02".into())),
-                }],
+                }]
+                .into_iter()
+                .map(SmartPlaylistCondition::Rule)
+                .collect(),
                 ..SmartPlaylistDefinition::default()
             },
             None,
@@ -1923,11 +1948,14 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             "All artwork",
             &SmartPlaylistDefinition {
                 source_id: None,
-                match_all: vec![SmartPlaylistRule {
+                conditions: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Title,
                     operator: SmartPlaylistRuleOperator::Equals,
                     value: Some(SmartPlaylistRuleValue::Text("Alpha".into())),
-                }],
+                }]
+                .into_iter()
+                .map(SmartPlaylistCondition::Rule)
+                .collect(),
                 ..SmartPlaylistDefinition::default()
             },
             None,
@@ -2925,7 +2953,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
     );
     assert_eq!(rows[0].definition.sort_field, SmartPlaylistSort::PlayCount);
     assert_eq!(
-        rows[1].definition.match_all[0].field,
+        rows[1].definition.rules().next().unwrap().field,
         SmartPlaylistRuleField::Played
     );
     assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
@@ -3003,21 +3031,34 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
 async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
-    let suggestions = fixture
-        .catalog
-        .smart_playlist_value_suggestions(fixture.source, None, &cancel)
-        .await
-        .expect("bounded Smart Playlist value suggestions");
-    assert_eq!(suggestions.genres, ["Rock".to_string()]);
-    assert_eq!(suggestions.moods, ["Energetic".to_string()]);
+    for (field, expected) in [
+        (SmartPlaylistRuleField::Genre, "Rock"),
+        (SmartPlaylistRuleField::Mood, "Energetic"),
+    ] {
+        let values = fixture
+            .catalog
+            .smart_playlist_values(field, "", None, None, 10)
+            .await
+            .expect("Smart Playlist values");
+        assert_eq!(
+            values
+                .iter()
+                .map(|value| value.name.as_str())
+                .collect::<Vec<_>>(),
+            [expected]
+        );
+    }
     let never = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Played,
             operator: SmartPlaylistRuleOperator::Is,
             value: Some(SmartPlaylistRuleValue::Bool(false)),
-        }],
-        match_any: Vec::new(),
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
+        matching: SmartPlaylistMatch::All,
         sort_field: SmartPlaylistSort::Title,
         descending: false,
         activity_period: SmartPlaylistActivityPeriod::Weekly,
@@ -3030,9 +3071,10 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .expect("create Never Played");
     let policy_definition = SmartPlaylistDefinition {
         source_id: None,
-        match_all: SmartPlaylistRuleField::ALL
+        conditions: SmartPlaylistRuleField::ALL
             .into_iter()
             .map(SmartPlaylistRuleField::default_rule)
+            .map(SmartPlaylistCondition::Rule)
             .collect(),
         ..SmartPlaylistDefinition::default()
     };
@@ -3090,12 +3132,15 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut played = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::PlayCount,
             operator: SmartPlaylistRuleOperator::Above,
             value: Some(SmartPlaylistRuleValue::Number(0)),
-        }],
-        match_any: Vec::new(),
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
+        matching: SmartPlaylistMatch::All,
         sort_field: SmartPlaylistSort::PlayCount,
         descending: true,
         activity_period: SmartPlaylistActivityPeriod::Weekly,
@@ -3151,12 +3196,15 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut optional = SmartPlaylistDefinition {
         source_id: None,
-        match_all: vec![SmartPlaylistRule {
+        conditions: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Comment,
             operator: SmartPlaylistRuleOperator::NotContains,
             value: Some(SmartPlaylistRuleValue::Text("absent".to_string())),
-        }],
-        match_any: Vec::new(),
+        }]
+        .into_iter()
+        .map(SmartPlaylistCondition::Rule)
+        .collect(),
+        matching: SmartPlaylistMatch::All,
         sort_field: SmartPlaylistSort::Title,
         descending: false,
         activity_period: SmartPlaylistActivityPeriod::Lifetime,
@@ -3184,8 +3232,11 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             .len(),
         3
     );
-    optional.match_all[0].operator = SmartPlaylistRuleOperator::IsEmpty;
-    optional.match_all[0].value = None;
+    let SmartPlaylistCondition::Rule(rule) = &mut optional.conditions[0] else {
+        unreachable!("the definition holds one rule")
+    };
+    rule.operator = SmartPlaylistRuleOperator::IsEmpty;
+    rule.value = None;
     assert!(
         fixture
             .catalog

@@ -17,6 +17,7 @@ bindings = ["dep:uniffi"]
 [dependencies]
 uniffi = { workspace = true, optional = true }
 chrono.workspace = true
+csv.workspace = true
 tempfile.workspace = true
 futures-util.workspace = true
 futures-executor.workspace = true
@@ -36,6 +37,9 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 unicode-normalization = "0.1.25"
 url.workspace = true
+zip.workspace = true
+# The ZIP reader's inflate backend, as rufin-core picks it.
+flate2.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix.workspace = true

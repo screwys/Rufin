@@ -1521,7 +1521,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
         catalog
-            .export_activity_jsonl(Vec::new(), None)
+            .export_activity(Vec::new(), library::ActivityExportFormat::Jsonl, None)
             .await
             .unwrap(),
         0

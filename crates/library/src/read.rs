@@ -1373,7 +1373,10 @@ impl Catalog {
         items: impl Iterator<Item = Item>,
         now: i64,
     ) -> LibraryResult<Inputs> {
-        let mut inputs = Inputs::default();
+        let mut inputs = Inputs {
+            now,
+            ..Inputs::default()
+        };
         let periods = {
             let snapshot = self.snapshot();
             let mut periods = Vec::new();
