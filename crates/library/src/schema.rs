@@ -516,8 +516,8 @@ CREATE TABLE store_commits (
 INSERT INTO store_commits VALUES (1, randomblob(16), 0);
 "#;
 
-/// Creates a new Store, and refuses any other version than the current one. Released Stores
-/// were converted by the importer before this runs; unreleased formats are not migrated.
+/// Creates a new Store, and refuses any other version than the current one: a Store of
+/// another version is upgraded by `migration::steps` or rebuilt before this runs.
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     crate::lyrics_tokenizer::register(connection).await?;
     match pragma(connection, "user_version").await? {

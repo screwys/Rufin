@@ -161,10 +161,12 @@ pub enum LibraryError {
     Io(#[from] std::io::Error),
     #[error("stored JSON failed: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("known Store migration failed: {0}")]
+    #[error("Store migration: {0}")]
     Migration(String),
     #[error("invalid Library Store: {0}")]
     InvalidStore(String),
+    #[error("the Library Store is damaged: {0}")]
+    Damaged(String),
     #[error("Library request is invalid: {0}")]
     InvalidRequest(String),
     #[error("Playlist only accepts Tracks from Source {0}")]

@@ -59,6 +59,12 @@ impl<'a> Handle<'a> {
         }
         // SAFETY: the handle is open, and SQLite returns a static or connection-owned string.
         let message = unsafe { CStr::from_ptr(ffi::sqlite3_errmsg(self.raw.as_ptr())) };
+        // A file no statement reads, which only a rebuild or a new Store replaces.
+        if matches!(code & 0xff, ffi::SQLITE_CORRUPT | ffi::SQLITE_NOTADB) {
+            return Err(LibraryError::Damaged(
+                message.to_string_lossy().into_owned(),
+            ));
+        }
         Err(LibraryError::InvalidStore(format!(
             "a Catalog read failed: {}",
             message.to_string_lossy()

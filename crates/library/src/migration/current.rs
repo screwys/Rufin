@@ -158,8 +158,9 @@ async fn drop_dangling(connection: &mut SqliteConnection) -> LibraryResult<()> {
     }
 }
 
-/// Rebuilds a damaged or newer Store in place, in one transaction: every table takes this
-/// schema's shape and keeps the columns it shares with it.
+/// Rebuilds in place, in one transaction, a Store no step upgrades: one a newer version wrote,
+/// or one with other tables than its version's. Every table takes this schema's shape and
+/// keeps the columns it shares with it.
 pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
     let mut connection = crate::db::open_writer(path).await?;
     let recovered = async {
@@ -190,15 +191,6 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
                 copy_table(&mut transaction, "main", &format!("recovered_{table}"), table, &[], "true").await?;
             }
         }
-        if old.iter().any(|table| table == "legacy_activity") {
-            play_counts_of_0_17(&mut transaction).await?;
-        }
-        playlist_folders_of_0_17(&mut transaction).await?;
-        // 0.17 kept MusicBrainz's release types per album.
-        if old.iter().any(|table| table == "album_release_observations") {
-            sqlx::query("INSERT OR IGNORE INTO musicbrainz_release_types(identity,release_types) SELECT lookup_identity,release_types FROM recovered_album_release_observations")
-                .execute(&mut *transaction).await?;
-        }
         for table in &old {
             sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
                 .execute(&mut *transaction).await?;
@@ -210,57 +202,6 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
     }.await;
     connection.close().await?;
     recovered
-}
-
-/// A 0.17 Store kept its counts from outside Rufin by source and object id, and the 0.16
-/// baselines of file-library tracks as native counts, which those tracks never show. Both
-/// become play counts.
-async fn play_counts_of_0_17(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let counts = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "{} FROM recovered_legacy_activity",
-        crate::activity::RELEASED_COUNTS
-    )))
-    .fetch_all(&mut *connection)
-    .await?;
-    crate::activity::carry_released_counts(connection, counts).await?;
-    let files = "source_key IN(SELECT source_key FROM sources WHERE kind IN('local','webdav','smb')) AND native_play_count IS NOT NULL";
-    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
-        SELECT media_uri,'lifetime',native_play_count,0,native_last_played FROM tracks WHERE {files} {}", crate::activity::ADD_PLAY_COUNTS)))
-        .execute(&mut *connection)
-        .await?;
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "UPDATE tracks SET native_play_count=NULL,native_last_played=NULL WHERE {files}"
-    )))
-    .execute(&mut *connection)
-    .await?;
-    Ok(())
-}
-
-/// A 0.17 playlist or smart playlist named its one folder in its own row.
-async fn playlist_folders_of_0_17(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    for (table, members, key) in [
-        ("playlists", "playlist_folder_playlists", "playlist_key"),
-        (
-            "smart_playlists",
-            "playlist_folder_smart_playlists",
-            "smart_playlist_key",
-        ),
-    ] {
-        let recovered = format!("recovered_{table}");
-        if columns(connection, "main", &recovered)
-            .await?
-            .iter()
-            .any(|column| column == "playlist_folder_key")
-        {
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "INSERT OR IGNORE INTO {members}({key},folder_key) SELECT {key},playlist_folder_key FROM \"{recovered}\"
-                 WHERE playlist_folder_key IN(SELECT folder_key FROM playlist_folders) AND {key} IN(SELECT {key} FROM {table})"
-            )))
-            .execute(&mut *connection)
-            .await?;
-        }
-    }
-    Ok(())
 }
 
 /// One released entity row with the credits and tags its edges name.
