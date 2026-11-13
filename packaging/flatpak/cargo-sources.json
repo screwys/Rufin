@@ -4890,14 +4890,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/ksni/ksni-0.3.6.crate",
-        "sha256": "814b44c24cd2cb236c3b8a41c7f08237b452a8e76ecaa81f1cec40b5b678215b",
-        "dest": "cargo/vendor/ksni-0.3.6"
+        "url": "https://static.crates.io/crates/ksni/ksni-0.3.7.crate",
+        "sha256": "1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf",
+        "dest": "cargo/vendor/ksni-0.3.7"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"814b44c24cd2cb236c3b8a41c7f08237b452a8e76ecaa81f1cec40b5b678215b\", \"files\": {}}",
-        "dest": "cargo/vendor/ksni-0.3.6",
+        "contents": "{\"package\": \"1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf\", \"files\": {}}",
+        "dest": "cargo/vendor/ksni-0.3.7",
         "dest-filename": ".cargo-checksum.json"
     },
     {
