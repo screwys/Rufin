@@ -1489,6 +1489,11 @@ msgstr "Загрузка"
 msgid "Downloads"
 msgstr "Загрузки"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Перетащите, чтобы изменить порядок"
+
 msgid "Drag to reorder"
 msgstr "Перетащите, чтобы изменить порядок"
 
@@ -3806,9 +3811,6 @@ msgstr "Выбрать всё"
 msgid "Select {title}"
 msgstr "Выбрать {title}"
 
-msgid "Select"
-msgstr "Выбрать"
-
 msgid "Selected folders"
 msgstr "Выбранные папки"
 
@@ -4935,6 +4937,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Select"
+#~ msgstr "Выбрать"
 
 #~ msgid "Apply Template"
 #~ msgstr "Применить шаблон"

@@ -1504,6 +1504,11 @@ msgstr "Allalaadimisel"
 msgid "Downloads"
 msgstr "Allalaadimised"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Järjekorra muutmiseks lohista"
+
 msgid "Drag to reorder"
 msgstr "Järjekorra muutmiseks lohista"
 
@@ -3839,11 +3844,6 @@ msgstr "Vali kõik"
 msgid "Select {title}"
 msgstr "Vali {title}"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Valik"
-
 msgid "Selected folders"
 msgstr "Valitud muusikakaustad"
 
@@ -4986,6 +4986,11 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Valik"
 
 #~ msgid "Apply Template"
 #~ msgstr "Rakenda mall"

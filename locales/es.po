@@ -1495,6 +1495,11 @@ msgstr "Descargando"
 msgid "Downloads"
 msgstr "Descargas"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Arrastra para ordenar"
+
 msgid "Drag to reorder"
 msgstr "Arrastra para ordenar"
 
@@ -3824,9 +3829,6 @@ msgstr "Seleccionar todo"
 msgid "Select {title}"
 msgstr "Seleccionar {title}"
 
-msgid "Select"
-msgstr "Seleccionar"
-
 msgid "Selected folders"
 msgstr "Carpetas seleccionadas"
 
@@ -4967,6 +4969,9 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Select"
+#~ msgstr "Seleccionar"
 
 #~ msgid "Apply Template"
 #~ msgstr "Aplicar Plantilla"

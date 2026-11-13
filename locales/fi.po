@@ -1643,6 +1643,11 @@ msgstr "Ladataan"
 msgid "Downloads"
 msgstr "Lataukset"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Vedä järjestääksesi uudelleen"
+
 msgid "Drag to reorder"
 msgstr "Vedä järjestääksesi uudelleen"
 
@@ -4258,11 +4263,6 @@ msgstr "Valitse kaikki"
 msgid "Select {title}"
 msgstr "Valitse kaikki"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Valinta"
-
 msgid "Selected folders"
 msgstr "Valitut kansiot"
 
@@ -5512,6 +5512,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Valinta"
 
 #~ msgid "Apply Template"
 #~ msgstr "Toteuta mallipohja"

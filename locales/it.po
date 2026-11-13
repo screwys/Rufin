@@ -1631,6 +1631,11 @@ msgstr "Scaricando"
 msgid "Downloads"
 msgstr "Scaricamenti"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Trascina per riordinare"
+
 msgid "Drag to reorder"
 msgstr "Trascina per riordinare"
 
@@ -4025,9 +4030,6 @@ msgid "Select all"
 msgstr ""
 
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"

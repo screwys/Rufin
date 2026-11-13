@@ -1384,6 +1384,9 @@ msgstr ""
 msgid "Downloads"
 msgstr ""
 
+msgid "Drag to a folder"
+msgstr ""
+
 msgid "Drag to reorder"
 msgstr ""
 
@@ -3643,9 +3646,6 @@ msgid "Select all"
 msgstr ""
 
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"

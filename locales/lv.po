@@ -1680,6 +1680,11 @@ msgstr "Lejupielādē"
 msgid "Downloads"
 msgstr "Lejupielādes"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Pārvelciet, lai mainītu secību"
+
 msgid "Drag to reorder"
 msgstr "Pārvelciet, lai mainītu secību"
 
@@ -4272,11 +4277,6 @@ msgstr "Atlasīt visu"
 msgid "Select {title}"
 msgstr "Atlasiet {title}"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Atlasīšana"
-
 msgid "Selected folders"
 msgstr "Atlasītās mapes"
 
@@ -5543,6 +5543,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Atlasīšana"
 
 #~ msgid "Apply Template"
 #~ msgstr "Lietot veidni"

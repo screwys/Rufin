@@ -1512,6 +1512,11 @@ msgstr "Wird heruntergeladen"
 msgid "Downloads"
 msgstr "Downloads"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Zum Sortieren ziehen"
+
 msgid "Drag to reorder"
 msgstr "Zum Sortieren ziehen"
 
@@ -3863,11 +3868,6 @@ msgstr "Alle auswählen"
 msgid "Select {title}"
 msgstr "{title} auswählen"
 
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Auswahl"
-
 msgid "Selected folders"
 msgstr "Ausgewählte Ordner"
 
@@ -5009,6 +5009,11 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Auswahl"
 
 #~ msgid "Apply Template"
 #~ msgstr "Vorlage anwenden"

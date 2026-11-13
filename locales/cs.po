@@ -1719,6 +1719,11 @@ msgstr "Stahování"
 msgid "Downloads"
 msgstr "Stahování"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Přetažením změňte pořadí"
+
 msgid "Drag to reorder"
 msgstr "Přetažením změňte pořadí"
 
@@ -4449,11 +4454,6 @@ msgid "Select {title}"
 msgstr "Vybrat vše"
 
 #, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Výběr"
-
-#, fuzzy
 #| msgid "Select Music Folder"
 msgid "Selected folders"
 msgstr "Vybrat složku s hudbou"
@@ -5718,6 +5718,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Výběr"
 
 #, fuzzy
 #~| msgid "Slate"

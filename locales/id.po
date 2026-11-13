@@ -1507,6 +1507,11 @@ msgstr "Mengunduh"
 msgid "Downloads"
 msgstr "Unduhan"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Seret untuk mengubah urutan"
+
 msgid "Drag to reorder"
 msgstr "Seret untuk mengubah urutan"
 
@@ -3805,9 +3810,6 @@ msgid "Select all"
 msgstr ""
 
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"
