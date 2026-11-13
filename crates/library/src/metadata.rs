@@ -119,6 +119,8 @@ pub struct AlbumTags {
     pub sort_text: String,
     pub is_compilation: Option<bool>,
     pub release_types: Vec<String>,
+    /// Which mix, edition or remaster the album is, as its `ALBUMVERSION` tag names it.
+    pub version: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -137,6 +139,8 @@ pub struct AlbumMetadata {
     pub album_artists: Vec<ArtistCredit>,
     pub genres: Vec<TagReference>,
     pub release_types: Vec<String>,
+    /// Which mix, edition or remaster the album is; readers show it beside its year.
+    pub version: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

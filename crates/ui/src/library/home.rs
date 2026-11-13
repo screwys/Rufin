@@ -827,7 +827,7 @@ fn home_showcase_page(
     view.replace_summary(&[
         (
             "rufin-x-office-calendar-symbolic",
-            album.year.map(|year| year.to_string()).unwrap_or_default(),
+            rufin_core::settings::presentation::album_year(&album),
         ),
         (
             "rufin-tracks-symbolic",

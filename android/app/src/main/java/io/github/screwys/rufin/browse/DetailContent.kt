@@ -317,7 +317,7 @@ private fun DetailHeader(
                             else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks")) },
                         label = { Text(trackCountText(item.row.trackCount)) },
                         leadingIcon = { RufinIcon("rufin-tracks-symbolic", null, Modifier.size(16.dp)) })
-                } else FactsPill(listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                } else FactsPill(listOfNotNull(item.row.yearText?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it) },
                     Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
                     Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
                         .takeIf { item.row.durationMillis > 0UL || playlist }), onBand = false)
