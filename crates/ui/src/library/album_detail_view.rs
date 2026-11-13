@@ -210,11 +210,7 @@ fn album_summary_items(summary: &AlbumView) -> Vec<(&'static str, String)> {
     vec![
         (
             "rufin-x-office-calendar-symbolic",
-            summary
-                .metadata
-                .year
-                .map(|year| year.to_string())
-                .unwrap_or_default(),
+            rufin_core::settings::presentation::album_year(&summary.row),
         ),
         (
             "rufin-tracks-symbolic",

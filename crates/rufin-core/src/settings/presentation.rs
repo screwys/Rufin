@@ -490,7 +490,7 @@ pub fn album_field(album: &library::AlbumRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
         LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
-        LibraryField::Year => optional_year(album.year),
+        LibraryField::Year => album_year(album),
         LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
         LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
         LibraryField::LastPlayed => display_unix_date(album.state.last_played),
@@ -615,6 +615,16 @@ pub fn stored_rating(value: Option<i64>) -> String {
     value
         .map(|value| format!("{:.1}", value as f64 / 2.0))
         .unwrap_or_default()
+}
+
+/// An album's year with its version beside it, so mixes and editions of one album tell apart.
+pub fn album_year(album: &library::AlbumRow) -> String {
+    let year = optional_year(album.year);
+    match album.version.as_deref() {
+        Some(version) if year.is_empty() => version.to_owned(),
+        Some(version) => format!("{year} · {version}"),
+        None => year,
+    }
 }
 
 pub fn optional_year(year: Option<i64>) -> String {

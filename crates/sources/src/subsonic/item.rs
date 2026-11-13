@@ -139,7 +139,16 @@ pub(super) fn album_from_json(
                 .unwrap_or_default()
         }
     };
+    let version = clean_optional(json::field(album, "version"));
+    // Navidrome appends the version to the name by default; Rufin shows it beside the year.
     let title = album_title(album);
+    let title = match version
+        .as_deref()
+        .and_then(|version| title.strip_suffix(&format!(" ({version})")))
+    {
+        Some(name) => name.to_owned(),
+        None => title,
+    };
     Ok(Some(library::AlbumObservation {
         metadata: library::AlbumMetadata {
             sort_text: clean_optional(json::field(album, "sortName"))
@@ -156,6 +165,7 @@ pub(super) fn album_from_json(
             album_artists: album_artists,
             genres: genre_credits_from_item(source, album),
             release_types: library::normalize_release_types(json::strings(&album["releaseTypes"])),
+            version,
             ..Default::default()
         },
         user_data: library::NativeUserState {

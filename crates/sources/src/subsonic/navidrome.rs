@@ -593,6 +593,9 @@ fn album_from_navidrome(
             album_artists: album_artists,
             genres: genre_credits(source, &album["genres"]),
             release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
+            version: tag_values(&album["tags"], "albumversion")
+                .into_iter()
+                .next(),
             ..Default::default()
         },
         user_data: library::NativeUserState {

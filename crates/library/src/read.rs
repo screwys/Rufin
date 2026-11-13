@@ -371,6 +371,8 @@ pub struct AlbumRow {
     pub release_date: Option<String>,
     /// As stored when it is no date.
     pub date_added: Option<String>,
+    /// Which mix, edition or remaster the album is, shown beside its year.
+    pub version: Option<String>,
     pub is_compilation: bool,
     pub release_class: AlbumReleaseClass,
     pub state: TrackState,
@@ -899,7 +901,7 @@ impl<'a> Builder<'a> {
         totals.albums = u32::from(totals.tracks > 0);
         totals.downloaded = self.downloaded(folder).albums[slot as usize];
         let runs = snapshot.album_runs(record);
-        let (release_date, date_added) =
+        let (release_date, date_added, version) =
             got.album_texts.get(&key.raw()).cloned().unwrap_or_default();
         Ok(Some(AlbumRow {
             album_key: key,
@@ -912,6 +914,7 @@ impl<'a> Builder<'a> {
             year: year_of(record.year).map(i64::from),
             release_date,
             date_added,
+            version,
             is_compilation: record.flags & COMPILATION != 0,
             release_class: AlbumReleaseClass::of(record.flags),
             state: state(
