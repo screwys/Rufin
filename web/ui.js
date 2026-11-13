@@ -53,13 +53,20 @@ const time = (millis) => {
 };
 
 let toastTimer;
+let toastParent;
 
-function notice(message) {
-  $("toast").textContent = message;
-  $("toast").hidden = false;
+// A modal dialog draws over the page, so the toast shows inside the topmost one, in the same
+// place. Work in progress stays until its result replaces it.
+function notice(message, { working = false } = {}) {
+  const toast = $("toast");
+  toastParent ??= toast.parentElement;
+  const dialogs = document.querySelectorAll("dialog:modal");
+  (dialogs[dialogs.length - 1] || toastParent).append(toast);
+  toast.textContent = message;
+  toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    $("toast").hidden = true;
+  if (!working) toastTimer = setTimeout(() => {
+    toast.hidden = true;
   }, 5000);
 }
 

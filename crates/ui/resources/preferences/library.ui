@@ -12,7 +12,7 @@
     </child>
     <child>
       <object class="AdwPreferencesGroup" id="activity_group">
-        <property name="title" translatable="yes">Activity</property>
+        <property name="title" translatable="yes">Export Activity</property>
         <child>
           <object class="AdwPreferencesRow">
             <property name="activatable">false</property>
@@ -91,6 +91,23 @@
             <child type="suffix">
               <object class="GtkButton" id="activity_export">
                 <property name="label" translatable="yes">Export</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Import Activity</property>
+        <child>
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Listens from Rufin, ListenBrainz or Last.fm, or play counts from other players</property>
+            <property name="title-lines">0</property>
+            <child type="suffix">
+              <object class="GtkButton" id="activity_import">
+                <property name="label" translatable="yes">Import</property>
                 <property name="valign">center</property>
               </object>
             </child>

@@ -4,18 +4,16 @@ use crate::{
     AlbumRow, ArtistRow, CalendarActivityPeriod, Catalog, LibraryResult, ReadCancellation, TrackRow,
 };
 
-// Released versions also stored monthly counts. Keep those in the same report;
-// lifetime provider counts cannot be assigned to a calendar month.
+// Play counts of a month count in the same report; lifetime counts cannot be assigned to a
+// calendar month.
 const PERIOD_ACTIVITY: &str = "WITH period_activity AS (
     SELECT media_uri,count(*) plays,sum(duration_millis) duration_millis,artist_name
     FROM listens WHERE skipped=0 AND local_period>=?1 AND local_period<?2
     GROUP BY media_uri,artist_name
     UNION ALL
-    SELECT track.media_uri,baseline.play_count,track.duration_millis*baseline.play_count,track.display_artist
-    FROM legacy_activity baseline JOIN sources source ON source.object_id=baseline.source_id
-    JOIN tracks track ON track.source_key=source.source_key AND track.object_id=baseline.track_object_id
-    WHERE baseline.item_kind='track' AND baseline.period>=?1 AND baseline.period<?2
-      AND baseline.play_count>0
+    SELECT track.media_uri,counted.plays,track.duration_millis*counted.plays,track.display_artist
+    FROM play_counts counted JOIN tracks track USING(media_uri)
+    WHERE counted.period>=?1 AND counted.period<?2 AND counted.plays>0
 ) ";
 
 #[derive(Clone, Debug, Default, PartialEq, sqlx::FromRow)]
@@ -223,10 +221,13 @@ impl Catalog {
 
     pub async fn activity_months(&self) -> LibraryResult<Vec<String>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT DISTINCT local_period FROM listens WHERE skipped=0
-            UNION SELECT period FROM legacy_activity WHERE length(period)=7 AND item_kind='track' AND play_count>0
-            ORDER BY 1 DESC")
-            .fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT local_period FROM listens WHERE skipped=0
+            UNION SELECT period FROM play_counts WHERE length(period)=7 AND plays>0
+            ORDER BY 1 DESC",
+        )
+        .fetch_all(&mut *connection)
+        .await?)
     }
 }
 

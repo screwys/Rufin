@@ -1,7 +1,10 @@
 use adw::prelude::*;
 use localization::tr;
 use playback::StreamQuality;
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 pub fn selection_row<F>(
     title: &str,
     option_titles: &[String],
@@ -185,64 +188,151 @@ pub fn connect_entry_reset(entry: &gtk::Entry, reset: impl Fn(&gtk::Entry) + 'st
 /// Under a server address row, core's `https://` and `http://` completions while the row has
 /// focus and the address no scheme; a click fills it in.
 pub fn attach_address_suggestions(row: &adw::EntryRow) {
+    attach_suggestions(row, |text, show| {
+        show(
+            rufin_core::source::authorization::address_suggestions(text)
+                .into_iter()
+                .map(|text| Suggestion { text, detail: None })
+                .collect(),
+        );
+    });
+}
+
+/// A suggestion under an entry: the text a pick fills in and, dimmed beside it, a detail.
+pub struct Suggestion {
+    pub text: String,
+    pub detail: Option<String>,
+}
+
+/// Under `entry`, the suggestions `suggest` gives for its text while it has focus; a click fills
+/// one in. `suggest` hands them over at once or later; those for text that has changed since, or
+/// after focus left, are dropped.
+pub fn attach_suggestions<E>(
+    entry: &E,
+    suggest: impl Fn(&str, Box<dyn FnOnce(Vec<Suggestion>)>) + 'static,
+) where
+    E: IsA<gtk::Widget> + IsA<gtk::Editable>,
+{
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     list.add_css_class("navigation-sidebar");
-    let popover = gtk::Popover::builder()
+    let scroller = gtk::ScrolledWindow::builder()
         .child(&list)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .propagate_natural_width(true)
+        .max_content_height(320)
+        .build();
+    let popover = gtk::Popover::builder()
+        .child(&scroller)
         .autohide(false)
         .has_arrow(false)
         .position(gtk::PositionType::Bottom)
         .halign(gtk::Align::Start)
-        // Typing stays in the row: neither the popover nor its rows take focus.
+        // Typing stays in the entry: neither the popover nor its rows take focus.
         .can_focus(false)
         .build();
-    popover.set_parent(row);
-    // The row owns the popover; it leaves with the row.
-    row.connect_destroy({
-        let popover = popover.clone();
-        move |_| popover.unparent()
+    popover.set_parent(entry);
+    let texts = Rc::new(RefCell::new(Vec::<String>::new()));
+    // Counts requests, so a later one, a pick or the entry leaving makes earlier answers stale.
+    let request = Rc::new(Cell::new(0_u64));
+    // The entry owns the popover; it leaves with the entry.
+    entry.upcast_ref::<gtk::Widget>().connect_destroy({
+        let (popover, request) = (popover.clone(), Rc::clone(&request));
+        move |_| {
+            request.set(request.get() + 1);
+            popover.unparent();
+        }
     });
-    let weak = row.downgrade();
-    list.connect_row_activated(move |_, choice| {
-        let (Some(row), Some(label)) =
-            (weak.upgrade(), choice.child().and_downcast::<gtk::Label>())
-        else {
-            return;
-        };
-        row.set_text(&label.text());
-        row.set_position(-1);
-    });
-    let show = {
-        let (list, popover) = (list.clone(), popover.clone());
-        move |row: &adw::EntryRow| {
-            let suggestions = if row.has_focus() || row.focus_child().is_some() {
-                rufin_core::source::authorization::address_suggestions(&row.text())
-            } else {
-                Vec::new()
+    let filling = Rc::new(Cell::new(false));
+    let editable = entry.upcast_ref::<gtk::Editable>().downgrade();
+    list.connect_row_activated({
+        let (texts, request, filling) =
+            (Rc::clone(&texts), Rc::clone(&request), Rc::clone(&filling));
+        let popover = popover.downgrade();
+        move |_, choice| {
+            let (Some(editable), Some(popover)) = (editable.upgrade(), popover.upgrade()) else {
+                return;
             };
-            list.remove_all();
-            for address in &suggestions {
-                let label = gtk::Label::builder().label(address).xalign(0.0).build();
-                list.append(&label);
-            }
-            if suggestions.is_empty() {
+            let Some(text) = texts.borrow().get(choice.index() as usize).cloned() else {
+                return;
+            };
+            request.set(request.get() + 1);
+            filling.set(true);
+            editable.set_text(&text);
+            editable.set_position(-1);
+            filling.set(false);
+            popover.popdown();
+        }
+    });
+    let focus = gtk::EventControllerFocus::new();
+    let show = {
+        let focus = focus.downgrade();
+        let show: Rc<dyn Fn(&gtk::Editable)> = Rc::new(move |editable: &gtk::Editable| {
+            let current = request.get() + 1;
+            request.set(current);
+            if filling.get() || !focus.upgrade().is_some_and(|focus| focus.contains_focus()) {
                 popover.popdown();
-            } else {
-                popover.popup();
+                return;
+            }
+            let (list, popover, texts, request) = (
+                list.clone(),
+                popover.clone(),
+                Rc::clone(&texts),
+                Rc::clone(&request),
+            );
+            suggest(
+                &editable.text(),
+                Box::new(move |suggestions| {
+                    if request.get() != current {
+                        return;
+                    }
+                    list.remove_all();
+                    let mut shown = texts.borrow_mut();
+                    shown.clear();
+                    for suggestion in suggestions {
+                        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+                        row.append(
+                            &gtk::Label::builder()
+                                .label(&suggestion.text)
+                                .xalign(0.0)
+                                .hexpand(true)
+                                .ellipsize(gtk::pango::EllipsizeMode::End)
+                                .max_width_chars(40)
+                                .build(),
+                        );
+                        if let Some(detail) = &suggestion.detail {
+                            let detail = gtk::Label::new(Some(detail));
+                            detail.add_css_class("dim-label");
+                            detail.add_css_class("numeric");
+                            row.append(&detail);
+                        }
+                        list.append(&row);
+                        shown.push(suggestion.text);
+                    }
+                    if shown.is_empty() {
+                        popover.popdown();
+                    } else {
+                        popover.popup();
+                    }
+                }),
+            );
+        });
+        show
+    };
+    entry.upcast_ref::<gtk::Editable>().connect_changed({
+        let show = Rc::clone(&show);
+        move |editable| show(editable)
+    });
+    let on_focus = |show: Rc<dyn Fn(&gtk::Editable)>| {
+        let editable = entry.upcast_ref::<gtk::Editable>().downgrade();
+        move |_: &gtk::EventControllerFocus| {
+            if let Some(editable) = editable.upgrade() {
+                show(&editable);
             }
         }
     };
-    row.connect_changed({
-        let show = show.clone();
-        move |row| show(row)
-    });
-    let focus = gtk::EventControllerFocus::new();
-    let weak = row.downgrade();
-    focus.connect_leave(move |_| {
-        if let Some(row) = weak.upgrade() {
-            show(&row);
-        }
-    });
-    row.add_controller(focus);
+    focus.connect_enter(on_focus(show.clone()));
+    focus.connect_leave(on_focus(show));
+    entry.add_controller(focus);
 }

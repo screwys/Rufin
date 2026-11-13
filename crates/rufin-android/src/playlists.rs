@@ -301,6 +301,45 @@ impl AndroidLibrary {
         Ok(())
     }
 
+    /// The values of `field` the smart playlist editor suggests for `text`, from `source` or
+    /// every source. Dropping the call stops the read, so the latest text wins.
+    pub async fn smart_playlist_values(
+        &self,
+        field: library::SmartPlaylistRuleField,
+        text: String,
+        source: Option<SourceId>,
+    ) -> Result<Vec<library::SmartPlaylistValueChoice>, AndroidError> {
+        let selected = self
+            .source
+            .selected_library()
+            .ok_or_else(|| error("No source selected"))?;
+        let catalog = self.catalog.clone();
+        crate::browse::run_read(&self.runtime, move |_| async move {
+            playlists::smart_playlist_values(&catalog, &selected, field, &text, source.as_ref())
+                .await
+                .map_err(error)
+        })
+        .await
+    }
+
+    /// How many tracks `definition` matches now; dropping the call stops the count.
+    pub async fn smart_playlist_match_count(
+        &self,
+        definition: library::SmartPlaylistDefinition,
+    ) -> Result<u64, AndroidError> {
+        let selected = self
+            .source
+            .selected_library()
+            .ok_or_else(|| error("No source selected"))?;
+        let catalog = self.catalog.clone();
+        crate::browse::run_read(&self.runtime, move |_| async move {
+            playlists::smart_playlist_match_count(&catalog, &selected, &definition)
+                .await
+                .map_err(error)
+        })
+        .await
+    }
+
     pub fn smart_playlist_default_definition(&self) -> library::SmartPlaylistDefinition {
         library::SmartPlaylistDefinition::default()
     }
@@ -347,4 +386,77 @@ pub fn smart_sort_title(field: library::SmartPlaylistSort) -> String {
 #[uniffi::export]
 pub fn smart_period_title(period: library::SmartPlaylistActivityPeriod) -> String {
     localization::tr(presentation::smart_period_title(period))
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidSmartPlaylistTemplate {
+    pub name: String,
+    pub definition: library::SmartPlaylistDefinition,
+}
+
+#[uniffi::export]
+pub fn smart_playlist_templates() -> Vec<AndroidSmartPlaylistTemplate> {
+    playlists::smart_playlist_templates()
+        .into_iter()
+        .map(|template| AndroidSmartPlaylistTemplate {
+            name: localization::tr(template.name),
+            definition: template.definition,
+        })
+        .collect()
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidSmartNumberBounds {
+    pub min: i64,
+    pub max: i64,
+    pub first: i64,
+}
+
+#[uniffi::export]
+pub fn smart_number_bounds(
+    field: library::SmartPlaylistRuleField,
+    operator: library::SmartPlaylistRuleOperator,
+) -> AndroidSmartNumberBounds {
+    let (min, max, first) = field.number_bounds(operator);
+    AndroidSmartNumberBounds { min, max, first }
+}
+
+#[uniffi::export]
+pub fn smart_number_scale(field: library::SmartPlaylistRuleField) -> i64 {
+    presentation::smart_number_scale(field)
+}
+
+#[uniffi::export]
+pub fn smart_value_kind(
+    field: library::SmartPlaylistRuleField,
+    operator: library::SmartPlaylistRuleOperator,
+) -> Option<library::SmartPlaylistRuleValueKind> {
+    field.value_kind(operator)
+}
+
+#[uniffi::export]
+pub fn smart_reads_plays(definition: library::SmartPlaylistDefinition) -> bool {
+    definition.reads_plays()
+}
+
+#[uniffi::export]
+pub fn smart_field_section(
+    field: library::SmartPlaylistRuleField,
+) -> library::SmartPlaylistFieldSection {
+    field.section()
+}
+
+#[uniffi::export]
+pub fn smart_field_section_title(section: library::SmartPlaylistFieldSection) -> String {
+    localization::tr(presentation::smart_field_section_title(section))
+}
+
+#[uniffi::export]
+pub fn smart_match_title(matching: library::SmartPlaylistMatch) -> String {
+    localization::tr(presentation::smart_match_title(matching))
+}
+
+#[uniffi::export]
+pub fn smart_value_placeholder(field: library::SmartPlaylistRuleField) -> String {
+    localization::tr(presentation::smart_value_placeholder(field))
 }

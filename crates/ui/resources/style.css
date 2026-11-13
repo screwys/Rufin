@@ -114,13 +114,15 @@ toastoverlay toast {
     inset 0 1px color-mix(in srgb, white 14%, transparent);
 }
 
-.control-feedback-toast {
+/* A popover is at least twice its corner radius in each direction, so the pill's radius is
+   half its single-line height rather than an unbounded one. */
+popover.control-feedback-toast > contents {
+  min-width: 0;
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--card-bg-color) 12%);
   color: var(--window-fg-color);
   border: 1px solid color-mix(in srgb, var(--window-fg-color) 16%, transparent);
-  border-radius: 999px;
+  border-radius: 18px;
   padding: 9px 16px;
-  margin-bottom: 109px;
   font-weight: 700;
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.3),
@@ -3012,4 +3014,9 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .sleep-timer-countdown {
   font-size: 2.6em;
   font-weight: 300;
+}
+
+/* A smart playlist group's rules sit inset in the rule list. */
+list.boxed-list.smart-playlist-group {
+  background-color: color-mix(in srgb, black 12%, var(--card-bg-color));
 }

@@ -6,6 +6,7 @@
   </object>
   <object class="GtkFileDialog" id="restore_chooser"><property name="title" translatable="yes">Import Backup</property></object>
   <object class="GtkFileDialog" id="activity_chooser"><property name="title" translatable="yes">Export Activity</property></object>
+  <object class="GtkFileDialog" id="activity_import_chooser"><property name="title" translatable="yes">Import Activity</property></object>
   <object class="GtkFileDialog" id="folder_chooser"><property name="title" translatable="yes">Choose Folder</property></object>
   <object class="AdwAlertDialog" id="restore_confirm">
     <property name="heading" translatable="yes">Restore User State</property>

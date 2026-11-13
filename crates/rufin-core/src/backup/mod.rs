@@ -21,6 +21,54 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+/// What an Activity import did, as every client says it.
+pub fn activity_import_summary(report: &library::ActivityImportReport) -> String {
+    use localization::trn_with;
+    let count = |value: u64| value.to_string();
+    let mut sentences = Vec::new();
+    if report.listens > 0 || report.play_counts == 0 {
+        sentences.push(trn_with(
+            "Imported {count} listen.",
+            "Imported {count} listens.",
+            report.listens,
+            &[("count", &count(report.listens))],
+        ));
+    }
+    if report.play_counts > 0 {
+        sentences.push(trn_with(
+            "Set {count} play count.",
+            "Set {count} play counts.",
+            report.play_counts,
+            &[("count", &count(report.play_counts))],
+        ));
+    }
+    if report.known > 0 {
+        sentences.push(trn_with(
+            "{count} listen was already in Rufin.",
+            "{count} listens were already in Rufin.",
+            report.known,
+            &[("count", &count(report.known))],
+        ));
+    }
+    if report.unmatched > 0 {
+        sentences.push(trn_with(
+            "{count} entry matches no track in the library.",
+            "{count} entries match no track in the library.",
+            report.unmatched,
+            &[("count", &count(report.unmatched))],
+        ));
+    }
+    if report.unreadable > 0 {
+        sentences.push(trn_with(
+            "{count} line could not be read.",
+            "{count} lines could not be read.",
+            report.unreadable,
+            &[("count", &count(report.unreadable))],
+        ));
+    }
+    sentences.join(" ")
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct SavedLogins {
     sources: BTreeMap<sources::SourceId, Option<String>>,
@@ -477,6 +525,42 @@ impl BackupOwner {
             .await
             .map_err(|error| error.to_string())?
             .map_err(Into::into)
+    }
+
+    /// Exports Activity to a document the platform granted.
+    pub async fn export_activity_document(
+        &self,
+        uri: String,
+        format: library::ActivityExportFormat,
+        source_id: Option<String>,
+    ) -> Result<u64, SettingsError> {
+        let catalog = Arc::clone(&self.catalog);
+        let source = source_id.map(sources::SourceId::new);
+        let file = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+        let mut output = std::io::BufWriter::new(file.reopen().map_err(|error| error.to_string())?);
+        let count = catalog
+            .export_activity(&mut output, format, source.as_ref())
+            .await
+            .map_err(|error| error.to_string())?;
+        std::io::Write::flush(&mut output).map_err(|error| error.to_string())?;
+        sources::save_document(&uri, file.path(), None).map_err(|error| error.to_string())?;
+        Ok(count)
+    }
+
+    /// Imports an activity document and says what it did.
+    pub async fn import_activity_document(&self, uri: String) -> Result<String, SettingsError> {
+        let mut input = Vec::new();
+        std::io::Read::read_to_end(
+            &mut sources::open_document_input(&uri).map_err(|error| error.to_string())?,
+            &mut input,
+        )
+        .map_err(|error| error.to_string())?;
+        let report = self
+            .catalog
+            .import_activity(&input, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(activity_import_summary(&report))
     }
 
     pub async fn restore(

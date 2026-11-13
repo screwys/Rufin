@@ -1,7 +1,7 @@
-import { api, state } from "./connection.js";
+import { api, browserHeaders, state } from "./connection.js";
 import { qualityControls } from "./download-quality.js";
 import { openSource, sourceIcon, updateSources } from "./sources.js";
-import { $, el, icon, openPopup, run, tr, setLayoutSettings } from "./ui.js";
+import { $, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
 
 let values = {};
 
@@ -229,6 +229,33 @@ async function renderLibrary() {
       linkRow(item.name, item.id === state.source ? tr("Selected") : "", () => showSource(item), sourceIcon(item.kind))),
   );
   if (!configured.sources.length) $("pref-sources").append(el("div", "pref-row", tr("No sources configured")));
+  const scope = $("pref-activity-source");
+  const chosen = scope.value;
+  scope.replaceChildren(new Option(tr("All"), ""), ...configured.sources.map((item) => new Option(item.name, item.id)));
+  scope.value = configured.sources.some((item) => item.id === chosen) ? chosen : "";
+}
+
+// Activity: the history downloads as the chosen file, and a picked file imports, as in GTK.
+async function exportActivity() {
+  const format = $("pref-activity-format").value;
+  const response = await fetch(`/api/activity/export?${new URLSearchParams({ format, source: $("pref-activity-source").value })}`,
+    { headers: browserHeaders() });
+  if (!response.ok) throw new Error((await response.json()).error || tr("Request failed ({status})", { status: response.status }));
+  const url = URL.createObjectURL(await response.blob());
+  const link = el("a");
+  link.href = url;
+  link.download = format === "jsonl" ? "activity.jsonl" : "activity.csv";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function importActivity(file) {
+  notice(tr("Matching tracks..."), { working: true });
+  const response = await fetch("/api/activity/import",
+    { method: "POST", headers: { ...browserHeaders(), "Content-Type": "application/octet-stream" }, body: file });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || tr("Request failed ({status})", { status: response.status }));
+  notice(result.message);
 }
 
 function showSource(item) {
@@ -343,6 +370,13 @@ function init() {
   for (const node of document.querySelectorAll("[data-file-connection]"))
     node.addEventListener("click", () => openSource(null, { kind: node.dataset.fileConnection, saved: () => run(renderFileConnections) }));
   $("pref-download-source").addEventListener("change", () => run(renderDownloads));
+  $("pref-activity-export").addEventListener("click", () => run(exportActivity));
+  $("pref-activity-import").addEventListener("click", () => $("pref-activity-file").click());
+  $("pref-activity-file").addEventListener("change", (event) => {
+    const [file] = event.target.files;
+    event.target.value = "";
+    if (file) run(() => importActivity(file));
+  });
   // The source dialog saved a source: Library shows it.
   document.addEventListener("rufin-sources", () => {
     if (dialog.open && !$("pref-library").hidden) run(renderLibrary);

@@ -23,6 +23,10 @@ import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
+import io.github.screwys.rufin.settings.PreferenceChoice
+import io.github.screwys.rufin.shared.library.ActivityExportFormat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -78,6 +82,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
                 leading = { RufinIcon("rufin-list-add-symbolic", null, Modifier.size(24.dp)) },
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp)) }, modifier = Modifier.clickable(onClick = onAdd))
         }
+        ActivityGroup(model)
         }
         if (connectionsOnly) SettingsGroup(translate("File connections")) {
             SettingsRow(translate("File connection"), leading = { RufinIcon("rufin-list-add-symbolic", null) },
@@ -97,6 +102,42 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
             addingConnection = false; editingConnection = null
             model.runAction { bridge?.let { connections = it.fileIntegrations().filter { !it.musicSource } } }
         }, editingConnection, connectionsOnly = true)
+    }
+}
+
+/// GTK's Activity group: the listening history exports in a chosen format and scope, and a
+/// file of listens or play counts imports.
+@Composable
+private fun ActivityGroup(model: RufinConnection) {
+    var format by remember { mutableStateOf(ActivityExportFormat.LAST_FM) }
+    var scope by remember { mutableStateOf("") }
+    fun withBackups(work: suspend (BackupOwner) -> Unit) = model.runAction {
+        model.connectedService().runtime.value!!.getOrThrow().backups().use { work(it) }
+    }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        if (uri != null) withBackups { it.exportActivityDocument(uri.toString(), format, scope.ifEmpty { null }) }
+    }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) withBackups {
+            model.showWorking(translate("Matching tracks..."))
+            model.showFeedback(it.importActivityDocument(uri.toString()))
+        }
+    }
+    SettingsGroup(translate("Export Activity")) {
+        PreferenceChoice(translate("Export format"), format, listOf(ActivityExportFormat.LAST_FM to "Last.fm",
+            ActivityExportFormat.LISTEN_BRAINZ to "ListenBrainz", ActivityExportFormat.JSONL to "JSONL")) { format = it }
+        PreferenceChoice(translate("Source"), scope, listOf("" to translate("All")) +
+            model.sources?.sources.orEmpty().map { it.id to it.name }) { scope = it }
+        SettingsRow(translate("Export your listening history in Rufin"), trailing = {
+            FilledTonalButton({ export.launch(if (format == ActivityExportFormat.JSONL) "activity.jsonl" else "activity.csv") }) {
+                Text(translate("Export"))
+            }
+        })
+    }
+    SettingsGroup(translate("Import Activity")) {
+        SettingsRow(translate("Listens from Rufin, ListenBrainz or Last.fm, or play counts from other players"), trailing = {
+            FilledTonalButton({ import.launch(arrayOf("*/*")) }) { Text(translate("Import")) }
+        })
     }
 }
 

@@ -1156,7 +1156,7 @@ impl<'a> Write<'a> {
         self.edits.listened.insert(key, stats);
     }
 
-    /// Counts the plays of the tracks with these URIs again from their listens and carried-over
+    /// Counts the plays of the tracks with these URIs again from their listens and play
     /// counts. Imports and identity moves change those with plain SQL.
     pub(crate) async fn recount(&mut self, uris: &[&str]) -> LibraryResult<()> {
         for page in uris.chunks(READ_KEYS) {
@@ -2087,17 +2087,17 @@ pub(crate) fn user_state(favorite: Option<bool>, rating: Option<i64>) -> UserSta
 }
 
 /// The SQL that counts the plays, skips and last play of the tracks a condition selects from
-/// their listens and carried-over counts. The load counts the same way for every track.
+/// their listens and play counts. The load counts the same way for every track.
 pub(crate) fn listened_sql(condition: &str) -> String {
     format!(
-        "SELECT track_key,plays+coalesce(legacy_plays,0),skips+coalesce(legacy_skips,0),max(coalesce(last,legacy_last),coalesce(legacy_last,last)) FROM(
+        "SELECT track_key,plays+coalesce(counted_plays,0),skips+coalesce(counted_skips,0),max(coalesce(last,counted_last),coalesce(counted_last,last)) FROM(
             SELECT track.track_key,
                 (SELECT count(*) FROM listens listen WHERE listen.media_uri=track.media_uri AND listen.skipped=0) plays,
                 (SELECT count(*) FROM listens listen WHERE listen.media_uri=track.media_uri AND listen.skipped=1) skips,
                 (SELECT max(started_at) FROM listens listen WHERE listen.media_uri=track.media_uri) last,
-                legacy.play_count legacy_plays,legacy.skip_count legacy_skips,legacy.last_played_at legacy_last
-            FROM tracks track LEFT JOIN sources source USING(source_key)
-            LEFT JOIN legacy_activity legacy ON legacy.source_id=source.object_id AND legacy.track_object_id=track.object_id AND legacy.period='lifetime' AND legacy.item_kind='track'
+                counted.plays counted_plays,counted.skips counted_skips,counted.last_played_at counted_last
+            FROM tracks track
+            LEFT JOIN play_counts counted ON counted.media_uri=track.media_uri AND counted.period='lifetime'
             WHERE {condition})"
     )
 }

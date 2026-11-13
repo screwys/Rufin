@@ -13,18 +13,107 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-/// The values the smart playlist editor suggests in `selected`, in the music folder smart
-/// playlists read in.
-pub async fn smart_playlist_suggestions(
+/// How many values the smart playlist editor lists at once; typing narrows them.
+const SMART_PLAYLIST_VALUES: usize = 200;
+
+/// The values of `field` the smart playlist editor offers for `text`: from the playlist's
+/// source, every source without one, in the music folder smart playlists read in.
+pub async fn smart_playlist_values(
     catalog: &Catalog,
     selected: &crate::runtime::SelectedLibrary,
-    cancellation: &ReadCancellation,
-) -> library::LibraryResult<library::SmartPlaylistValueSuggestions> {
+    field: library::SmartPlaylistRuleField,
+    text: &str,
+    source: Option<&SourceId>,
+) -> library::LibraryResult<Vec<library::SmartPlaylistValueChoice>> {
     let folder =
         crate::view::Scope::of(&crate::route::Route::SmartPlaylists).folder(Some(selected));
     catalog
-        .smart_playlist_value_suggestions(selected.source_key, folder, cancellation)
+        .smart_playlist_values(field, text, source, folder, SMART_PLAYLIST_VALUES)
         .await
+}
+
+/// How many tracks a smart playlist being edited matches now, in the music folder smart
+/// playlists read in.
+pub async fn smart_playlist_match_count(
+    catalog: &Catalog,
+    selected: &crate::runtime::SelectedLibrary,
+    definition: &library::SmartPlaylistDefinition,
+) -> library::LibraryResult<u64> {
+    let folder =
+        crate::view::Scope::of(&crate::route::Route::SmartPlaylists).folder(Some(selected));
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    catalog
+        .smart_playlist_match_count(definition, folder, now)
+        .await
+}
+
+/// A starting point the smart playlist editor offers for a new playlist.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SmartPlaylistTemplate {
+    pub name: &'static str,
+    pub definition: library::SmartPlaylistDefinition,
+}
+
+pub fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
+    use library::{
+        SmartPlaylistCondition as C, SmartPlaylistDefinition as D, SmartPlaylistRule as R,
+        SmartPlaylistRuleField as F, SmartPlaylistRuleOperator as O, SmartPlaylistRuleValue as V,
+        SmartPlaylistSort as S,
+    };
+    let template = |name, rule: R, sort_field, descending, limit| SmartPlaylistTemplate {
+        name,
+        definition: D {
+            conditions: vec![C::Rule(rule)],
+            sort_field,
+            descending,
+            limit,
+            ..D::default()
+        },
+    };
+    let rule = |field, operator, value| R {
+        field,
+        operator,
+        value: Some(value),
+    };
+    vec![
+        template(
+            localization::msgid("Most played"),
+            rule(F::PlayCount, O::Above, V::Number(0)),
+            S::PlayCount,
+            true,
+            Some(100),
+        ),
+        template(
+            localization::msgid("Recently played"),
+            rule(F::Played, O::Is, V::Bool(true)),
+            S::LastPlayed,
+            true,
+            Some(100),
+        ),
+        template(
+            localization::msgid("Recently added"),
+            rule(F::DateAdded, O::InTheLast, V::Number(30)),
+            S::DateAdded,
+            true,
+            None,
+        ),
+        template(
+            localization::msgid("Favorites"),
+            rule(F::Favorite, O::Is, V::Bool(true)),
+            S::Title,
+            false,
+            None,
+        ),
+        template(
+            localization::msgid("Never played"),
+            rule(F::Played, O::Is, V::Bool(false)),
+            S::Title,
+            false,
+            None,
+        ),
+    ]
 }
 
 pub fn import_local_paths(

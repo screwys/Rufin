@@ -15,6 +15,7 @@ uniffi::custom_type!(LibraryIndex, u64, {
 mod audio;
 pub use audio::*;
 mod activity;
+mod activity_import;
 mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
@@ -84,9 +85,10 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityKey,
-    LegacyActivityRecord, ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityExportFormat, ActivityRecord, CalendarActivityPeriod, ListenDeliveryTarget,
+    ListenWrite, PendingListenDelivery, PlayCount, PlayCountKey,
 };
+pub use activity_import::ActivityImportReport;
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
     authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,
@@ -142,10 +144,10 @@ pub use queue::{
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistCopy, SmartPlaylistDefinition, SmartPlaylistRow,
+    SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,
+    SmartPlaylistDefinition, SmartPlaylistFieldSection, SmartPlaylistMatch, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
-    SmartPlaylistWrite,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueChoice, SmartPlaylistWrite,
 };
 pub use tracks::{TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView};
 
