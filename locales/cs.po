@@ -72,6 +72,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -2347,6 +2352,11 @@ msgstr "Uložené zdroje"
 msgid "Image"
 msgstr "Obrázek"
 
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Activity"
+msgstr "Chytrý Playlist"
+
 msgid "Import Backup"
 msgstr ""
 
@@ -2369,6 +2379,14 @@ msgstr "Uživatelská podpora"
 #| msgid "Support"
 msgid "Import"
 msgstr "Uživatelská podpora"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "Smazat playlist"
+msgstr[1] "Smazat playlist"
+msgstr[2] "Smazat playlist"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2740,6 +2758,11 @@ msgstr "V mezipaměti"
 #| msgid "Cached"
 msgid "Matched"
 msgstr "V mezipaměti"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Matching tracks..."
+msgstr "Žádné odpovídající skladby"
 
 msgid "Maximum frequency (Hz)"
 msgstr ""
@@ -4496,6 +4519,15 @@ msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
 
 #, fuzzy
+#| msgid "{count} day ago"
+#| msgid_plural "{count} days ago"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} dnem"
+msgstr[1] "{count} dny"
+msgstr[2] "{count} dny"
+
+#, fuzzy
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Zdroj metadat"
@@ -5515,6 +5547,12 @@ msgstr[0] "{count} dnem"
 msgstr[1] "{count} dny"
 msgstr[2] "{count} dny"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 #, fuzzy
 #| msgid "{count} track"
 #| msgid_plural "{count} tracks"
@@ -5529,6 +5567,18 @@ msgid_plural "{count} folders selected"
 msgstr[0] "{count} složka vybrána"
 msgstr[1] "{count} složky vybrány"
 msgstr[2] "{count} složek vybráno"
+
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
@@ -6044,11 +6094,6 @@ msgstr ""
 
 #~ msgid "Save to rescan"
 #~ msgstr "Uložit pro opětovné naskenování"
-
-#, fuzzy
-#~| msgid "Smart Playlist"
-#~ msgid "Import a copy"
-#~ msgstr "Chytrý Playlist"
 
 #~ msgid "Lyrics settings"
 #~ msgstr "Nastavení textu skladeb"
