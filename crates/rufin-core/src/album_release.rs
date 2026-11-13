@@ -1,86 +1,55 @@
-//! Bounded Album release enrichment over exact Catalog candidates.
+//! Release types from MusicBrainz for the albums no source typed.
 
 use std::sync::Arc;
 
-use library::{AlbumReleaseResult, Catalog, ReadCancellation, SourceKey};
+use library::Catalog;
 use tracing::{info, warn};
 
 use crate::settings::SettingsFile;
 
-const LOOKUP_LIMIT: usize = 8;
-
-pub(crate) async fn run_selected_album_release_lookup(
-    catalog: Arc<Catalog>,
-    settings: SettingsFile,
-    source_key: SourceKey,
-) {
-    let mut requested = 0;
-    let mut found = 0;
-    let mut missing = 0;
-    let mut errors = 0;
-    if !settings.load().ui.allows_external_metadata_lookup() {
+/// Asks MusicBrainz for every album that still has no answer, a hundred a request, until
+/// none is left.
+pub(crate) async fn fill_release_types(catalog: Arc<Catalog>, settings: SettingsFile) {
+    let allowed = || settings.load().ui.allows_external_metadata_lookup();
+    if !allowed() {
         return;
     }
-    let candidates = match catalog
-        .album_release_candidates(source_key, LOOKUP_LIMIT, &ReadCancellation::new())
-        .await
-    {
-        Ok(candidates) => candidates,
-        Err(error) => {
-            warn!(%error, %source_key, "could not read Album release candidates");
-            return;
-        }
-    };
-    for candidate in candidates {
-        if !settings.load().ui.allows_external_metadata_lookup() {
-            break;
-        }
-        requested += 1;
-        let identity = candidate.lookup_identity.clone();
-        let lookup_identity = identity.clone();
-        let lookup = tokio::task::spawn_blocking(move || {
-            let (release_group, release) =
-                lookup_identity.strip_prefix("release-group:").map_or_else(
-                    || (None, lookup_identity.strip_prefix("release:")),
-                    |id| (Some(id), None),
-                );
-            metadata_lookup::lookup_album_release(release_group, release)
-        })
-        .await;
-        let result = match lookup {
-            Ok(Ok(Some(metadata))) => {
-                found += 1;
-                AlbumReleaseResult::Found {
-                    release_types: metadata.release_types,
-                }
-            }
-            Ok(Ok(None)) => {
-                missing += 1;
-                AlbumReleaseResult::Missing
-            }
-            Ok(Err(error)) => {
-                errors += 1;
-                warn!(%error, album_key = %candidate.album_key, "Album release lookup failed");
-                break;
-            }
+    // Albums a refresh adds meanwhile are asked for in the next round.
+    loop {
+        let identities = match catalog.untyped_release_identities().await {
+            Ok(identities) if identities.is_empty() => return,
+            Ok(identities) => identities,
             Err(error) => {
-                errors += 1;
-                warn!(%error, album_key = %candidate.album_key, "Album release worker failed");
-                break;
+                warn!(%error, "could not read the albums without a release type");
+                return;
             }
         };
-        match catalog
-            .accept_album_release_result(source_key, candidate.album_key, identity.as_str(), result)
-            .await
-        {
-            // The accepted album's Change reaches clients through the change feed.
-            Ok(Some(_) | None) => {}
-            Err(error) => {
-                errors += 1;
-                warn!(%error, "could not accept Album release result");
-                break;
+        for identities in identities.chunks(100) {
+            if !allowed() {
+                return;
+            }
+            let asked = identities.to_vec();
+            let answers =
+                tokio::task::spawn_blocking(move || metadata_lookup::lookup_release_types(&asked))
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|answers| answers);
+            let accepted = match answers {
+                Ok(answers) => catalog
+                    .accept_release_types(&answers)
+                    .await
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            // A later refresh asks again for what is left.
+            if let Err(error) = accepted {
+                warn!(%error, "release type lookup failed");
+                return;
             }
         }
+        info!(
+            asked = identities.len(),
+            "asked MusicBrainz for release types"
+        );
     }
-    info!(%source_key, requested, found, missing, errors, "completed Album release lookup");
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkPopover" id="popover">
+    <property name="child"><object class="GtkCalendar" id="calendar"/></property>
+  </object>
+</interface>

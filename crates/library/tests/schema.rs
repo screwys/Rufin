@@ -551,7 +551,7 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            62,
+            63,
             "{version}"
         );
         // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.

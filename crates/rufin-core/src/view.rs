@@ -55,7 +55,7 @@ pub struct OpenOptions {
     pub downloaded_only: bool,
     /// The one source History lists; every source when `None`.
     pub history_source: Option<sources::SourceId>,
-    pub release_filters: Option<[String; 6]>,
+    pub release_filters: Option<[String; library::AlbumReleaseClass::COUNT]>,
     /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
     /// the page opened with; plays and syncs change them on the next visit.
     pub smart_opened: Option<i64>,
@@ -114,8 +114,8 @@ enum Body {
     /// artist's favorite tracks when the page shows them.
     Releases {
         read: ListRead,
-        counts: [usize; 6],
-        source_counts: [usize; 6],
+        counts: [usize; library::AlbumReleaseClass::COUNT],
+        source_counts: [usize; library::AlbumReleaseClass::COUNT],
         favorites: Option<(MemberRead, usize)>,
     },
     /// Child folders, then the folder's tracks. Cached child folders have a read; live ones
@@ -1638,7 +1638,12 @@ impl View {
     }
 
     /// An artist page's albums per release group: filtered, then unfiltered.
-    pub fn release_counts(&self) -> Option<([usize; 6], [usize; 6])> {
+    pub fn release_counts(
+        &self,
+    ) -> Option<(
+        [usize; library::AlbumReleaseClass::COUNT],
+        [usize; library::AlbumReleaseClass::COUNT],
+    )> {
         match &self.body {
             Body::Releases {
                 counts,
@@ -2587,10 +2592,7 @@ fn release_query(
     settings: &Settings,
 ) -> ListRead {
     if let ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
-        *filters = options
-            .release_filters
-            .as_ref()
-            .map(|filters| Arc::new(std::array::from_fn(|index| filters[index].clone())));
+        *filters = options.release_filters.clone().map(Arc::new);
     }
     let releases = OpenOptions {
         category: CollectionCategory::Albums,

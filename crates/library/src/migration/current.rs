@@ -194,6 +194,11 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
             play_counts_of_0_17(&mut transaction).await?;
         }
         playlist_folders_of_0_17(&mut transaction).await?;
+        // 0.17 kept MusicBrainz's release types per album.
+        if old.iter().any(|table| table == "album_release_observations") {
+            sqlx::query("INSERT OR IGNORE INTO musicbrainz_release_types(identity,release_types) SELECT lookup_identity,release_types FROM recovered_album_release_observations")
+                .execute(&mut *transaction).await?;
+        }
         for table in &old {
             sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
                 .execute(&mut *transaction).await?;
@@ -537,11 +542,10 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 release_types,
             };
-            let lookup = text(row, "release_lookup_identity");
             let artwork = binding(row)?;
             let first_seen = number(row, "first_seen_at");
-            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
-                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,?19,?20,?21)")
+            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
+                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,jsonb(?15),jsonb(?16),?17,?18,?19,?20)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -554,7 +558,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(&metadata.date_added)
                 .bind(metadata.is_compilation)
                 .bind(first_seen)
-                .bind(&lookup)
                 .bind(number(row, "source_favorite"))
                 .bind(number(row, "source_rating"))
                 .bind(metadata.details_json()?)
@@ -565,14 +568,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(picture_flag(artwork.as_deref()))
                 .execute(&mut *connection)
                 .await?;
-            if let Some(identity) = lookup {
-                sqlx::query("INSERT INTO album_release_observations VALUES(?1,?2,jsonb(?3))")
-                    .bind(entity.key)
-                    .bind(identity)
-                    .bind(serde_json::to_string(&metadata.release_types)?)
-                    .execute(&mut *connection)
-                    .await?;
-            }
         }
     }
 }

@@ -40,9 +40,9 @@ pub(crate) const CACHED_LOCAL: u16 = 1 << 8;
 pub(crate) const INPUT: u16 = 1 << 9;
 pub(crate) const COMPILATION_KNOWN: u16 = 1 << 10;
 pub(crate) const COMPILATION: u16 = 1 << 11;
-/// Albums: the release class code, bits 12-14.
+/// Albums: the release class code, bits 12-15.
 pub(crate) const RELEASE_SHIFT: u16 = 12;
-pub(crate) const RELEASE_MASK: u16 = 0b111 << RELEASE_SHIFT;
+pub(crate) const RELEASE_MASK: u16 = 0b1111 << RELEASE_SHIFT;
 /// Playlists: a source owns the playlist.
 pub(crate) const SOURCE_OWNED: u16 = 1 << 8;
 pub(crate) const WRITABLE: u16 = 1 << 9;
