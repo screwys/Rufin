@@ -85,6 +85,11 @@ msgstr ""
 "ingresadas o accediendo como invitado"
 
 msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -2030,6 +2035,11 @@ msgstr "Archivos de imagen"
 msgid "Image"
 msgstr "Imagen"
 
+#, fuzzy
+#| msgid "Export Activity"
+msgid "Import Activity"
+msgstr "Exportar Actividad"
+
 msgid "Import Backup"
 msgstr "Importar Respaldo"
 
@@ -2044,6 +2054,14 @@ msgstr "Importar tema"
 
 msgid "Import"
 msgstr "Importar"
+
+#, fuzzy
+#| msgid "Delete {count} playlist?"
+#| msgid_plural "Delete {count} playlists?"
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "¿Eliminar {count} lista de reproducción?"
+msgstr[1] "¿Eliminar {count} listas de reproducción?"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2380,6 +2398,11 @@ msgstr "Coincidencias"
 
 msgid "Matched"
 msgstr "Coincidencias"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Matching tracks..."
+msgstr "Ninguna pista coincide"
 
 msgid "Maximum frequency (Hz)"
 msgstr "Frecuencia máxima (Hz)"
@@ -3861,6 +3884,14 @@ msgstr "Servidor"
 msgid "Set the Discord activity type to Listening"
 msgstr "Establecer el tipo de actividad de Discord en \"Escuchando\""
 
+#, fuzzy
+#| msgid "{count} play"
+#| msgid_plural "{count} plays"
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} reproducción"
+msgstr[1] "{count} reproducciones"
+
 msgid "Settings and sources"
 msgstr "Ajustes y fuentes"
 
@@ -4760,6 +4791,11 @@ msgid_plural "{count} days ago"
 msgstr[0] "hace {count} dia"
 msgstr[1] "hace {count} dias"
 
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] ""
+msgstr[1] ""
+
 #, fuzzy
 #| msgid "{count} track"
 #| msgid_plural "{count} tracks"
@@ -4772,6 +4808,20 @@ msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "{count} carpeta seleccionada"
 msgstr[1] "{count} carpetas seleccionadas"
+
+#, fuzzy
+#| msgid "Some playlist entries could not be imported"
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] ""
+"Algunas entradas de la lista de reproducción no se pudieron importar"
+msgstr[1] ""
+"Algunas entradas de la lista de reproducción no se pudieron importar"
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
