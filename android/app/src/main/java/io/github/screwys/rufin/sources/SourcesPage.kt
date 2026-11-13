@@ -119,7 +119,7 @@ private fun ActivityGroup(model: RufinConnection) {
     }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) withBackups {
-            model.showWorking(translate("Matching tracks…"))
+            model.showWorking(translate("Matching tracks..."))
             model.showFeedback(it.importActivityDocument(uri.toString()))
         }
     }

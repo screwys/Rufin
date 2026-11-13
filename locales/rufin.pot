@@ -2295,7 +2295,7 @@ msgstr ""
 msgid "Matched"
 msgstr ""
 
-msgid "Matching tracks\342\200\246"
+msgid "Matching tracks..."
 msgstr ""
 
 msgid "Maximum frequency (Hz)"

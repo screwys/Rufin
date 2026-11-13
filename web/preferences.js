@@ -250,7 +250,7 @@ async function exportActivity() {
 }
 
 async function importActivity(file) {
-  notice(tr("Matching tracks…"), { working: true });
+  notice(tr("Matching tracks..."), { working: true });
   const response = await fetch("/api/activity/import",
     { method: "POST", headers: { ...browserHeaders(), "Content-Type": "application/octet-stream" }, body: file });
   const result = await response.json();

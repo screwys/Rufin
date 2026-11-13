@@ -294,7 +294,7 @@ impl Shell {
             };
             shell
                 .control_feedback
-                .show_working(localization::tr("Matching tracks…"));
+                .show_working(localization::tr("Matching tracks..."));
             let catalog = Arc::clone(&shell.products.library);
             let task = shell.products.runtime.spawn(async move {
                 let input = std::fs::read(&path)?;
