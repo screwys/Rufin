@@ -397,9 +397,6 @@ msgstr "Actividad"
 msgid "Add Manually"
 msgstr "Añadir Manualmente"
 
-msgid "Add Rule"
-msgstr "Añadir Regla"
-
 msgid "Add Source"
 msgstr "Añadir fuente"
 
@@ -430,11 +427,21 @@ msgstr "Añade actual"
 msgid "Add folder"
 msgstr "Agregar carpeta"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Añadir fuente"
+
 msgid "Add image"
 msgstr "Añadir una imagen"
 
 msgid "Add music"
 msgstr "Agregar música"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Añadir Regla"
 
 msgid "Add to Favorites"
 msgstr "Añadir a Favoritos"
@@ -565,9 +572,6 @@ msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 "Aplica de forma separada a la barra lateral y al modo de pantalla completa"
 
-msgid "Apply Template"
-msgstr "Aplicar Plantilla"
-
 msgid "Apply"
 msgstr "Aplicar"
 
@@ -622,6 +626,11 @@ msgstr "Almacenamiento de arte"
 
 msgid "Artwork"
 msgstr "Portada"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Descendiente"
 
 msgid "Audio effects"
 msgstr "Efectos de audio"
@@ -1366,9 +1375,6 @@ msgstr "Registros de diagnóstico"
 msgid "Direct"
 msgstr "Directo"
 
-msgid "Direction"
-msgstr "Dirección"
-
 msgid "Disable private mode"
 msgstr "Desactivar modo privado"
 
@@ -2043,6 +2049,11 @@ msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Importa archivos en la biblioteca, y busca cambios en carpetas añadidas."
 
+#, fuzzy
+#| msgid "New playlist"
+msgid "In playlist"
+msgstr "Nueva lista de reproducción"
+
 msgid "Inactive at this sample rate"
 msgstr "Inactivo a esta frecuencia de muestreo"
 
@@ -2362,6 +2373,11 @@ msgstr "Mapeo de ruta local"
 msgid "March {year}"
 msgstr "Marzo del {year}"
 
+#, fuzzy
+#| msgid "Matched"
+msgid "Match"
+msgstr "Coincidencias"
+
 msgid "Matched"
 msgstr "Coincidencias"
 
@@ -2466,15 +2482,6 @@ msgstr "Más acciones"
 
 msgid "More"
 msgstr "Más"
-
-msgid "Most Played (Monthly)"
-msgstr "Más reproducido (Por mes)"
-
-msgid "Most Played (Weekly)"
-msgstr "Más reproducido (Por semana)"
-
-msgid "Most Played (Yearly)"
-msgstr "Más reproducido (Por año)"
 
 msgid "Most Played"
 msgstr "Más reproducido"
@@ -2604,6 +2611,11 @@ msgstr ""
 "transmisión"
 
 msgid "Never Played"
+msgstr "Nunca reproducidos"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Nunca reproducidos"
 
 msgid "New Playlist"
@@ -2922,6 +2934,9 @@ msgstr "Opciones"
 msgid "Orange"
 msgstr "Naranja"
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr "Audio original"
 
@@ -3003,9 +3018,6 @@ msgstr "Perceptual"
 
 msgid "Performer"
 msgstr "Artista"
-
-msgid "Period"
-msgstr "Período"
 
 msgid "Pink"
 msgstr "Rosa"
@@ -3132,6 +3144,11 @@ msgstr "Lista de reproducción"
 
 msgid "Playlists"
 msgstr "Listas de reproducción"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Plays from"
+msgstr "Reproducir a partir de"
 
 msgid "Plays"
 msgstr "Reproducciones"
@@ -3268,6 +3285,9 @@ msgstr "Cerrar"
 msgid "Radio"
 msgstr "Radio"
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Selección por rango"
 
@@ -3285,6 +3305,11 @@ msgstr "Recibiendo perfil"
 
 msgid "Recent searches"
 msgstr "Búsquedas recientes"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Reproducido recientemente"
 
 msgid "Recently played"
 msgstr "Reproducido recientemente"
@@ -3422,6 +3447,11 @@ msgstr "Quitar de Guardados"
 
 msgid "Remove from folder"
 msgstr "Remover de la carpeta"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Remover regla"
 
 msgid "Remove rule"
 msgstr "Remover regla"
@@ -4037,9 +4067,6 @@ msgstr "Ordenar por nombre"
 msgid "Sort title"
 msgstr "Ordenar por título"
 
-msgid "Sort"
-msgstr "Ordenar"
-
 msgid "Source by position"
 msgstr "Fuente por posición"
 
@@ -4076,6 +4103,11 @@ msgstr "Espectro"
 
 msgid "Start Listening"
 msgstr "Emepezar a Escuchar"
+
+#, fuzzy
+#| msgid "Start"
+msgid "Start from"
+msgstr "Iniciar"
 
 msgid "Start minimized"
 msgstr "Inicio minimizado"
@@ -4185,9 +4217,6 @@ msgstr "Verde Azulado"
 
 msgid "Techno"
 msgstr "Techno"
-
-msgid "Template"
-msgstr "Plantilla"
 
 msgid "Test connection"
 msgstr "Probar conexión"
@@ -4633,6 +4662,16 @@ msgstr "encima"
 msgid "after"
 msgstr "después"
 
+#, fuzzy
+#| msgid "Small"
+msgid "all"
+msgstr "Pequeño"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Cualquiera"
+
 msgid "before"
 msgstr "antes"
 
@@ -4641,6 +4680,9 @@ msgstr "debajo"
 
 msgid "contains"
 msgstr "contiene"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "no contiene"
@@ -4657,6 +4699,11 @@ msgstr "excluye"
 msgid "here"
 msgstr "aquí"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "in the last"
+msgstr "Finalizar la última pista"
+
 msgid "is empty"
 msgstr "está vacío"
 
@@ -4671,6 +4718,19 @@ msgstr "está"
 
 msgid "kbps"
 msgstr "kbps"
+
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "not in the last"
+msgstr "Finalizar la última pista"
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import theme"
+msgid "of these"
+msgstr "Importar tema"
 
 msgid "range"
 msgstr "rango"
@@ -4857,6 +4917,30 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Apply Template"
+#~ msgstr "Aplicar Plantilla"
+
+#~ msgid "Direction"
+#~ msgstr "Dirección"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Más reproducido (Por mes)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Más reproducido (Por semana)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Más reproducido (Por año)"
+
+#~ msgid "Period"
+#~ msgstr "Período"
+
+#~ msgid "Sort"
+#~ msgstr "Ordenar"
+
+#~ msgid "Template"
+#~ msgstr "Plantilla"
 
 #, fuzzy
 #~| msgid "Guest / public access"

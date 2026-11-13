@@ -2,7 +2,7 @@
   Rufin
 </h1>
 <p align="center">
-  <a href="https://matrix.to/#/#rufin:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23rufin-red?logo=matrix"></a>
+  <a href="https://matrix.to/#/#rufin:rufin.app"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23rufin-red?logo=matrix"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0+" src="https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg"></a>
   <a href="Cargo.toml"><img alt="Rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-f74c00?logo=rust"></a>
   <a href="https://gstreamer.freedesktop.org/"><img alt="GStreamer 1.26+" src="https://img.shields.io/badge/GStreamer-1.26%2B-3584E4?logo=gstreamer&amp;logoColor=white&amp;labelColor=2E3436"></a>

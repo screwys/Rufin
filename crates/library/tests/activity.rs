@@ -300,7 +300,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .create_smart_playlist(
             "Local never played",
             &library::SmartPlaylistDefinition {
-                match_all: vec![
+                conditions: vec![
                     library::SmartPlaylistRule {
                         field: library::SmartPlaylistRuleField::Played,
                         operator: library::SmartPlaylistRuleOperator::Is,
@@ -311,7 +311,10 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                         operator: library::SmartPlaylistRuleOperator::Equals,
                         value: Some(library::SmartPlaylistRuleValue::Number(0)),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(library::SmartPlaylistCondition::Rule)
+                .collect(),
                 ..library::SmartPlaylistDefinition::default()
             },
             None,

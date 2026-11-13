@@ -401,9 +401,6 @@ msgstr "Aktivitas"
 msgid "Add Manually"
 msgstr "Tambahkan manual"
 
-msgid "Add Rule"
-msgstr "Tambah aturan"
-
 msgid "Add Source"
 msgstr "Tambah sumber"
 
@@ -434,11 +431,21 @@ msgstr "Tambah lagu saat ini"
 msgid "Add folder"
 msgstr "Tambah folder"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Tambah sumber"
+
 msgid "Add image"
 msgstr "Tambah gambar"
 
 msgid "Add music"
 msgstr "Tambah musik"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Tambah aturan"
 
 msgid "Add to Favorites"
 msgstr "Tambahkan ke Favorit"
@@ -568,9 +575,6 @@ msgstr "Nama aplikasi"
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Berlaku terpisah untuk sidebar dan fullscreen"
 
-msgid "Apply Template"
-msgstr "Terapkan Template"
-
 msgid "Apply"
 msgstr "Terapkan"
 
@@ -624,6 +628,11 @@ msgstr "Penyimpanan sampul"
 
 msgid "Artwork"
 msgstr "Sampul"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "Menurun"
 
 msgid "Audio effects"
 msgstr "Efek audio"
@@ -1377,9 +1386,6 @@ msgstr "Log diagnostik"
 msgid "Direct"
 msgstr "Langsung"
 
-msgid "Direction"
-msgstr "Arah"
-
 msgid "Disable private mode"
 msgstr "Matikan mode privat"
 
@@ -2073,6 +2079,11 @@ msgstr ""
 "Mengimpor file ke pustaka dan memantau perubahan pada folder yang "
 "ditambahkan."
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "In playlist"
+msgstr "Buat playlist"
+
 msgid "Inactive at this sample rate"
 msgstr "Tidak aktif pada laju sampel ini"
 
@@ -2381,6 +2392,9 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+msgid "Match"
+msgstr ""
+
 msgid "Matched"
 msgstr ""
 
@@ -2478,15 +2492,6 @@ msgid "More actions"
 msgstr ""
 
 msgid "More"
-msgstr ""
-
-msgid "Most Played (Monthly)"
-msgstr ""
-
-msgid "Most Played (Weekly)"
-msgstr ""
-
-msgid "Most Played (Yearly)"
 msgstr ""
 
 msgid "Most Played"
@@ -2614,6 +2619,11 @@ msgstr ""
 
 msgid "Never Played"
 msgstr ""
+
+#, fuzzy
+#| msgid "Ever played"
+msgid "Never played"
+msgstr "Pernah diputar"
 
 msgid "New Playlist"
 msgstr ""
@@ -2924,6 +2934,9 @@ msgstr ""
 msgid "Orange"
 msgstr ""
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr ""
 
@@ -3000,9 +3013,6 @@ msgid "Perceptual"
 msgstr ""
 
 msgid "Performer"
-msgstr ""
-
-msgid "Period"
 msgstr ""
 
 msgid "Pink"
@@ -3129,6 +3139,9 @@ msgid "Playlist"
 msgstr ""
 
 msgid "Playlists"
+msgstr ""
+
+msgid "Plays from"
 msgstr ""
 
 msgid "Plays"
@@ -3266,6 +3279,9 @@ msgstr ""
 msgid "Radio"
 msgstr ""
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr ""
 
@@ -3282,6 +3298,9 @@ msgid "Receiving profile"
 msgstr ""
 
 msgid "Recent searches"
+msgstr ""
+
+msgid "Recently added"
 msgstr ""
 
 msgid "Recently played"
@@ -3417,6 +3436,9 @@ msgid "Remove from Saved"
 msgstr ""
 
 msgid "Remove from folder"
+msgstr ""
+
+msgid "Remove group"
 msgstr ""
 
 msgid "Remove rule"
@@ -4024,9 +4046,6 @@ msgstr ""
 msgid "Sort title"
 msgstr ""
 
-msgid "Sort"
-msgstr ""
-
 msgid "Source by position"
 msgstr ""
 
@@ -4058,6 +4077,9 @@ msgid "Spectrum"
 msgstr ""
 
 msgid "Start Listening"
+msgstr ""
+
+msgid "Start from"
 msgstr ""
 
 msgid "Start minimized"
@@ -4167,10 +4189,6 @@ msgstr ""
 
 msgid "Techno"
 msgstr ""
-
-#, fuzzy
-msgid "Template"
-msgstr "Template"
 
 msgid "Test connection"
 msgstr ""
@@ -4601,6 +4619,16 @@ msgstr ""
 msgid "after"
 msgstr ""
 
+#, fuzzy
+#| msgid "All"
+msgid "all"
+msgstr "Semua"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Semua"
+
 msgid "before"
 msgstr ""
 
@@ -4608,6 +4636,9 @@ msgid "below"
 msgstr ""
 
 msgid "contains"
+msgstr ""
+
+msgid "days"
 msgstr ""
 
 msgid "does not contain"
@@ -4625,6 +4656,11 @@ msgstr ""
 msgid "here"
 msgstr ""
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "in the last"
+msgstr "Selesaikan lagu terakhir"
+
 msgid "is empty"
 msgstr ""
 
@@ -4639,6 +4675,19 @@ msgstr ""
 
 msgid "kbps"
 msgstr ""
+
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "not in the last"
+msgstr "Selesaikan lagu terakhir"
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import theme"
+msgid "of these"
+msgstr "Impor tema"
 
 msgid "range"
 msgstr ""
@@ -4808,3 +4857,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Apply Template"
+#~ msgstr "Terapkan Template"
+
+#~ msgid "Direction"
+#~ msgstr "Arah"
+
+#, fuzzy
+#~ msgid "Template"
+#~ msgstr "Template"
