@@ -33,7 +33,7 @@ const ORDER: [&str; 15] = [
     "state",
     "lyrics",
     "listen",
-    "legacy",
+    "plays",
     "analysis",
     "album-loudness",
     "session",
@@ -45,7 +45,7 @@ const ORDER: [&str; 15] = [
 const COMPARED: [(&str, bool); 9] = [
     ("state", true),
     ("lyrics", true),
-    ("legacy", true),
+    ("plays", true),
     ("folder", true),
     ("playlist", true),
     ("entry", true),
@@ -133,14 +133,13 @@ struct LyricsValue {
     lyrics: String,
 }
 
+/// A track's plays counted outside Rufin's listens for one period, under
+/// `plays:{period}:{uri}`.
 #[derive(Serialize, Deserialize)]
-struct LegacyValue {
-    play_count: i64,
-    skip_count: i64,
+struct PlaysValue {
+    plays: i64,
+    skips: i64,
     last_played_at: Option<i64>,
-    title: String,
-    artist: String,
-    album: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -701,8 +700,8 @@ impl Records {
         Ok(changes)
     }
 
-    /// The listens of tracks heard: new ones, and ones written again with a longer listening
-    /// time.
+    /// The listens and play counts of tracks whose plays changed: new listens, ones written
+    /// again with a longer listening time, and new or changed counts.
     async fn heard_listens(
         &self,
         tracks: &[library::TrackKey],
@@ -712,7 +711,13 @@ impl Records {
             .listens(&[], tracks)
             .await
             .map_err(string_error)?;
-        let items = self.encode_listens(listens).await?;
+        let counts = self
+            .catalog
+            .play_counts(Some(&[]), tracks)
+            .await
+            .map_err(string_error)?;
+        let mut items = self.encode_listens(listens).await?;
+        items.extend(self.encode_plays(counts, None).await?);
         let ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
         self.diff(items, Select::Ids(&ids), false).await
     }
@@ -757,16 +762,29 @@ impl Records {
                 }
                 None => Vec::new(),
             },
-            "legacy" => {
-                let keys = objects
-                    .map(|keys| {
-                        keys.iter()
-                            .map(|key| legacy_key(key))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .transpose()?;
-                self.legacy_items(keys.as_deref()).await?
-            }
+            "plays" => match objects {
+                Some(objects) => {
+                    let uris = objects
+                        .iter()
+                        .map(|object| Ok(plays_key(object)?.1))
+                        .collect::<Result<Vec<_>, String>>()?;
+                    let (uris, portable) = self.local_named(&uris).await?;
+                    let counts = self
+                        .catalog
+                        .play_counts(Some(&uris), &[])
+                        .await
+                        .map_err(string_error)?;
+                    self.encode_plays(counts, Some(portable)).await?
+                }
+                None => {
+                    let counts = self
+                        .catalog
+                        .play_counts(None, &[])
+                        .await
+                        .map_err(string_error)?;
+                    self.encode_plays(counts, None).await?
+                }
+            },
             "lyrics" => match objects {
                 Some(objects) => {
                     let (uris, portable) = self.local_named(objects).await?;
@@ -965,29 +983,36 @@ impl Records {
             .collect()
     }
 
-    async fn legacy_items(
+    /// Play counts, under their portable URIs. `portable` names their URIs when the caller
+    /// already looked them up.
+    async fn encode_plays(
         &self,
-        keys: Option<&[library::LegacyActivityKey]>,
+        counts: Vec<library::PlayCount>,
+        portable: Option<HashMap<String, String>>,
     ) -> Result<Vec<Item>, String> {
-        self.catalog
-            .legacy_activity(keys)
-            .await
-            .map_err(string_error)?
+        let portable = match portable {
+            Some(portable) => portable,
+            None => {
+                self.portable(
+                    &counts
+                        .iter()
+                        .map(|count| count.media_uri.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await?
+            }
+        };
+        counts
             .into_iter()
-            .map(|record| {
+            .map(|count| {
+                let uri = portable.get(&count.media_uri).unwrap_or(&count.media_uri);
                 Item::new(
-                    format!(
-                        "legacy:{}/{}/{}/{}",
-                        record.source_id, record.period, record.item_kind, record.track_object_id
-                    ),
+                    format!("plays:{}:{uri}", count.period),
                     None,
-                    &LegacyValue {
-                        play_count: record.play_count,
-                        skip_count: record.skip_count,
-                        last_played_at: record.last_played_at,
-                        title: record.title,
-                        artist: record.artist,
-                        album: record.album,
+                    &PlaysValue {
+                        plays: count.plays,
+                        skips: count.skips,
+                        last_played_at: count.last_played_at,
                     },
                 )
             })
@@ -1723,35 +1748,36 @@ impl Records {
                     .await
                     .map_err(string_error)
             }
-            "legacy" => {
-                let mut records = Vec::new();
-                for row in live {
-                    let value: LegacyValue = decode(row)?;
-                    let (source_id, period, item_kind, track_object_id) =
-                        legacy_key(&object(row, "legacy:")?)?;
-                    records.push(library::LegacyActivityRecord {
-                        source_id,
+            "plays" => {
+                let keys = rows
+                    .iter()
+                    .map(|row| plays_key(&object(row, "plays:")?))
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self
+                    .local(&keys.iter().map(|(_, uri)| uri.clone()).collect::<Vec<_>>())
+                    .await?;
+                let (mut counts, mut gone) = (Vec::new(), Vec::new());
+                for (row, (period, uri)) in rows.iter().zip(keys) {
+                    let uri = local.get(&uri).cloned().unwrap_or(uri);
+                    if row.deleted {
+                        gone.push((uri, period));
+                        continue;
+                    }
+                    let value: PlaysValue = decode(row)?;
+                    counts.push(library::PlayCount {
+                        media_uri: uri,
                         period,
-                        item_kind,
-                        track_object_id,
-                        play_count: value.play_count,
-                        skip_count: value.skip_count,
+                        plays: value.plays,
+                        skips: value.skips,
                         last_played_at: value.last_played_at,
-                        title: value.title,
-                        artist: value.artist,
-                        album: value.album,
                     });
                 }
                 catalog
-                    .put_legacy_activity(&records)
+                    .put_play_counts(&counts)
                     .await
                     .map_err(string_error)?;
-                let keys = gone("legacy:")
-                    .iter()
-                    .map(|key| legacy_key(key))
-                    .collect::<Result<Vec<_>, String>>()?;
                 catalog
-                    .delete_legacy_activity(&keys)
+                    .delete_play_counts(&gone)
                     .await
                     .map_err(string_error)
             }
@@ -2188,14 +2214,11 @@ fn unhex(text: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-fn legacy_key(key: &str) -> Result<library::LegacyActivityKey, String> {
-    let mut parts = key.splitn(4, '/').map(str::to_owned);
-    match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(source), Some(period), Some(kind), Some(object)) => {
-            Ok((source, period, kind, object))
-        }
-        _ => Err(format!("Invalid activity key {key}")),
-    }
+/// The period and URI of a play count's record id without its kind.
+fn plays_key(key: &str) -> Result<(String, String), String> {
+    key.split_once(':')
+        .map(|(period, uri)| (period.to_owned(), uri.to_owned()))
+        .ok_or_else(|| format!("Invalid play count key {key}"))
 }
 
 fn source_value(

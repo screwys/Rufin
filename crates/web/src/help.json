@@ -79,6 +79,8 @@
     "POST /api/preferences": "Change a preference with {operation:set,path:JSON pointer from GET /api/preferences,value}, a sidebar entry with {operation:route,item,visible?,delta?} a Home block with {operation:home_block,block,visible?,delta?} or a theme with {operation:theme,theme:preference,accent?}, where accent picks one of a named theme's own accents. Delta moves the entry. Returns what GET returns.",
     "GET /api/preferences/storage": "Read cached data sizes as {total_bytes,errors,caches:[{kind:waveforms|loudness|fingerprints|metadata_lookups|artwork|lyrics|japanese_dictionary,entries,bytes}]}.",
     "POST /api/preferences/storage": "Clear one cache with {kind}. Returns the sizes afterwards.",
+    "GET /api/activity/export?format=&source=": "Download the listening history as lastfm or listenbrainz CSV or Rufin jsonl, for every source or one source id.",
+    "POST /api/activity/import": "Import the file in the request body: a ListenBrainz export, a Last.fm or Rufin export, or a CSV of play counts. Returns {message}.",
     "POST /api/metadata": "Open a metadata editor for {kind:track|album|artist,uri}, for a page's selected rows {page,ranges} or for tracks {uris}. An album or artist on a file source edits its tracks together. Returns the editor {id,fields:[{key,label,kind,value,writable,mixed,changed,original,mixed_label}],locked,lock_writable,has_changes,track_count,...}; the editor keeps its changes until saved or closed.",
     "PATCH /api/metadata?id=": "Change the editor's draft with {operation:set,key,value}, {operation:reset,key} or {operation:lock,locked}. Returns the editor.",
     "DELETE /api/metadata?id=": "Close an editor without saving.",

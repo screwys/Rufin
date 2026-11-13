@@ -9,8 +9,8 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::raw_sql("UPDATE sources SET kind='subsonic';
-      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
+      INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
+      SELECT media_uri,'lifetime',CASE object_id WHEN 'track-0' THEN 7 ELSE 99 END,0,CASE object_id WHEN 'track-0' THEN 100 ELSE 900 END FROM tracks WHERE object_id IN('track-0','track-1');
       UPDATE tracks SET native_play_count=3,native_last_played=200 WHERE object_id='track-1';")
         .execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;

@@ -49,7 +49,7 @@ fn library_sources_page(
         library_page: adw::PreferencesPage,
         activity_source: gtk::MenuButton,
         listenbrainz: gtk::ToggleButton, jsonl: gtk::ToggleButton,
-        activity_export: gtk::Button,
+        activity_export: gtk::Button, activity_import: gtk::Button,
         servers_group: adw::PreferencesGroup,
         empty_remote_row: adw::ActionRow,
         local_source_row: adw::ActionRow, add_source: gtk::Button,
@@ -226,14 +226,14 @@ fn library_sources_page(
     activity_export.connect_clicked(move |_| {
         if let Some(shell) = weak.upgrade() {
             let format = if jsonl.upgrade().is_some_and(|button| button.is_active()) {
-                None
+                library::ActivityExportFormat::Jsonl
             } else if listenbrainz
                 .upgrade()
                 .is_some_and(|button| button.is_active())
             {
-                Some(library::ActivityCsvFormat::ListenBrainz)
+                library::ActivityExportFormat::ListenBrainz
             } else {
-                Some(library::ActivityCsvFormat::LastFm)
+                library::ActivityExportFormat::LastFm
             };
             let source = activity_scope
                 .upgrade()
@@ -241,6 +241,12 @@ fn library_sources_page(
                 .and_then(|index| sources.get(index as usize))
                 .map(|source| source.id.clone());
             shell.export_activity_dialog(format, source);
+        }
+    });
+    let weak = Rc::downgrade(shell);
+    activity_import.connect_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            shell.import_activity_dialog();
         }
     });
     library_page

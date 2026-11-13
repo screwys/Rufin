@@ -23,7 +23,7 @@ impl StateGroups {
             ("user-state.jsonl", self.favorites),
             ("local-locators.jsonl", self.local_imports),
             ("activity.jsonl", self.activity),
-            ("legacy-activity.jsonl", self.activity),
+            ("play-counts.jsonl", self.activity),
             ("queue.jsonl", self.queue),
         ]
         .into_iter()
@@ -104,8 +104,8 @@ impl Catalog {
             let mut output = private_file(&directory.join("activity.jsonl"))?;
             crate::activity::export_activity_jsonl_on(&mut transaction, &mut output, None).await?;
             output.flush()?;
-            let mut output = private_file(&directory.join("legacy-activity.jsonl"))?;
-            crate::activity::export_legacy_activity_jsonl_on(&mut transaction, &mut output).await?;
+            let mut output = private_file(&directory.join("play-counts.jsonl"))?;
+            crate::activity::export_play_counts_jsonl_on(&mut transaction, &mut output).await?;
             output.flush()?;
         }
         if contents.local_imports {
@@ -177,15 +177,24 @@ impl Catalog {
         }
         if contents.activity {
             let activity =
-                crate::activity::import_activity_jsonl_on(&mut write, open("activity.jsonl")?)
+                crate::activity::restore_listens_jsonl_on(&mut write, open("activity.jsonl")?)
                     .await?;
             report.listens = activity.accepted;
             report.skipped_listens = activity.skipped;
-            crate::activity::import_legacy_activity_jsonl_on(
-                &mut write,
-                open("legacy-activity.jsonl")?,
-            )
-            .await?;
+            // Backups of 0.17 and earlier keep their counts by source and object id.
+            if directory.join("play-counts.jsonl").exists() {
+                crate::activity::restore_play_counts_jsonl_on(
+                    &mut write,
+                    open("play-counts.jsonl")?,
+                )
+                .await?;
+            } else {
+                crate::activity::import_released_counts_jsonl_on(
+                    &mut write,
+                    open("legacy-activity.jsonl")?,
+                )
+                .await?;
+            }
         }
         if contents.local_imports {
             report.local_locators = crate::local::import_local_locators_jsonl_on(
@@ -231,7 +240,7 @@ async fn clear_groups(
         .await?;
     }
     if contents.activity {
-        sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
+        sqlx::raw_sql("DELETE FROM listens;DELETE FROM play_counts;")
             .execute(&mut *connection)
             .await?;
     }

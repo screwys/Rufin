@@ -3,6 +3,7 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
+mod activity;
 mod browser;
 mod catalog;
 mod connect;
@@ -180,6 +181,7 @@ fn routes() -> Router<ProductHandles> {
         .merge(connect::routes())
         .merge(equalizer::routes())
         .merge(preferences::routes())
+        .merge(activity::routes())
         .merge(metadata::routes())
         .merge(smart_playlists::routes())
 }

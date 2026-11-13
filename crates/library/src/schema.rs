@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 60;
+pub(crate) const STORE_VERSION: i64 = 61;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 60;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 61;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -308,14 +308,16 @@ CREATE TABLE listen_outbox (
 CREATE INDEX listen_outbox_due_idx ON listen_outbox(next_attempt_at, outbox_key)
     WHERE next_attempt_at IS NOT NULL;
 
--- Counts carried over from 0.15 and 0.16, with their own display copy.
-CREATE TABLE legacy_activity (
-    source_id TEXT NOT NULL, period TEXT NOT NULL, item_kind TEXT NOT NULL,
-    track_object_id TEXT NOT NULL, play_count INTEGER NOT NULL, skip_count INTEGER NOT NULL,
+-- Plays counted outside Rufin's listens, added to them: totals released versions kept and
+-- counts imported from other players. A period is 'lifetime' or a YYYY-MM month.
+CREATE TABLE play_counts (
+    media_uri TEXT NOT NULL CHECK (media_uri <> ''),
+    period TEXT NOT NULL,
+    plays INTEGER NOT NULL CHECK (plays >= 0),
+    skips INTEGER NOT NULL DEFAULT 0 CHECK (skips >= 0),
     last_played_at INTEGER,
-    title TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(source_id,period,item_kind,track_object_id)
-) STRICT;
+    PRIMARY KEY(media_uri, period)
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE playlist_folders (
     folder_key INTEGER PRIMARY KEY,

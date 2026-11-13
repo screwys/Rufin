@@ -4321,6 +4321,8 @@ dependencies = [
  "blake3",
  "bytemuck",
  "chrono",
+ "csv",
+ "flate2",
  "futures-executor",
  "futures-util",
  "libsqlite3-sys",
@@ -4341,6 +4343,7 @@ dependencies = [
  "unicode-normalization",
  "uniffi",
  "url",
+ "zip",
 ]
 
 [[package]]

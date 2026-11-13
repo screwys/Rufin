@@ -238,7 +238,7 @@ impl Shell {
 
     pub(crate) fn export_activity_dialog(
         self: &Rc<Self>,
-        format: Option<library::ActivityCsvFormat>,
+        format: library::ActivityExportFormat,
         source_id: Option<sources::SourceId>,
     ) {
         let shell = Rc::clone(self);
@@ -249,10 +249,9 @@ impl Shell {
                 resource,
                 "activity_chooser",
             );
-            dialog.set_initial_name(Some(if format.is_some() {
-                "activity.csv"
-            } else {
-                "activity.jsonl"
+            dialog.set_initial_name(Some(match format {
+                library::ActivityExportFormat::Jsonl => "activity.jsonl",
+                _ => "activity.csv",
             }));
             let Ok(file) = dialog.save_future(Some(&shell.chrome.window)).await else {
                 return;
@@ -263,27 +262,52 @@ impl Shell {
             let catalog = Arc::clone(&shell.products.library);
             let task = shell.products.runtime.spawn(async move {
                 let mut output = std::io::BufWriter::new(std::fs::File::create(path)?);
-                let count = match format {
-                    Some(format) => {
-                        catalog
-                            .export_activity_csv(&mut output, format, source_id.as_ref())
-                            .await
-                    }
-                    None => {
-                        catalog
-                            .export_activity_jsonl(&mut output, source_id.as_ref())
-                            .await
-                    }
-                }?;
+                let count = catalog
+                    .export_activity(&mut output, format, source_id.as_ref())
+                    .await?;
                 output.flush()?;
                 Ok::<_, library::LibraryError>(count)
             });
             if let Ok(Err(error)) = task.await {
                 shell
-                    .chrome
-                    .toast_overlay
-                    .add_toast(adw::Toast::new(&error.to_string()));
+                    .control_feedback
+                    .show_feedback_toast(error.to_string());
             }
+        });
+    }
+
+    /// Imports listens and play counts from a file, then says what it did.
+    pub(crate) fn import_activity_dialog(self: &Rc<Self>) {
+        let shell = Rc::clone(self);
+        glib::spawn_future_local(async move {
+            let resource = "preferences/dialogs/backup.ui";
+            let dialog: gtk::FileDialog = crate::ui_resource::object(
+                &crate::ui_resource::builder(resource),
+                resource,
+                "activity_import_chooser",
+            );
+            let Ok(file) = dialog.open_future(Some(&shell.chrome.window)).await else {
+                return;
+            };
+            let Some(path) = file.path() else {
+                return;
+            };
+            shell
+                .control_feedback
+                .show_working(localization::tr("Matching tracks…"));
+            let catalog = Arc::clone(&shell.products.library);
+            let task = shell.products.runtime.spawn(async move {
+                let input = std::fs::read(&path)?;
+                catalog
+                    .import_activity(&input, Some(&library::playlist_base(&path)))
+                    .await
+            });
+            let message = match task.await {
+                Ok(Ok(report)) => rufin_core::backup::activity_import_summary(&report),
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => return,
+            };
+            shell.control_feedback.show_feedback_toast(message);
         });
     }
 }
