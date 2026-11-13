@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 17:44+0000\n"
+"PO-Revision-Date: 2026-11-12 16:44+0000\n"
 "Last-Translator: Александр Стельмах "
 "<aguhadug@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
@@ -398,9 +398,6 @@ msgstr "Активность"
 msgid "Add Manually"
 msgstr "Добавить вручную"
 
-msgid "Add Rule"
-msgstr "Добавить правило"
-
 msgid "Add Source"
 msgstr "Добавить источник"
 
@@ -431,11 +428,21 @@ msgstr "Добавить текущий"
 msgid "Add folder"
 msgstr "Добавить папку"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Add group"
+msgstr "Добавить источник"
+
 msgid "Add image"
 msgstr "Добавить изображение"
 
 msgid "Add music"
 msgstr "Добавить музыку"
+
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add rule"
+msgstr "Добавить правило"
 
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
@@ -523,7 +530,7 @@ msgid "Allow downloading"
 msgstr "Разрешить загрузку"
 
 msgid "Allow permanently deleting tracks"
-msgstr ""
+msgstr "Разрешить безвозвратное удаление треков"
 
 msgid "Allow remote connections"
 msgstr "Разрешить удалённые подключения"
@@ -546,10 +553,8 @@ msgstr "Любой жанр"
 msgid "Any"
 msgstr "Любой"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "App icon"
-msgstr "Настройки приложения"
+msgstr "Иконка приложения"
 
 msgid "App settings"
 msgstr "Настройки приложения"
@@ -565,9 +570,6 @@ msgstr "Название приложения"
 
 msgid "Applies to sidebar and fullscreen separately"
 msgstr "Применяется отдельно к боковой панели и полноэкранному режиму"
-
-msgid "Apply Template"
-msgstr "Применить шаблон"
 
 msgid "Apply"
 msgstr "Применить"
@@ -623,6 +625,11 @@ msgstr "Хранилище обложек"
 
 msgid "Artwork"
 msgstr "Обложка"
+
+#, fuzzy
+#| msgid "Descending"
+msgid "Ascending"
+msgstr "По убыванию"
 
 msgid "Audio effects"
 msgstr "Звуковые эффекты"
@@ -991,10 +998,8 @@ msgstr "Коллекции"
 msgid "Color for the active word during playback"
 msgstr "Цвет для активного слова во время воспроизведения"
 
-#, fuzzy
-#| msgid "Color scheme"
 msgid "Colored"
-msgstr "Цветовая схема"
+msgstr "Цветной"
 
 msgid "Column borders"
 msgstr "Границы столбцов"
@@ -1298,10 +1303,8 @@ msgstr "Правая боковая панель по умолчанию"
 msgid "Default"
 msgstr "По умолчанию"
 
-#, fuzzy
-#| msgid "Delete preset"
 msgid "Delete Permanently?"
-msgstr "Удалить пресет"
+msgstr "Удалить безвозвратно?"
 
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
@@ -1313,10 +1316,8 @@ msgstr "Удалить \"{name}\"?"
 msgid "Delete folder"
 msgstr "Удалить папку"
 
-#, fuzzy
-#| msgid "Delete preset"
 msgid "Delete permanently"
-msgstr "Удалить пресет"
+msgstr "Удалить безвозвратно"
 
 msgid "Delete playlist file"
 msgstr "Удалить файл плейлиста"
@@ -1368,9 +1369,6 @@ msgstr "Журнал диагностики"
 
 msgid "Direct"
 msgstr "Прямой"
-
-msgid "Direction"
-msgstr "Направление"
 
 msgid "Disable private mode"
 msgstr "Отключить приватный режим"
@@ -2044,6 +2042,11 @@ msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Импортирует файлы в библиотеку и отслеживает изменения в добавленных папках."
 
+#, fuzzy
+#| msgid "New playlist"
+msgid "In playlist"
+msgstr "Новый плейлист"
+
 msgid "Inactive at this sample rate"
 msgstr "Неактивно при данной частоте дискретизации"
 
@@ -2362,6 +2365,11 @@ msgstr "Сопоставленный локальный путь"
 msgid "March {year}"
 msgstr "Март {year}"
 
+#, fuzzy
+#| msgid "Matched"
+msgid "Match"
+msgstr "Соответствие"
+
 msgid "Matched"
 msgstr "Соответствие"
 
@@ -2462,15 +2470,6 @@ msgstr "Другие действия"
 
 msgid "More"
 msgstr "Дополнительно"
-
-msgid "Most Played (Monthly)"
-msgstr "Самые воспроизводимые (За месяц)"
-
-msgid "Most Played (Weekly)"
-msgstr "Самые воспроизводимые (За неделю)"
-
-msgid "Most Played (Yearly)"
-msgstr "Самые воспроизводимые (За год)"
 
 msgid "Most Played"
 msgstr "Самые воспроизводимые"
@@ -2598,6 +2597,11 @@ msgstr ""
 "на устройства для трансляции"
 
 msgid "Never Played"
+msgstr "Ни разу не воспроизводилось"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "Never played"
 msgstr "Ни разу не воспроизводилось"
 
 msgid "New Playlist"
@@ -2911,6 +2915,9 @@ msgstr "Параметры"
 msgid "Orange"
 msgstr "Оранжевый"
 
+msgid "Order"
+msgstr ""
+
 msgid "Original audio"
 msgstr "Оригинальное аудио"
 
@@ -2991,9 +2998,6 @@ msgstr "Воспринимаемая"
 
 msgid "Performer"
 msgstr "Исполнитель"
-
-msgid "Period"
-msgstr "Период"
 
 msgid "Pink"
 msgstr "Розовый"
@@ -3120,6 +3124,11 @@ msgstr "Плейлист"
 
 msgid "Playlists"
 msgstr "Плейлисты"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Plays from"
+msgstr "Воспроизведение с"
 
 msgid "Plays"
 msgstr "Прослушано раз"
@@ -3258,6 +3267,9 @@ msgstr "Выход"
 msgid "Radio"
 msgstr "Радио"
 
+msgid "Random"
+msgstr ""
+
 msgid "Range selection"
 msgstr "Выбор диапазона"
 
@@ -3275,6 +3287,11 @@ msgstr "Получение профиля"
 
 msgid "Recent searches"
 msgstr "Недавние поиски"
+
+#, fuzzy
+#| msgid "Recently played"
+msgid "Recently added"
+msgstr "Недавно прослушанные"
 
 msgid "Recently played"
 msgstr "Недавно прослушанные"
@@ -3410,6 +3427,11 @@ msgstr "Удалить из сохраненного"
 
 msgid "Remove from folder"
 msgstr "Удалить из папки"
+
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove group"
+msgstr "Удалить правило"
 
 msgid "Remove rule"
 msgstr "Удалить правило"
@@ -4022,9 +4044,6 @@ msgstr "Сортировать по имени"
 msgid "Sort title"
 msgstr "Сортировать по названию"
 
-msgid "Sort"
-msgstr "Сортировать"
-
 msgid "Source by position"
 msgstr "Источник по позиции"
 
@@ -4057,6 +4076,11 @@ msgstr "Спектр"
 
 msgid "Start Listening"
 msgstr "Начать воспроизведение"
+
+#, fuzzy
+#| msgid "Start"
+msgid "Start from"
+msgstr "Начать"
 
 msgid "Start minimized"
 msgstr "Запускать в свернутом виде"
@@ -4136,7 +4160,7 @@ msgid "Switching library..."
 msgstr "Переключение библиотеки…"
 
 msgid "Symbolic"
-msgstr ""
+msgstr "Символический"
 
 msgid "Sync folder"
 msgstr "Папка синхронизации"
@@ -4168,9 +4192,6 @@ msgstr "Цвет морской волны"
 msgid "Techno"
 msgstr "Техно"
 
-msgid "Template"
-msgstr "Шаблон"
-
 msgid "Test connection"
 msgstr "Проверить соединение"
 
@@ -4187,7 +4208,7 @@ msgid "The connection no longer exists"
 msgstr "Соединение больше не существует"
 
 msgid "The files are deleted where they are stored. This cannot be undone."
-msgstr ""
+msgstr "Файлы удаляются из места их хранения. Это действие нельзя отменить."
 
 msgid "TheAudioDB album ID"
 msgstr "Идентификатор альбома TheAudioDB"
@@ -4306,10 +4327,8 @@ msgstr "Режим перехода"
 msgid "Translation language"
 msgstr "Язык перевода"
 
-#, fuzzy
-#| msgid "Show tray icon"
 msgid "Tray icon"
-msgstr "Показывать значок в системном трее"
+msgstr "Иконка в трее"
 
 msgid "Treble"
 msgstr "Высокие частоты"
@@ -4608,6 +4627,16 @@ msgstr "выше"
 msgid "after"
 msgstr "после"
 
+#, fuzzy
+#| msgid "Small"
+msgid "all"
+msgstr "Маленький"
+
+#, fuzzy
+#| msgid "Any"
+msgid "any"
+msgstr "Любой"
+
 msgid "before"
 msgstr "до"
 
@@ -4616,6 +4645,9 @@ msgstr "ниже"
 
 msgid "contains"
 msgstr "содержит"
+
+msgid "days"
+msgstr ""
 
 msgid "does not contain"
 msgstr "не содержит"
@@ -4632,6 +4664,11 @@ msgstr "исключает"
 msgid "here"
 msgstr "здесь"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "in the last"
+msgstr "Завершить последний трек"
+
 msgid "is empty"
 msgstr "пуст"
 
@@ -4646,6 +4683,19 @@ msgstr "является"
 
 msgid "kbps"
 msgstr "кбит/с"
+
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "not in the last"
+msgstr "Завершить последний трек"
+
+msgid "of these rules"
+msgstr ""
+
+#, fuzzy
+#| msgid "Import theme"
+msgid "of these"
+msgstr "Импортировать тему"
 
 msgid "range"
 msgstr "диапазон"
@@ -4832,6 +4882,30 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Apply Template"
+#~ msgstr "Применить шаблон"
+
+#~ msgid "Direction"
+#~ msgstr "Направление"
+
+#~ msgid "Most Played (Monthly)"
+#~ msgstr "Самые воспроизводимые (За месяц)"
+
+#~ msgid "Most Played (Weekly)"
+#~ msgstr "Самые воспроизводимые (За неделю)"
+
+#~ msgid "Most Played (Yearly)"
+#~ msgstr "Самые воспроизводимые (За год)"
+
+#~ msgid "Period"
+#~ msgstr "Период"
+
+#~ msgid "Sort"
+#~ msgstr "Сортировать"
+
+#~ msgid "Template"
+#~ msgstr "Шаблон"
 
 #, fuzzy
 #~| msgid "Guest / public access"
