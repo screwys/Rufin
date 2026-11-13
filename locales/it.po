@@ -563,9 +563,6 @@ msgstr "Impostazioni dell'app"
 msgid "Appearance"
 msgstr "Aspetto"
 
-msgid "Appears On"
-msgstr "Compare In"
-
 msgid "Application name"
 msgstr "Nome dell'applicazione"
 
@@ -1465,6 +1462,12 @@ msgstr "Cancella"
 msgid "Delivery"
 msgstr ""
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Discendente"
 
@@ -1630,6 +1633,11 @@ msgstr "Scaricando"
 
 msgid "Downloads"
 msgstr "Scaricamenti"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Trascina per riordinare"
 
 msgid "Drag to reorder"
 msgstr "Trascina per riordinare"
@@ -2433,6 +2441,9 @@ msgstr "Connettendo a {device}..."
 #| msgid "Connecting to {device}..."
 msgid "Listening"
 msgstr "Connettendo a {device}..."
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr ""
@@ -3607,6 +3618,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr ""
 
@@ -3985,6 +4002,9 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
+msgid "Secondary release types"
+msgstr ""
+
 msgid "Secret storage"
 msgstr ""
 
@@ -4025,9 +4045,6 @@ msgid "Select all"
 msgstr ""
 
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"
@@ -4304,6 +4321,16 @@ msgstr "Nome dell'artista"
 
 msgid "Sort title"
 msgstr ""
+
+#, fuzzy
+#| msgid "All tracks"
+msgid "Soundtrack"
+msgstr "Tutte le Tracce"
+
+#, fuzzy
+#| msgid "All tracks"
+msgid "Soundtracks"
+msgstr "Tutte le Tracce"
 
 msgid "Source by position"
 msgstr ""
@@ -5166,6 +5193,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Appears On"
+#~ msgstr "Compare In"
 
 #~ msgid "Apply Template"
 #~ msgstr "Applica Template"

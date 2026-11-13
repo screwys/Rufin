@@ -537,9 +537,6 @@ msgstr "Sovelluksen asetukset"
 msgid "Appearance"
 msgstr "Ulkoasu"
 
-msgid "Appears On"
-msgstr ""
-
 msgid "Application name"
 msgstr "Sovelluksen nimi"
 
@@ -1471,6 +1468,12 @@ msgstr "Poista"
 msgid "Delivery"
 msgstr ""
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Laskevasti"
 
@@ -1642,6 +1645,11 @@ msgstr "Ladataan"
 
 msgid "Downloads"
 msgstr "Lataukset"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Vedä järjestääksesi uudelleen"
 
 msgid "Drag to reorder"
 msgstr "Vedä järjestääksesi uudelleen"
@@ -2497,6 +2505,9 @@ msgstr "Haetaan laitteita..."
 #| msgid "ListenBrainz"
 msgid "Listening"
 msgstr "ListenBrainz"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr ""
@@ -3796,6 +3807,12 @@ msgstr "Lataa uudelleen toteuttaaksesi muutokset"
 msgid "Reload"
 msgstr "Lataa uudelleen"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Etäsanoitukset"
 
@@ -4214,6 +4231,11 @@ msgstr "Haku käynnistyy automaattisesti"
 msgid "Searching..."
 msgstr "Haetaan..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Avaa julkaisutiedot"
+
 msgid "Secret storage"
 msgstr "Salaisuuden tallennustila"
 
@@ -4257,11 +4279,6 @@ msgstr "Valitse kaikki"
 #| msgid "Select All"
 msgid "Select {title}"
 msgstr "Valitse kaikki"
-
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Valinta"
 
 msgid "Selected folders"
 msgstr "Valitut kansiot"
@@ -4566,6 +4583,17 @@ msgstr "Esittäjän nimi"
 
 msgid "Sort title"
 msgstr ""
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} kappale"
+
+#, fuzzy
+#| msgid "Tracks"
+msgid "Soundtracks"
+msgstr "Kappaleet"
 
 msgid "Source by position"
 msgstr ""
@@ -5512,6 +5540,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Valinta"
 
 #~ msgid "Apply Template"
 #~ msgstr "Toteuta mallipohja"

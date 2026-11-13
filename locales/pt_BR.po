@@ -562,9 +562,6 @@ msgstr "Configurações do app"
 msgid "Appearance"
 msgstr "Aparência"
 
-msgid "Appears On"
-msgstr "Aparece em"
-
 msgid "Application name"
 msgstr "Nome do aplicativo"
 
@@ -1343,6 +1340,12 @@ msgstr "Excluir"
 msgid "Delivery"
 msgstr "Entrega"
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Decrescente"
 
@@ -1488,6 +1491,11 @@ msgstr "Baixando"
 
 msgid "Downloads"
 msgstr "Downloads"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Arraste para reordenar"
 
 msgid "Drag to reorder"
 msgstr "Arraste para reordenar"
@@ -2254,6 +2262,9 @@ msgstr "Visão geral de audição"
 
 msgid "Listening"
 msgstr "Ouvindo"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Carregar conteúdo do arquivo"
@@ -3422,6 +3433,12 @@ msgstr "Recarregar para aplicar alterações"
 msgid "Reload"
 msgstr "Recarregar"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Letras remotas"
 
@@ -3789,6 +3806,11 @@ msgstr "A pesquisa começará automaticamente"
 msgid "Searching..."
 msgstr "Pesquisando..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Abrir notas de lançamento"
+
 msgid "Secret storage"
 msgstr "Armazenamento secreto"
 
@@ -3830,11 +3852,6 @@ msgstr "Selecionar tudo"
 
 msgid "Select {title}"
 msgstr "Selecionar {title}"
-
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Seleção"
 
 msgid "Selected folders"
 msgstr "Pastas selecionadas"
@@ -4109,6 +4126,17 @@ msgstr "Nome de ordenação"
 
 msgid "Sort title"
 msgstr "Título de ordenação"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} faixa"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Faixas por humor"
 
 msgid "Source by position"
 msgstr "Fonte por posição"
@@ -4970,6 +4998,14 @@ msgstr "A opção de atualização automática do {app_name} é inválida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bem-vindo à configuração do Rufin"
+
+#~ msgid "Appears On"
+#~ msgstr "Aparece em"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Seleção"
 
 #~ msgid "Apply Template"
 #~ msgstr "Aplicar modelo"
