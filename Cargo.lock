@@ -4330,7 +4330,7 @@ dependencies = [
  "percent-encoding",
  "process-memory",
  "proptest",
- "roxmltree 0.21.1",
+ "roxmltree 0.21.2",
  "rustix",
  "serde",
  "serde_json",
@@ -6130,7 +6130,7 @@ dependencies = [
  "mdns-sd",
  "playback",
  "reqwest 0.13.5",
- "roxmltree 0.21.1",
+ "roxmltree 0.21.2",
  "rustls",
  "socket2",
  "sources",
@@ -7026,9 +7026,9 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "roxmltree"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
 dependencies = [
  "memchr",
 ]
@@ -9155,7 +9155,7 @@ dependencies = [
  "proptest",
  "pulldown-cmark",
  "regex",
- "roxmltree 0.21.1",
+ "roxmltree 0.21.2",
  "rufin-core",
  "serde",
  "serde_json",
@@ -9434,7 +9434,7 @@ dependencies = [
  "kurbo",
  "log",
  "pico-args",
- "roxmltree 0.21.1",
+ "roxmltree 0.21.2",
  "simplecss",
  "siphasher",
  "skrifa",
@@ -10317,7 +10317,7 @@ dependencies = [
  "directories",
  "proc-macro2",
  "resvg",
- "roxmltree 0.21.1",
+ "roxmltree 0.21.2",
  "serde_json",
  "syn 3.0.6",
  "tempfile",
