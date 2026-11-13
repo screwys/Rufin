@@ -571,9 +571,6 @@ msgstr "Rakenduse seadistused"
 msgid "Appearance"
 msgstr "Välimus"
 
-msgid "Appears On"
-msgstr "Esineb"
-
 msgid "Application name"
 msgstr "Rakenduse nimi"
 
@@ -1354,6 +1351,12 @@ msgstr "Kustuta"
 msgid "Delivery"
 msgstr "Üleandmine"
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Järjesta kahanevalt"
 
@@ -1503,6 +1506,11 @@ msgstr "Allalaadimisel"
 
 msgid "Downloads"
 msgstr "Allalaadimised"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Järjekorra muutmiseks lohista"
 
 msgid "Drag to reorder"
 msgstr "Järjekorra muutmiseks lohista"
@@ -2272,6 +2280,9 @@ msgstr "Kuulamiste ülevaade"
 
 msgid "Listening"
 msgstr "Kuulan"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Laadi faili sisu"
@@ -3433,6 +3444,12 @@ msgstr "Muudatuste rakendamiseks laadi uuesti"
 msgid "Reload"
 msgstr "Laadi uuesti"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Laulusõnad kaugserverist"
 
@@ -3797,6 +3814,11 @@ msgstr "Otsing algab automaatselt"
 msgid "Searching..."
 msgstr "Otsin…"
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Vaata versiooniteavet"
+
 msgid "Secret storage"
 msgstr "Salajane salvestusruum"
 
@@ -3838,11 +3860,6 @@ msgstr "Vali kõik"
 
 msgid "Select {title}"
 msgstr "Vali {title}"
-
-#, fuzzy
-#| msgid "Selection"
-msgid "Select"
-msgstr "Valik"
 
 msgid "Selected folders"
 msgstr "Valitud muusikakaustad"
@@ -4117,6 +4134,17 @@ msgstr "Järjesta nime"
 
 msgid "Sort title"
 msgstr "Järjesta pealkirja alusel"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} lugu"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Meeleolu sättivad lood"
 
 msgid "Source by position"
 msgstr "Allikas asukoha alusel"
@@ -4986,6 +5014,14 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Appears On"
+#~ msgstr "Esineb"
+
+#, fuzzy
+#~| msgid "Selection"
+#~ msgid "Select"
+#~ msgstr "Valik"
 
 #~ msgid "Apply Template"
 #~ msgstr "Rakenda mall"

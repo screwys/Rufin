@@ -1376,11 +1376,10 @@ pub fn smart_playlist_display_name(object_id: &str, name: &str) -> String {
 pub async fn create_playlist_folder(
     owner: &SourceOwner,
     name: String,
-    smart: bool,
 ) -> sources::SourceResult<library::PlaylistFolderKey> {
     owner
         .reply(move |_, catalog| async move {
-            let key = catalog.create_playlist_folder(&name, smart).await?;
+            let key = catalog.create_playlist_folder(&name).await?;
             Ok::<_, SourceError>(key)
         })
         .recv()
@@ -1412,14 +1411,20 @@ pub async fn delete_playlist_folder(
     owner
         .reply(move |owner, catalog| async move {
             let folder = catalog.delete_playlist_folders(&[key]).await?.pop();
-            if let Some((folder_id, smart)) = folder {
+            if let Some(folder_id) = folder {
                 let settings = owner.shared.settings.clone();
                 tokio::task::spawn_blocking(move || {
                     settings.update(|stored| {
-                        stored.ui.sidebar.set_pinned(
-                            crate::settings::SidebarPin::PlaylistFolder { folder_id, smart },
-                            false,
-                        );
+                        // Pinned from either page.
+                        for smart in [false, true] {
+                            stored.ui.sidebar.set_pinned(
+                                crate::settings::SidebarPin::PlaylistFolder {
+                                    folder_id: folder_id.clone(),
+                                    smart,
+                                },
+                                false,
+                            );
+                        }
                         Ok(())
                     })
                 })
@@ -1435,14 +1440,34 @@ pub async fn delete_playlist_folder(
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
-pub async fn move_playlist_to_folder(
+pub async fn add_to_playlist_folder(
     owner: &SourceOwner,
-    member: library::PlaylistFolderMember,
+    members: Vec<library::PlaylistFolderMember>,
+    folder: library::PlaylistFolderKey,
+) -> sources::SourceResult<()> {
+    owner
+        .reply(move |_, catalog| async move {
+            catalog.add_to_playlist_folder(&members, folder).await?;
+            Ok::<_, SourceError>(())
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
+/// Takes playlists out of the folder whose page they are on, or out of every folder from
+/// another page.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn remove_from_playlist_folder(
+    owner: &SourceOwner,
+    members: Vec<library::PlaylistFolderMember>,
     folder: Option<library::PlaylistFolderKey>,
 ) -> sources::SourceResult<()> {
     owner
         .reply(move |_, catalog| async move {
-            catalog.move_playlist_to_folder(member, folder).await?;
+            catalog
+                .remove_from_playlist_folder(&members, folder)
+                .await?;
             Ok::<_, SourceError>(())
         })
         .recv()
@@ -1493,10 +1518,10 @@ pub async fn apply_smart_playlist_change(
                     let updated = catalog
                         .update_smart_playlist(key, &name, &definition, artwork)
                         .await?;
-                    if updated && folder.is_some() {
+                    if updated && let Some(folder) = folder {
                         catalog
-                            .move_playlist_to_folder(
-                                library::PlaylistFolderMember::SmartPlaylist { key },
+                            .add_to_playlist_folder(
+                                &[library::PlaylistFolderMember::SmartPlaylist { key }],
                                 folder,
                             )
                             .await?;

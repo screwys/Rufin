@@ -275,7 +275,6 @@ pub(crate) struct Album {
     pub(crate) facts: AlbumFacts,
     pub(crate) first_seen: Option<i64>,
     pub(crate) release_identity: Option<String>,
-    pub(crate) release_lookup_identity: Option<String>,
     pub(crate) state: NativeState,
     pub(crate) binding: Option<Vec<u8>>,
     /// Whether a source observed a header; the header itself is read by key.
@@ -300,7 +299,6 @@ impl Album {
             facts: AlbumFacts::default(),
             first_seen: None,
             release_identity: None,
-            release_lookup_identity: None,
             state: NativeState::default(),
             binding: None,
             input: false,

@@ -69,6 +69,7 @@ fn snapshot(id: u64, session: &Session) -> Value {
             "value": field.field.value,
             "writable": field.field.writable,
             "mixed": field.field.mixed,
+            "options": field.field.options,
             "changed": field.identified,
             "original": field.original_value,
             "mixed_label": field.mixed_label,

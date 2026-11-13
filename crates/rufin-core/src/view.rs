@@ -55,7 +55,7 @@ pub struct OpenOptions {
     pub downloaded_only: bool,
     /// The one source History lists; every source when `None`.
     pub history_source: Option<sources::SourceId>,
-    pub release_filters: Option<[String; 6]>,
+    pub release_filters: Option<[String; library::AlbumReleaseClass::COUNT]>,
     /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
     /// the page opened with; plays and syncs change them on the next visit.
     pub smart_opened: Option<i64>,
@@ -114,8 +114,8 @@ enum Body {
     /// artist's favorite tracks when the page shows them.
     Releases {
         read: ListRead,
-        counts: [usize; 6],
-        source_counts: [usize; 6],
+        counts: [usize; library::AlbumReleaseClass::COUNT],
+        source_counts: [usize; library::AlbumReleaseClass::COUNT],
         favorites: Option<(MemberRead, usize)>,
     },
     /// Child folders, then the folder's tracks. Cached child folders have a read; live ones
@@ -268,8 +268,7 @@ pub enum PlayTarget {
 }
 
 impl PlayTarget {
-    /// What `row` plays outside a page; None for a playlist folder, which its menu offers no
-    /// Play for, and for a child folder, which plays what its page's
+    /// What `row` plays outside a page; None for a child folder, which plays what its page's
     /// [`View::row_target`] gives.
     pub fn of_row(row: &Row) -> Option<Self> {
         match row {
@@ -277,7 +276,7 @@ impl PlayTarget {
             Row::Album(album) | Row::AlbumHeading(album) => Some(Self::of_album(album)),
             Row::Artist(artist) => Some(Self::of_artist(artist)),
             Row::Tag(tag) => Some(Self::of_tag(tag)),
-            Row::Playlist(playlist) => Self::of_playlist(playlist),
+            Row::Playlist(playlist) => Some(Self::of_playlist(playlist)),
             Row::Folder(_) => None,
         }
     }
@@ -308,12 +307,9 @@ impl PlayTarget {
         Self::Route(Route::of_tag(tag))
     }
 
-    /// What a playlist or smart playlist row plays: its page; None for a playlist folder.
-    pub fn of_playlist(row: &library::PlaylistListRow) -> Option<Self> {
-        match row {
-            library::PlaylistListRow::Folder(_) => None,
-            row => Some(Self::Route(Route::of_playlist(row))),
-        }
+    /// What a playlist, smart playlist or playlist folder row plays: its page.
+    pub fn of_playlist(row: &library::PlaylistListRow) -> Self {
+        Self::Route(Route::of_playlist(row))
     }
 }
 
@@ -737,7 +733,7 @@ impl SourceOwner {
                 (None, Plan::Rows(Read::List(list(ListKind::Moods))))
             }
             Route::Playlists | Route::PlaylistFolder { smart: false, .. } => {
-                (None, playlists(ListKind::Playlists))
+                (None, playlists(ListKind::Playlists { now }))
             }
             Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
                 (None, playlists(ListKind::SmartPlaylists { now }))
@@ -1642,7 +1638,12 @@ impl View {
     }
 
     /// An artist page's albums per release group: filtered, then unfiltered.
-    pub fn release_counts(&self) -> Option<([usize; 6], [usize; 6])> {
+    pub fn release_counts(
+        &self,
+    ) -> Option<(
+        [usize; library::AlbumReleaseClass::COUNT],
+        [usize; library::AlbumReleaseClass::COUNT],
+    )> {
         match &self.body {
             Body::Releases {
                 counts,
@@ -2220,28 +2221,33 @@ fn rows_selection(
     settings: &Settings,
     scope: SelectionScope,
 ) -> MemberSelection {
+    let smart_page = Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(0));
     let page = match read.kind {
         ListKind::Albums | ListKind::ArtistAlbums { .. } => Route::AlbumDetail(String::new()),
         ListKind::Artists { .. } => Route::ArtistTracks(String::new()),
         ListKind::Genres => Route::GenreDetail(library::GenreKey::from_raw(0)),
         ListKind::Moods => Route::MoodDetail(library::MoodKey::from_raw(0)),
-        ListKind::Playlists => Route::PlaylistDetail(library::PlaylistKey::from_raw(0)),
-        ListKind::SmartPlaylists { .. } => {
-            Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(0))
+        ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. } => {
+            Route::PlaylistDetail(library::PlaylistKey::from_raw(0))
         }
     };
     // Each row's page reads its collection, which takes the place of this one.
-    let members = member_read(
-        &page,
-        read.folder.filter(|_| scope.keeps_folder(&page)),
-        &OpenOptions::default(),
-        settings,
-        Collection::Album(library::AlbumKey::from_raw(0)),
-    );
+    let template = |page: &Route| {
+        Box::new(member_read(
+            page,
+            read.folder.filter(|_| scope.keeps_folder(page)),
+            &OpenOptions::default(),
+            settings,
+            Collection::Album(library::AlbumKey::from_raw(0)),
+        ))
+    };
+    // Playlist lists and their folders hold smart playlists too, which play as their page does.
+    let smart = read.kind.now().map(|_| template(&smart_page));
     MemberSelection::Parents {
+        members: template(&page),
+        smart,
         read,
         ranges,
-        members: Box::new(members),
     }
 }
 
@@ -2586,10 +2592,7 @@ fn release_query(
     settings: &Settings,
 ) -> ListRead {
     if let ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
-        *filters = options
-            .release_filters
-            .as_ref()
-            .map(|filters| Arc::new(std::array::from_fn(|index| filters[index].clone())));
+        *filters = options.release_filters.clone().map(Arc::new);
     }
     let releases = OpenOptions {
         category: CollectionCategory::Albums,

@@ -11,7 +11,8 @@ import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.shared.rufin_core.addPlaylistTracks
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
-import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
+import io.github.screwys.rufin.shared.rufin_core.addToPlaylistFolder
+import io.github.screwys.rufin.shared.rufin_core.removeFromPlaylistFolder
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
 import io.github.screwys.rufin.shared.library.RadioSeed
 import io.github.screwys.rufin.shared.library.MemberSelection
@@ -324,7 +325,8 @@ internal fun BrowseMenuSheet(
                     BrowseMenuAction("rufin-folders-symbolic", "Add to folder") { folderPicker = true }
                     if (inFolder && folderMember != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
                         val source = model.sourceOwner ?: return@runAction
-                        movePlaylistToFolder(source, folderMember, null)
+                        // On a folder's page it leaves that folder; elsewhere, every folder.
+                        removeFromPlaylistFolder(source, listOf(folderMember), (browse.current?.route as? Route.PlaylistFolder)?.key)
                         onDismiss()
                     } }
                 }
@@ -372,9 +374,9 @@ internal fun BrowseMenuSheet(
         navigation = false; onDismiss(); onNavigate(route, title, source)
     }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
-        folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
+        folderMembers = listOfNotNull(folderMember)) { folderPicker = false; onDismiss() }
     if (rename) {
-        if (playlistFolder != null) PlaylistFolderNameDialog(model, playlistFolder.smart,
+        if (playlistFolder != null) PlaylistFolderNameDialog(model,
             { rename = false; onDismiss() }, playlistFolder)
         else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
         else browse.library?.let { library ->
@@ -566,8 +568,9 @@ internal fun BrowseMenuAction(icon: String, label: String, destructive: Boolean 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PlaylistPickerSheet(
-    model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection,
-    folderKind: Boolean? = null,
+    model: RufinConnection, browse: BrowseConnection, item: BrowseItem?, player: PlayerConnection,
+    /** The playlists to put in a folder, which makes it a folder picker. */
+    folderMembers: List<PlaylistFolderMember>? = null,
     /** The tracks to add instead of `item`'s: a Select mode's picked rows. */
     selectionOf: (() -> io.github.screwys.rufin.shared.library.MemberSelection?)? = null,
     onDismiss: () -> Unit,
@@ -576,22 +579,22 @@ internal fun PlaylistPickerSheet(
     var skipDuplicates by remember { mutableStateOf(true) }
     var create by remember { mutableStateOf(false) }
     val library = browse.library
-    val pages = remember(library, filter, folderKind) {
+    val pages = remember(library, filter, folderMembers) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderMembers) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (pages.loadState.refresh as? LoadState.Error)?.error ?: (pages.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text(translate(if (folderKind == null) "Add to Playlist" else "Add to folder"),
+        Text(translate(if (folderMembers == null) "Add to Playlist" else "Add to folder"),
             Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge)
-        BrowseMenuHeader(item, player)
-        OutlinedTextField(filter, { filter = it }, label = { Text(translate(if (folderKind == null) "Search playlists" else "Search")) }, singleLine = true,
+        item?.let { BrowseMenuHeader(it, player) }
+        OutlinedTextField(filter, { filter = it }, label = { Text(translate(if (folderMembers == null) "Search playlists" else "Search")) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp))
-        if (folderKind == null) ListItem(headlineContent = { Text(translate("Don't duplicate")) },
+        if (folderMembers == null) ListItem(headlineContent = { Text(translate("Don't duplicate")) },
             trailingContent = { Switch(skipDuplicates, { skipDuplicates = it }) })
-        BrowseMenuAction("rufin-list-add-symbolic", if (folderKind == null) "New Playlist" else "New folder") { create = true }
+        BrowseMenuAction("rufin-list-add-symbolic", if (folderMembers == null) "New Playlist" else "New folder") { create = true }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (pages.itemCount == 0 && pages.loadState.refresh is LoadState.NotLoading) item {
                 BrowseEmptyState(filter.isNotBlank()) { filter = "" }
@@ -607,13 +610,12 @@ internal fun PlaylistPickerSheet(
                         leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(CoverShape)) },
                         modifier = Modifier.clickable {
                         model.runAction {
-                            if (folderKind != null) {
+                            if (folderMembers != null) {
                                 val source = model.sourceOwner ?: return@runAction
-                                movePlaylistToFolder(source, item.row.playlistFolderMember!!,
-                                    playlist.playlistFolder!!.folderKey)
+                                addToPlaylistFolder(source, folderMembers, playlist.playlistFolder!!.folderKey)
                             } else playlist.route?.let { destination ->
                                 browse.library?.let { library ->
-                                    (selectionOf?.invoke() ?: playlistSelection(library, item)).use { selection ->
+                                    (selectionOf?.invoke() ?: playlistSelection(library, item!!)).use { selection ->
                                         model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                                             addPlaylistTracks(source, (destination as Route.PlaylistDetail).v1, selection, skipDuplicates)
                                         }
@@ -633,13 +635,13 @@ internal fun PlaylistPickerSheet(
             } }
         }
     }
-    if (create && folderKind != null) PlaylistFolderNameDialog(model, folderKind, {
+    if (create && folderMembers != null) PlaylistFolderNameDialog(model, {
         create = false
         pages.refresh()
     })
-    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
+    if (create && folderMembers == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
         browse.library?.let { library ->
-            (selectionOf?.invoke() ?: playlistSelection(library, item)).use { selection ->
+            (selectionOf?.invoke() ?: playlistSelection(library, item!!)).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                     createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) }
                 }
@@ -697,7 +699,7 @@ internal fun PlaylistCreateSheet(
 
 internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
-    private val folderKind: Boolean? = null,
+    private val folderMembers: List<PlaylistFolderMember>? = null,
 ) : PagingSource<Int, BrowseItem>() {
     /** The page it lists, opened once for the filter it reads. */
     private var opened: AndroidOpened? = null
@@ -711,7 +713,7 @@ internal class BrowseChoiceSource(
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
                 if (route == Route.Playlists) {
-                    val page = library.playlistChoices(filter, folderKind, offset.toULong(), params.loadSize.toUInt())
+                    val page = library.playlistChoices(filter, folderMembers, offset.toULong(), params.loadSize.toUInt())
                     val count = page.count.toInt()
                     val rows = page.rows
                     return@withContext LoadResult.Page(items(rows),

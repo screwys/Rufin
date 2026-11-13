@@ -264,6 +264,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val playlistFolder = browse.current?.route as? Route.PlaylistFolder
     val playlistList = browse.current?.route.let { it is Route.Playlists || it is Route.SmartPlaylists || it is Route.PlaylistFolder }
     val smartPlaylistList = playlistFolder?.smart ?: (browse.current?.route is Route.SmartPlaylists)
+    val select = remember { SelectMode() }
     val context = LocalContext.current
     val importTheme = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(preferences::importTheme) }
     val importPlaylist = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -279,7 +280,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     val imported = browse.library?.importPlaylist(uri.toString()) ?: return@forEach
                     playlistFolder?.let { folder ->
                         imported.row.playlistFolderMember?.let { member ->
-                            model.sourceOwner?.let { movePlaylistToFolder(it, member, folder.key) }
+                            model.sourceOwner?.let { addToPlaylistFolder(it, listOf(member), folder.key) }
                         }
                     }
                     browse.open(BrowseItem(imported.row, 0UL, null))
@@ -485,7 +486,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         val split = paneWidth >= 556.dp && configuration.screenHeightDp >= 480 && browse.section == AppSection.Browse &&
             rootRoute?.route?.listsPages == true && (rootPage?.options?.displaySettings ?: rootPage?.displaySettings)?.gridPicked != true
         SideEffect { splitShown = split }
-        CompositionLocalProvider(LocalPlayerBottomPadding provides dockHeight, LocalTinyScreen provides tiny) {
+        CompositionLocalProvider(LocalPlayerBottomPadding provides dockHeight, LocalTinyScreen provides tiny,
+            LocalSelectMode provides select) {
         // The route roots carry this bar, so it moves with its page instead of shifting the page beside it.
         val shellBar: @Composable () -> Unit = {
             ShellTopBar(browse, moreDestination, if (tabs) null else rootRoute?.title, searchExpanded, searchFocus, tabs, !split,
@@ -511,6 +513,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             if (playlistFolder == null) DropdownMenuItem(text = { Text(translate("New folder")) }, onClick = { createMenu = false; createFolder = true })
                         }
                     }
+                    PlayerIconButton("rufin-selection-mode-symbolic", "Select", { select.route = (if (split) rootPage else browse.visiblePage)?.location?.route })
                     if (!smartPlaylistList) PlayerIconButton("rufin-document-open-symbolic", "Import Playlist", {
                         importPlaylist.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
                             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
@@ -711,15 +714,15 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
             io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public)?.let { created ->
                 playlistFolder?.let { folder ->
-                    created.playlistKey?.let { key -> movePlaylistToFolder(source,
-                        io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(key), folder.key) }
+                    created.playlistKey?.let { key -> addToPlaylistFolder(source,
+                        listOf(io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(key)), folder.key) }
                 }
                 created.settingsError?.let { error(it) }
             }
         }
         createPlaylist = false
     }
-    if (createFolder) PlaylistFolderNameDialog(model, smartPlaylistList, { createFolder = false })
+    if (createFolder) PlaylistFolderNameDialog(model, { createFolder = false })
     if (createSmartPlaylist) SmartPlaylistEditor(model, browse, { createSmartPlaylist = false }, folder = playlistFolder?.key)
     metadata?.row?.metadataItem?.let { item -> MetadataEditorScreen(model, item) { metadata = null } }
     if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !random) {
@@ -958,6 +961,9 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
         if (state.finding) BackHandler(onBack = closeFind)
         OverlayBar(color, inset = barHeight > 56.dp, onBand = !state.finding && !plain && (!past || bandColor.value != null)) {
             if (!beside || depth > 1 || state.finding) PlayerIconButton("rufin-go-previous-symbolic", "Back", if (state.finding) closeFind else browse::back)
+            // A playlist and a smart playlist open their Select mode from beside Back.
+            if (!state.finding && (location.route is Route.PlaylistDetail && summary?.row?.playlist != null || location.route is Route.SmartPlaylistDetail))
+                LocalSelectMode.current.let { select -> PlayerIconButton("rufin-selection-mode-symbolic", "Select", { select.route = location.route }) }
             Box(Modifier.weight(1f)) {
                 if (state.finding) BasicTextField(browse.filter, { browse.filter = it }, Modifier.fillMaxWidth().focusRequester(focus),
                     singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = LocalContentColor.current),
@@ -979,6 +985,10 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
             // Customize as on other routes, and ⋯ opens the page's item menu; Find opens on a pull down.
             if (!state.finding) {
                 if (beside) PlayerIconButton("rufin-search-symbolic", "Search", { state.finding = true })
+                // A folder's Select sits with its list tools, as on the playlist lists.
+                if (location.route is Route.PlaylistFolder) LocalSelectMode.current.let { select ->
+                    PlayerIconButton("rufin-selection-mode-symbolic", "Select", { select.route = location.route })
+                }
                 if (page != null) PlayerIconButton("rufin-filter-symbolic", "Customize", { onCustomize(page) })
                 summary?.let { shown -> PlayerIconButton("rufin-view-more-symbolic", "More actions", { onMenu(BrowseItem(shown.row, 0UL, null)) }) }
                 trailing()
@@ -1137,6 +1147,9 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 onDownload = { browse.download(it, remove = it.row.downloaded) })
             return@Column
         }
+        val select = LocalSelectMode.current
+        if (select.route == location.route && location.route.let { it is Route.Playlists || it is Route.SmartPlaylists || it is Route.PlaylistFolder })
+            PlaylistListSelectMode(model, browse, page, rows, player) { select.route = null }
         if (choices.isNotEmpty()) SegmentedPill(choices.map { it.category }, options.category,
             { options.category = it; options.sort = null; options.displaySettings = null },
             Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp), scroll = rememberScrollState()) { category, _ ->

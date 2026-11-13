@@ -19,6 +19,7 @@ use rufin_core::metadata::{MetadataEditor, mixed_field_label};
 
 mod artwork;
 mod batch;
+mod kinds;
 mod lookup;
 mod lyrics;
 mod navigation;
@@ -27,7 +28,8 @@ pub use batch::build_batch_dialog;
 struct MetadataEntry {
     field: String,
     group: adw::PreferencesGroup,
-    entry: adw::EntryRow,
+    row: adw::PreferencesRow,
+    control: kinds::Control,
     undo: gtk::Button,
     clear: gtk::Button,
 }
@@ -230,28 +232,7 @@ fn append_draft_fields(
     let snapshot = model.snapshot();
     for presented in snapshot.fields {
         let field = presented.field;
-        append_named_entry(
-            entries,
-            field.key.clone(),
-            field.label,
-            &field.value,
-            field.writable,
-            field.mixed,
-            snapshot.track_count,
-        );
-        let entry = &entries.last().unwrap().entry;
-        if field.kind == sources::MetadataFieldKind::Number {
-            entry.set_input_purpose(
-                if matches!(
-                    field.key.as_str(),
-                    "track_number" | "disc_number" | "year" | "bpm"
-                ) {
-                    gtk::InputPurpose::Digits
-                } else {
-                    gtk::InputPurpose::Number
-                },
-            );
-        }
+        append_named_entry(entries, &field, snapshot.track_count);
     }
     append_lock(
         locked,
@@ -264,34 +245,128 @@ fn append_draft_fields(
 
 fn append_named_entry(
     entries: &mut Vec<MetadataEntry>,
-    field: String,
-    mut title: String,
-    value: &str,
-    writable: bool,
-    mixed: bool,
+    field: &sources::MetadataField,
     count: u64,
 ) {
+    let (value, writable, mixed) = (&field.value, field.writable, field.mixed);
+    let mut title = field.label.clone();
     if mixed {
         title = mixed_field_label(&title, count);
     }
-    let resource = "preferences/dialogs/metadata_field.ui";
-    let builder = crate::ui_resource::builder(resource);
-    crate::objects!(builder, resource, { entry: adw::EntryRow, clear: gtk::Button, undo: gtk::Button });
-    entry.set_title(&title);
-    entry.set_text(if mixed { "" } else { value });
-    entry.set_sensitive(writable);
+    // A number and a list have rows of their own. Text, a date with its calendar and a
+    // vocabulary's choices are an entry row.
+    let kind = Some(field.kind).filter(|_| field.options.is_empty());
+    let (control, clear, undo) = kind.and_then(kinds::Control::of_kind).unwrap_or_else(|| {
+        let resource = "preferences/dialogs/metadata_field.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, { entry: adw::EntryRow, clear: gtk::Button, undo: gtk::Button, choose: gtk::MenuButton, choices: gtk::Box, calendar: gtk::MenuButton });
+        if !field.options.is_empty() {
+            let several = field.kind == sources::MetadataFieldKind::List;
+            connect_choices(&entry, &choose, &choices, &field.options, several);
+        } else if field.kind == sources::MetadataFieldKind::Date {
+            kinds::connect_calendar(&entry, &calendar);
+        }
+        (kinds::Control::Entry(entry), clear, undo)
+    });
+    let row = control.row();
+    row.set_title(&title);
+    control.set_text(if mixed { "" } else { value });
+    row.set_sensitive(writable);
     if writable {
-        entry.set_tooltip_text(None);
+        row.set_tooltip_text(None);
     }
-    style_compact_field_row(&entry);
+    style_compact_field_row(&row);
     entries.push(MetadataEntry {
-        field,
-        group: compact_field_row_group(&entry),
-        entry,
+        field: field.key.clone(),
+        group: compact_field_row_group(&row),
+        row,
+        control,
         undo,
         clear,
     });
 }
+/// A field with a fixed vocabulary: its text is chosen from a menu, one value or, for a
+/// list, any number of them. The row's text stays the field's value.
+fn connect_choices(
+    entry: &adw::EntryRow,
+    choose: &gtk::MenuButton,
+    choices: &gtk::Box,
+    options: &[String],
+    several: bool,
+) {
+    entry.set_editable(false);
+    choose.set_visible(true);
+    let checks = options
+        .iter()
+        .map(|option| {
+            let check = gtk::CheckButton::with_label(option);
+            choices.append(&check);
+            check
+        })
+        .collect::<Vec<_>>();
+    if !several {
+        for check in &checks[1..] {
+            check.set_group(Some(&checks[0]));
+        }
+    }
+    let chosen = |text: &str| {
+        text.split(';')
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>()
+    };
+    // The menu shows the row's text each time it opens: undo, clear and lookups change it.
+    let opening = Rc::new(Cell::new(false));
+    let (weak_entry, shown, syncing) = (entry.downgrade(), checks.clone(), opening.clone());
+    choose.connect_active_notify(move |choose| {
+        let Some(entry) = weak_entry.upgrade().filter(|_| choose.is_active()) else {
+            return;
+        };
+        let chosen = chosen(&entry.text());
+        syncing.set(true);
+        for check in &shown {
+            check.set_active(
+                check
+                    .label()
+                    .is_some_and(|label| chosen.contains(&label.into())),
+            );
+        }
+        syncing.set(false);
+    });
+    for check in &checks {
+        let (weak_entry, weak_choose, all, opening) = (
+            entry.downgrade(),
+            choose.downgrade(),
+            checks
+                .iter()
+                .map(|check| check.downgrade())
+                .collect::<Vec<_>>(),
+            opening.clone(),
+        );
+        check.connect_toggled(move |check| {
+            let Some(entry) = weak_entry.upgrade().filter(|_| !opening.get()) else {
+                return;
+            };
+            // One choice closes the menu; of a radio group only the chosen button answers.
+            if !several && !check.is_active() {
+                return;
+            }
+            let text = all
+                .iter()
+                .filter_map(|check| check.upgrade())
+                .filter(|check| check.is_active())
+                .filter_map(|check| check.label())
+                .map(String::from)
+                .collect::<Vec<_>>()
+                .join("; ");
+            entry.set_text(&text);
+            if let Some(choose) = weak_choose.upgrade().filter(|_| !several) {
+                choose.popdown();
+            }
+        });
+    }
+}
+
 fn append_lock(
     target: &mut Option<adw::SwitchRow>,
     value: Option<bool>,
@@ -319,14 +394,15 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
     for row in editor.entries.iter() {
         let field = row.field.clone();
         let editor_changed = Rc::downgrade(editor);
-        row.entry.connect_changed(move |entry| {
+        let title = row.row.downgrade();
+        row.control.connect_changed(move |text| {
             let Some(editor_changed) = editor_changed.upgrade() else {
                 return;
             };
             if editor_changed.updating.get() {
                 return;
             }
-            let text = entry.text().to_string();
+            let text = text.to_owned();
             if let Err(error) = editor_changed.model().set_field(field.clone(), text) {
                 editor_changed.show_error(&error.to_string());
             }
@@ -336,7 +412,9 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
                 .iter()
                 .find(|presented| presented.field.key == field)
             {
-                entry.set_title(&presented.field.label);
+                if let Some(title) = title.upgrade() {
+                    title.set_title(&presented.field.label);
+                }
                 refresh_identified_field(&editor_changed, &field, presented.identified);
             }
             refresh_save_state(&editor_changed);
@@ -360,8 +438,8 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
             };
             let model = editor_undo.model().clone();
             let field = field.clone();
-            editor_undo.set_busy(true, &tr("Reset"));
             let weak = Rc::downgrade(&editor_undo);
+            // A reset is quick work on the editor's own state: the page stays as it is.
             gtk::glib::spawn_future_local(async move {
                 let result = model.reset_field(field).await;
                 if let Some(editor) = weak.upgrade() {
@@ -369,7 +447,7 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
                         editor.show_error(&error.to_string());
                     }
                     refresh_editor_fields(&editor);
-                    editor.set_busy(false, &tr("Save"));
+                    refresh_save_state(&editor);
                     editor.changed();
                 }
             });
@@ -404,17 +482,14 @@ fn refresh_editor_fields(editor: &Editor) {
             let field = &presented.field;
             row.group
                 .set_visible(field.writable || !field.value.is_empty() || field.mixed);
-            row.entry.set_title(if field.mixed {
+            row.row.set_title(if field.mixed {
                 &presented.mixed_label
             } else {
                 &field.label
             });
-            let text = if field.mixed { "" } else { &field.value };
-            if row.entry.text().as_str() != text {
-                row.entry.set_text(text);
-            }
-            row.entry
-                .set_sensitive(!editor.busy.get() && field.writable);
+            row.control
+                .set_text(if field.mixed { "" } else { &field.value });
+            row.row.set_sensitive(!editor.busy.get() && field.writable);
             refresh_identified_field(editor, &field.key, presented.identified);
         } else {
             row.group.set_visible(false);
@@ -472,9 +547,9 @@ fn refresh_identified_field(editor: &Editor, field: &str, identified: bool) {
         row.undo.set_tooltip_text(Some(&label));
     }
     if identified {
-        row.entry.add_css_class("metadata-identified-change");
+        row.row.add_css_class("metadata-identified-change");
     } else {
-        row.entry.remove_css_class("metadata-identified-change");
+        row.row.remove_css_class("metadata-identified-change");
     }
 }
 fn refresh_save_state(editor: &Editor) {
@@ -605,7 +680,7 @@ impl Editor {
         refresh_save_state(self);
         self.cancel.set_sensitive(!busy);
         for row in self.entries.iter() {
-            row.entry.set_sensitive(!busy && self.writable(&row.field));
+            row.row.set_sensitive(!busy && self.writable(&row.field));
         }
         if let Some(locked) = &self.locked {
             locked.set_sensitive(!busy && self.model().snapshot().lock_writable);
@@ -632,7 +707,7 @@ impl Editor {
         self.cancel.set_sensitive(true);
         self.cancel.set_label(&tr("Close"));
         for row in self.entries.iter() {
-            row.entry.set_sensitive(false);
+            row.row.set_sensitive(false);
         }
         if let Some(locked) = &self.locked {
             locked.set_sensitive(false);

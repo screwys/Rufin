@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwPreferencesRow" id="row">
+    <style><class name="metadata-field"/><class name="metadata-list"/></style>
+    <property name="tooltip-text" translatable="yes">This source cannot edit this field</property>
+    <property name="activatable">false</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="spacing">6</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">4</property>
+            <property name="hexpand">true</property>
+            <property name="valign">center</property>
+            <child><object class="GtkLabel" id="title"><property name="label" bind-source="row" bind-property="title" bind-flags="sync-create"/><property name="xalign">0</property><property name="ellipsize">end</property><style><class name="subtitle"/></style></object></child>
+            <child>
+              <object class="AdwWrapBox" id="values">
+                <property name="child-spacing">6</property>
+                <property name="line-spacing">6</property>
+                <child><object class="GtkText" id="add"><property name="width-chars">8</property><property name="hexpand">true</property><accessibility><relation name="labelled-by">title</relation></accessibility></object></child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child><object class="GtkButton" id="clear"><property name="icon-name">rufin-edit-clear-symbolic</property><property name="tooltip-text" translatable="yes">Clear</property><property name="valign">center</property><style><class name="flat"/></style><accessibility><property name="label" translatable="yes">Clear</property></accessibility></object></child>
+        <child><object class="GtkButton" id="undo"><property name="icon-name">rufin-edit-undo-symbolic</property><property name="tooltip-text" translatable="yes">Reset</property><property name="valign">center</property><property name="visible">false</property><style><class name="flat"/></style><accessibility><property name="label" translatable="yes">Reset</property></accessibility></object></child>
+      </object>
+    </property>
+  </object>
+</interface>

@@ -158,8 +158,9 @@ async fn drop_dangling(connection: &mut SqliteConnection) -> LibraryResult<()> {
     }
 }
 
-/// Rebuilds a damaged or newer Store in place, in one transaction: every table takes this
-/// schema's shape and keeps the columns it shares with it.
+/// Rebuilds in place, in one transaction, a Store no step upgrades: one a newer version wrote,
+/// or one with other tables than its version's. Every table takes this schema's shape and
+/// keeps the columns it shares with it.
 pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
     let mut connection = crate::db::open_writer(path).await?;
     let recovered = async {
@@ -190,9 +191,6 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
                 copy_table(&mut transaction, "main", &format!("recovered_{table}"), table, &[], "true").await?;
             }
         }
-        if old.iter().any(|table| table == "legacy_activity") {
-            play_counts_of_0_17(&mut transaction).await?;
-        }
         for table in &old {
             sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
                 .execute(&mut *transaction).await?;
@@ -204,30 +202,6 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
     }.await;
     connection.close().await?;
     recovered
-}
-
-/// A 0.17 Store kept its counts from outside Rufin by source and object id, and the 0.16
-/// baselines of file-library tracks as native counts, which those tracks never show. Both
-/// become play counts.
-async fn play_counts_of_0_17(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let counts = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "{} FROM recovered_legacy_activity",
-        crate::activity::RELEASED_COUNTS
-    )))
-    .fetch_all(&mut *connection)
-    .await?;
-    crate::activity::carry_released_counts(connection, counts).await?;
-    let files = "source_key IN(SELECT source_key FROM sources WHERE kind IN('local','webdav','smb')) AND native_play_count IS NOT NULL";
-    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at)
-        SELECT media_uri,'lifetime',native_play_count,0,native_last_played FROM tracks WHERE {files} {}", crate::activity::ADD_PLAY_COUNTS)))
-        .execute(&mut *connection)
-        .await?;
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "UPDATE tracks SET native_play_count=NULL,native_last_played=NULL WHERE {files}"
-    )))
-    .execute(&mut *connection)
-    .await?;
-    Ok(())
 }
 
 /// One released entity row with the credits and tags its edges name.
@@ -509,11 +483,10 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 release_types,
             };
-            let lookup = text(row, "release_lookup_identity");
             let artwork = binding(row)?;
             let first_seen = number(row, "first_seen_at");
-            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
-                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,?19,?20,?21)")
+            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
+                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,jsonb(?15),jsonb(?16),?17,?18,?19,?20)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -526,7 +499,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(&metadata.date_added)
                 .bind(metadata.is_compilation)
                 .bind(first_seen)
-                .bind(&lookup)
                 .bind(number(row, "source_favorite"))
                 .bind(number(row, "source_rating"))
                 .bind(metadata.details_json()?)
@@ -537,14 +509,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(picture_flag(artwork.as_deref()))
                 .execute(&mut *connection)
                 .await?;
-            if let Some(identity) = lookup {
-                sqlx::query("INSERT INTO album_release_observations VALUES(?1,?2,jsonb(?3))")
-                    .bind(entity.key)
-                    .bind(identity)
-                    .bind(serde_json::to_string(&metadata.release_types)?)
-                    .execute(&mut *connection)
-                    .await?;
-            }
         }
     }
 }

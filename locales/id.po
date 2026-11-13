@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-12 09:02+0000\n"
+"PO-Revision-Date: 2026-11-13 08:03+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/"
 ">\n"
@@ -16,7 +16,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Generator: Weblate 2026.11.2.dev0\n"
+"X-Generator: Weblate 2026.12.dev0\n"
 
 #, fuzzy
 msgid ""
@@ -537,7 +537,7 @@ msgid "Allow downloading"
 msgstr "Izinkan mengunduh"
 
 msgid "Allow permanently deleting tracks"
-msgstr ""
+msgstr "Izinkan menghapus lagu secara permanen"
 
 msgid "Allow remote connections"
 msgstr "Izinkan koneksi jarak jauh"
@@ -570,9 +570,6 @@ msgstr "Pengaturan aplikasi"
 
 msgid "Appearance"
 msgstr "Tampilan"
-
-msgid "Appears On"
-msgstr "Muncul di"
 
 msgid "Application name"
 msgstr "Nama aplikasi"
@@ -995,7 +992,7 @@ msgid "Close"
 msgstr "Tutup"
 
 msgid "Club"
-msgstr ""
+msgstr "Klub"
 
 msgid "Collapse sidebar"
 msgstr "Ciutkan sidebar"
@@ -1040,115 +1037,115 @@ msgid "Compilation"
 msgstr "Kompilasi"
 
 msgid "Complete sign-in in your browser"
-msgstr ""
+msgstr "Lanjutkan proses masuk di browser Anda"
 
 msgid "Completed downloads will stay on this device."
-msgstr ""
+msgstr "Unduhan yang sudah selesai akan tetap tersimpan di perangkat ini."
 
 msgid "Composer sort"
-msgstr ""
+msgstr "Urutan komposer"
 
 msgid "Composer"
-msgstr ""
+msgstr "Komposer"
 
 msgid "Condition"
-msgstr ""
+msgstr "Kondisi"
 
 msgid "Configure another"
-msgstr ""
+msgstr "Konfigurasi lainnya"
 
 msgid "Configured items: {count}"
-msgstr ""
+msgstr "Item terkonfigurasi: {count}"
 
 msgid "Confirm"
-msgstr ""
+msgstr "Konfirmasi"
 
 msgid "Connect a device"
-msgstr ""
+msgstr "Hubungkan perangkat"
 
 msgid "Connect is not enabled"
-msgstr ""
+msgstr "Fitur Connect belum diaktifkan"
 
 msgid "Connect manually"
-msgstr ""
+msgstr "Hubungkan manual"
 
 msgid "Connect to Rufin"
-msgstr ""
+msgstr "Hubungkan ke Rufin"
 
 msgid "Connect"
-msgstr ""
+msgstr "Hubungkan"
 
 msgid "Connected as {username}"
-msgstr ""
+msgstr "Terhubung sebagai {username}"
 
 msgid "Connected devices"
-msgstr ""
+msgstr "Perangkat terhubung"
 
 msgid "Connected"
-msgstr ""
+msgstr "Terhubung"
 
 msgid "Connecting devices"
-msgstr ""
+msgstr "Menghubungkan perangkat"
 
 msgid "Connecting to music server..."
-msgstr ""
+msgstr "Menghubungkan ke server musik..."
 
 msgid "Connecting to {device}..."
-msgstr ""
+msgstr "Menghubungkan ke {device}..."
 
 msgid "Connecting..."
-msgstr ""
+msgstr "Menghubungkan..."
 
 msgid "Connection failed"
-msgstr ""
+msgstr "Koneksi gagal"
 
 msgid "Connection lost. Reconnecting..."
-msgstr ""
+msgstr "Koneksi terputus. Menyambungkan ulang..."
 
 msgid "Connection name"
-msgstr ""
+msgstr "Nama koneksi"
 
 msgid "Connection options"
-msgstr ""
+msgstr "Opsi koneksi"
 
 msgid "Connection settings"
-msgstr ""
+msgstr "Pengaturan koneksi"
 
 msgid "Connection test has failed"
-msgstr ""
+msgstr "Uji koneksi gagal"
 
 msgid "Connection"
-msgstr ""
+msgstr "Koneksi"
 
 msgid "Contents"
 msgstr "Isi"
 
 msgid "Context Menus"
-msgstr ""
+msgstr "Menu konteks"
 
 msgid "Continue from {device}"
-msgstr ""
+msgstr "Lanjutkan dari {device}"
 
 msgid "Continue"
-msgstr ""
+msgstr "Lanjutkan"
 
 msgid "Control notifications"
-msgstr ""
+msgstr "Kontrol notifikasi"
 
 msgid "Controller status"
-msgstr ""
+msgstr "Status Pengendali"
 
 msgid "Controller"
-msgstr ""
+msgstr "Pengendali"
 
 msgid "Copy access token"
-msgstr ""
+msgstr "Salin token akses"
 
 msgid "Copy invitation"
-msgstr ""
+msgstr "Salin undangan"
 
 msgid "Copy link"
-msgstr ""
+msgstr "Salin tautan"
 
 msgid "Copy of {name}"
 msgstr "Salinan {name}"
@@ -1358,6 +1355,12 @@ msgstr "Hapus"
 msgid "Delivery"
 msgstr "Metode pemutaran"
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Menurun"
 
@@ -1506,6 +1509,11 @@ msgstr "Mengunduh"
 
 msgid "Downloads"
 msgstr "Unduhan"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Seret untuk mengubah urutan"
 
 msgid "Drag to reorder"
 msgstr "Seret untuk mengubah urutan"
@@ -2111,130 +2119,137 @@ msgid "Increase"
 msgstr "Perbesar"
 
 msgid "Install available updates when Rufin starts"
-msgstr ""
+msgstr "instal pembaruan yang tersedia saat Rufin dibuka"
 
 msgid "Installed"
-msgstr ""
+msgstr "Terinstal"
 
 msgid "Instrumental"
-msgstr ""
+msgstr "Instrumen"
 
 msgid "Integrations"
-msgstr ""
+msgstr "Integrasi"
 
 msgid "Invite"
-msgstr ""
+msgstr "Undang"
 
 msgid "Item ID"
-msgstr ""
+msgstr "ID Item"
 
 msgid "Item is no longer available"
-msgstr ""
+msgstr "Item ini sudah tidak tersedia"
 
 msgid "January {year}"
-msgstr ""
+msgstr "Januari {year}"
 
 msgid "Japanese dictionary"
-msgstr ""
+msgstr "Kamus bahasa Jepang"
 
+#, fuzzy
 msgid "Jellyfin"
-msgstr ""
+msgstr "Jellyfin"
 
 msgid "Join profile"
-msgstr ""
+msgstr "Gabung ke profil"
 
 msgid "Join to copy its sources and sign-ins"
-msgstr ""
+msgstr "Gabung untuk menyalin sumber dan informasi masuk"
 
 msgid "Join"
 msgstr "Gabung"
 
 msgid "July {year}"
-msgstr ""
+msgstr "Juli {year}"
 
 msgid "June {year}"
-msgstr ""
+msgstr "Juni {year}"
 
 msgid "Karaoke Playback"
-msgstr ""
+msgstr "Pemutaran Karaoke"
 
 msgid "Karaoke highlight color"
-msgstr ""
+msgstr "Warna sorotan karaoke"
 
 msgid "Karaoke mode"
-msgstr ""
+msgstr "Mode Karaoke"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Biarkan Rufin berjalan setelah jendela ditutup"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
+"Simpan musik agar tersedia saat offline. Perubahan folder hanya berlaku "
+"untuk unduhan baru"
 
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "Pintasan Keyboard"
 
 msgid "LED spectrum"
-msgstr ""
+msgstr "Spektrum LED"
 
+#, fuzzy
 msgid "LRCLIB"
-msgstr ""
+msgstr "LRCLIB"
 
 msgid "Labels"
-msgstr ""
+msgstr "Label"
 
 msgid "Language and readings"
-msgstr ""
+msgstr "Bahasa dan bacaan"
 
 msgid "Language"
-msgstr ""
+msgstr "Bahasa"
 
+#, fuzzy
 msgid "Laptop/Headphones"
-msgstr ""
+msgstr "Laptop/Headphones"
 
 msgid "Large"
-msgstr ""
+msgstr "Besar"
 
 msgid "Last 30 days"
-msgstr ""
+msgstr "30 Hari terakhir"
 
 msgid "Last 365 days"
-msgstr ""
+msgstr "365 Hari terakhir"
 
 msgid "Last 7 days"
-msgstr ""
+msgstr "7 Hari terakhir"
 
 msgid "Last played"
-msgstr ""
+msgstr "Terakhir diputar"
 
+#, fuzzy
 msgid "Last.fm scrobbling"
-msgstr ""
+msgstr "Last.fm scrobbling"
 
+#, fuzzy
 msgid "Last.fm"
-msgstr ""
+msgstr "Last.fm"
 
 msgid "Layout"
-msgstr ""
+msgstr "Tata letak"
 
 msgid "Leave empty for an unencrypted archive."
-msgstr ""
+msgstr "Biarkan kosong untuk arsip tanpa enkripsi."
 
 msgid "Leave the password empty to keep the saved credential"
-msgstr ""
+msgstr "Biarkan kata sandi kosong untuk tetap memakai kredensial tersimpan"
 
 msgid "Legacy authorization"
-msgstr ""
+msgstr "Otoritas lawas"
 
 msgid "Legacy password (Subsonic)"
-msgstr ""
+msgstr "Kata sandi lawas (Subsonic)"
 
 msgid "Legacy password"
-msgstr ""
+msgstr "Kata sandi lawas"
 
 msgid "Legacy"
-msgstr ""
+msgstr "Lawas"
 
 msgid "Less"
-msgstr ""
+msgstr "Kurangi"
 
 msgid "Library Items"
 msgstr "Item Pustaka"
@@ -2242,178 +2257,186 @@ msgstr "Item Pustaka"
 msgid "Library"
 msgstr "Pustaka"
 
+#, fuzzy
 msgid "Libre.fm scrobbling"
-msgstr ""
+msgstr "Libre.fm scrobbling"
 
+#, fuzzy
 msgid "Libre.fm"
-msgstr ""
+msgstr "Libre.fm"
 
 msgid "Light"
-msgstr ""
+msgstr "Terang"
 
 msgid "Limit"
-msgstr ""
+msgstr "Batas"
 
 msgid "Linear"
-msgstr ""
+msgstr "Linear"
 
 msgid "Link copied"
-msgstr ""
+msgstr "Tautan disalin"
 
 msgid "Link exported file"
-msgstr ""
+msgstr "Tautan file hasil ekspor"
 
 msgid "Link to file..."
-msgstr ""
+msgstr "Tautkan ke file..."
 
 msgid "Link"
-msgstr ""
+msgstr "Tautan"
 
 msgid "Linked file"
-msgstr ""
+msgstr "File tertaut"
 
+#, fuzzy
 msgid "ListenBrainz scrobbling"
-msgstr ""
+msgstr "ListenBrainz scrobbling"
 
+#, fuzzy
 msgid "ListenBrainz"
-msgstr ""
+msgstr "ListenBrainz"
 
 msgid "Listening overview"
-msgstr ""
+msgstr "Ringkasan Mendengarkan"
 
 msgid "Listening"
+msgstr "Mendengarkan"
+
+msgid "Live"
 msgstr ""
 
 msgid "Load file contents"
 msgstr "Muat isi file"
 
 msgid "Loading cached lookups..."
-msgstr ""
+msgstr "Memuat cache pencarian..."
 
 msgid "Loading related tracks..."
-msgstr ""
+msgstr "Memuat lagu terkait..."
 
 msgid "Loading..."
-msgstr ""
+msgstr "Memuat..."
 
 msgid "Local Address"
-msgstr ""
+msgstr "Alamat Lokal"
 
 msgid "Local File Access"
-msgstr ""
+msgstr "Akses File Lokal"
 
 msgid "Local File Mapping"
-msgstr ""
+msgstr "Pemetaan File Lokal"
 
 msgid "Local Folders"
-msgstr ""
+msgstr "Folder Local"
 
 msgid "Local Prefix"
-msgstr ""
+msgstr "Awalan Local"
 
 msgid "Local file access configured"
-msgstr ""
+msgstr "Akses file local sudah terkonfigurasi"
 
 msgid "Local file access is required before these tags can be saved."
-msgstr ""
+msgstr "Akses file lokal diperlukan sebelum tag ini bisa disimpan."
 
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Pemetaan file lokal: {matched} dari {total} jalur server cocok"
 
 msgid "Local files and folders"
-msgstr ""
+msgstr "File dan folder lokal"
 
 msgid "Local imports and access"
-msgstr ""
+msgstr "Impor dan akses lokal"
 
 msgid "Local library"
 msgstr "Pustaka lokal"
 
 msgid "Local music folder is unavailable"
-msgstr ""
+msgstr "Folder musik lokal tidak tersedia"
 
 msgid "Local music folder"
-msgstr ""
+msgstr "Folder musik lokal"
 
 msgid "Local network permission is required for remote connections"
 msgstr "Izin jaringan lokal diperlukan untuk koneksi jarak jauh"
 
 msgid "Local network permission was denied"
-msgstr ""
+msgstr "Izin jaringan lokal ditolak"
 
 msgid "Local network"
-msgstr ""
+msgstr "Jaringan lokal"
 
 msgid "Local playback saved"
-msgstr ""
+msgstr "Pemutaran lokal disimpan"
 
 msgid "Local storage"
-msgstr ""
+msgstr "Penyimpanan lokal"
 
 msgid "Local"
 msgstr "Lokal"
 
 msgid "Locate Folder"
-msgstr ""
+msgstr "Cari Folder"
 
 msgid "Lock metadata"
-msgstr ""
+msgstr "Kunci metadata"
 
 msgid "Logarithmic"
-msgstr ""
+msgstr "Logaritma"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Log sudah disalin"
 
 msgid "Lookup"
-msgstr ""
+msgstr "Pencarian"
 
 msgid "Loudness normalization"
-msgstr ""
+msgstr "Penyamaan volume"
 
 msgid "Low shelf"
-msgstr ""
+msgstr "Shelf rendah"
 
 msgid "Lyrics background opacity"
-msgstr ""
+msgstr "Opasitas latar belakang lirik"
 
 msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
+"Lirik dari LRCLIB, NetEase, Genius dan SimpMusic saat lagu tidak punya lirik"
 
 msgid "Lyrics loaded"
-msgstr ""
+msgstr "Lirik dimuat"
 
 msgid "Lyrics offset (ms)"
-msgstr ""
+msgstr "Offset lirik (ms)"
 
 msgid "Lyrics storage"
-msgstr ""
+msgstr "Penyimpanan lirik"
 
 msgid "Lyrics will appear here."
-msgstr ""
+msgstr "Lirik akan muncul disini."
 
 msgid "Lyrics"
-msgstr ""
+msgstr "Lirik"
 
+#, fuzzy
 msgid "MP3"
-msgstr ""
+msgstr "MP3"
 
 msgid "Manage"
-msgstr ""
+msgstr "Kelola"
 
 msgid "Mapped Local Path"
-msgstr ""
+msgstr "Jalur Lokal Terpetakan"
 
 msgid "March {year}"
-msgstr ""
+msgstr "Maret {year}"
 
 msgid "Match"
-msgstr ""
+msgstr "Cocok"
 
 msgid "Matched"
-msgstr ""
+msgstr "Cocok"
 
 #, fuzzy
 #| msgid "Fetching metadata..."
@@ -2702,7 +2725,7 @@ msgid "No artwork found"
 msgstr ""
 
 msgid "No cached server path yet"
-msgstr ""
+msgstr "Belum ada jalur server tersimpan di cache"
 
 msgid "No downloads queued"
 msgstr ""
@@ -2732,7 +2755,7 @@ msgid "No listening activity in this period"
 msgstr ""
 
 msgid "No local file mapping"
-msgstr ""
+msgstr "Tidak ada pemetaan file lokal"
 
 msgid "No local files or folders configured"
 msgstr ""
@@ -2871,9 +2894,10 @@ msgstr ""
 
 msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
+"Satu jalur folder per baris; biarkan kosong untuk menyertakan seluruh koleksi"
 
 msgid "One path per line"
-msgstr ""
+msgstr "Satu jalur per baris"
 
 msgid "Online Lookups"
 msgstr ""
@@ -2999,13 +3023,13 @@ msgid "Paste"
 msgstr ""
 
 msgid "Path format"
-msgstr ""
+msgstr "Format penulisan jalur"
 
 msgid "Path in Source"
-msgstr ""
+msgstr "Jalur di sumber"
 
 msgid "Path"
-msgstr ""
+msgstr "Jalur"
 
 msgid "Pause"
 msgstr ""
@@ -3409,6 +3433,12 @@ msgstr ""
 msgid "Reload"
 msgstr ""
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Lirik online"
 
@@ -3599,7 +3629,7 @@ msgid "Rufin host"
 msgstr ""
 
 msgid "Rufin needs local access to {path}"
-msgstr ""
+msgstr "Rufin butuh akses lokal ke {path}"
 
 msgid "Rule actions"
 msgstr ""
@@ -3657,8 +3687,7 @@ msgstr "Informasi Masuk Tersimpan"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Pemetaan tersimpan. {matched} dari {total} jalur server cocok"
 
 msgid "Saved preset"
 msgstr ""
@@ -3765,6 +3794,9 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
+msgid "Secondary release types"
+msgstr ""
+
 msgid "Secret storage"
 msgstr ""
 
@@ -3805,9 +3837,6 @@ msgid "Select all"
 msgstr ""
 
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"
@@ -4074,6 +4103,14 @@ msgstr ""
 
 msgid "Sort title"
 msgstr ""
+
+msgid "Soundtrack"
+msgstr ""
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Soundtracks"
+msgstr "Lagu album"
 
 msgid "Source by position"
 msgstr ""
@@ -4898,6 +4935,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Appears On"
+#~ msgstr "Muncul di"
 
 #~ msgid "Apply Template"
 #~ msgstr "Terapkan Template"

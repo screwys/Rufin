@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 61;
+pub(crate) const STORE_VERSION: i64 = 63;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -21,7 +21,7 @@ pub(crate) const HAS_PICTURE: i64 = 1;
 /// Tracks only.
 pub(crate) const TRACK_CUE: i64 = 2;
 /// Albums only: the release class code, from its compilation flag and release types, in
-/// three bits from here.
+/// four bits from here.
 pub(crate) const ALBUM_RELEASE_SHIFT: i64 = 2;
 
 /// Roles of `track_links` and `album_links`. Albums use the artist and genre roles.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 61;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 63;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -64,8 +64,9 @@ CREATE TABLE albums (
     added_at INTEGER,
     is_compilation INTEGER,
     first_seen_at INTEGER,
+    -- The MusicBrainz release group or release to ask for release types, when no source
+    -- gave the album any.
     release_identity TEXT,
-    release_lookup_identity TEXT,
     native_favorite INTEGER,
     native_rating INTEGER,
     native_play_count INTEGER,
@@ -78,6 +79,7 @@ CREATE TABLE albums (
     flags INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source_key,object_id)
 ) STRICT;
+CREATE INDEX albums_release_identity_idx ON albums(release_identity) WHERE release_identity IS NOT NULL;
 
 CREATE TABLE tracks (
     track_key INTEGER PRIMARY KEY,
@@ -199,11 +201,11 @@ CREATE TABLE album_links (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX album_links_target_idx ON album_links(role,target,album_key);
 
-CREATE TABLE album_release_observations (
-    album_key INTEGER PRIMARY KEY REFERENCES albums ON DELETE CASCADE,
-    lookup_identity TEXT NOT NULL,
+-- MusicBrainz's release types for a release identity, empty when it knows none.
+CREATE TABLE musicbrainz_release_types (
+    identity TEXT PRIMARY KEY,
     release_types BLOB NOT NULL
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE home_entries (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
@@ -322,8 +324,7 @@ CREATE TABLE play_counts (
 CREATE TABLE playlist_folders (
     folder_key INTEGER PRIMARY KEY,
     object_id TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    smart INTEGER NOT NULL CHECK(smart IN(0,1))
+    name TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE playlists (
@@ -340,7 +341,6 @@ CREATE TABLE playlists (
     artwork_binding BLOB,
     writable INTEGER NOT NULL DEFAULT 1,
     metadata_writable INTEGER NOT NULL DEFAULT 1,
-    playlist_folder_key INTEGER REFERENCES playlist_folders(folder_key) ON DELETE SET NULL,
     provider_revision TEXT,
     valid_until INTEGER,
     -- The track URIs of the set-once mosaic.
@@ -348,7 +348,6 @@ CREATE TABLE playlists (
     UNIQUE (source_key, object_id)
 ) STRICT;
 CREATE UNIQUE INDEX playlists_global_object_idx ON playlists(object_id) WHERE source_key IS NULL;
-CREATE INDEX playlists_folder_idx ON playlists(playlist_folder_key) WHERE playlist_folder_key IS NOT NULL;
 
 CREATE TABLE playlist_entries (
     playlist_entry_key INTEGER PRIMARY KEY,
@@ -391,7 +390,6 @@ CREATE TABLE smart_playlists (
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
-    playlist_folder_key INTEGER REFERENCES playlist_folders(folder_key) ON DELETE SET NULL,
     definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
     artwork_bytes BLOB,
     artwork_revision TEXT,
@@ -402,7 +400,20 @@ CREATE TABLE smart_playlists (
     UNIQUE (object_id),
     UNIQUE (position)
 ) STRICT;
-CREATE INDEX smart_playlists_folder_idx ON smart_playlists(playlist_folder_key) WHERE playlist_folder_key IS NOT NULL;
+
+-- The folders each playlist and smart playlist is in.
+CREATE TABLE playlist_folder_playlists (
+    playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE,
+    PRIMARY KEY(playlist_key, folder_key)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX playlist_folder_playlists_folder_idx ON playlist_folder_playlists(folder_key);
+CREATE TABLE playlist_folder_smart_playlists (
+    smart_playlist_key INTEGER NOT NULL REFERENCES smart_playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE,
+    PRIMARY KEY(smart_playlist_key, folder_key)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX playlist_folder_smart_playlists_folder_idx ON playlist_folder_smart_playlists(folder_key);
 
 CREATE TABLE queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -505,8 +516,8 @@ CREATE TABLE store_commits (
 INSERT INTO store_commits VALUES (1, randomblob(16), 0);
 "#;
 
-/// Creates a new Store, and refuses any other version than the current one. Released Stores
-/// were converted by the importer before this runs; unreleased formats are not migrated.
+/// Creates a new Store, and refuses any other version than the current one: a Store of
+/// another version is upgraded by `migration::steps` or rebuilt before this runs.
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     crate::lyrics_tokenizer::register(connection).await?;
     match pragma(connection, "user_version").await? {

@@ -20,15 +20,69 @@ const MUSICBRAINZ_RECORDING_URL: &str = "https://musicbrainz.org/ws/2/recording/
 const MUSICBRAINZ_ARTIST_URL: &str = "https://musicbrainz.org/ws/2/artist/";
 const MUSICBRAINZ_MIN_INTERVAL: Duration = Duration::from_millis(1100);
 
-pub fn lookup_album_release(
-    release_group_id: Option<&str>,
-    release_id: Option<&str>,
-) -> Result<Option<AlbumReleaseMetadata>, String> {
-    match fetch_album_release_metadata(release_group_id, release_id) {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if is_expected_release_type_lookup_miss(&error) => Ok(None),
-        Err(error) => Err(error),
+/// MusicBrainz's release types for these release identities, `release-group:<id>` or
+/// `release:<id>`: one answer per identity, with no type when MusicBrainz names none. A
+/// request asks for a hundred.
+pub fn lookup_release_types(identities: &[String]) -> Result<Vec<(String, Vec<String>)>, String> {
+    const CONTEXT: &str = "MusicBrainz release type lookup";
+    let mut types = std::collections::HashMap::new();
+    for (prefix, root, field, listed, inc) in [
+        (
+            "release-group:",
+            MUSICBRAINZ_RELEASE_GROUP_SEARCH_URL,
+            "rgid",
+            "/release-groups",
+            "",
+        ),
+        (
+            "release:",
+            MUSICBRAINZ_RELEASE_SEARCH_URL,
+            "reid",
+            "/releases",
+            "release-groups",
+        ),
+    ] {
+        let asked = identities
+            .iter()
+            .filter_map(|identity| Some((identity, usable(identity.strip_prefix(prefix))?)))
+            .collect::<Vec<_>>();
+        for asked in asked.chunks(100) {
+            let ids = asked.iter().map(|(_, id)| *id).collect::<Vec<_>>();
+            let url = Url::parse_with_params(
+                root,
+                [
+                    ("fmt", "json"),
+                    ("limit", "100"),
+                    ("query", &format!("{field}:({})", ids.join(" OR "))),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+            let found = fetch_musicbrainz_json(client()?, url, CONTEXT)?;
+            let found = found.pointer(listed).and_then(Value::as_array);
+            for (identity, id) in asked {
+                let entity = found.into_iter().flatten().find(|entity| {
+                    text(entity, "id").is_some_and(|found| found.eq_ignore_ascii_case(id))
+                });
+                let entity = match entity {
+                    Some(entity) => Some(entity.clone()),
+                    // The search lists current ids; a merged id answers for itself.
+                    None => fetch_musicbrainz_entity(root, id, inc, CONTEXT)?,
+                };
+                let group = match &entity {
+                    Some(release) if field == "reid" => release.get("release-group"),
+                    entity => entity.as_ref(),
+                };
+                types.insert(
+                    *identity,
+                    group.map(release_group_types).unwrap_or_default(),
+                );
+            }
+        }
     }
+    Ok(identities
+        .iter()
+        .map(|identity| (identity.clone(), types.remove(identity).unwrap_or_default()))
+        .collect())
 }
 
 pub fn metadata_identity(
@@ -315,42 +369,6 @@ fn json_ids(value: &Value, collection_pointer: &str) -> Vec<String> {
     ids
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AlbumReleaseMetadata {
-    pub release_types: Vec<String>,
-}
-
-fn fetch_album_release_metadata(
-    release_group_id: Option<&str>,
-    release_id: Option<&str>,
-) -> Result<AlbumReleaseMetadata, String> {
-    let client = client()?;
-    if let Some(release_group_id) = release_group_id.and_then(library::AlbumCover::usable_mbid) {
-        return fetch_release_group_metadata(client, release_group_id);
-    }
-    if let Some(release_id) = release_id.and_then(library::AlbumCover::usable_mbid) {
-        return fetch_release_metadata(client, release_id);
-    }
-    Err("album has no MusicBrainz release or release-group id".to_string())
-}
-
-fn is_expected_release_type_lookup_miss(error: &str) -> bool {
-    if error.contains("error sending request")
-        || error.contains("timed out")
-        || error.contains("status 401")
-        || error.contains("status 403")
-        || error.contains("status 429")
-        || error.contains("status 500")
-        || error.contains("status 502")
-        || error.contains("status 503")
-        || error.contains("status 504")
-    {
-        return false;
-    }
-
-    error.contains("404 Not Found") || error.contains("did not return release group type")
-}
-
 pub(crate) fn search_album_release_group_ids(
     artist: &str,
     album: &str,
@@ -402,55 +420,14 @@ fn musicbrainz_phrase(value: &str) -> String {
     value.replace('\\', " ").replace('"', "\\\"")
 }
 
-fn fetch_release_group_metadata(
-    client: &Client,
-    release_group_id: &str,
-) -> Result<AlbumReleaseMetadata, String> {
-    let url = Url::parse_with_params(
-        &format!("{MUSICBRAINZ_RELEASE_GROUP_SEARCH_URL}{release_group_id}"),
-        [("fmt", "json")],
+fn release_group_types(group: &Value) -> Vec<String> {
+    let primary = group.get("primary-type").and_then(Value::as_str);
+    let secondary = group.get("secondary-types").and_then(Value::as_array);
+    library::normalize_release_types(
+        primary
+            .into_iter()
+            .chain(secondary.into_iter().flatten().filter_map(Value::as_str)),
     )
-    .map_err(|error| error.to_string())?;
-    let value = fetch_musicbrainz_json(client, url, "MusicBrainz release-group lookup")?;
-    release_metadata_from_group(&value)
-        .ok_or_else(|| "MusicBrainz did not return release group type".to_string())
-}
-
-fn fetch_release_metadata(
-    client: &Client,
-    release_id: &str,
-) -> Result<AlbumReleaseMetadata, String> {
-    let url = Url::parse_with_params(
-        &format!("{MUSICBRAINZ_RELEASE_SEARCH_URL}{release_id}"),
-        [("fmt", "json"), ("inc", "release-groups")],
-    )
-    .map_err(|error| error.to_string())?;
-    let value = fetch_musicbrainz_json(client, url, "MusicBrainz release lookup")?;
-    let Some(group) = value.get("release-group") else {
-        return Err("MusicBrainz did not return release group type".to_string());
-    };
-    release_metadata_from_group(group)
-        .ok_or_else(|| "MusicBrainz did not return release group type".to_string())
-}
-
-fn release_metadata_from_group(group: &Value) -> Option<AlbumReleaseMetadata> {
-    let mut raw_types = Vec::new();
-    if let Some(primary_type) = group.get("primary-type").and_then(Value::as_str) {
-        raw_types.push(primary_type.to_string());
-    }
-    if let Some(secondary_types) = group.get("secondary-types").and_then(Value::as_array) {
-        raw_types.extend(
-            secondary_types
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToString::to_string),
-        );
-    }
-    let release_types = library::normalize_release_types(raw_types);
-    if release_types.is_empty() {
-        return None;
-    }
-    Some(AlbumReleaseMetadata { release_types })
 }
 
 #[cfg(test)]
@@ -480,14 +457,8 @@ mod tests {
         });
 
         assert_eq!(
-            release_metadata_from_group(&value),
-            Some(AlbumReleaseMetadata {
-                release_types: vec![
-                    "album".to_string(),
-                    "compilation".to_string(),
-                    "live".to_string(),
-                ],
-            })
+            release_group_types(&value),
+            ["album", "compilation", "live"]
         );
     }
 
@@ -498,12 +469,7 @@ mod tests {
             "secondary-types": []
         });
 
-        assert_eq!(
-            release_metadata_from_group(&value),
-            Some(AlbumReleaseMetadata {
-                release_types: vec!["single".to_string()],
-            })
-        );
+        assert_eq!(release_group_types(&value), ["single"]);
     }
 
     #[test]

@@ -2416,7 +2416,6 @@ mod tests {
                         name: "Rock".into(),
                         ..Default::default()
                     }],
-                    release_types: vec!["album".into()],
                     ..Default::default()
                 },
                 artwork_binding: Some(br#"[{"image":{"kind":"album"}}]"#.to_vec()),
@@ -2492,25 +2491,23 @@ mod tests {
             "First (deluxe)"
         );
 
-        // A lookup result for the current identity replaces the release types.
-        let (album, source): (i64, i64) =
-            sqlx::query_as("SELECT album_key,source_key FROM albums WHERE object_id='al1'")
-                .fetch_one(&mut *catalog.acquire_reader().await.unwrap())
-                .await
-                .unwrap();
-        assert!(
-            catalog
-                .accept_album_release_result(
-                    SourceKey::from_raw(source),
-                    AlbumKey::from_raw(album),
-                    "release-group:rg1",
-                    crate::AlbumReleaseResult::Found {
-                        release_types: vec!["Compilation".into()],
-                    },
-                )
-                .await
-                .unwrap()
-                .is_some()
+        // MusicBrainz's answer for the identity types the album no source typed.
+        let source = scalar::<i64>(
+            &catalog,
+            "SELECT source_key FROM albums WHERE object_id='al1'",
+        )
+        .await;
+        catalog
+            .accept_release_types(&[("release-group:rg1".into(), vec!["compilation".into()])])
+            .await
+            .unwrap();
+        assert_eq!(
+            scalar::<String>(
+                &catalog,
+                "SELECT json(metadata->'$.release_types') FROM albums WHERE object_id='al1'"
+            )
+            .await,
+            r#"["compilation"]"#
         );
         assert_reloads(&catalog).await;
 

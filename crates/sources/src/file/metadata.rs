@@ -1015,6 +1015,38 @@ mod tests {
         assert_eq!(values["musicbrainz_recording_id"], "recording");
     }
 
+    #[test]
+    fn release_type_fields_share_one_tag_with_the_primary_type_first() {
+        use ::lofty::file::TaggedFileExt;
+        let directory = tempfile::tempdir().expect("metadata directory");
+        let path = directory.path().join("track.wav");
+        fs::write(&path, silent_wav()).expect("write WAV");
+        let write = |changes: &[(&str, &str)]| {
+            let edit = TagUpdate::Metadata(vec![(track_edit(changes), String::new())]);
+            edit_copy(&path, Some("wav"), &edit, &mut None).expect("write metadata");
+        };
+        write(&[("secondary_release_types", "Live; Compilation")]);
+        write(&[("release_type", "EP")]);
+        write(&[("release_type", "Single")]);
+
+        let tagged = ::lofty::read_from_path(&path).expect("read tags");
+        let written = tagged
+            .tags()
+            .iter()
+            .flat_map(|tag| tag.get_strings(ItemKey::MusicBrainzReleaseType))
+            .collect::<Vec<_>>();
+        assert_eq!(written, ["single", "live", "compilation"]);
+        let read = super::read_track_metadata(&path, Some("wav")).expect("read metadata");
+        let field = |key: &str| read.fields.iter().find(|field| field.key == key).unwrap();
+        assert_eq!(field("release_type").value, "Single");
+        assert_eq!(field("secondary_release_types").value, "Live; Compilation");
+        assert!(
+            field("release_type")
+                .options
+                .contains(&"Broadcast".to_owned())
+        );
+    }
+
     #[tokio::test]
     async fn unindexed_file_uri_metadata_edits_the_original_and_rejects_segments() {
         let directory = tempfile::tempdir().unwrap();

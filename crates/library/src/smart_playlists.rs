@@ -849,10 +849,10 @@ impl Catalog {
         let key = SmartPlaylistKey::from_raw(row.0);
         write.put_smart(row);
         if let Some(folder) = folder {
-            crate::playlist_folders::move_to_folder_on(
+            crate::playlist_folders::add_to_folder_on(
                 &mut write,
-                crate::PlaylistFolderMember::SmartPlaylist { key },
-                Some(folder),
+                &[crate::PlaylistFolderMember::SmartPlaylist { key }],
+                folder,
             )
             .await?;
         }
@@ -919,13 +919,13 @@ impl Catalog {
     }
 }
 
-/// A smart playlist by object id: its folder by object id, its definition as JSON and the
+/// A smart playlist by object id: its folders by object id, its definition as JSON and the
 /// mosaic's track URIs as a JSON list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SmartPlaylistCopy {
     pub object_id: String,
     pub name: String,
-    pub folder: Option<String>,
+    pub folders: Vec<String>,
     pub definition: String,
     pub mosaic: Option<String>,
 }
@@ -937,9 +937,8 @@ impl Catalog {
         objects: Option<&[String]>,
     ) -> LibraryResult<Vec<SmartPlaylistCopy>> {
         let mut connection = self.acquire_reader().await?;
-        let rows: Vec<(String, String, Option<String>, String, Option<String>)> = sqlx::query_as(
-            "SELECT smart.object_id,smart.name,folder.object_id,smart.definition_json,smart.mosaic FROM smart_playlists smart
-             LEFT JOIN playlist_folders folder ON folder.folder_key=smart.playlist_folder_key
+        let rows: Vec<(String, String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT smart.object_id,smart.name,(SELECT json_group_array(folder.object_id) FROM playlist_folder_smart_playlists member JOIN playlist_folders folder USING(folder_key) WHERE member.smart_playlist_key=smart.smart_playlist_key),smart.definition_json,smart.mosaic FROM smart_playlists smart
              WHERE ?1 IS NULL OR smart.object_id IN(SELECT value FROM json_each(?1)) ORDER BY smart.object_id",
         )
         .bind(objects.map(serde_json::to_string).transpose()?)
@@ -948,10 +947,10 @@ impl Catalog {
         Ok(rows
             .into_iter()
             .map(
-                |(object_id, name, folder, definition, mosaic)| SmartPlaylistCopy {
+                |(object_id, name, folders, definition, mosaic)| SmartPlaylistCopy {
                     object_id,
                     name,
-                    folder,
+                    folders: crate::playlist_folders::object_ids(&folders),
                     definition,
                     mosaic,
                 },
@@ -959,8 +958,8 @@ impl Catalog {
             .collect())
     }
 
-    /// Writes smart playlists by object id, in one Write. A new one is placed last; a folder
-    /// that is not here leaves it outside folders; a missing mosaic keeps the stored one.
+    /// Writes smart playlists by object id, in one Write. A new one is placed last; it is in
+    /// the folders of its copy that are here; a missing mosaic keeps the stored one.
     pub async fn put_smart_playlist_copies(
         &self,
         playlists: &[SmartPlaylistCopy],
@@ -977,7 +976,7 @@ impl Catalog {
                     name: playlist.name.clone(),
                     definition_json: playlist.definition.clone(),
                     position: None,
-                    folder: playlist.folder.clone(),
+                    folders: Some(playlist.folders.clone()),
                 },
             )
             .await?;
@@ -1087,10 +1086,11 @@ pub struct SmartPlaylistWrite {
     pub definition_json: String,
     /// Its place in the order; without one, or when another holds it, it goes last.
     pub position: Option<i64>,
-    /// Its folder by object id; backups restore folders separately.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[sqlx(default)]
-    pub folder: Option<String>,
+    /// Its folders by object id; None keeps those it is in. Backups restore folders
+    /// separately.
+    #[serde(skip)]
+    #[sqlx(skip)]
+    pub folders: Option<Vec<String>>,
 }
 
 pub(crate) async fn export_smart_playlists_jsonl_on(
@@ -1149,15 +1149,13 @@ pub(crate) async fn write_smart_playlist(
     // Backups and Connect write here, so a definition is checked as an edit's is.
     let definition = encode_definition(&serde_json::from_str(&record.definition_json)?)?;
     let row: Option<crate::catalog::write::SmartRow> = sqlx::query_as(AssertSqlSafe(format!(
-        "INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,playlist_folder_key,mosaic)
+        "INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,mosaic)
          VALUES(?1,?2,lower(?2),?3,CASE WHEN ?4 IS NULL OR EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
-             THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,
-             (SELECT folder_key FROM playlist_folders WHERE object_id=?5 AND smart),?6)
+             THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5)
          ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
-             definition_json=excluded.definition_json,playlist_folder_key=excluded.playlist_folder_key,
-             mosaic=coalesce(excluded.mosaic,mosaic)
-         WHERE (name,definition_json,playlist_folder_key,mosaic) IS NOT
-             (excluded.name,excluded.definition_json,excluded.playlist_folder_key,coalesce(excluded.mosaic,mosaic))
+             definition_json=excluded.definition_json,mosaic=coalesce(excluded.mosaic,mosaic)
+         WHERE (name,definition_json,mosaic) IS NOT
+             (excluded.name,excluded.definition_json,coalesce(excluded.mosaic,mosaic))
          RETURNING {}",
         crate::catalog::write::SMART_COLUMNS
     )))
@@ -1165,12 +1163,26 @@ pub(crate) async fn write_smart_playlist(
     .bind(&record.name)
     .bind(&definition)
     .bind(record.position)
-    .bind(&record.folder)
     .bind(&record.mosaic)
     .fetch_optional(write.connection().await?)
     .await?;
     if let Some(row) = row {
         write.put_smart(row);
+    }
+    if let Some(folders) = &record.folders {
+        let key: i64 =
+            sqlx::query_scalar("SELECT smart_playlist_key FROM smart_playlists WHERE object_id=?1")
+                .bind(&record.object_id)
+                .fetch_one(write.connection().await?)
+                .await?;
+        crate::playlist_folders::set_folders_on(
+            write,
+            &crate::PlaylistFolderMember::SmartPlaylist {
+                key: SmartPlaylistKey::from_raw(key),
+            },
+            folders,
+        )
+        .await?;
     }
     if record.artwork_bytes.is_some() || record.artwork_binding.is_some() {
         crate::playlists::write_playlist_artwork(

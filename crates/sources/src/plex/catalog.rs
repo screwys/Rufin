@@ -247,9 +247,11 @@ impl PlexSource {
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
 
+        // A listing row has neither a track's streams nor an album's Format and Subformat
+        // tags, which name its release types.
         let ids = rows
             .iter()
-            .filter(|item| item["type"] == "track")
+            .filter(|item| item["type"] == "track" || item["type"] == "album")
             .filter_map(|item| id(&item["ratingKey"]))
             .collect::<Vec<_>>();
         let details = if ids.is_empty() {
@@ -793,6 +795,14 @@ pub(super) mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(damaged_detail))
             .mount_as_scoped(&server)
             .await;
+        // Only an album's details name its release types.
+        Mock::given(method("GET"))
+            .and(path("/library/metadata/album"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Metadata":[
+                {"ratingKey":"album","type":"album","title":"Album","Format":[{"tag":"EP"}],"Subformat":[{"tag":"Live"}]}
+            ]}})))
+            .mount(&server)
+            .await;
         Mock::given(method("GET")).and(path("/library/metadata/unanalyzed")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Metadata":[{"ratingKey":"unanalyzed","type":"track","title":valid_title,"Media":[{"Part":[{"Stream":[{"streamType":2,"gain":{},"peak":-1}]}]}]}]}}))).mount(&server).await;
         Mock::given(method("GET")).and(path("/library/sections")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Directory":[null,{"key":"1","type":"artist","title":"Music"}]}}))).mount(&server).await;
         for (kind, value) in [
@@ -923,6 +933,13 @@ pub(super) mod tests {
                 .collect::<Vec<_>>(),
             ["Rock"]
         );
+        let album = library::source_entity_uri(
+            &crate::SourceId::new("plex-test"),
+            "album",
+            "plex:album:album",
+        );
+        let album = catalog.album(&album, true, &cancellation).await.unwrap();
+        assert_eq!(album.unwrap().metadata.release_types, ["ep", "live"]);
         let source_key = {
             catalog.loaded().await;
             catalog.source_key(&library::SourceId::new(&catalog_source_id))

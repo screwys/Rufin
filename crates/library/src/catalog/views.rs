@@ -14,8 +14,9 @@ use super::strings::StrId;
 use crate::read::{AlbumSpan, Listen, Members, Order, OrderInner};
 use crate::tags::TagKind;
 use crate::{
-    AlbumReleaseClass, Catalog, Collection, LibraryField, LibraryResult, ListKind, ListRead,
-    MemberRead, PlaylistScope, Read, ReadCancellation, SmartPlaylistDefinition, SourceKey,
+    AlbumReleaseClass, Catalog, Collection, Item, LibraryField, LibraryResult, ListKind, ListRead,
+    MemberRead, PlaylistFolderKey, PlaylistKey, PlaylistScope, Read, ReadCancellation,
+    SmartPlaylistDefinition, SmartPlaylistKey, SourceKey,
 };
 
 /// Bytes of cached orders, read by the order cache's eviction.
@@ -1409,12 +1410,23 @@ fn compare_named(
 
 /// Rows of the playlist lists, which sort by creation, name or totals.
 struct PlaylistItem<'a> {
-    key: i64,
+    item: Item,
     name: &'a str,
     sort: String,
     position: i64,
     totals: Totals,
-    folder: Option<i64>,
+    /// The folders it is in; none for a folder.
+    folders: &'a [i64],
+}
+
+/// A playlist list row's kind and key, which breaks ties.
+fn item_rank(item: &Item) -> (u8, i64) {
+    match item {
+        Item::Playlist(key) => (0, key.raw()),
+        Item::Smart(key) => (1, key.raw()),
+        Item::PlaylistFolder(key) => (2, key.raw()),
+        _ => (3, 0),
+    }
 }
 
 fn compare_items(
@@ -1431,7 +1443,7 @@ fn compare_items(
     };
     directed(order, descending)
         .then_with(|| a.sort.cmp(&b.sort))
-        .then(a.key.cmp(&b.key))
+        .then(item_rank(&a.item).cmp(&item_rank(&b.item)))
 }
 
 impl Context<'_> {
@@ -1492,141 +1504,121 @@ impl Context<'_> {
             && (record.flags & SOURCE_OWNED == 0 || record.indexed())
     }
 
-    /// Smart playlists, or the playlists of the read's source and Rufin's; of every source for
-    /// `every_source`.
-    fn playlist_items(
+    /// The smart playlists `keep` keeps, counted in music folder `folder`.
+    fn smart_items(
+        &self,
+        inputs: &Inputs,
+        folder: Option<u32>,
+        keep: impl Fn(&[i64]) -> bool,
+    ) -> Vec<PlaylistItem<'_>> {
+        self.snapshot
+            .smart_playlists
+            .values()
+            .filter(|playlist| keep(&playlist.folders))
+            .map(|playlist| PlaylistItem {
+                item: Item::Smart(SmartPlaylistKey::from_raw(playlist.key)),
+                name: &playlist.name,
+                sort: playlist.name.to_lowercase(),
+                position: playlist.position,
+                totals: self.smart_totals(&playlist.definition, inputs, None, folder),
+                folders: &playlist.folders,
+            })
+            .collect()
+    }
+
+    /// The playlists of the read's source and Rufin's that `keep` keeps.
+    fn regular_items(
         &self,
         read: &ListRead,
-        folder: Option<u32>,
-        inputs: &Inputs,
-        every_source: bool,
+        keep: impl Fn(&[i64]) -> bool,
     ) -> Vec<PlaylistItem<'_>> {
         let snapshot = self.snapshot;
-        if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
-            return snapshot
-                .smart_playlists
-                .values()
-                .map(|playlist| PlaylistItem {
-                    key: playlist.key,
-                    name: &playlist.name,
-                    sort: playlist.name.to_lowercase(),
-                    position: playlist.position,
-                    totals: self.smart_totals(&playlist.definition, inputs, None, folder),
-                    folder: playlist.folder,
-                })
-                .collect();
-        }
         let source = read.source.and_then(|source| self.source_slot(source));
         snapshot
             .playlists
             .iter()
             .filter(|(_, record)| {
                 self.listed_playlist(record)
-                    && (every_source
-                        || record.source == NO_SOURCE
+                    && keep(&record.folders)
+                    && (record.source == NO_SOURCE
                         || source.is_some_and(|source| record.source == source))
             })
             .map(|(_, record)| {
                 let name = snapshot.text(record.name);
                 PlaylistItem {
-                    key: record.key,
+                    item: Item::Playlist(PlaylistKey::from_raw(record.key)),
                     name,
                     sort: name.to_lowercase(),
                     position: i64::from(record.created),
                     totals: self.playlist_totals(record),
-                    folder: (record.folder != 0).then_some(record.folder),
+                    folders: &record.folders,
                 }
             })
             .collect()
     }
 
-    /// Totals of the playlists each playlist folder holds, as the list read shows them; of
-    /// every source for a read without one, as a pinned folder counts.
-    pub(crate) fn playlist_folder_totals(&self, read: &ListRead) -> HashMap<i64, Totals> {
-        let folder = self.list_folder(read).flatten();
-        let mut totals = HashMap::<i64, Totals>::new();
-        let every_source = read.source.is_none();
-        let inputs = Inputs {
-            now: match read.kind {
-                ListKind::SmartPlaylists { now } => now,
-                _ => 0,
-            },
-            ..Inputs::default()
-        };
-        for item in self.playlist_items(read, folder, &inputs, every_source) {
-            if let Some(owner) = item.folder {
-                let total = totals.entry(owner).or_default();
-                total.tracks += item.totals.tracks;
-                total.duration += item.totals.duration;
-                total.downloaded += item.totals.downloaded;
-            }
-        }
-        totals
-    }
-
-    /// Playlists, smart playlists and their folders in one key space, folders negative, with
-    /// the totals their rows show.
-    fn playlist_order(&self, read: &ListRead, inputs: &Inputs) -> Vec<(i64, Totals)> {
+    /// Playlists, smart playlists and folders with the totals their rows show. A page lists
+    /// its own kind outside folders; a folder holds both kinds, and its totals are its
+    /// members'.
+    fn playlist_order(&self, read: &ListRead, inputs: &Inputs) -> Vec<(Item, Totals)> {
         let Some(folder) = self.list_folder(read) else {
             return Vec::new();
         };
         let smart = matches!(read.kind, ListKind::SmartPlaylists { .. });
         let filter = filter_text(&read.filter);
-        let has_folders = self
-            .snapshot
-            .playlist_folders
-            .values()
-            .any(|folder| folder.smart == smart);
-        let children = self.playlist_items(read, folder, inputs, false);
-        let mut items =
-            if read.playlist_scope == PlaylistScope::All
-                || read.playlist_scope == PlaylistScope::Root && !has_folders
-            {
-                children
+        let grouped = !self.snapshot.playlist_folders.is_empty();
+        let page = |keep: &dyn Fn(&[i64]) -> bool| {
+            if smart {
+                self.smart_items(inputs, folder, keep)
             } else {
+                self.regular_items(read, keep)
+            }
+        };
+        let mut items = match read.playlist_scope {
+            PlaylistScope::All => page(&|_| true),
+            PlaylistScope::Root if !grouped => page(&|_| true),
+            PlaylistScope::Folder { key } => {
+                let held = |folders: &[i64]| folders.contains(&key.raw());
+                let mut items = self.regular_items(read, held);
+                items.extend(self.smart_items(inputs, folder, held));
+                items
+            }
+            PlaylistScope::Root | PlaylistScope::Folders => {
+                // Members of the other kind count only toward their folders.
+                let mut members = self.regular_items(read, |folders| !smart || !folders.is_empty());
+                members.extend(
+                    self.smart_items(inputs, folder, |folders| smart || !folders.is_empty()),
+                );
                 let mut items = Vec::new();
-                if read.playlist_scope != PlaylistScope::Folders {
-                    let parent = match read.playlist_scope {
-                        PlaylistScope::Folder { key } => Some(key.raw()),
-                        _ => None,
-                    };
-                    items.extend(children.iter().filter(|item| item.folder == parent).map(
-                        |item| PlaylistItem {
-                            name: item.name,
-                            sort: item.sort.clone(),
-                            ..*item
-                        },
-                    ));
-                }
-                if matches!(
-                    read.playlist_scope,
-                    PlaylistScope::Root | PlaylistScope::Folders
-                ) {
-                    for playlist_folder in self.snapshot.playlist_folders.values() {
-                        if playlist_folder.smart != smart {
-                            continue;
-                        }
-                        let mut totals = Totals::default();
-                        for child in children
-                            .iter()
-                            .filter(|child| child.folder == Some(playlist_folder.key))
-                        {
-                            totals.tracks += child.totals.tracks;
-                            totals.duration += child.totals.duration;
-                            totals.downloaded += child.totals.downloaded;
-                        }
-                        items.push(PlaylistItem {
-                            key: -playlist_folder.key,
-                            name: &playlist_folder.name,
-                            sort: playlist_folder.name.to_lowercase(),
-                            position: playlist_folder.key,
-                            totals,
-                            folder: None,
-                        });
+                for playlist_folder in self.snapshot.playlist_folders.values() {
+                    let mut totals = Totals::default();
+                    for member in members
+                        .iter()
+                        .filter(|member| member.folders.contains(&playlist_folder.key))
+                    {
+                        totals.tracks += member.totals.tracks;
+                        totals.duration += member.totals.duration;
+                        totals.downloaded += member.totals.downloaded;
                     }
+                    items.push(PlaylistItem {
+                        item: Item::PlaylistFolder(PlaylistFolderKey::from_raw(
+                            playlist_folder.key,
+                        )),
+                        name: &playlist_folder.name,
+                        sort: playlist_folder.name.to_lowercase(),
+                        position: playlist_folder.key,
+                        totals,
+                        folders: &[],
+                    });
+                }
+                if read.playlist_scope == PlaylistScope::Root {
+                    items.extend(members.into_iter().filter(|member| {
+                        member.folders.is_empty() && matches!(member.item, Item::Smart(_)) == smart
+                    }));
                 }
                 items
-            };
+            }
+        };
         items.retain(|item| item.name.to_lowercase().contains(&filter));
         if smart && matches!(read.playlist_scope, PlaylistScope::All) {
             // Smart playlists keep their own order between equal values.
@@ -1639,14 +1631,14 @@ impl Context<'_> {
                 };
                 directed(order, read.descending)
                     .then(a.position.cmp(&b.position))
-                    .then(a.key.cmp(&b.key))
+                    .then(item_rank(&a.item).cmp(&item_rank(&b.item)))
             });
         } else {
             items.sort_by(|a, b| compare_items(read.sort, read.descending, a, b));
         }
         items
             .into_iter()
-            .map(|item| (item.key, item.totals))
+            .map(|item| (item.item, item.totals))
             .collect()
     }
 
@@ -1723,7 +1715,7 @@ impl Context<'_> {
                     false,
                 )
             }),
-            ListKind::Playlists | ListKind::SmartPlaylists { .. } => true,
+            ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. } => true,
         }
     }
 
@@ -1810,7 +1802,7 @@ impl Context<'_> {
                 }
                 rows.sort_by(|a, b| compare_named(read.sort, read.descending, a, b));
             }
-            ListKind::Playlists | ListKind::SmartPlaylists { .. } => unreachable!(),
+            ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. } => unreachable!(),
         }
         rows.into_iter().map(|row| row.key).collect()
     }
@@ -1851,24 +1843,35 @@ impl Context<'_> {
                     let tag = snapshot.tags.get(*key)?;
                     snapshot.name_sort(tag.name, tag.sort)
                 }
-                ListKind::Playlists | ListKind::SmartPlaylists { .. } => {
-                    let grouped = !matches!(read.playlist_scope, PlaylistScope::All);
-                    if !grouped && sort != LibraryField::Title {
-                        return None;
-                    }
-                    Cow::Owned(if *key < 0 {
-                        snapshot.playlist_folders.get(&-key)?.name.to_lowercase()
-                    } else if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
-                        snapshot.smart_playlists.get(key)?.name.to_lowercase()
-                    } else {
-                        snapshot
-                            .text(snapshot.playlists.get(*key)?.name)
-                            .to_lowercase()
-                    })
-                }
+                ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. } => unreachable!(),
             }))
         });
         sections(texts)
+    }
+
+    /// Letter sections of a playlist list order: by name, or none for an ungrouped list in
+    /// another sort.
+    fn playlist_sections(
+        &self,
+        read: &ListRead,
+        order: &[(Item, Totals)],
+    ) -> Vec<crate::ScrollSection> {
+        let snapshot = self.snapshot;
+        let grouped = !matches!(read.playlist_scope, PlaylistScope::All);
+        sections(order.iter().map(|(item, _)| -> Option<&'static str> {
+            if !grouped && read.sort.sort() != LibraryField::Title {
+                return None;
+            }
+            let name = match item {
+                Item::PlaylistFolder(key) => {
+                    snapshot.playlist_folders.get(&key.raw())?.name.as_str()
+                }
+                Item::Smart(key) => snapshot.smart_playlists.get(&key.raw())?.name.as_str(),
+                Item::Playlist(key) => snapshot.text(snapshot.playlists.get(key.raw())?.name),
+                _ => return None,
+            };
+            Some(bucket(&name.to_lowercase()))
+        }))
     }
 }
 
@@ -2340,14 +2343,14 @@ impl ListRead {
     pub(crate) fn depends(&self) -> Depends {
         let sort = self.sort.sort();
         match self.kind {
-            ListKind::SmartPlaylists { .. } => [true; 4],
+            // Smart playlists, and folders that hold them, read everything.
+            ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. } => [true; 4],
             _ => [
                 self.favorites_only
                     || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
                 sort.activity_sensitive(),
-                // Playlist rows carry their downloaded counts.
-                self.kind == ListKind::Playlists,
-                self.kind == ListKind::Playlists,
+                false,
+                false,
             ],
         }
     }
@@ -2357,7 +2360,7 @@ impl ListRead {
     fn unfiltered(&self) -> Option<Self> {
         if matches!(
             self.kind,
-            ListKind::Playlists | ListKind::SmartPlaylists { .. }
+            ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. }
         ) {
             return None;
         }
@@ -2396,9 +2399,7 @@ impl Read {
                 read.collection,
                 Collection::Objects { .. } | Collection::Smart { .. } | Collection::History { .. }
             ),
-            Self::List(read) | Self::AlbumTracks(read) => {
-                matches!(read.kind, ListKind::SmartPlaylists { .. })
-            }
+            Self::List(read) | Self::AlbumTracks(read) => read.kind.now().is_some(),
             Self::Folders(_) => false,
         }
     }
@@ -2662,7 +2663,7 @@ impl Catalog {
             Read::List(list)
                 if matches!(
                     list.kind,
-                    ListKind::Playlists | ListKind::SmartPlaylists { .. }
+                    ListKind::Playlists { .. } | ListKind::SmartPlaylists { .. }
                 ) =>
             {
                 Members::Playlists(context.playlist_order(list, inputs).into())
@@ -2670,7 +2671,7 @@ impl Catalog {
             Read::List(list) => {
                 let keys = self.list_keys(context, list, inputs, read_at);
                 if let ListKind::ArtistAlbums { .. } = list.kind {
-                    let mut classes = [0; 6];
+                    let mut classes = [0; AlbumReleaseClass::COUNT];
                     for key in &keys {
                         if let Some(album) = snapshot.albums.get(*key) {
                             classes[usize::from(AlbumReleaseClass::of(album.flags).code())] += 1;
@@ -2871,7 +2872,7 @@ impl Catalog {
                 _ => {}
             },
             Read::List(read) | Read::AlbumTracks(read) => {
-                if let ListKind::SmartPlaylists { now } = read.kind {
+                if let Some(now) = read.kind.now() {
                     let definitions = self
                         .snapshot()
                         .smart_playlists
@@ -3086,9 +3087,7 @@ impl Catalog {
             (Read::List(read), Members::Keys(keys)) => {
                 context.list_sections(read, keys.iter().map(|key| i64::from(*key)))
             }
-            (Read::List(read), Members::Playlists(keys)) => {
-                context.list_sections(read, keys.iter().map(|(key, _)| *key))
-            }
+            (Read::List(read), Members::Playlists(keys)) => context.playlist_sections(read, keys),
             (Read::Folders(_), Members::Keys(keys)) => sections(keys.iter().map(|key| {
                 let folder = snapshot.folders.get(i64::from(*key));
                 Some(bucket(&folder.map_or(Cow::Borrowed(""), |folder| {

@@ -13,11 +13,13 @@ pub enum MemberSelection {
         ranges: Option<Vec<Range<usize>>>,
     },
     /// Selected rows of a list, each row's collection read as `members` reads, its collection
-    /// replaced.
+    /// replaced; a smart playlist's as `smart` reads, when given. A playlist folder's row names
+    /// its members, as its page lists them.
     Parents {
         read: ListRead,
         ranges: Option<Vec<Range<usize>>>,
         members: Box<MemberRead>,
+        smart: Option<Box<MemberRead>>,
     },
     Keys {
         source: Option<SourceKey>,
@@ -47,25 +49,21 @@ fn in_ranges(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<Item> {
         .collect()
 }
 
-/// The collections a list's selected rows name, in order. A playlist folder names none, as
-/// it plays nothing (`PlayTarget::of_playlist`).
-fn parents(read: &ListRead, order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<Collection> {
-    in_ranges(order, ranges)
-        .into_iter()
-        .filter_map(|item| {
-            Some(match (item, &read.kind) {
-                (Item::Album(key) | Item::AlbumHeading(key), _) => Collection::Album(key),
-                (Item::Artist { key, album_artist }, _) => Collection::Artist { key, album_artist },
-                (Item::Genre(key), _) => Collection::Genre(key),
-                (Item::Mood(key), _) => Collection::Mood(key),
-                (Item::Playlist(key), _) => Collection::Playlist(key),
-                (Item::Smart(key), ListKind::SmartPlaylists { now }) => {
-                    Collection::Smart { key, now: *now }
-                }
-                _ => return None,
-            })
-        })
-        .collect()
+/// The collection a list row names; None for a playlist folder, whose members its page
+/// lists.
+fn parent(read: &ListRead, item: Item) -> Option<Collection> {
+    Some(match item {
+        Item::Album(key) | Item::AlbumHeading(key) => Collection::Album(key),
+        Item::Artist { key, album_artist } => Collection::Artist { key, album_artist },
+        Item::Genre(key) => Collection::Genre(key),
+        Item::Mood(key) => Collection::Mood(key),
+        Item::Playlist(key) => Collection::Playlist(key),
+        Item::Smart(key) => Collection::Smart {
+            key,
+            now: read.kind.now()?,
+        },
+        _ => return None,
+    })
 }
 
 /// The tracks of an order's selected ranges, with the playlist entry each comes from.
@@ -119,11 +117,30 @@ pub(crate) async fn selected_tracks_on(
                     read,
                     ranges,
                     members,
+                    smart,
                 } => {
                     let order = catalog
                         .order_on(connection, &Read::List(read.clone()))
                         .await?;
-                    for collection in parents(read, &order, ranges.as_deref()) {
+                    let mut items = Vec::new();
+                    for item in in_ranges(&order, ranges.as_deref()) {
+                        let Item::PlaylistFolder(key) = item else {
+                            items.push(item);
+                            continue;
+                        };
+                        let folder = ListRead {
+                            playlist_scope: PlaylistScope::Folder { key },
+                            filter: String::new(),
+                            ..read.clone()
+                        };
+                        let order = catalog.order_on(connection, &Read::List(folder)).await?;
+                        items.extend(order.items(0..order.len()));
+                    }
+                    for collection in items.into_iter().filter_map(|item| parent(read, item)) {
+                        let members = match (&collection, smart) {
+                            (Collection::Smart { .. }, Some(smart)) => smart,
+                            _ => members,
+                        };
                         parts.push((group, Part::Read(reads.len())));
                         reads.push(MemberRead {
                             collection,
@@ -188,7 +205,10 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Collection>> {
         let order = self.order(&Read::List(read.clone()), cancellation).await?;
-        Ok(parents(read, &order, Some(ranges)))
+        Ok(in_ranges(&order, Some(ranges))
+            .into_iter()
+            .filter_map(|item| parent(read, item))
+            .collect())
     }
 
     pub async fn selected_track_uris(

@@ -145,7 +145,7 @@ struct PlaysValue {
 #[derive(Serialize, Deserialize)]
 struct PlaylistValue {
     name: String,
-    folder: Option<String>,
+    folders: Vec<String>,
     created_at: i64,
     mosaic: Option<Vec<String>>,
 }
@@ -170,13 +170,12 @@ pub(super) struct Copy {
 #[derive(Serialize, Deserialize)]
 struct FolderValue {
     name: String,
-    smart: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 struct SmartValue {
     name: String,
-    folder: Option<String>,
+    folders: Vec<String>,
     definition: String,
     mosaic: Option<Vec<String>>,
 }
@@ -1066,10 +1065,7 @@ impl Records {
                 Item::new(
                     format!("folder:{}", folder.object_id),
                     None,
-                    &FolderValue {
-                        name: folder.name,
-                        smart: folder.smart,
-                    },
+                    &FolderValue { name: folder.name },
                 )
             })
             .collect()
@@ -1086,13 +1082,10 @@ impl Records {
             let mosaic = self.portable_mosaic(playlist.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("playlist:{}", playlist.object_id),
-                playlist
-                    .folder
-                    .as_ref()
-                    .map(|folder| format!("folder:{folder}")),
+                None,
                 &PlaylistValue {
                     name: playlist.name,
-                    folder: playlist.folder,
+                    folders: playlist.folders,
                     created_at: playlist.created_at,
                     mosaic,
                 },
@@ -1178,13 +1171,10 @@ impl Records {
             let mosaic = self.portable_mosaic(smart.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("smart:{}", smart.object_id),
-                smart
-                    .folder
-                    .as_ref()
-                    .map(|folder| format!("folder:{folder}")),
+                None,
                 &SmartValue {
                     name: smart.name,
-                    folder: smart.folder,
+                    folders: smart.folders,
                     definition: smart.definition,
                     mosaic,
                 },
@@ -1413,9 +1403,9 @@ impl Records {
         Ok((applied, held))
     }
 
-    /// Splits rows into those that can apply now and those that wait for their parent. When
-    /// settling, playlists apply without their folder and children of a gone playlist are
-    /// dropped. A device that left or was removed cannot trust itself again; only a record of
+    /// Splits rows into those that can apply now and those that wait for their parents. When
+    /// settling, playlists apply without the folders that are not here and children of a gone
+    /// playlist are dropped. A device that left or was removed cannot trust itself again; only a record of
     /// a later pairing does.
     #[allow(clippy::type_complexity)]
     async fn parents(
@@ -1470,31 +1460,45 @@ impl Records {
                 .collect::<HashSet<_>>(),
             _ => return Ok((rows, Vec::new())),
         };
-        let parent = |row: &Row| -> Option<String> {
-            let value = row.value.as_ref().filter(|_| !row.deleted)?;
+        let parents = |row: &Row| -> Vec<String> {
+            let Some(value) = row.value.as_ref().filter(|_| !row.deleted) else {
+                return Vec::new();
+            };
+            let text = |value: &Value| value.as_str().map(str::to_owned);
             match kind {
-                "playlist" | "smart" => value["folder"].as_str().map(str::to_owned),
-                "entry" => value["playlist"].as_str().map(str::to_owned),
-                _ => row.id.strip_prefix("artwork:").map(str::to_owned),
+                "playlist" | "smart" => value["folders"]
+                    .as_array()
+                    .map(|folders| folders.iter().filter_map(text).collect())
+                    .unwrap_or_default(),
+                "entry" => text(&value["playlist"]).into_iter().collect(),
+                _ => row
+                    .id
+                    .strip_prefix("artwork:")
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect(),
             }
         };
         let mut ready = Vec::new();
         let mut waiting = Vec::new();
         for (from, mut row) in rows {
-            match parent(&row) {
-                Some(parent) if !present.contains(&parent) => {
-                    if !settle {
-                        waiting.push((from, row));
-                    } else if matches!(kind, "playlist" | "smart") {
-                        if let Some(value) = &mut row.value {
-                            value["folder"] = Value::Null;
-                        }
-                        ready.push((from, row));
-                    } else {
-                        tracing::debug!(id = row.id, "Connect record of a gone playlist");
-                    }
+            let parents = parents(&row);
+            if parents.iter().all(|parent| present.contains(parent)) {
+                ready.push((from, row));
+            } else if !settle {
+                waiting.push((from, row));
+            } else if matches!(kind, "playlist" | "smart") {
+                if let Some(value) = &mut row.value {
+                    value["folders"] = Value::from(
+                        parents
+                            .into_iter()
+                            .filter(|parent| present.contains(parent))
+                            .collect::<Vec<_>>(),
+                    );
                 }
-                _ => ready.push((from, row)),
+                ready.push((from, row));
+            } else {
+                tracing::debug!(id = row.id, "Connect record of a gone playlist");
             }
         }
         Ok((ready, waiting))
@@ -1519,7 +1523,6 @@ impl Records {
                         Ok(library::PlaylistFolderCopy {
                             object_id: object(row, "folder:")?,
                             name: value.name,
-                            smart: value.smart,
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
@@ -1547,7 +1550,7 @@ impl Records {
                     playlists.push(library::PlaylistCopy {
                         object_id: object(row, "playlist:")?,
                         name: value.name,
-                        folder: value.folder,
+                        folders: value.folders,
                         created_at: value.created_at,
                         mosaic: self.local_mosaic(value.mosaic).await?,
                     });
@@ -1576,7 +1579,7 @@ impl Records {
                     playlists.push(library::SmartPlaylistCopy {
                         object_id: object(row, "smart:")?,
                         name: value.name,
-                        folder: value.folder,
+                        folders: value.folders,
                         definition: value.definition,
                         mosaic: self.local_mosaic(value.mosaic).await?,
                     });

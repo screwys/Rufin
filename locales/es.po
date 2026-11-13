@@ -567,9 +567,6 @@ msgstr "Ajustes de la aplicación"
 msgid "Appearance"
 msgstr "Apariencia"
 
-msgid "Appears On"
-msgstr "Aparece en"
-
 msgid "Application name"
 msgstr "Nombre de la aplicación"
 
@@ -1347,6 +1344,12 @@ msgstr "Eliminar"
 msgid "Delivery"
 msgstr "Entrega"
 
+msgid "Demo"
+msgstr ""
+
+msgid "Demos"
+msgstr ""
+
 msgid "Descending"
 msgstr "Descendiente"
 
@@ -1494,6 +1497,11 @@ msgstr "Descargando"
 
 msgid "Downloads"
 msgstr "Descargas"
+
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to a folder"
+msgstr "Arrastra para ordenar"
 
 msgid "Drag to reorder"
 msgstr "Arrastra para ordenar"
@@ -2258,6 +2266,9 @@ msgstr "Vista general de escucha"
 
 msgid "Listening"
 msgstr "Escuchando"
+
+msgid "Live"
+msgstr ""
 
 msgid "Load file contents"
 msgstr "Cargar los contenidos del archivo"
@@ -3420,6 +3431,12 @@ msgstr "Recargar para aplicar los cambios"
 msgid "Reload"
 msgstr "Recargar"
 
+msgid "Remix"
+msgstr ""
+
+msgid "Remixes"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr "Letras remotas"
 
@@ -3782,6 +3799,11 @@ msgstr "La búsqueda comenzará automáticamente"
 msgid "Searching..."
 msgstr "Buscando..."
 
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Secondary release types"
+msgstr "Abrir notas del lanzamiento"
+
 msgid "Secret storage"
 msgstr "Almacenamiento secreto"
 
@@ -3823,9 +3845,6 @@ msgstr "Seleccionar todo"
 
 msgid "Select {title}"
 msgstr "Seleccionar {title}"
-
-msgid "Select"
-msgstr "Seleccionar"
 
 msgid "Selected folders"
 msgstr "Carpetas seleccionadas"
@@ -4097,6 +4116,17 @@ msgstr "Ordenar por nombre"
 
 msgid "Sort title"
 msgstr "Ordenar por título"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "Soundtrack"
+msgstr "{count} pista"
+
+#, fuzzy
+#| msgid "Mood tracks"
+msgid "Soundtracks"
+msgstr "Pistas del estado de ánimo"
 
 msgid "Source by position"
 msgstr "Fuente por posición"
@@ -4967,6 +4997,12 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Appears On"
+#~ msgstr "Aparece en"
+
+#~ msgid "Select"
+#~ msgstr "Seleccionar"
 
 #~ msgid "Apply Template"
 #~ msgstr "Aplicar Plantilla"

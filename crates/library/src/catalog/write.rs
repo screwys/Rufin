@@ -1250,16 +1250,10 @@ impl<'a> Write<'a> {
     }
 
     /// Stages a playlist folder a statement returned with FOLDER_COLUMNS.
-    pub(crate) fn put_folder(&mut self, (key, object, name, smart): FolderRow) {
-        self.edits.folders.insert(
-            key,
-            Some(PlaylistFolder {
-                key,
-                object,
-                name,
-                smart,
-            }),
-        );
+    pub(crate) fn put_folder(&mut self, (key, object, name): FolderRow) {
+        self.edits
+            .folders
+            .insert(key, Some(PlaylistFolder { key, object, name }));
     }
 
     pub(crate) fn remove_folder(&mut self, key: i64) {
@@ -1737,8 +1731,8 @@ impl<'a> Write<'a> {
                     .as_ref()
                     .zip(resident.as_ref())
                     .is_some_and(|(next, before)| {
-                        (next.folder, next.indexed, next.created)
-                            != (before.folder, before.indexed, before.created)
+                        (&next.folders, next.indexed, next.created)
+                            != (&before.folders, before.indexed, before.created)
                     });
             scopes.push(Scope::Playlist {
                 key: PlaylistKey::from_raw(*key),
@@ -2104,7 +2098,7 @@ pub(crate) fn listened_sql(condition: &str) -> String {
 
 /// The playlist header columns the Catalog holds, in load order. Statements that write a
 /// header return them.
-pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),playlist_folder_key,created_at,writable,metadata_writable,EXISTS(SELECT 1 FROM playlist_file_links link WHERE link.playlist_key=playlists.playlist_key),object_id";
+pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),coalesce((SELECT group_concat(member.folder_key) FROM playlist_folder_playlists member WHERE member.playlist_key=playlists.playlist_key),''),created_at,writable,metadata_writable,EXISTS(SELECT 1 FROM playlist_file_links link WHERE link.playlist_key=playlists.playlist_key),object_id";
 
 pub(crate) type PlaylistRow = (
     i64,
@@ -2112,7 +2106,7 @@ pub(crate) type PlaylistRow = (
     bool,
     bool,
     String,
-    Option<i64>,
+    String,
     i64,
     bool,
     bool,
@@ -2127,7 +2121,7 @@ pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playl
         owned_by_source,
         indexed,
         name,
-        folder,
+        folders,
         created,
         writable,
         metadata_writable,
@@ -2141,7 +2135,7 @@ pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playl
         indexed,
         object,
         name,
-        folder,
+        folders: folder_keys(&folders),
         created,
         writable,
         metadata_writable,
@@ -2163,19 +2157,28 @@ fn edit_entries(entries: &mut Vec<Entry<TrackKey>>, removed: &[i64], put: Vec<En
 }
 
 /// The smart playlist columns the Catalog holds. Statements that write one return them.
-pub(crate) const SMART_COLUMNS: &str =
-    "smart_playlist_key,name,playlist_folder_key,position,definition_json,object_id";
+pub(crate) const SMART_COLUMNS: &str = "smart_playlist_key,name,coalesce((SELECT group_concat(member.folder_key) FROM playlist_folder_smart_playlists member WHERE member.smart_playlist_key=smart_playlists.smart_playlist_key),''),position,definition_json,object_id";
 
-pub(crate) type SmartRow = (i64, String, Option<i64>, i64, String, String);
+pub(crate) type SmartRow = (i64, String, String, i64, String, String);
+
+/// The folder keys a row's folder column lists, in key order.
+fn folder_keys(text: &str) -> Vec<i64> {
+    let mut keys = text
+        .split(',')
+        .filter_map(|key| key.parse().ok())
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys
+}
 
 pub(crate) fn smart_playlist(
-    (key, name, folder, position, definition, object): SmartRow,
+    (key, name, folders, position, definition, object): SmartRow,
 ) -> SmartPlaylist {
     SmartPlaylist {
         key,
         object,
         name,
-        folder,
+        folders: folder_keys(&folders),
         position,
         definition: serde_json::from_str(&definition).unwrap_or_else(|error| {
             tracing::warn!(%error, key, "smart playlist has an unreadable definition");
@@ -2185,9 +2188,9 @@ pub(crate) fn smart_playlist(
 }
 
 /// The playlist folder columns the Catalog holds. Statements that write one return them.
-pub(crate) const FOLDER_COLUMNS: &str = "folder_key,object_id,name,smart";
+pub(crate) const FOLDER_COLUMNS: &str = "folder_key,object_id,name";
 
-pub(crate) type FolderRow = (i64, String, String, bool);
+pub(crate) type FolderRow = (i64, String, String);
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2408,14 +2411,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let folder_key = catalog
-            .create_playlist_folder("Folder", false)
-            .await
-            .unwrap();
+        let folder_key = catalog.create_playlist_folder("Folder").await.unwrap();
         catalog
-            .move_playlist_to_folder(
-                crate::PlaylistFolderMember::Playlist { key: playlist },
-                Some(folder_key),
+            .add_to_playlist_folder(
+                &[crate::PlaylistFolderMember::Playlist { key: playlist }],
+                folder_key,
             )
             .await
             .unwrap();
@@ -2437,8 +2437,8 @@ mod tests {
             assert_eq!(snapshot.listened(one.key).plays, 1);
             assert_eq!(snapshot.downloaded(one.key), Some(true));
             assert_eq!(
-                snapshot.playlist(playlist.raw()).unwrap().folder,
-                Some(folder_key.raw())
+                snapshot.playlist(playlist.raw()).unwrap().folders,
+                [folder_key.raw()]
             );
         }
 

@@ -32,10 +32,10 @@ impl Shell {
                     if let Some(folder) = folder {
                         let result = async {
                             if let Some(key) = created.playlist_key {
-                                rufin_core::playlists::move_playlist_to_folder(
+                                rufin_core::playlists::add_to_playlist_folder(
                                     &source,
-                                    library::PlaylistFolderMember::Playlist { key },
-                                    Some(folder),
+                                    vec![library::PlaylistFolderMember::Playlist { key }],
+                                    folder,
                                 )
                                 .await
                                 .map_err(|error| error.to_string())?;
@@ -111,17 +111,7 @@ impl Shell {
 
 impl Shell {
     pub(crate) fn new_playlist_folder_dialog(self: &Rc<Self>) {
-        let smart = matches!(
-            self.navigation.routes.borrow().current(),
-            rufin_core::route::Route::SmartPlaylists
-                | rufin_core::route::Route::PlaylistFolder { smart: true, .. }
-        );
-        crate::menus::playlist_folders::present_new_folder_dialog(
-            self,
-            smart,
-            Vec::new(),
-            Rc::new(|| {}),
-        );
+        crate::menus::playlist_folders::present_new_folder_dialog(self, Vec::new(), Rc::new(|| {}));
     }
 }
 
