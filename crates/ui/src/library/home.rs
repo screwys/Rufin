@@ -63,6 +63,9 @@ impl MountedHomeSection {
                 && previous.iter().zip(&items).all(|(a, b)| match (a, b) {
                     (library::Row::Track(a), library::Row::Track(b)) => a.media_uri == b.media_uri,
                     (library::Row::Album(a), library::Row::Album(b)) => a.media_uri == b.media_uri,
+                    (library::Row::Artist(a), library::Row::Artist(b)) => {
+                        a.media_uri == b.media_uri
+                    }
                     (library::Row::Tag(a), library::Row::Tag(b)) => a.key == b.key,
                     _ => false,
                 })
@@ -104,14 +107,15 @@ impl MountedHomeSection {
         let data = self.data.borrow();
         let columns = data.len().div_ceil(self.column_rows);
         // Before its first allocation the scroller shows no more than the route's width.
-        let page = match adjustment.page_size() {
-            page if page > 0.0 => page,
+        let end = match adjustment.page_size() {
+            page if page > 0.0 => scrolled(&adjustment, &self.row) + page,
             _ => f64::from(shell.route_width()),
         };
-        let shown = ((adjustment.value() + page) / f64::from(width + gap)).ceil() as usize;
+        let shown = (end / f64::from(width + gap)).ceil() as usize;
         let mut cells = self.cells.borrow_mut();
         let built = cells.len().div_ceil(self.column_rows);
-        let wanted = shown.max(1).min(columns).max(built);
+        // One column past the ones shown, so keyboard focus moving on scrolls the row to it.
+        let wanted = (shown + 1).min(columns).max(built);
         for items in data.chunks(self.column_rows).take(wanted).skip(built) {
             let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
             column.set_width_request(width);
@@ -197,16 +201,30 @@ fn column_size(rows: usize) -> (i32, i32) {
     }
 }
 
+/// How far `adjustment` has scrolled `row` from its start, which is its right end in a
+/// right-to-left layout.
+fn scrolled(adjustment: &gtk::Adjustment, row: &impl IsA<gtk::Widget>) -> f64 {
+    if row.direction() == gtk::TextDirection::Rtl {
+        adjustment.upper() - adjustment.page_size() - adjustment.value()
+    } else {
+        adjustment.value() - adjustment.lower()
+    }
+}
+
 /// Scrolls `scroller` forward or back by the whole columns, `stride` apart, that fit its width, as
 /// Home's ‹ › do.
 fn scroll_page(scroller: &gtk::ScrolledWindow, stride: f64, forward: bool) {
     let adjustment = scroller.hadjustment();
     let columns = (adjustment.page_size() / stride).floor().max(1.0);
-    let first = (adjustment.value() / stride).round();
-    let to = ((first + if forward { columns } else { -columns }) * stride).clamp(
-        adjustment.lower(),
-        adjustment.upper() - adjustment.page_size(),
-    );
+    let first = (scrolled(&adjustment, scroller) / stride).round();
+    let length = adjustment.upper() - adjustment.lower() - adjustment.page_size();
+    let from_start =
+        ((first + if forward { columns } else { -columns }) * stride).clamp(0.0, length.max(0.0));
+    let to = if scroller.direction() == gtk::TextDirection::Rtl {
+        adjustment.upper() - adjustment.page_size() - from_start
+    } else {
+        adjustment.lower() + from_start
+    };
     let target = adw::PropertyAnimationTarget::new(&adjustment, "value");
     let scroll = adw::TimedAnimation::new(scroller, adjustment.value(), to, 250, target);
     scroll.set_easing(adw::Easing::EaseOutCubic);
@@ -795,10 +813,10 @@ impl CatalogUi {
             let mounted = mounted.clone();
             move |adjustment: &gtk::Adjustment| {
                 mounted.fill();
-                previous.set_sensitive(adjustment.value() > adjustment.lower());
-                next.set_sensitive(
-                    adjustment.value() + adjustment.page_size() < adjustment.upper() - 1.0,
-                );
+                let from_start = scrolled(adjustment, &mounted.row);
+                let length = adjustment.upper() - adjustment.lower() - adjustment.page_size();
+                previous.set_sensitive(from_start > 0.0);
+                next.set_sensitive(from_start < length - 1.0);
             }
         };
         ends(&adjustment);

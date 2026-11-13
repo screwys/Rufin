@@ -892,9 +892,15 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
         match block {
             HomeBlockKind::Showcase => expected.showcase = all.showcase.clone(),
             HomeBlockKind::Explore => expected.explore = all.explore.clone(),
-            HomeBlockKind::MostPlayed => expected.most_played = all.most_played.clone(),
+            HomeBlockKind::MostPlayed => {
+                expected.most_played = all.most_played.clone();
+                expected.reads_plays = true;
+            }
             HomeBlockKind::NewlyAdded => expected.newly_added = all.newly_added.clone(),
-            HomeBlockKind::RecentlyPlayed => expected.recently_played = all.recently_played.clone(),
+            HomeBlockKind::RecentlyPlayed => {
+                expected.recently_played = all.recently_played.clone();
+                expected.reads_plays = true;
+            }
             HomeBlockKind::RecentlyReleased => {
                 expected.recently_released = all.recently_released.clone()
             }
