@@ -454,9 +454,9 @@ pub(super) fn title(
         (_, Some(Header::Smart(smart))) => {
             rufin_core::playlists::smart_playlist_display_name(&smart.object_id, &smart.name)
         }
-        (Route::PlaylistFolder { key, smart }, None) => products
+        (Route::PlaylistFolder { key, .. }, None) => products
             .library
-            .playlist_folder_choices(*smart, "")
+            .playlist_folder_choices("", &[])
             .into_iter()
             .find_map(|(folder, name)| (folder == *key).then_some(name))
             .unwrap_or_default(),

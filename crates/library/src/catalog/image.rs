@@ -17,7 +17,7 @@ use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
 /// Raised when the meaning of a record's fields or flags changes, or its fields are reordered.
-const REVISION: u8 = 7;
+const REVISION: u8 = 8;
 /// Records are written as they are in memory, so their sizes are part of the format.
 const FORMAT: [u8; 8] = [
     REVISION,
@@ -280,7 +280,7 @@ fn encode<W: std::io::Write>(snapshot: &Snapshot, stamp: &Stamp, out: W) -> std:
         out.i64(playlist.key);
         out.u32(playlist.name.raw());
         out.u32(playlist.object.raw());
-        out.i64(playlist.folder);
+        out.slice(&playlist.folders);
         out.u32(playlist.created);
         out.u16(playlist.source);
         out.u16(playlist.flags);
@@ -297,7 +297,7 @@ fn encode<W: std::io::Write>(snapshot: &Snapshot, stamp: &Stamp, out: W) -> std:
         out.i64(smart.key);
         out.text(&smart.object);
         out.text(&smart.name);
-        out.optional_i64(smart.folder);
+        out.slice(&smart.folders);
         out.i64(smart.position);
         out.text(&serde_json::to_string(&smart.definition).unwrap_or_default());
     }
@@ -306,7 +306,6 @@ fn encode<W: std::io::Write>(snapshot: &Snapshot, stamp: &Stamp, out: W) -> std:
         out.i64(folder.key);
         out.text(&folder.object);
         out.text(&folder.name);
-        out.u8(u8::from(folder.smart));
     }
     let sum = *out.sum.finalize().as_bytes();
     out.failed?;
@@ -394,7 +393,7 @@ fn decode(bytes: &[u8]) -> Option<Snapshot> {
             key: input.i64()?,
             name: StrId::from_raw(input.u32()?),
             object: StrId::from_raw(input.u32()?),
-            folder: input.i64()?,
+            folders: input.slice()?.into(),
             created: input.u32()?,
             source: input.u16()?,
             flags: input.u16()?,
@@ -421,7 +420,7 @@ fn decode(bytes: &[u8]) -> Option<Snapshot> {
                 key,
                 object: input.text()?,
                 name: input.text()?,
-                folder: input.optional_i64()?,
+                folders: input.slice()?,
                 position: input.i64()?,
                 definition: serde_json::from_str(&input.text()?).ok()?,
             },
@@ -436,7 +435,6 @@ fn decode(bytes: &[u8]) -> Option<Snapshot> {
                 key,
                 object: input.text()?,
                 name: input.text()?,
-                smart: input.u8()? != 0,
             },
         );
     }

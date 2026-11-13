@@ -335,9 +335,20 @@ impl Catalog {
             };
             built.insert(item, row);
         }
+        // A folder may be pinned from both pages; each pin opens on its own.
         let rows = pinned
             .into_iter()
-            .filter_map(|(pin, item)| Some((pin.clone(), built.remove(&item)?)))
+            .filter_map(|(pin, item)| {
+                let mut row = built.get(&item)?.clone();
+                if let (
+                    SidebarPin::PlaylistFolder { smart, .. },
+                    Row::Playlist(PlaylistListRow::Folder(folder)),
+                ) = (pin, &mut row)
+                {
+                    folder.smart = *smart;
+                }
+                Some((pin.clone(), row))
+            })
             .collect();
         Ok(rows)
     }

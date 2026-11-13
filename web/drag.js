@@ -3,6 +3,8 @@ import { el, icon } from "./ui.js";
 
 const mediaType = "application/x-rufin-media";
 const pinType = "application/x-rufin-collection";
+// Playlists and smart playlists, which a folder or another playlist takes.
+const playlistType = "application/x-rufin-playlists";
 let current = null;
 let preview = null;
 
@@ -19,6 +21,7 @@ function bindDrag(node, read, pinnable = true) {
     current = Promise.resolve(media);
     if (media.page || media.uris) event.dataTransfer.setData(mediaType, "");
     if (pinnable) event.dataTransfer.setData(pinType, "");
+    if (playlistMember(media)) event.dataTransfer.setData(playlistType, "");
     event.dataTransfer.effectAllowed = "copyMove";
     preview?.remove();
     preview = el("div", "drag-preview");
@@ -57,6 +60,17 @@ function acceptsPin(event) {
   return event.dataTransfer.types.includes(pinType);
 }
 
+function acceptsPlaylists(event) {
+  return event.dataTransfer.types.includes(playlistType);
+}
+
+// The folder member a dragged playlist or smart playlist is, as core names it.
+function playlistMember(media) {
+  if (media.kind === "playlist") return { Playlist: { key: media.row.id } };
+  if (media.kind === "smart-playlist") return { SmartPlaylist: { key: media.row.id } };
+  return null;
+}
+
 // Plays or queues a collection's page whole or the selected rows of a page, or tracks by URI.
 function queueMedia(media, mode = "append", position = {}) {
   return api("/queue", "POST", {
@@ -77,6 +91,8 @@ export {
   bindDrag,
   acceptsMedia,
   acceptsPin,
+  acceptsPlaylists,
+  playlistMember,
   draggedMedia,
   mediaSelection,
   queueMedia,

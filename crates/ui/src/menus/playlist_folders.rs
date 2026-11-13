@@ -42,7 +42,6 @@ pub fn folder_name_dialog(
 
 pub fn present_new_folder_dialog(
     shell: &Rc<Shell>,
-    smart: bool,
     members: Vec<library::PlaylistFolderMember>,
     dismiss: Rc<dyn Fn()>,
 ) {
@@ -55,11 +54,9 @@ pub fn present_new_folder_dialog(
         let dismiss = Rc::clone(&dismiss);
         gtk::glib::spawn_future_local(async move {
             let result = async {
-                let folder =
-                    rufin_core::playlists::create_playlist_folder(&source, name, smart).await?;
-                for member in members {
-                    rufin_core::playlists::move_playlist_to_folder(&source, member, Some(folder))
-                        .await?;
+                let folder = rufin_core::playlists::create_playlist_folder(&source, name).await?;
+                if !members.is_empty() {
+                    rufin_core::playlists::add_to_playlist_folder(&source, members, folder).await?;
                 }
                 Ok::<_, sources::SourceError>(())
             }
@@ -79,16 +76,25 @@ pub fn present_new_folder_dialog(
     shell.present_selected_dialog(&dialog);
 }
 
-pub fn move_member(
+/// Puts `members` in `folder`, or takes them out of the folder `removed` names: the page's
+/// folder, or every folder when None.
+fn change_members(
     shell: &Rc<Shell>,
-    member: library::PlaylistFolderMember,
-    folder: Option<library::PlaylistFolderKey>,
+    members: Vec<library::PlaylistFolderMember>,
+    folder: Result<library::PlaylistFolderKey, Option<library::PlaylistFolderKey>>,
 ) {
     let source = shell.products.source.clone();
     let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
-        if let Err(error) =
-            rufin_core::playlists::move_playlist_to_folder(&source, member, folder).await
+        let result = match folder {
+            Ok(folder) => {
+                rufin_core::playlists::add_to_playlist_folder(&source, members, folder).await
+            }
+            Err(removed) => {
+                rufin_core::playlists::remove_from_playlist_folder(&source, members, removed).await
+            }
+        };
+        if let Err(error) = result
             && let Some(shell) = shell.upgrade()
         {
             shell
@@ -124,15 +130,15 @@ pub fn append_folder_actions(
         move || present_folder_picker(&picker, picker_members.clone()),
     );
     if in_folder {
+        let page = match shell.navigation.routes.borrow().current() {
+            Route::PlaylistFolder { key, .. } => Some(*key),
+            _ => None,
+        };
         let shell = Rc::clone(shell);
         surface.append_fixed_action(
             msgid("Remove from folder"),
             crate::widgets::controls::REMOVE_ICON,
-            move || {
-                for member in &members {
-                    move_member(&shell, member.clone(), None);
-                }
-            },
+            move || change_members(&shell, members.clone(), Err(page)),
         );
     }
 }
@@ -159,10 +165,6 @@ fn populate_folder_picker(
     members: Vec<library::PlaylistFolderMember>,
     dismiss: Rc<dyn Fn()>,
 ) {
-    let smart = matches!(
-        members.first(),
-        Some(library::PlaylistFolderMember::SmartPlaylist { .. })
-    );
     let create_shell = Rc::downgrade(shell);
     let create_members = members.clone();
     let create_dismiss = Rc::clone(&dismiss);
@@ -174,9 +176,7 @@ fn populate_folder_picker(
         true,
         Rc::new(move |folder, _, _| {
             if let Some(shell) = choose_shell.upgrade() {
-                for member in &choose_members {
-                    move_member(&shell, member.clone(), Some(folder));
-                }
+                change_members(&shell, choose_members.clone(), Ok(folder));
             }
             choose_dismiss();
         }),
@@ -184,15 +184,10 @@ fn populate_folder_picker(
             let Some(shell) = create_shell.upgrade() else {
                 return;
             };
-            present_new_folder_dialog(
-                &shell,
-                smart,
-                create_members.clone(),
-                Rc::clone(&create_dismiss),
-            );
+            present_new_folder_dialog(&shell, create_members.clone(), Rc::clone(&create_dismiss));
         }),
     );
-    update(shell.products.library.playlist_folder_choices(smart, ""));
+    update(shell.products.library.playlist_folder_choices("", &members));
 }
 
 /// A playlist folder's Rename folder and Delete folder, as `menu` offers them.
@@ -242,19 +237,22 @@ pub fn append_folder_row_actions(
             let source = delete_shell.products.source.clone();
             let shell = Rc::downgrade(&delete_shell);
             let key = folder.folder_key;
-            let smart = folder.smart;
             gtk::glib::spawn_future_local(async move {
                 let result = rufin_core::playlists::delete_playlist_folder(&source, key).await;
                 let Some(shell) = shell.upgrade() else { return };
                 match result {
                     Ok(()) => {
-                        if shell.navigation.routes.borrow().current().clone()
-                            == (rufin_core::route::Route::PlaylistFolder { key, smart })
-                        {
+                        let open = match shell.navigation.routes.borrow().current() {
+                            Route::PlaylistFolder { key: open, smart } if *open == key => {
+                                Some(*smart)
+                            }
+                            _ => None,
+                        };
+                        if let Some(smart) = open {
                             shell.open_route(if smart {
-                                rufin_core::route::Route::SmartPlaylists
+                                Route::SmartPlaylists
                             } else {
-                                rufin_core::route::Route::Playlists
+                                Route::Playlists
                             });
                         }
                     }
@@ -265,18 +263,6 @@ pub fn append_folder_row_actions(
             });
         },
     );
-}
-
-pub fn single_regular_playlist_drag(source: &crate::widgets::media_drag::MediaDragSource) -> bool {
-    use crate::widgets::media_drag::{CollectionTargets, MediaDragSource};
-    let single = match source {
-        MediaDragSource::Target { .. } => true,
-        MediaDragSource::Targets {
-            targets: CollectionTargets::Ready(targets),
-        } => targets.len() == 1,
-        _ => false,
-    };
-    single && playlist_drag_matches(source, false)
 }
 
 pub fn playlist_drag_matches(
@@ -297,7 +283,7 @@ pub fn playlist_drag_matches(
         MediaDragSource::Targets {
             targets: CollectionTargets::Parents(reads),
         } => reads.iter().any(|(read, _)| match read.kind {
-            library::ListKind::Playlists => !smart,
+            library::ListKind::Playlists { .. } => !smart,
             library::ListKind::SmartPlaylists { .. } => smart,
             _ => false,
         }),
@@ -305,14 +291,20 @@ pub fn playlist_drag_matches(
     }
 }
 
-pub fn drop_playlist_on_folder(
+/// Whether a drag holds playlists or smart playlists, which a folder takes.
+pub fn folder_takes_drag(source: &crate::widgets::media_drag::MediaDragSource) -> bool {
+    playlist_drag_matches(source, false) || playlist_drag_matches(source, true)
+}
+
+/// Puts the playlists a drag holds in the folder `onto` names, or with a playlist `onto` names
+/// in a new folder the person names. False when the drag holds no playlists.
+pub fn drop_playlists(
     shell: &Rc<Shell>,
-    folder_key: library::PlaylistFolderKey,
-    smart: bool,
+    onto: Result<library::PlaylistFolderKey, library::PlaylistFolderMember>,
     source: crate::widgets::media_drag::MediaDragSource,
 ) -> bool {
     use crate::widgets::media_drag::{CollectionTargets, MediaDragSource};
-    if !playlist_drag_matches(&source, smart) {
+    if !folder_takes_drag(&source) {
         return false;
     }
     let targets = match source {
@@ -329,22 +321,36 @@ pub fn drop_playlist_on_folder(
     let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
         let result = async {
-            let collections = task.await.map_err(|error| error.to_string())??;
-            for collection in collections {
-                let member = match collection {
-                    library::Collection::Playlist(key) if !smart => {
-                        library::PlaylistFolderMember::Playlist { key }
+            let mut members: Vec<_> = task
+                .await
+                .map_err(|error| error.to_string())??
+                .into_iter()
+                .filter_map(|collection| match collection {
+                    library::Collection::Playlist(key) => {
+                        Some(library::PlaylistFolderMember::Playlist { key })
                     }
-                    library::Collection::Smart { key, .. } if smart => {
-                        library::PlaylistFolderMember::SmartPlaylist { key }
+                    library::Collection::Smart { key, .. } => {
+                        Some(library::PlaylistFolderMember::SmartPlaylist { key })
                     }
-                    _ => continue,
-                };
-                rufin_core::playlists::move_playlist_to_folder(&source, member, Some(folder_key))
-                    .await
-                    .map_err(|error| error.to_string())?;
+                    _ => None,
+                })
+                .collect();
+            match onto {
+                Ok(folder) => {
+                    rufin_core::playlists::add_to_playlist_folder(&source, members, folder)
+                        .await
+                        .map_err(|error| error.to_string())
+                }
+                // A playlist dropped on itself makes no folder.
+                Err(with) if !members.contains(&with) => {
+                    members.push(with);
+                    if let Some(shell) = shell.upgrade() {
+                        present_new_folder_dialog(&shell, members, Rc::new(|| {}));
+                    }
+                    Ok(())
+                }
+                Err(_) => Ok(()),
             }
-            Ok::<_, String>(())
         }
         .await;
         if let Err(error) = result

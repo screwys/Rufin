@@ -521,7 +521,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         folder,
         activity: true,
         ..library::ListRead::new(
-            library::ListKind::Playlists,
+            library::ListKind::Playlists { now: 0 },
             Some(fixture.source),
             LibraryField::Title,
         )

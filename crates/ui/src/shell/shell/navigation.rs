@@ -1292,9 +1292,8 @@ fn install_playlist_pin_drop(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    if let SidebarPin::PlaylistFolder { smart, .. } = &pin.pin {
+    if let SidebarPin::PlaylistFolder { .. } = &pin.pin {
         let folder_key = library::PlaylistFolderKey::from_raw(pin.key());
-        let smart = *smart;
         let menus = Rc::downgrade(&shell);
         let drop = gtk::DropTarget::new(
             glib::BoxedAnyObject::static_type(),
@@ -1306,7 +1305,7 @@ fn install_playlist_pin_drop(
                 .value()
                 .as_ref()
                 .and_then(crate::widgets::media_drag::media_drag_source)
-                && !crate::menus::playlist_folders::playlist_drag_matches(&source, smart)
+                && !crate::menus::playlist_folders::folder_takes_drag(&source)
             {
                 drop.reject();
             }
@@ -1319,9 +1318,7 @@ fn install_playlist_pin_drop(
             ) else {
                 return false;
             };
-            crate::menus::playlist_folders::drop_playlist_on_folder(
-                &menus, folder_key, smart, source,
-            )
+            crate::menus::playlist_folders::drop_playlists(&menus, Ok(folder_key), source)
         });
         target.add_controller(drop);
         return;

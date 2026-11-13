@@ -34,7 +34,14 @@ import {
 
 import { openWelcome, sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
-import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
+import {
+  acceptsPlaylists,
+  bindDrag,
+  draggedMedia,
+  mediaSelection,
+  playlistMember,
+  queueMedia,
+} from "./drag.js";
 
 let viewRequest = null;
 
@@ -715,6 +722,37 @@ function fitActions(actions) {
   form.style.setProperty("--gap", `${Math.floor(spacing)}px`);
 }
 
+// Playlists dropped on a folder's card go into it; dropped on another playlist's, they go into
+// a new folder with it, as on GTK and Android.
+function bindPlaylistDrop(card, kind, row) {
+  const target = kind === "playlist-folder" ? null : playlistMember(mediaSelection(kind, row));
+  if (kind !== "playlist-folder" && !target) return;
+  card.addEventListener("dragover", (event) => {
+    if (!acceptsPlaylists(event)) return;
+    event.preventDefault();
+    card.classList.add("pin-drop");
+  });
+  card.addEventListener("dragleave", () => card.classList.remove("pin-drop"));
+  card.addEventListener("drop", (event) => {
+    if (!acceptsPlaylists(event)) return;
+    event.preventDefault();
+    card.classList.remove("pin-drop");
+    const payload = draggedMedia();
+    run(async () => {
+      const dragged = playlistMember(await payload);
+      if (!dragged) return;
+      if (!target) {
+        await api("/playlist-folders/members", "POST", { folder: row.id, members: [dragged] });
+        return;
+      }
+      // A playlist dropped on itself makes no folder.
+      if (JSON.stringify(dragged) === JSON.stringify(target)) return;
+      const name = prompt(tr("Folder name"), "")?.trim();
+      if (name) await api("/playlist-folders", "POST", { name, members: [dragged, target] });
+    });
+  });
+}
+
 function bindCard(card) {
   for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts, .detail-below > .detail-facts")) slideText(node);
   // The header's width, not the row's, which the fitting itself changes.
@@ -727,8 +765,10 @@ function bindCard(card) {
     bindHoverControls(card);
     const row = mediaRow(card),
       kind = card.dataset.kind;
-    if (!card.classList.contains("pin-row"))
+    if (!card.classList.contains("pin-row")) {
       bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
+      bindPlaylistDrop(card, kind, row);
+    }
     const open = () => {
       if (row.page) return navigate(row.page);
       host

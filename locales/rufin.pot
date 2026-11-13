@@ -1410,6 +1410,9 @@ msgstr ""
 msgid "Downloads"
 msgstr ""
 
+msgid "Drag to a folder"
+msgstr ""
+
 msgid "Drag to reorder"
 msgstr ""
 
@@ -3695,9 +3698,6 @@ msgstr ""
 
 #, rust-format
 msgid "Select {title}"
-msgstr ""
-
-msgid "Select"
 msgstr ""
 
 msgid "Selected folders"

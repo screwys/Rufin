@@ -180,7 +180,7 @@ impl Catalog {
         let order = self
             .order(
                 &crate::Read::List(crate::ListRead::new(
-                    crate::ListKind::Playlists,
+                    crate::ListKind::Playlists { now: 0 },
                     source,
                     crate::LibraryField::RowIndex,
                 )),
@@ -1191,9 +1191,9 @@ impl Catalog {
         objects: Option<&[String]>,
     ) -> LibraryResult<Vec<PlaylistCopy>> {
         let mut connection = self.acquire_reader().await?;
-        let rows: Vec<(String, String, Option<String>, i64, Option<String>)> = sqlx::query_as(
-            "SELECT playlist.object_id,coalesce(playlist.name,''),folder.object_id,playlist.created_at,playlist.mosaic
-             FROM playlists playlist LEFT JOIN playlist_folders folder ON folder.folder_key=playlist.playlist_folder_key
+        let rows: Vec<(String, String, String, i64, Option<String>)> = sqlx::query_as(
+            "SELECT playlist.object_id,coalesce(playlist.name,''),(SELECT json_group_array(folder.object_id) FROM playlist_folder_playlists member JOIN playlist_folders folder USING(folder_key) WHERE member.playlist_key=playlist.playlist_key),playlist.created_at,playlist.mosaic
+             FROM playlists playlist
              WHERE playlist.owner='rufin' AND playlist.source_key IS NULL
                AND (?1 IS NULL OR playlist.object_id IN(SELECT value FROM json_each(?1)))
              ORDER BY playlist.object_id",
@@ -1204,10 +1204,10 @@ impl Catalog {
         Ok(rows
             .into_iter()
             .map(
-                |(object_id, name, folder, created_at, mosaic)| PlaylistCopy {
+                |(object_id, name, folders, created_at, mosaic)| PlaylistCopy {
                     object_id,
                     name,
-                    folder,
+                    folders: crate::playlist_folders::object_ids(&folders),
                     created_at,
                     mosaic,
                 },
@@ -1215,8 +1215,8 @@ impl Catalog {
             .collect())
     }
 
-    /// Writes Rufin playlists by object id, in one Write. A folder that is not here leaves the
-    /// playlist outside folders; a missing mosaic keeps the stored one.
+    /// Writes Rufin playlists by object id, in one Write. A playlist is in the folders of its
+    /// copy that are here; a missing mosaic keeps the stored one.
     pub async fn put_playlist_copies(&self, playlists: &[PlaylistCopy]) -> LibraryResult<()> {
         if playlists.is_empty() {
             return Ok(());
@@ -1227,7 +1227,6 @@ impl Catalog {
                 (
                     &playlist.object_id,
                     &playlist.name,
-                    &playlist.folder,
                     playlist.created_at,
                     &playlist.mosaic,
                 )
@@ -1235,14 +1234,13 @@ impl Catalog {
             .collect::<Vec<_>>();
         let mut write = self.write().await?;
         let written: Vec<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO playlists(owner,object_id,name,created_at,playlist_folder_key,mosaic)
-             SELECT 'rufin',input.value->>0,input.value->>1,input.value->>3,
-                 (SELECT folder_key FROM playlist_folders WHERE object_id=input.value->>2 AND NOT smart),input.value->>4
+            "INSERT INTO playlists(owner,object_id,name,created_at,mosaic)
+             SELECT 'rufin',input.value->>0,input.value->>1,input.value->>2,input.value->>3
              FROM json_each(?1) input WHERE true
              ON CONFLICT(object_id) WHERE source_key IS NULL DO UPDATE SET name=excluded.name,created_at=excluded.created_at,
-                 playlist_folder_key=excluded.playlist_folder_key,mosaic=coalesce(excluded.mosaic,mosaic)
-             WHERE owner='rufin' AND (name,created_at,playlist_folder_key,mosaic) IS NOT
-                 (excluded.name,excluded.created_at,excluded.playlist_folder_key,coalesce(excluded.mosaic,mosaic))
+                 mosaic=coalesce(excluded.mosaic,mosaic)
+             WHERE owner='rufin' AND (name,created_at,mosaic) IS NOT
+                 (excluded.name,excluded.created_at,coalesce(excluded.mosaic,mosaic))
              RETURNING {}",
             crate::catalog::write::PLAYLIST_COLUMNS
         )))
@@ -1253,6 +1251,22 @@ impl Catalog {
             let key = PlaylistKey::from_raw(row.0);
             crate::playlist_links::mark_dirty_on(self, write.connection().await?, key).await?;
             write.put_playlist(row);
+        }
+        for playlist in playlists {
+            let key: i64 = sqlx::query_scalar(
+                "SELECT playlist_key FROM playlists WHERE source_key IS NULL AND object_id=?1 AND owner='rufin'",
+            )
+            .bind(&playlist.object_id)
+            .fetch_one(write.connection().await?)
+            .await?;
+            crate::playlist_folders::set_folders_on(
+                &mut write,
+                &crate::PlaylistFolderMember::Playlist {
+                    key: PlaylistKey::from_raw(key),
+                },
+                &playlist.folders,
+            )
+            .await?;
         }
         write.commit().await?;
         Ok(())
@@ -1308,13 +1322,13 @@ impl Catalog {
     }
 }
 
-/// A Rufin playlist's shared identity: its folder by object id, its creation time and the
+/// A Rufin playlist's shared identity: its folders by object id, its creation time and the
 /// mosaic's track URIs as a JSON list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistCopy {
     pub object_id: String,
     pub name: String,
-    pub folder: Option<String>,
+    pub folders: Vec<String>,
     pub created_at: i64,
     pub mosaic: Option<String>,
 }

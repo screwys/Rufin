@@ -193,6 +193,7 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
         if old.iter().any(|table| table == "legacy_activity") {
             play_counts_of_0_17(&mut transaction).await?;
         }
+        playlist_folders_of_0_17(&mut transaction).await?;
         for table in &old {
             sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
                 .execute(&mut *transaction).await?;
@@ -227,6 +228,33 @@ async fn play_counts_of_0_17(connection: &mut SqliteConnection) -> LibraryResult
     )))
     .execute(&mut *connection)
     .await?;
+    Ok(())
+}
+
+/// A 0.17 playlist or smart playlist named its one folder in its own row.
+async fn playlist_folders_of_0_17(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    for (table, members, key) in [
+        ("playlists", "playlist_folder_playlists", "playlist_key"),
+        (
+            "smart_playlists",
+            "playlist_folder_smart_playlists",
+            "smart_playlist_key",
+        ),
+    ] {
+        let recovered = format!("recovered_{table}");
+        if columns(connection, "main", &recovered)
+            .await?
+            .iter()
+            .any(|column| column == "playlist_folder_key")
+        {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT OR IGNORE INTO {members}({key},folder_key) SELECT {key},playlist_folder_key FROM \"{recovered}\"
+                 WHERE playlist_folder_key IN(SELECT folder_key FROM playlist_folders) AND {key} IN(SELECT {key} FROM {table})"
+            )))
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
     Ok(())
 }
 

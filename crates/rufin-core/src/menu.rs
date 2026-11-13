@@ -327,9 +327,9 @@ fn downloadable(source: Option<&SourceConfiguration>, row: &Row) -> bool {
 }
 
 fn in_folder(owner: &SourceOwner, member: PlaylistFolderMember) -> bool {
-    owner
+    !owner
         .shared
         .catalog
-        .playlist_member_folder(&member)
-        .is_some()
+        .playlist_member_folders(&member)
+        .is_empty()
 }

@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 61;
+pub(crate) const STORE_VERSION: i64 = 62;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 61;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 62;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -322,8 +322,7 @@ CREATE TABLE play_counts (
 CREATE TABLE playlist_folders (
     folder_key INTEGER PRIMARY KEY,
     object_id TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    smart INTEGER NOT NULL CHECK(smart IN(0,1))
+    name TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE playlists (
@@ -340,7 +339,6 @@ CREATE TABLE playlists (
     artwork_binding BLOB,
     writable INTEGER NOT NULL DEFAULT 1,
     metadata_writable INTEGER NOT NULL DEFAULT 1,
-    playlist_folder_key INTEGER REFERENCES playlist_folders(folder_key) ON DELETE SET NULL,
     provider_revision TEXT,
     valid_until INTEGER,
     -- The track URIs of the set-once mosaic.
@@ -348,7 +346,6 @@ CREATE TABLE playlists (
     UNIQUE (source_key, object_id)
 ) STRICT;
 CREATE UNIQUE INDEX playlists_global_object_idx ON playlists(object_id) WHERE source_key IS NULL;
-CREATE INDEX playlists_folder_idx ON playlists(playlist_folder_key) WHERE playlist_folder_key IS NOT NULL;
 
 CREATE TABLE playlist_entries (
     playlist_entry_key INTEGER PRIMARY KEY,
@@ -391,7 +388,6 @@ CREATE TABLE smart_playlists (
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
-    playlist_folder_key INTEGER REFERENCES playlist_folders(folder_key) ON DELETE SET NULL,
     definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
     artwork_bytes BLOB,
     artwork_revision TEXT,
@@ -402,7 +398,20 @@ CREATE TABLE smart_playlists (
     UNIQUE (object_id),
     UNIQUE (position)
 ) STRICT;
-CREATE INDEX smart_playlists_folder_idx ON smart_playlists(playlist_folder_key) WHERE playlist_folder_key IS NOT NULL;
+
+-- The folders each playlist and smart playlist is in.
+CREATE TABLE playlist_folder_playlists (
+    playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE,
+    PRIMARY KEY(playlist_key, folder_key)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX playlist_folder_playlists_folder_idx ON playlist_folder_playlists(folder_key);
+CREATE TABLE playlist_folder_smart_playlists (
+    smart_playlist_key INTEGER NOT NULL REFERENCES smart_playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE,
+    PRIMARY KEY(smart_playlist_key, folder_key)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX playlist_folder_smart_playlists_folder_idx ON playlist_folder_smart_playlists(folder_key);
 
 CREATE TABLE queue_contexts (
     context_key INTEGER PRIMARY KEY,

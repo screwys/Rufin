@@ -381,6 +381,57 @@ async fn store_of_0_17_moves_its_counts_into_play_counts() {
 }
 
 #[tokio::test]
+async fn store_of_0_17_keeps_its_playlist_folders() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    Catalog::open(&path).await.unwrap().close().await.unwrap();
+    let mut raw = connection(&path, false).await;
+    // 0.17 named a playlist's one folder in its row, and a folder held one kind.
+    sqlx::raw_sql("DROP TABLE playlist_folder_playlists;
+        DROP TABLE playlist_folder_smart_playlists;
+        ALTER TABLE playlist_folders ADD COLUMN smart INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE playlists ADD COLUMN playlist_folder_key INTEGER;
+        ALTER TABLE smart_playlists ADD COLUMN playlist_folder_key INTEGER;
+        INSERT INTO playlist_folders(folder_key,object_id,name,smart) VALUES (1,'f1','Mixes',0),(2,'f2','Rules',1);
+        INSERT INTO playlists(playlist_key,object_id,name,playlist_folder_key) VALUES (1,'p1','One',1),(2,'p2','Two',NULL);
+        UPDATE smart_playlists SET playlist_folder_key=2 WHERE position=0;
+        PRAGMA user_version=60;")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    Catalog::open_installation(
+        &path,
+        &path.with_extension("released.sqlite"),
+        &path.with_extension("catalog.sqlite"),
+    )
+    .await
+    .unwrap()
+    .close()
+    .await
+    .unwrap();
+    let mut raw = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT playlist_key,folder_key FROM playlist_folder_playlists"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![(1, 1)]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT folder_key FROM playlist_folder_smart_playlists JOIN smart_playlists USING(smart_playlist_key) WHERE position=0"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![2]
+    );
+}
+
+#[tokio::test]
 async fn released_store_imports_old_playlist_artwork_and_files() {
     let directory = tempfile::tempdir().unwrap();
     let released = directory.path().join("rufin-store.sqlite");
@@ -500,7 +551,7 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            61,
+            62,
             "{version}"
         );
         // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.

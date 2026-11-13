@@ -1053,11 +1053,11 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .await
         .unwrap();
     let regular_folder = catalog
-        .create_playlist_folder("Pinned playlists", false)
+        .create_playlist_folder("Pinned playlists")
         .await
         .unwrap();
     let smart_folder = catalog
-        .create_playlist_folder("Pinned smart playlists", true)
+        .create_playlist_folder("Pinned smart playlists")
         .await
         .unwrap();
     let outside = catalog
@@ -1070,23 +1070,21 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .await
         .unwrap()[0];
     catalog
-        .move_playlist_to_folder(
-            library::PlaylistFolderMember::Playlist {
+        .add_to_playlist_folder(
+            &[library::PlaylistFolderMember::Playlist {
                 key: library::PlaylistKey::from_raw(outside),
-            },
-            Some(regular_folder),
+            }],
+            regular_folder,
         )
         .await
         .unwrap();
-    for key in [limited, all] {
-        catalog
-            .move_playlist_to_folder(
-                library::PlaylistFolderMember::SmartPlaylist { key },
-                Some(smart_folder),
-            )
-            .await
-            .unwrap();
-    }
+    catalog
+        .add_to_playlist_folder(
+            &[limited, all].map(|key| library::PlaylistFolderMember::SmartPlaylist { key }),
+            smart_folder,
+        )
+        .await
+        .unwrap();
     let mut raw = connection(&fixture.path).await;
     let folders: Vec<(i64, String)> =
         sqlx::query_as("SELECT folder_key,object_id FROM playlist_folders ORDER BY folder_key")
@@ -2057,7 +2055,11 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     library::ListRead {
                         folder,
                         activity: true,
-                        ..library::ListRead::new(library::ListKind::Playlists, source, sort)
+                        ..library::ListRead::new(
+                            library::ListKind::Playlists { now: 0 },
+                            source,
+                            sort,
+                        )
                     },
                 )
                 .await;

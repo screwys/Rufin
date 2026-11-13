@@ -57,7 +57,10 @@ pub enum ListKind {
     },
     Genres,
     Moods,
-    Playlists,
+    /// Playlists, and the folders they and smart playlists are in, counted at `now`.
+    Playlists {
+        now: i64,
+    },
     SmartPlaylists {
         now: i64,
     },
@@ -71,8 +74,16 @@ impl ListKind {
             Self::Artists { .. } => CatalogKind::Artist,
             Self::Genres => CatalogKind::Genre,
             Self::Moods => CatalogKind::Mood,
-            Self::Playlists => CatalogKind::Playlist,
+            Self::Playlists { .. } => CatalogKind::Playlist,
             Self::SmartPlaylists { .. } => CatalogKind::SmartPlaylist,
+        }
+    }
+
+    /// The time a playlist list counts smart playlists at.
+    pub fn now(&self) -> Option<i64> {
+        match self {
+            Self::Playlists { now } | Self::SmartPlaylists { now } => Some(*now),
+            _ => None,
         }
     }
 }
