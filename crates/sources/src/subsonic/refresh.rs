@@ -770,7 +770,7 @@ mod tests {
                 &catalog,
                 library::ListRead {
                     playlist_scope: Default::default(),
-                    kind: library::ListKind::Playlists,
+                    kind: library::ListKind::Playlists { now: 0 },
                     source: (Some(
                         {
                             catalog.loaded().await;
@@ -1012,7 +1012,7 @@ mod tests {
                     &catalog,
                     library::ListRead {
                         playlist_scope: Default::default(),
-                        kind: library::ListKind::Playlists,
+                        kind: library::ListKind::Playlists { now: 0 },
                         source: (Some(
                             {
                                 catalog.loaded().await;

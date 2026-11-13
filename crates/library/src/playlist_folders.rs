@@ -1,10 +1,11 @@
-//! Library-owned groups for regular and smart playlists.
+//! Library-owned groups of playlists and smart playlists. A folder holds both kinds and shows
+//! on both pages; a playlist may be in several.
 use crate::catalog::write::{
     FOLDER_COLUMNS, FolderRow, PLAYLIST_COLUMNS, PlaylistRow as PlaylistHeader, SMART_COLUMNS,
     SmartRow, Write,
 };
 use crate::*;
-use sqlx::{FromRow, SqliteConnection};
+use sqlx::SqliteConnection;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -12,6 +13,7 @@ pub struct PlaylistFolderRow {
     pub folder_key: PlaylistFolderKey,
     pub object_id: String,
     pub name: String,
+    /// Whether the row was read on the Smart Playlists page, which its page opens on.
     pub smart: bool,
     pub artwork_binding: Option<Vec<u8>>,
     pub track_count: i64,
@@ -42,52 +44,99 @@ pub enum PlaylistFolderMember {
     SmartPlaylist { key: SmartPlaylistKey },
 }
 
+/// A member's membership table, its key column there and its key.
 fn member_relation(member: &PlaylistFolderMember) -> (&'static str, &'static str, i64) {
     match member {
-        PlaylistFolderMember::Playlist { key } => ("playlists", "playlist_key", key.raw()),
-        PlaylistFolderMember::SmartPlaylist { key } => {
-            ("smart_playlists", "smart_playlist_key", key.raw())
+        PlaylistFolderMember::Playlist { key } => {
+            ("playlist_folder_playlists", "playlist_key", key.raw())
         }
+        PlaylistFolderMember::SmartPlaylist { key } => (
+            "playlist_folder_smart_playlists",
+            "smart_playlist_key",
+            key.raw(),
+        ),
     }
 }
 
-pub(crate) async fn move_to_folder_on(
-    write: &mut Write<'_>,
-    member: PlaylistFolderMember,
-    folder: Option<PlaylistFolderKey>,
-) -> LibraryResult<()> {
-    let smart = matches!(member, PlaylistFolderMember::SmartPlaylist { .. });
-    let (table, column, key) = member_relation(&member);
+/// Stages a member's row again, which lists the folders it is in.
+async fn stage_member(write: &mut Write<'_>, member: &PlaylistFolderMember) -> LibraryResult<()> {
     let connection = write.connection().await?;
-    if let Some(folder) = folder {
-        let namespace: Option<bool> =
-            sqlx::query_scalar("SELECT smart FROM playlist_folders WHERE folder_key=?1")
-                .bind(folder)
-                .fetch_optional(&mut *connection)
-                .await?;
-        if namespace != Some(smart) {
-            return Err(LibraryError::InvalidRequest(
-                "Playlist folder does not match the playlist kind".into(),
-            ));
+    match member {
+        PlaylistFolderMember::Playlist { key } => {
+            let row: Option<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT {PLAYLIST_COLUMNS} FROM playlists WHERE playlist_key=?1"
+            )))
+            .bind(key.raw())
+            .fetch_optional(connection)
+            .await?;
+            if let Some(row) = row {
+                write.put_playlist(row);
+            }
         }
-    }
-    let returning = if smart {
-        SMART_COLUMNS
-    } else {
-        PLAYLIST_COLUMNS
-    };
-    let moved = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "UPDATE {table} SET playlist_folder_key=?2 WHERE {column}=?1 AND playlist_folder_key IS NOT ?2 RETURNING {returning}"
-    )))
-    .bind(key).bind(folder).fetch_optional(connection).await?;
-    if let Some(row) = moved {
-        if smart {
-            write.put_smart(SmartRow::from_row(&row)?);
-        } else {
-            write.put_playlist(PlaylistHeader::from_row(&row)?);
+        PlaylistFolderMember::SmartPlaylist { key } => {
+            let row: Option<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT {SMART_COLUMNS} FROM smart_playlists WHERE smart_playlist_key=?1"
+            )))
+            .bind(key.raw())
+            .fetch_optional(connection)
+            .await?;
+            if let Some(row) = row {
+                write.put_smart(row);
+            }
         }
     }
     Ok(())
+}
+
+pub(crate) async fn add_to_folder_on(
+    write: &mut Write<'_>,
+    members: &[PlaylistFolderMember],
+    folder: PlaylistFolderKey,
+) -> LibraryResult<()> {
+    for member in members {
+        let (table, column, key) = member_relation(member);
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT OR IGNORE INTO {table}({column},folder_key) VALUES(?1,?2)"
+        )))
+        .bind(key)
+        .bind(folder)
+        .execute(write.connection().await?)
+        .await?;
+        stage_member(write, member).await?;
+    }
+    Ok(())
+}
+
+/// Puts `member` in exactly the folders of these object ids that exist.
+pub(crate) async fn set_folders_on(
+    write: &mut Write<'_>,
+    member: &PlaylistFolderMember,
+    folders: &[String],
+) -> LibraryResult<()> {
+    let (table, column, key) = member_relation(member);
+    let folders = serde_json::to_string(folders)?;
+    let named = "SELECT folder_key FROM playlist_folders WHERE object_id IN(SELECT value FROM json_each(?2))";
+    let connection = write.connection().await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM {table} WHERE {column}=?1 AND folder_key NOT IN({named})"
+    )))
+    .bind(key)
+    .bind(&folders)
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT OR IGNORE INTO {table}({column},folder_key) SELECT ?1,folder_key FROM({named})"
+    )))
+    .bind(key)
+    .bind(&folders)
+    .execute(connection)
+    .await?;
+    stage_member(write, member).await
+}
+
+/// The object ids of a JSON list a statement built.
+pub(crate) fn object_ids(json: &str) -> Vec<String> {
+    serde_json::from_str(json).unwrap_or_default()
 }
 
 fn folder_name(name: &str) -> LibraryResult<&str> {
@@ -100,14 +149,10 @@ fn folder_name(name: &str) -> LibraryResult<&str> {
     Ok(name)
 }
 impl Catalog {
-    pub async fn create_playlist_folder(
-        &self,
-        name: &str,
-        smart: bool,
-    ) -> LibraryResult<PlaylistFolderKey> {
+    pub async fn create_playlist_folder(&self, name: &str) -> LibraryResult<PlaylistFolderKey> {
         let name = folder_name(name)?;
         let mut write = self.write().await?;
-        let row: FolderRow = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_folders(object_id,name,smart) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1,?2) RETURNING {FOLDER_COLUMNS}"))).bind(name).bind(smart).fetch_one(write.connection().await?).await?;
+        let row: FolderRow = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_folders(object_id,name) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1) RETURNING {FOLDER_COLUMNS}"))).bind(name).fetch_one(write.connection().await?).await?;
         let key = PlaylistFolderKey::from_raw(row.0);
         write.put_folder(row);
         write.commit().await?;
@@ -133,92 +178,130 @@ impl Catalog {
         write.commit().await?;
         Ok(())
     }
-    /// Deletes playlist folders in one Write; their members leave them first, so their rows
-    /// say so. The object id and kind of each folder that went.
+    /// Deletes playlist folders in one Write; their members' rows say they left them. The
+    /// object id of each folder that went.
     pub async fn delete_playlist_folders(
         &self,
         keys: &[PlaylistFolderKey],
-    ) -> LibraryResult<Vec<(String, bool)>> {
+    ) -> LibraryResult<Vec<String>> {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
         let keys = serde_json::to_string(keys)?;
         let folders = "(SELECT value FROM json_each(?1))";
         let mut write = self.write().await?;
-        let playlists: Vec<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {PLAYLIST_COLUMNS}"
+        let playlists: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT DISTINCT playlist_key FROM playlist_folder_playlists WHERE folder_key IN{folders}"
         )))
         .bind(&keys)
         .fetch_all(write.connection().await?)
         .await?;
-        let smart: Vec<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {SMART_COLUMNS}"
+        let smart: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT DISTINCT smart_playlist_key FROM playlist_folder_smart_playlists WHERE folder_key IN{folders}"
         )))
         .bind(&keys)
         .fetch_all(write.connection().await?)
         .await?;
-        let deleted: Vec<(i64, String, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "DELETE FROM playlist_folders WHERE folder_key IN{folders} RETURNING folder_key,object_id,smart"
+        let deleted: Vec<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM playlist_folders WHERE folder_key IN{folders} RETURNING folder_key,object_id"
         )))
         .bind(&keys)
         .fetch_all(write.connection().await?)
         .await?;
-        for playlist in playlists {
-            write.put_playlist(playlist);
+        let members = playlists
+            .into_iter()
+            .map(|key| PlaylistFolderMember::Playlist {
+                key: PlaylistKey::from_raw(key),
+            })
+            .chain(
+                smart
+                    .into_iter()
+                    .map(|key| PlaylistFolderMember::SmartPlaylist {
+                        key: SmartPlaylistKey::from_raw(key),
+                    }),
+            );
+        for member in members {
+            stage_member(&mut write, &member).await?;
         }
-        for smart in smart {
-            write.put_smart(smart);
-        }
-        for (key, _, _) in &deleted {
+        for (key, _) in &deleted {
             write.remove_folder(*key);
         }
         write.commit().await?;
-        Ok(deleted
-            .into_iter()
-            .map(|(_, object, smart)| (object, smart))
-            .collect())
+        Ok(deleted.into_iter().map(|(_, object)| object).collect())
     }
-    /// The folder a playlist or smart playlist is in.
-    pub fn playlist_member_folder(
-        &self,
-        member: &PlaylistFolderMember,
-    ) -> Option<PlaylistFolderKey> {
+    /// The folders a playlist or smart playlist is in.
+    pub fn playlist_member_folders(&self, member: &PlaylistFolderMember) -> Vec<PlaylistFolderKey> {
         let snapshot = self.snapshot();
-        match member {
+        let folders = match member {
             PlaylistFolderMember::Playlist { key } => snapshot
                 .playlists
                 .get(key.raw())
-                .filter(|playlist| playlist.folder != 0)
-                .map(|playlist| PlaylistFolderKey::from_raw(playlist.folder)),
+                .map(|playlist| playlist.folders.to_vec()),
             PlaylistFolderMember::SmartPlaylist { key } => snapshot
                 .smart_playlists
                 .get(&key.raw())
-                .and_then(|smart| smart.folder)
-                .map(PlaylistFolderKey::from_raw),
-        }
+                .map(|smart| smart.folders.clone()),
+        };
+        folders
+            .unwrap_or_default()
+            .into_iter()
+            .map(PlaylistFolderKey::from_raw)
+            .collect()
     }
-    pub async fn move_playlist_to_folder(
+    pub async fn add_to_playlist_folder(
         &self,
-        member: PlaylistFolderMember,
-        folder: Option<PlaylistFolderKey>,
+        members: &[PlaylistFolderMember],
+        folder: PlaylistFolderKey,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        move_to_folder_on(&mut write, member, folder).await?;
+        add_to_folder_on(&mut write, members, folder).await?;
         write.commit().await?;
         Ok(())
     }
-    /// Playlist folders of one kind whose names hold `filter`, by name.
+    /// Takes playlists and smart playlists out of `folder`, or out of every folder.
+    pub async fn remove_from_playlist_folder(
+        &self,
+        members: &[PlaylistFolderMember],
+        folder: Option<PlaylistFolderKey>,
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for member in members {
+            let (table, column, key) = member_relation(member);
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE {column}=?1 AND (?2 IS NULL OR folder_key=?2)"
+            )))
+            .bind(key)
+            .bind(folder)
+            .execute(write.connection().await?)
+            .await?;
+            stage_member(&mut write, member).await?;
+        }
+        write.commit().await?;
+        Ok(())
+    }
+    /// Playlist folders whose names hold `filter`, by name, without those every one of
+    /// `members` is already in.
     pub fn playlist_folder_choices(
         &self,
-        smart: bool,
         filter: &str,
+        members: &[PlaylistFolderMember],
     ) -> Vec<(PlaylistFolderKey, String)> {
         let holds = crate::playlists::name_holds(filter);
+        let held = members
+            .iter()
+            .map(|member| self.playlist_member_folders(member))
+            .collect::<Vec<_>>();
         let snapshot = self.snapshot();
         let mut folders = snapshot
             .playlist_folders
             .values()
-            .filter(|folder| folder.smart == smart && holds(&folder.name))
+            .filter(|folder| {
+                holds(&folder.name)
+                    && (held.is_empty()
+                        || !held.iter().all(|folders| {
+                            folders.contains(&PlaylistFolderKey::from_raw(folder.key))
+                        }))
+            })
             .map(|folder| (folder.name.to_lowercase(), folder.key, folder.name.clone()))
             .collect::<Vec<_>>();
         folders.sort();
@@ -234,7 +317,6 @@ impl Catalog {
 pub struct PlaylistFolderCopy {
     pub object_id: String,
     pub name: String,
-    pub smart: bool,
 }
 
 impl Catalog {
@@ -247,7 +329,6 @@ impl Catalog {
             .map(|folder| PlaylistFolderCopy {
                 object_id: folder.object.clone(),
                 name: folder.name.clone(),
-                smart: folder.smart,
             })
             .collect()
     }
@@ -256,15 +337,15 @@ impl Catalog {
     pub async fn put_playlist_folders(&self, folders: &[PlaylistFolderCopy]) -> LibraryResult<()> {
         let folders = folders
             .iter()
-            .map(|folder| Ok((&folder.object_id, folder_name(&folder.name)?, folder.smart)))
+            .map(|folder| Ok((&folder.object_id, folder_name(&folder.name)?)))
             .collect::<LibraryResult<Vec<_>>>()?;
         if folders.is_empty() {
             return Ok(());
         }
         let mut write = self.write().await?;
         let rows: Vec<FolderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO playlist_folders(object_id,name,smart)
-             SELECT value->>0,value->>1,value->>2 FROM json_each(?1) WHERE true
+            "INSERT INTO playlist_folders(object_id,name)
+             SELECT value->>0,value->>1 FROM json_each(?1) WHERE true
              ON CONFLICT(object_id) DO UPDATE SET name=excluded.name WHERE name IS NOT excluded.name
              RETURNING {FOLDER_COLUMNS}"
         )))
@@ -279,60 +360,78 @@ impl Catalog {
     }
 }
 
+/// A line of a backup's folder file. `smart` and `cover` are written for older Rufin, which
+/// needs them; a folder holds both kinds and its cover is its first member's.
 #[derive(serde::Serialize, serde::Deserialize)]
 enum FolderRecord {
     Folder {
         id: String,
         name: String,
+        #[serde(default)]
         smart: bool,
     },
     Playlist {
         folder: String,
         source: Option<String>,
         id: String,
+        #[serde(default)]
         cover: bool,
     },
     SmartPlaylist {
         folder: String,
         id: String,
+        #[serde(default)]
         cover: bool,
     },
+}
+fn write_record(output: &mut impl std::io::Write, record: &FolderRecord) -> LibraryResult<()> {
+    serde_json::to_writer(&mut *output, record)?;
+    output.write_all(b"\n")?;
+    Ok(())
 }
 pub(crate) async fn export_on(
     connection: &mut SqliteConnection,
     mut output: impl std::io::Write,
 ) -> LibraryResult<()> {
     use futures_util::TryStreamExt;
-    let mut folders = sqlx::query_as::<_, (String, String, bool)>(
-        "SELECT object_id,name,smart FROM playlist_folders ORDER BY folder_key",
+    let mut folders = sqlx::query_as::<_, (String, String)>(
+        "SELECT object_id,name FROM playlist_folders ORDER BY folder_key",
     )
     .fetch(&mut *connection);
-    while let Some((id, name, smart)) = folders.try_next().await? {
-        serde_json::to_writer(&mut output, &FolderRecord::Folder { id, name, smart })?;
-        output.write_all(b"\n")?;
+    while let Some((id, name)) = folders.try_next().await? {
+        write_record(
+            &mut output,
+            &FolderRecord::Folder {
+                id,
+                name,
+                smart: false,
+            },
+        )?;
     }
     drop(folders);
-    let mut members = sqlx::query_as::<_, (String, Option<String>, String, bool)>("SELECT folder.object_id,source.object_id,playlist.object_id,playlist.playlist_key=(SELECT min(child.playlist_key) FROM playlists child WHERE child.playlist_folder_key=folder.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed)) FROM playlists playlist JOIN playlist_folders folder ON folder.folder_key=playlist.playlist_folder_key LEFT JOIN sources source USING(source_key) ORDER BY folder.folder_key,playlist.playlist_key").fetch(&mut *connection);
-    while let Some((folder, source, id, cover)) = members.try_next().await? {
-        serde_json::to_writer(
+    let mut members = sqlx::query_as::<_, (String, Option<String>, String)>("SELECT folder.object_id,source.object_id,playlist.object_id FROM playlist_folder_playlists member JOIN playlist_folders folder USING(folder_key) JOIN playlists playlist USING(playlist_key) LEFT JOIN sources source USING(source_key) ORDER BY member.folder_key,member.playlist_key").fetch(&mut *connection);
+    while let Some((folder, source, id)) = members.try_next().await? {
+        write_record(
             &mut output,
             &FolderRecord::Playlist {
                 folder,
                 source,
                 id,
-                cover,
+                cover: false,
             },
         )?;
-        output.write_all(b"\n")?;
     }
     drop(members);
-    let mut members = sqlx::query_as::<_, (String, String, bool)>("SELECT folder.object_id,playlist.object_id,playlist.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=folder.folder_key) FROM smart_playlists playlist JOIN playlist_folders folder ON folder.folder_key=playlist.playlist_folder_key ORDER BY folder.folder_key,playlist.smart_playlist_key").fetch(&mut *connection);
-    while let Some((folder, id, cover)) = members.try_next().await? {
-        serde_json::to_writer(
+    let mut members = sqlx::query_as::<_, (String, String)>("SELECT folder.object_id,playlist.object_id FROM playlist_folder_smart_playlists member JOIN playlist_folders folder USING(folder_key) JOIN smart_playlists playlist USING(smart_playlist_key) ORDER BY member.folder_key,member.smart_playlist_key").fetch(&mut *connection);
+    while let Some((folder, id)) = members.try_next().await? {
+        write_record(
             &mut output,
-            &FolderRecord::SmartPlaylist { folder, id, cover },
+            &FolderRecord::SmartPlaylist {
+                folder,
+                id,
+                cover: false,
+            },
         )?;
-        output.write_all(b"\n")?;
     }
     Ok(())
 }
@@ -342,22 +441,20 @@ pub(crate) async fn import_on(
 ) -> LibraryResult<()> {
     for line in input.lines() {
         match serde_json::from_str::<FolderRecord>(&line?)? {
-            FolderRecord::Folder { id, name, smart } => {
-                sqlx::query("INSERT INTO playlist_folders(object_id,name,smart) VALUES(?1,?2,?3)")
+            FolderRecord::Folder { id, name, .. } => {
+                sqlx::query("INSERT INTO playlist_folders(object_id,name) VALUES(?1,?2)")
                     .bind(id)
                     .bind(name)
-                    .bind(smart)
                     .execute(&mut *connection)
                     .await?;
             }
-            // A folder's cover is its first playlist, so the saved cover choice is not read.
             FolderRecord::Playlist {
                 folder, source, id, ..
             } => {
-                sqlx::query("UPDATE playlists SET playlist_folder_key=(SELECT folder_key FROM playlist_folders WHERE object_id=?3 AND NOT smart) WHERE object_id=?1 AND (owner='rufin' OR source_key IS(SELECT source_key FROM sources WHERE object_id=?2))").bind(&id).bind(&source).bind(&folder).execute(&mut *connection).await?;
+                sqlx::query("INSERT OR IGNORE INTO playlist_folder_playlists(playlist_key,folder_key) SELECT playlist.playlist_key,folder.folder_key FROM playlists playlist JOIN playlist_folders folder ON folder.object_id=?3 WHERE playlist.object_id=?1 AND (playlist.owner='rufin' OR playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=?2))").bind(&id).bind(&source).bind(&folder).execute(&mut *connection).await?;
             }
             FolderRecord::SmartPlaylist { folder, id, .. } => {
-                sqlx::query("UPDATE smart_playlists SET playlist_folder_key=(SELECT folder_key FROM playlist_folders WHERE object_id=?2 AND smart) WHERE object_id=?1").bind(&id).bind(&folder).execute(&mut *connection).await?;
+                sqlx::query("INSERT OR IGNORE INTO playlist_folder_smart_playlists(smart_playlist_key,folder_key) SELECT playlist.smart_playlist_key,folder.folder_key FROM smart_playlists playlist JOIN playlist_folders folder ON folder.object_id=?2 WHERE playlist.object_id=?1").bind(&id).bind(&folder).execute(&mut *connection).await?;
             }
         }
     }

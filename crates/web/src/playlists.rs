@@ -30,10 +30,50 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
         .route("/api/playlists/public", get(public))
         .route("/api/playlists/destinations", get(destinations))
+        .route("/api/playlist-folders", post(create_folder))
+        .route("/api/playlist-folders/members", post(add_to_folder))
         .route(
             "/api/playlists/file",
             get(file_settings).post(file_action).patch(file_update),
         )
+}
+
+/// Creates a playlist folder named `name` that holds `members`, as a drop of playlists on
+/// another playlist does.
+async fn create_folder(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        name: String,
+        members: Vec<library::PlaylistFolderMember>,
+    }
+    let input: Input = body(request).await?;
+    let folder = rufin_core::playlists::create_playlist_folder(&products.source, input.name)
+        .await
+        .map_err(bad_request)?;
+    rufin_core::playlists::add_to_playlist_folder(&products.source, input.members, folder)
+        .await
+        .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({"key":folder})))
+}
+
+/// Puts `members` in the playlist folder `folder`, as a drop of playlists on a folder does.
+async fn add_to_folder(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        folder: library::PlaylistFolderKey,
+        members: Vec<library::PlaylistFolderMember>,
+    }
+    let input: Input = body(request).await?;
+    rufin_core::playlists::add_to_playlist_folder(&products.source, input.members, input.folder)
+        .await
+        .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({})))
 }
 
 /// The playlists tracks can be added to whose names hold `q`, as the playlist list orders

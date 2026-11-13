@@ -253,8 +253,8 @@ pub(crate) struct PlaylistRec {
     pub(crate) key: i64,
     pub(crate) name: StrId,
     pub(crate) object: StrId,
-    /// Zero when the playlist is in no folder.
-    pub(crate) folder: i64,
+    /// The folders it is in, by key.
+    pub(crate) folders: Box<[i64]>,
     pub(crate) created: u32,
     pub(crate) source: u16,
     pub(crate) flags: u16,
@@ -279,7 +279,7 @@ pub(crate) struct Playlist {
     pub(crate) indexed: bool,
     pub(crate) object: String,
     pub(crate) name: String,
-    pub(crate) folder: Option<i64>,
+    pub(crate) folders: Vec<i64>,
     pub(crate) created: i64,
     pub(crate) writable: bool,
     pub(crate) metadata_writable: bool,
@@ -292,7 +292,7 @@ pub(crate) struct SmartPlaylist {
     pub(crate) key: i64,
     pub(crate) object: String,
     pub(crate) name: String,
-    pub(crate) folder: Option<i64>,
+    pub(crate) folders: Vec<i64>,
     pub(crate) position: i64,
     pub(crate) definition: SmartPlaylistDefinition,
 }
@@ -302,7 +302,6 @@ pub(crate) struct PlaylistFolder {
     pub(crate) key: i64,
     pub(crate) object: String,
     pub(crate) name: String,
-    pub(crate) smart: bool,
 }
 
 /// The fields every packed record shares.
@@ -1132,7 +1131,7 @@ impl Snapshot {
             indexed: record.flags & INDEXED != 0,
             object: self.text(record.object).to_owned(),
             name: self.text(record.name).to_owned(),
-            folder: (record.folder != 0).then_some(record.folder),
+            folders: record.folders.to_vec(),
             created: i64::from(record.created),
             writable: record.flags & WRITABLE != 0,
             metadata_writable: record.flags & METADATA_WRITABLE != 0,
@@ -1180,7 +1179,7 @@ impl Snapshot {
             key: playlist.key,
             name,
             object,
-            folder: playlist.folder.unwrap_or(0),
+            folders: playlist.folders.as_slice().into(),
             created: clamp_u32(playlist.created),
             source,
             flags: u16::from(playlist.indexed) * INDEXED

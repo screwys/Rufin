@@ -261,7 +261,7 @@ impl NamedCollectionRow for TagRow {
 
 impl CollectionRow for library::PlaylistListRow {
     fn playback(&self) -> Option<PlayTarget> {
-        PlayTarget::of_playlist(self)
+        Some(PlayTarget::of_playlist(self))
     }
     fn downloaded(&self) -> bool {
         library::PlaylistListRow::downloaded(self)
@@ -341,14 +341,13 @@ impl NamedCollectionRow for library::PlaylistListRow {
             else {
                 return;
             };
+            // Playlists dropped on a folder go into it, and on a playlist make a folder with it;
+            // tracks dropped on a playlist are added to it.
+            let playlists = crate::menus::playlist_folders::folder_takes_drag(&source);
             let accepts = match accept_current() {
-                Some(library::PlaylistListRow::Folder(folder)) => {
-                    crate::menus::playlist_folders::playlist_drag_matches(&source, folder.smart)
-                }
-                Some(library::PlaylistListRow::Playlist(_)) => {
-                    !crate::menus::playlist_folders::single_regular_playlist_drag(&source)
-                }
-                _ => false,
+                Some(library::PlaylistListRow::Playlist(_)) => true,
+                Some(_) => playlists,
+                None => false,
             };
             if !accepts {
                 drop.reject();
@@ -363,11 +362,24 @@ impl NamedCollectionRow for library::PlaylistListRow {
             ) else {
                 return false;
             };
+            let onto = match &row {
+                library::PlaylistListRow::Folder(folder) => Ok(folder.folder_key),
+                library::PlaylistListRow::Playlist(playlist) => {
+                    Err(library::PlaylistFolderMember::Playlist {
+                        key: playlist.playlist_key,
+                    })
+                }
+                library::PlaylistListRow::SmartPlaylist(smart) => {
+                    Err(library::PlaylistFolderMember::SmartPlaylist {
+                        key: smart.smart_playlist_key,
+                    })
+                }
+            };
+            if crate::menus::playlist_folders::folder_takes_drag(&source) {
+                return crate::menus::playlist_folders::drop_playlists(&menus, onto, source);
+            }
             match row {
                 library::PlaylistListRow::Playlist(row) => {
-                    if crate::menus::playlist_folders::single_regular_playlist_drag(&source) {
-                        return false;
-                    }
                     crate::menus::media_menus::add_drag_to_playlist(
                         &menus,
                         row.playlist_key,
@@ -375,15 +387,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
                         source,
                     )
                 }
-                library::PlaylistListRow::Folder(row) => {
-                    crate::menus::playlist_folders::drop_playlist_on_folder(
-                        &menus,
-                        row.folder_key,
-                        row.smart,
-                        source,
-                    )
-                }
-                library::PlaylistListRow::SmartPlaylist(_) => false,
+                _ => false,
             }
         });
         widget.add_controller(drop);

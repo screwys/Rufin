@@ -126,8 +126,8 @@ internal fun DetailContent(
     }
     val route = page.location.route
     val headerItem = remember(summary, page.pageView, page.displaySettings) { BrowseItem(summary.row, 0UL, page.pageView, page.displaySettings) }
-    var selecting by remember { mutableStateOf(false) }
-    if (selecting) PlaylistSelectMode(player.model, player.model.browse, page, rows, player, headerItem) { selecting = false }
+    val select = LocalSelectMode.current
+    if (select.route == route) PlaylistSelectMode(player.model, player.model.browse, page, rows, player, headerItem) { select.route = null }
     val artist = route is Route.ArtistDetail || route is Route.AlbumArtistDetail
     val releasesVisible = route.showsReleases
     fun images(fields: List<AndroidSortField>) = fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }
@@ -213,18 +213,6 @@ internal fun DetailContent(
                         }
                     }
                 } else {
-                    // A saved playlist's rows open its Select mode from above them.
-                    if (headerItem.row.playlist != null && !finding) item("detail-select") {
-                        Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(trackCountText(headerItem.row.trackCount), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton({ selecting = true }) {
-                                RufinIcon("rufin-object-select-symbolic", null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(translate("Select"))
-                            }
-                        }
-                    }
                     if (display?.showHeader != false) item("detail-track-header") { FieldHeader(page.fields, display?.size) }
                     items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
                         val item = rows[index]
@@ -565,8 +553,7 @@ internal fun FieldRow(
     val baseHeight = when (size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> if (merged) 64.dp else 56.dp }
     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
     BrowseSwipeActions(item, allowSwipe) {
-    val member = item.row.playlistFolderMember
-    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrop(item, player.model).pickedRow(item)
+    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).pickedRow(item)
         .combinedClickable(onClick = { activate(item) }, onLongClick = { menu(projected) })
         .padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -575,8 +562,7 @@ internal fun FieldRow(
             when (field.id) {
                 LibraryField.IMAGE -> if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
                 // Compact actions, so the title keeps the width.
-                LibraryField.TOOLS -> if (member != null) PlaylistDragHandle(member, detailColumn(field.id))
-                    else PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) }, detailColumn(field.id).height(36.dp), iconSize = 20.dp)
+                LibraryField.TOOLS -> PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) }, detailColumn(field.id).height(36.dp), iconSize = 20.dp)
                 LibraryField.FAVORITE -> IconButton({ favorite(projected) }, detailColumn(field.id).height(36.dp)) {
                     RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(20.dp),
                         if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
@@ -602,7 +588,6 @@ internal fun FieldRow(
                     style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }
         }
-        if (member != null && fields.none { it.id == LibraryField.TOOLS }) PlaylistDragHandle(member)
     }
     }
 }

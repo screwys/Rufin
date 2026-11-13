@@ -15,12 +15,12 @@ pub struct AndroidPlaylistChoices {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    /// The playlists Add to Playlist offers, or with `folder_kind` the playlist folders of that
-    /// kind Add to folder offers, as GTK lists them, whose names hold `filter`.
+    /// The playlists Add to Playlist offers, or with `folder_members` the playlist folders Add
+    /// to folder offers them, as GTK lists them, whose names hold `filter`.
     pub async fn playlist_choices(
         &self,
         filter: String,
-        folder_kind: Option<bool>,
+        folder_members: Option<Vec<library::PlaylistFolderMember>>,
         offset: u64,
         limit: u32,
     ) -> Result<AndroidPlaylistChoices, AndroidError> {
@@ -34,10 +34,10 @@ impl AndroidLibrary {
                 let cancel = library::ReadCancellation::new();
                 let offset = usize::try_from(offset).map_err(error)?;
                 let window = offset..offset.saturating_add(limit as usize);
-                let (count, rows) = match folder_kind {
-                    Some(smart) => {
+                let (count, rows) = match folder_members {
+                    Some(members) => {
                         let folders = catalog
-                            .playlist_folder_choices(smart, &filter)
+                            .playlist_folder_choices(&filter, &members)
                             .into_iter()
                             .map(|(key, _)| library::Item::PlaylistFolder(key))
                             .collect::<Vec<_>>();
