@@ -15,9 +15,17 @@ use tracing::{debug, warn};
 
 use crate::settings::{SettingsFile, StoredSettings};
 
+pub use ::lyrics::{
+    JapaneseDictionaryStatus, JapaneseReading, JapaneseReadingSegment, KaraokeTiming,
+    LYRICS_USER_SCROLL_PAUSE_MS, LyricsAgent, LyricsAgentRole, LyricsDocument, LyricsLine,
+    LyricsQuery, LyricsRole, LyricsSearchContent, LyricsSearchResult, PreparedCueLine,
+    PreparedLyrics, PreparedLyricsLine, Settings, UserPreferences, active_lyrics_line_index,
+    intro_lyrics_line_index, japanese_reading_from_romanization, lyric_line_has_text,
+    lyrics_to_lrc_text, playback_position_for_lyrics_position, pronunciation_line_for,
+    shift_lrc_text_timestamps, should_highlight_all_lyrics_lines,
+};
 use ::lyrics::{
-    LyricsBundle, LyricsDocument, LyricsOrigin, LyricsQuery, LyricsRole, LyricsSearchResult,
-    Settings, lyrics_from_search_result, lyrics_to_lrc_text, save_current_lyrics, search_lyrics,
+    LyricsBundle, LyricsOrigin, lyrics_from_search_result, save_current_lyrics, search_lyrics,
 };
 use ::lyrics::{
     LyricsLookup, LyricsPlan, cached_lyrics_allowed, external_best_lyrics, lyrics_from_edited_text,

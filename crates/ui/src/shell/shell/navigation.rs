@@ -17,8 +17,8 @@ use crate::widgets::interactions::{
     show_native_menu_icons,
 };
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::{gio, glib};
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::playlists::smart_playlist_display_name;
 use rufin_core::route::{CollectionCategory, Route};

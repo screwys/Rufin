@@ -57,24 +57,20 @@ impl FetchContext {
                 name,
                 musicbrainz_id,
                 ..
-            } => {
-                if !policy.allow_musicbrainz {
-                    return Ok(FetchOutcome::Missing);
-                }
-                metadata_lookup::lookup_artist_image(
-                    name,
-                    musicbrainz_id.as_deref(),
-                    match size {
-                        ImageSize::Original => None,
-                        ImageSize::Thumbnail(size) => Some(size),
-                    },
-                )
-                .map(|bytes| {
-                    bytes
-                        .map(FetchOutcome::Ready)
-                        .unwrap_or(FetchOutcome::Missing)
-                })
-            }
+            } => metadata_lookup::lookup_artist_image(
+                name,
+                musicbrainz_id.as_deref(),
+                match size {
+                    ImageSize::Original => None,
+                    ImageSize::Thumbnail(size) => Some(size),
+                },
+                &policy.lookups,
+            )
+            .map(|bytes| {
+                bytes
+                    .map(FetchOutcome::Ready)
+                    .unwrap_or(FetchOutcome::Missing)
+            }),
             library::ArtworkImage::Native {
                 source_id,
                 item_id,
@@ -144,10 +140,7 @@ impl FetchContext {
                     ImageSize::Original => None,
                     ImageSize::Thumbnail(size) => Some(size),
                 },
-                &metadata_lookup::AlbumCoverPolicy::new(
-                    policy.lastfm_api_key.clone(),
-                    policy.allow_musicbrainz,
-                ),
+                &policy.lookups,
             )
             .map(|bytes| {
                 bytes

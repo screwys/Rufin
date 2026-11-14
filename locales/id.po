@@ -72,6 +72,11 @@ msgstr ""
 "Unduhan dari sumber ini akan dihapus, dan aturan otomatis akan dimatikan"
 
 msgid ""
+"GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
+"an API key."
+msgstr ""
+
+msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
 "Rufin. If it is installed as a flatpak, this is not needed."
 msgstr ""
@@ -308,9 +313,6 @@ msgstr "+1 Lagu"
 msgid "+5 min"
 msgstr "+5 min"
 
-msgid ". You only need to fill email and an application name parts"
-msgstr ". Anda hanya perlu mengisi bagian email dan nama aplikasi"
-
 msgid "1 day"
 msgstr "1 hari"
 
@@ -376,9 +378,6 @@ msgstr "Kunci API (Subsonic)"
 msgid "API key"
 msgstr "Kunci API"
 
-msgid "API keys"
-msgstr "Kunci API"
-
 msgid "About Rufin"
 msgstr "Tentang Rufin"
 
@@ -397,8 +396,18 @@ msgstr "Token akses"
 msgid "Accessibility"
 msgstr "Aksesibilitas"
 
+#, fuzzy
+#| msgid "Bar count"
+msgid "Account"
+msgstr "Jumlah bar"
+
 msgid "Actions"
 msgstr "Tindakan"
+
+#, fuzzy
+#| msgid "Activity"
+msgid "Active"
+msgstr "Aktivitas"
 
 msgid "Activity"
 msgstr "Aktivitas"
@@ -406,8 +415,18 @@ msgstr "Aktivitas"
 msgid "Add Manually"
 msgstr "Tambahkan manual"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add SMB folder"
+msgstr "Tambah folder"
+
 msgid "Add Source"
 msgstr "Tambah sumber"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add WebDAV folder"
+msgstr "Tambah folder"
 
 msgid "Add a matching server prefix"
 msgstr "Tambahkan awalan yang sesuai dengan server"
@@ -452,6 +471,11 @@ msgstr "Tambah musik"
 msgid "Add rule"
 msgstr "Tambah aturan"
 
+#, fuzzy
+#| msgid "Add Rule"
+msgid "Add server"
+msgstr "Tambah aturan"
+
 msgid "Add to Favorites"
 msgstr "Tambahkan ke Favorit"
 
@@ -487,6 +511,11 @@ msgstr "Artis album"
 
 msgid "Album artists"
 msgstr "Artis album"
+
+#, fuzzy
+#| msgid "Album sort"
+msgid "Album covers"
+msgstr "Urutan album"
 
 msgid "Album details"
 msgstr "Detail album"
@@ -527,9 +556,6 @@ msgstr "Semua Playlist"
 msgid "All time"
 msgstr "Sepanjang waktu"
 
-msgid "All tracks"
-msgstr "Semua lagu"
-
 msgid "All"
 msgstr "Semua"
 
@@ -542,6 +568,9 @@ msgstr "Izinkan menghapus lagu secara permanen"
 msgid "Allow remote connections"
 msgstr "Izinkan koneksi jarak jauh"
 
+msgid "Also album types and tag suggestions"
+msgstr ""
+
 msgid "Alternate addresses"
 msgstr "Alamat alternatif"
 
@@ -553,9 +582,6 @@ msgstr "Anonim (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonim"
-
-msgid "Any genre"
-msgstr "Semua genre"
 
 msgid "Any"
 msgstr "Semua"
@@ -594,6 +620,11 @@ msgstr "Album artis"
 
 msgid "Artist details"
 msgstr "Detail artis"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Artist images"
+msgstr "Nama artis"
 
 msgid "Artist name"
 msgstr "Nama artis"
@@ -636,6 +667,9 @@ msgstr "Sampul"
 msgid "Ascending"
 msgstr "Menurun"
 
+msgid "Asked in this order."
+msgstr ""
+
 msgid "Audio effects"
 msgstr "Efek audio"
 
@@ -658,14 +692,14 @@ msgstr "Pemrosesan audio tidak tersedia"
 msgid "Audio"
 msgstr "Audio"
 
+msgid "Audioscrobbler API"
+msgstr ""
+
 msgid "August {year}"
 msgstr "Agustus {year}"
 
 msgid "Authentication"
 msgstr "Autentikasi"
-
-msgid "Authorization timed out"
-msgstr "Waktu otorisasi habis"
 
 msgid "Auto DJ refill threshold"
 msgstr "Batas antrean DJ Otomatis"
@@ -773,6 +807,9 @@ msgstr "Bitstream"
 msgid "Blue"
 msgstr "Biru"
 
+msgid "Bottom bar"
+msgstr ""
+
 msgid "Brightness (%)"
 msgstr "Kecerahan (%)"
 
@@ -865,6 +902,11 @@ msgstr "Saluran"
 
 msgid "Check for updates"
 msgstr "Periksa pembaruan"
+
+#, fuzzy
+#| msgid "Connecting to music server..."
+msgid "Checking the user token..."
+msgstr "Menghubungkan ke server musik..."
 
 msgid "Choose Folder"
 msgstr "Pilih folder"
@@ -1120,9 +1162,6 @@ msgstr "Koneksi"
 msgid "Contents"
 msgstr "Isi"
 
-msgid "Context Menus"
-msgstr "Menu konteks"
-
 msgid "Continue from {device}"
 msgstr "Lanjutkan dari {device}"
 
@@ -1201,7 +1240,9 @@ msgstr "Tidak dapat memperbarui favorit"
 msgid "Couldn't connect to the server"
 msgstr "Gagal terhubung ke server"
 
-msgid "Couldn't connect to {service}"
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect"
 msgstr "Gagal terhubung ke {service}"
 
 msgid "Couldn't decode this track"
@@ -1209,6 +1250,11 @@ msgstr "Tidak dapat mendekode lagu ini"
 
 msgid "Couldn't load this folder"
 msgstr "Tidak dapat memuat folder ini"
+
+#, fuzzy
+#| msgid "Could not open file: {error}"
+msgid "Couldn't open the sign-in page: {error}"
+msgstr "Tidak dapat membuka file: {error}"
 
 msgid "Couldn't search for lyrics"
 msgstr "Gagal mencari lirik"
@@ -1218,6 +1264,17 @@ msgstr "Gagal mengunduh kamus bahasa Jepang"
 
 msgid "Country"
 msgstr "Negara"
+
+msgid "Covers and artist images your library doesn't have"
+msgstr ""
+
+msgid "Covers, artist images, tags"
+msgstr ""
+
+#, fuzzy
+#| msgid "API keys"
+msgid "Create API keys"
+msgstr "Kunci API"
 
 msgid "Create a playlist from queue"
 msgstr "Buat playlist dari antrean"
@@ -1309,12 +1366,6 @@ msgstr "Desember {year}"
 
 msgid "Decrease"
 msgstr "Kurangi"
-
-msgid "Default left sidebar"
-msgstr "Sidebar sisi kiri bawaan"
-
-msgid "Default right sidebar"
-msgstr "Sidebar sisi kanan bawaan"
 
 msgid "Default"
 msgstr "Bawaan"
@@ -1436,10 +1487,6 @@ msgstr "Discord Rich Presence"
 msgid "Discord access in Flatpak"
 msgstr "Akses Discord di Flatpak"
 
-#, fuzzy
-msgid "Discord"
-msgstr "Discord"
-
 msgid "Display"
 msgstr "Tampilan"
 
@@ -1518,6 +1565,11 @@ msgstr "Seret untuk mengubah urutan"
 msgid "Drag to reorder"
 msgstr "Seret untuk mengubah urutan"
 
+#, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to reorder."
+msgstr "Seret untuk mengubah urutan"
+
 msgid "Duplicate preset"
 msgstr "Duplikasi preset"
 
@@ -1553,6 +1605,9 @@ msgstr "EP"
 #, fuzzy
 msgid "ERB"
 msgstr "ERB"
+
+msgid "Each plays whole"
+msgstr ""
 
 msgid "Edit Lyrics"
 msgstr "Edit Lirik"
@@ -1638,8 +1693,11 @@ msgstr "Akhir lagu ini"
 msgid "Ends around {time}"
 msgstr "Selesai sekitar {time}"
 
-msgid "Enter API credentials first"
-msgstr "Masukan kredensial API terlebih dahulu"
+msgid "Enter a name and URL."
+msgstr ""
+
+msgid "Enter a name and the server's URL."
+msgstr ""
 
 msgid "Enter a server address and API key"
 msgstr "Masukan alamat server dan kunci API"
@@ -1649,6 +1707,14 @@ msgstr "Masukan alamat server, nama pengguna, dan kata sandi"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr "Masukan alamat server Nextcloud Anda untuk masuk melalui browser"
+
+msgid "Enter your user token first"
+msgstr ""
+
+#, fuzzy
+#| msgid "Enter a server address, username, and password"
+msgid "Enter your username and password."
+msgstr "Masukan alamat server, nama pengguna, dan kata sandi"
 
 msgid "Entire Library"
 msgstr "Seluruh pustaka"
@@ -1716,9 +1782,6 @@ msgstr "Pencarian lirik eksternal"
 
 msgid "External metadata lookup"
 msgstr "Pencarian metadata eksternal"
-
-msgid "External site links"
-msgstr "Tautan situs eksternal"
 
 msgid "FFT size"
 msgstr "Ukuran FFT"
@@ -1788,9 +1851,6 @@ msgstr "Bidang"
 msgid "File connection"
 msgstr "Koneksi file"
 
-msgid "File connections"
-msgstr "Koneksi file"
-
 msgid "File format"
 msgstr "Format file"
 
@@ -1819,7 +1879,9 @@ msgstr "Cari di {name}"
 msgid "Find shares"
 msgstr "Cari folder bersama"
 
-msgid "Find your ListenBrainz user token"
+#, fuzzy
+#| msgid "Find your ListenBrainz user token"
+msgid "Find your token"
 msgstr "Temukan token pengguna ListenBrainz Anda"
 
 msgid "Finding lyrics..."
@@ -1961,11 +2023,8 @@ msgstr "Genre"
 msgid "Genres"
 msgstr "Genre"
 
-msgid "Gestures"
-msgstr "Gestur"
-
-msgid "Get token"
-msgstr "Dapatkan token"
+msgid "Get a personal key"
+msgstr ""
 
 msgid "Go to Album"
 msgstr "Buka Album"
@@ -2038,11 +2097,13 @@ msgstr "Tahan dan seret untuk mengubah ukuran"
 msgid "Hold to reorder"
 msgstr "Tahan untuk mengubah urutan"
 
-msgid "Home Blocks"
-msgstr "Blok Beranda"
-
 msgid "Home Profile"
 msgstr "Pofil Beranda"
+
+#, fuzzy
+#| msgid "Home Blocks"
+msgid "Home blocks"
+msgstr "Blok Beranda"
 
 msgid "Home"
 msgstr "Beranda"
@@ -2059,9 +2120,6 @@ msgstr "Hz"
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "Jika halaman tidak terbuka, Libre.fm memblokir rentang IP/VPN Anda"
-
-msgid "If you do not have API keys, create them"
-msgstr "Jika belum punya kunci API, silakan buat kunci dahulu"
 
 msgid "Ignore playback volume"
 msgstr "Abaikan volume pemutaran"
@@ -2139,6 +2197,11 @@ msgstr "ID Item"
 msgid "Item is no longer available"
 msgstr "Item ini sudah tidak tersedia"
 
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Item menus"
+msgstr "Menu konteks"
+
 msgid "January {year}"
 msgstr "Januari {year}"
 
@@ -2184,6 +2247,11 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr "Pintasan Keyboard"
 
+#, fuzzy
+#| msgid "Find your ListenBrainz user token"
+msgid "Koito, Maloja and other ListenBrainz servers."
+msgstr "Temukan token pengguna ListenBrainz Anda"
+
 msgid "LED spectrum"
 msgstr "Spektrum LED"
 
@@ -2220,10 +2288,6 @@ msgid "Last played"
 msgstr "Terakhir diputar"
 
 #, fuzzy
-msgid "Last.fm scrobbling"
-msgstr "Last.fm scrobbling"
-
-#, fuzzy
 msgid "Last.fm"
 msgstr "Last.fm"
 
@@ -2235,6 +2299,11 @@ msgstr "Biarkan kosong untuk arsip tanpa enkripsi."
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Biarkan kata sandi kosong untuk tetap memakai kredensial tersimpan"
+
+#, fuzzy
+#| msgid "Hide sidebar"
+msgid "Left sidebar"
+msgstr "Sembunyikan sidebar"
 
 msgid "Legacy authorization"
 msgstr "Otoritas lawas"
@@ -2251,19 +2320,13 @@ msgstr "Lawas"
 msgid "Less"
 msgstr "Kurangi"
 
-msgid "Library Items"
+#, fuzzy
+#| msgid "Library Items"
+msgid "Library items"
 msgstr "Item Pustaka"
 
 msgid "Library"
 msgstr "Pustaka"
-
-#, fuzzy
-msgid "Libre.fm scrobbling"
-msgstr "Libre.fm scrobbling"
-
-#, fuzzy
-msgid "Libre.fm"
-msgstr "Libre.fm"
 
 msgid "Light"
 msgstr "Terang"
@@ -2290,12 +2353,17 @@ msgid "Linked file"
 msgstr "File tertaut"
 
 #, fuzzy
-msgid "ListenBrainz scrobbling"
-msgstr "ListenBrainz scrobbling"
+#| msgid "Link"
+msgid "Links"
+msgstr "Tautan"
 
 #, fuzzy
-msgid "ListenBrainz"
+msgid "ListenBrainz API"
 msgstr "ListenBrainz"
+
+#, fuzzy
+msgid "ListenBrainz or Audioscrobbler API"
+msgstr "ListenBrainz scrobbling"
 
 msgid "Listening overview"
 msgstr "Ringkasan Mendengarkan"
@@ -2391,6 +2459,11 @@ msgstr "Log sudah disalin"
 msgid "Lookup"
 msgstr "Pencarian"
 
+#, fuzzy
+#| msgid "Lookup"
+msgid "Lookups"
+msgstr "Pencarian"
+
 msgid "Loudness normalization"
 msgstr "Penyamaan volume"
 
@@ -2415,6 +2488,11 @@ msgstr "Penyimpanan lirik"
 
 msgid "Lyrics will appear here."
 msgstr "Lirik akan muncul disini."
+
+#, fuzzy
+#| msgid "While your library loads"
+msgid "Lyrics your library doesn't have"
+msgstr "Memuat pustaka anda"
 
 msgid "Lyrics"
 msgstr "Lirik"
@@ -2461,6 +2539,9 @@ msgstr ""
 msgid "Menu"
 msgstr ""
 
+msgid "Menus"
+msgstr ""
+
 msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
 
@@ -2474,9 +2555,6 @@ msgid "Metadata lookups"
 msgstr ""
 
 msgid "Metadata saved"
-msgstr ""
-
-msgid "Metadata source"
 msgstr ""
 
 msgid "Metadata was saved, but refreshing the source failed."
@@ -2507,6 +2585,15 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Mirrored"
+msgstr ""
+
+msgid "Mix (play later)"
+msgstr ""
+
+msgid "Mix (play next)"
+msgstr ""
+
+msgid "Mix"
 msgstr ""
 
 msgid "Mode"
@@ -2554,12 +2641,6 @@ msgstr ""
 msgid "Move down"
 msgstr ""
 
-msgid "Move provider down"
-msgstr ""
-
-msgid "Move provider up"
-msgstr ""
-
 msgid "Move up"
 msgstr ""
 
@@ -2584,13 +2665,13 @@ msgstr ""
 msgid "Music"
 msgstr ""
 
-msgid "MusicBrainz + Last.fm"
-msgstr ""
-
 msgid "MusicBrainz album artist ID"
 msgstr ""
 
 msgid "MusicBrainz artist ID"
+msgstr ""
+
+msgid "MusicBrainz or Last.fm"
 msgstr ""
 
 msgid "MusicBrainz recording ID"
@@ -2626,10 +2707,7 @@ msgstr ""
 msgid "Narrow layout threshold"
 msgstr ""
 
-msgid "Narrow left sidebar"
-msgstr ""
-
-msgid "Narrow right sidebar"
+msgid "Narrow window"
 msgstr ""
 
 msgid "Navidrome"
@@ -2829,6 +2907,12 @@ msgstr ""
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not played recently"
+msgstr ""
+
+msgid "Not set"
+msgstr ""
+
 msgid "Not valid"
 msgstr ""
 
@@ -2905,12 +2989,6 @@ msgstr ""
 msgid "Only fill missing information"
 msgstr ""
 
-msgid "Only played tracks"
-msgstr ""
-
-msgid "Only unplayed tracks"
-msgstr ""
-
 msgid "Opacity (%)"
 msgstr ""
 
@@ -2974,6 +3052,12 @@ msgstr ""
 msgid "Opening Libre.fm authorization..."
 msgstr ""
 
+msgid "Optional. New images show up sooner with your own key."
+msgstr ""
+
+msgid "Optional. Rufin has its own."
+msgstr ""
+
 msgid "Options"
 msgstr ""
 
@@ -3008,6 +3092,12 @@ msgid "Output gain"
 msgstr ""
 
 msgid "Overview"
+msgstr ""
+
+msgid "Page links"
+msgstr ""
+
+msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3061,10 +3151,12 @@ msgstr ""
 msgid "Performer"
 msgstr ""
 
-msgid "Pink"
-msgstr ""
+#, fuzzy
+#| msgid "API key"
+msgid "Personal API key"
+msgstr "Kunci API"
 
-msgid "Pins"
+msgid "Pink"
 msgstr ""
 
 msgid "Plain lyrics"
@@ -3094,9 +3186,6 @@ msgstr ""
 msgid "Play count"
 msgstr ""
 
-msgid "Play filter"
-msgstr ""
-
 msgid "Play genre"
 msgstr ""
 
@@ -3113,15 +3202,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play random (play later)"
-msgstr ""
-
-msgid "Play random (play next)"
-msgstr ""
-
-msgid "Play random"
 msgstr ""
 
 msgid "Play track"
@@ -3143,6 +3223,12 @@ msgid "Playback speed"
 msgstr ""
 
 msgid "Playback"
+msgstr ""
+
+msgid "Played"
+msgstr ""
+
+msgid "Player"
 msgstr ""
 
 msgid "Playing from {}"
@@ -3205,9 +3291,6 @@ msgstr ""
 msgid "Port"
 msgstr ""
 
-msgid "Position"
-msgstr ""
-
 msgid "Preamp"
 msgstr ""
 
@@ -3225,6 +3308,9 @@ msgstr ""
 
 msgid "Preparing library..."
 msgstr "Menyiapkan pustaka..."
+
+msgid "Presence and links"
+msgstr ""
 
 msgid "Preserve channels"
 msgstr ""
@@ -3285,6 +3371,14 @@ msgstr ""
 
 msgid "Pronunciation"
 msgstr ""
+
+msgid "Protocol"
+msgstr ""
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Providers"
+msgstr "Folder"
 
 msgid "Proxy casting through Rufin"
 msgstr ""
@@ -3439,6 +3533,17 @@ msgstr ""
 msgid "Remixes"
 msgstr ""
 
+msgid "Remote folders on a Windows share or NAS"
+msgstr ""
+
+msgid "Remote folders over WebDAV"
+msgstr ""
+
+#, fuzzy
+#| msgid "Delete folder"
+msgid "Remote folders"
+msgstr "Hapus folder"
+
 msgid "Remote lyrics"
 msgstr "Lirik online"
 
@@ -3498,6 +3603,11 @@ msgstr ""
 
 msgid "Remove search"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose Server"
+msgid "Remove server"
+msgstr "Pilih server"
 
 msgid "Remove unavailable tracks"
 msgstr ""
@@ -3594,6 +3704,15 @@ msgstr ""
 
 msgid "Ribbon"
 msgstr ""
+
+#, fuzzy
+msgid "Rich Presence on"
+msgstr "Discord Rich Presence"
+
+#, fuzzy
+#| msgid "Hide sidebar"
+msgid "Right sidebar"
+msgstr "Sembunyikan sidebar"
 
 msgid "Rise speed (%)"
 msgstr ""
@@ -3722,6 +3841,13 @@ msgstr ""
 msgid "Scheduled backup password saved"
 msgstr ""
 
+msgid "Scrobble plays"
+msgstr ""
+
+#, fuzzy
+msgid "Scrobbling"
+msgstr "Last.fm scrobbling"
+
 msgid "Search Again"
 msgstr ""
 
@@ -3812,6 +3938,9 @@ msgstr ""
 msgid "Seek to {time}"
 msgstr ""
 
+msgid "Seekbar"
+msgstr ""
+
 msgid "Segment end"
 msgstr ""
 
@@ -3836,6 +3965,9 @@ msgstr ""
 msgid "Select all"
 msgstr ""
 
+msgid "Select an entry to show or hide it."
+msgstr ""
+
 msgid "Select {title}"
 msgstr ""
 
@@ -3853,6 +3985,10 @@ msgstr ""
 
 msgid "Self-host an Iroh Relay"
 msgstr ""
+
+#, fuzzy
+msgid "Self-hosted scrobbling"
+msgstr "Last.fm scrobbling"
 
 msgid "September {year}"
 msgstr ""
@@ -3878,6 +4014,11 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
+#, fuzzy
+#| msgid "Server Library"
+msgid "Server URL"
+msgstr "Pustaka Server"
+
 msgid "Server default"
 msgstr ""
 
@@ -3892,6 +4033,14 @@ msgstr ""
 
 msgid "Server"
 msgstr ""
+
+msgid "Service icons on album and artist pages"
+msgstr ""
+
+#, fuzzy
+#| msgid "Device"
+msgid "Services"
+msgstr "Perangkat"
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
@@ -3937,9 +4086,6 @@ msgid "Show current lyrics line"
 msgstr ""
 
 msgid "Show downloaded badge"
-msgstr ""
-
-msgid "Show external service icons on album and artist pages"
 msgstr ""
 
 msgid "Show external site links"
@@ -3996,6 +4142,9 @@ msgstr ""
 msgid "Shows what you are playing on your Discord profile"
 msgstr ""
 
+msgid "Shows what you play on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr ""
 
@@ -4004,6 +4153,11 @@ msgstr ""
 
 msgid "Sidebar item {position}"
 msgstr ""
+
+#, fuzzy
+#| msgid "Library Items"
+msgid "Sidebar items"
+msgstr "Item Pustaka"
 
 msgid "Sidebar route by position"
 msgstr ""
@@ -4017,6 +4171,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in again"
+msgstr ""
+
 msgid "Sign in to Plex first"
 msgstr ""
 
@@ -4028,6 +4185,11 @@ msgstr ""
 
 msgid "Sign in"
 msgstr ""
+
+#, fuzzy
+#| msgid "Finding lyrics..."
+msgid "Signing in..."
+msgstr "Mencari lirik..."
 
 msgid "Similar artists"
 msgstr ""
@@ -4086,6 +4248,9 @@ msgstr ""
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
+msgid "Song and artist links"
+msgstr ""
+
 msgid "Song title"
 msgstr ""
 
@@ -4119,9 +4284,6 @@ msgid "Source is no longer available"
 msgstr ""
 
 msgid "Source setup is unavailable"
-msgstr ""
-
-msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
 msgid "Source type"
@@ -4169,6 +4331,9 @@ msgstr ""
 msgid "Status display"
 msgstr ""
 
+msgid "Status"
+msgstr ""
+
 msgid "Stereo for lossy formats"
 msgstr ""
 
@@ -4208,6 +4373,9 @@ msgstr ""
 msgid "Swipe left"
 msgstr ""
 
+msgid "Swipe on a row"
+msgstr ""
+
 msgid "Swipe right"
 msgstr ""
 
@@ -4229,7 +4397,13 @@ msgstr ""
 msgid "Sync folder"
 msgstr ""
 
+msgid "Synced and plain lyrics"
+msgstr ""
+
 msgid "Synced lyrics"
+msgstr ""
+
+msgid "Synced lyrics, some word by word"
 msgstr ""
 
 msgid "System default"
@@ -4268,10 +4442,16 @@ msgstr ""
 msgid "The anchored track is gone"
 msgstr ""
 
+msgid "The closest match wins; on a tie, the higher one."
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
 msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
+
+msgid "The sheet a long press opens. Tap an entry to show or hide it."
 msgstr ""
 
 msgid "TheAudioDB album ID"
@@ -4454,6 +4634,11 @@ msgstr ""
 msgid "Unmuted"
 msgstr ""
 
+#, fuzzy
+#| msgid "Ever played"
+msgid "Unplayed"
+msgstr "Pernah diputar"
+
 msgid "Unsaved"
 msgstr ""
 
@@ -4524,12 +4709,6 @@ msgid "Use listening activity"
 msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
-msgstr ""
-
-msgid "Use maximum year"
-msgstr ""
-
-msgid "Use minimum year"
 msgstr ""
 
 msgid "Use sort tags"
@@ -4658,6 +4837,9 @@ msgstr ""
 msgid "Yearly"
 msgstr ""
 
+msgid "Years"
+msgstr ""
+
 msgid "Yellow"
 msgstr ""
 
@@ -4669,6 +4851,11 @@ msgstr "Pustaka anda siap"
 
 msgid "Your music belongs here"
 msgstr ""
+
+#, fuzzy
+#| msgid "API key"
+msgid "Your own API key"
+msgstr "Kunci API"
 
 msgid "Your queue is empty."
 msgstr ""
@@ -4719,7 +4906,7 @@ msgstr ""
 msgid "excludes"
 msgstr ""
 
-msgid "here"
+msgid "fanart.tv key"
 msgstr ""
 
 #, fuzzy
@@ -4797,6 +4984,12 @@ msgid_plural "{count} folders selected"
 msgstr[0] ""
 msgstr[1] ""
 
+#, fuzzy
+#| msgid "Excluded folders"
+msgid "{count} folder"
+msgid_plural "{count} folders"
+msgstr[0] "Folder yang dikecualikan"
+
 msgid "{count} line could not be read."
 msgid_plural "{count} lines could not be read."
 msgstr[0] ""
@@ -4844,6 +5037,9 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "{minutes} min"
+msgstr ""
+
+msgid "{shown} of {total} shown"
 msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
@@ -4935,6 +5131,54 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "All tracks"
+#~ msgstr "Semua lagu"
+
+#~ msgid "Any genre"
+#~ msgstr "Semua genre"
+
+#~ msgid ". You only need to fill email and an application name parts"
+#~ msgstr ". Anda hanya perlu mengisi bagian email dan nama aplikasi"
+
+#~ msgid "Authorization timed out"
+#~ msgstr "Waktu otorisasi habis"
+
+#~ msgid "Default left sidebar"
+#~ msgstr "Sidebar sisi kiri bawaan"
+
+#~ msgid "Default right sidebar"
+#~ msgstr "Sidebar sisi kanan bawaan"
+
+#, fuzzy
+#~ msgid "Discord"
+#~ msgstr "Discord"
+
+#~ msgid "Enter API credentials first"
+#~ msgstr "Masukan kredensial API terlebih dahulu"
+
+#~ msgid "External site links"
+#~ msgstr "Tautan situs eksternal"
+
+#~ msgid "File connections"
+#~ msgstr "Koneksi file"
+
+#~ msgid "Gestures"
+#~ msgstr "Gestur"
+
+#~ msgid "Get token"
+#~ msgstr "Dapatkan token"
+
+#~ msgid "If you do not have API keys, create them"
+#~ msgstr "Jika belum punya kunci API, silakan buat kunci dahulu"
+
+#, fuzzy
+#~ msgid "Libre.fm scrobbling"
+#~ msgstr "Libre.fm scrobbling"
+
+#, fuzzy
+#~ msgid "Libre.fm"
+#~ msgstr "Libre.fm"
 
 #~ msgid "Appears On"
 #~ msgstr "Muncul di"

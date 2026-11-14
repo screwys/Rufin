@@ -216,9 +216,12 @@ internal fun DetailContent(
                     if (display?.showHeader != false) item("detail-track-header") { FieldHeader(page.fields, display?.size) }
                     items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
                         val item = rows[index]
-                        if (item == null) Spacer(Modifier.height(48.dp))
-                        else FieldRow(item.copy(displaySettings = display), player,
-                            images(page.fields), page.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                        Column {
+                            page.discHeadings[index]?.let { DiscHeading(it) }
+                            if (item == null) Spacer(Modifier.height(48.dp))
+                            else FieldRow(item.copy(displaySettings = display), player,
+                                images(page.fields), page.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                        }
                     }
                 }
                 item { DetailLoadState(rows.loadState.refresh, rows::retry); DetailLoadState(rows.loadState.append, rows::retry) }
@@ -317,7 +320,7 @@ private fun DetailHeader(
                             else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks")) },
                         label = { Text(trackCountText(item.row.trackCount)) },
                         leadingIcon = { RufinIcon("rufin-tracks-symbolic", null, Modifier.size(16.dp)) })
-                } else FactsPill(listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                } else FactsPill(listOfNotNull(item.row.yearText?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it) },
                     Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
                     Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
                         .takeIf { item.row.durationMillis > 0UL || playlist }), onBand = false)
@@ -500,6 +503,14 @@ private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConne
             }
         }
     }
+}
+
+/** A disc's number and title over its first track, dimmed as GTK's disc headers are. */
+@Composable
+private fun DiscHeading(title: String) {
+    Text(title, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable

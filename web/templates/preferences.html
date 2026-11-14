@@ -30,34 +30,62 @@
         <div class="pref-group">
           {% call m::switch("/prefer_distinct_track_covers", localization::tr("Prefer distinct track covers"), localization::tr("Use each track's own cover when available")) %}{% endcall %}
           {% call m::switch("/use_sort_tags", localization::tr("Use sort tags"), localization::tr("Sort artists and albums by their sort tags instead of their names")) %}{% endcall %}
-          {% call m::switch("/external_metadata_enabled", localization::tr("External metadata lookup"), "") %}{% endcall %}
-          {% call m::switch("/external_lyrics_enabled", localization::tr("External lyrics lookup"), "") %}{% endcall %}
         </div>
       </section>
       <section id="pref-customization" role="tabpanel" hidden>
-        <h4>{{ localization::tr("Accessibility") }}</h4>
-        <div class="pref-group">{% call m::switch("/reduce_motion", localization::tr("Reduce motion"), "") %}{% endcall %}</div>
-        <h4>{{ localization::tr("Layout") }}</h4>
-        <div class="pref-group">
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Default left sidebar") }}</span></span><select data-setting="/layout/default_profile/left_sidebar"><option value='"Full"'>{{ localization::tr("Full") }}</option><option value='"Compact"'>{{ localization::tr("Compact") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Default right sidebar") }}</span></span><select data-setting="/layout/default_profile/right_sidebar"><option value='"Visible"'>{{ localization::tr("Visible") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
-          {% call m::switch("/lyrics_panel_visible", localization::tr("Show lyrics"), "") %}{% endcall %}
-          {% call m::switch("/layout/narrow_enabled", localization::tr("Use different layout below a threshold width"), "") %}{% endcall %}
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow layout threshold") }}</span></span><input type="number" min="600" max="3000" step="10" data-setting="/layout/narrow_threshold" /></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow left sidebar") }}</span></span><select data-setting="/layout/narrow_profile/left_sidebar"><option value='"Full"'>{{ localization::tr("Full") }}</option><option value='"Compact"'>{{ localization::tr("Compact") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow right sidebar") }}</span></span><select data-setting="/layout/narrow_profile/right_sidebar"><option value='"Visible"'>{{ localization::tr("Visible") }}</option><option value='"Hidden"'>{{ localization::tr("Hidden") }}</option></select></label>
+        <div class="segmented pref-tabs" role="radiogroup" aria-label="{{ localization::tr("Customization") }}">
+          {% for (tab, label) in [("layout", "Layout"), ("player", "Player"), ("menus", "Menus")] %}<label><input type="radio" name="customization-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
         </div>
-        <h4>{{ localization::tr("Sidebar Items") }}</h4>
-        <div class="pref-group" id="pref-routes"></div>
-        <div class="pref-group">{% call m::switch("/sidebar/pins_visible", localization::tr("Pins"), localization::tr("Fixed position")) %}{% endcall %}</div>
-        <h4>{{ localization::tr("Home Blocks") }}</h4>
-        <div class="pref-group" id="pref-home-blocks"></div>
-        <h4>{{ localization::tr("Context Menus") }}</h4>
-        <div class="pref-group" id="pref-context-menu">
-          {% for (item, label) in [("Play", "Play"), ("PlayNext", "Play Next"), ("PlayLater", "Play Later"), ("PlayRadio", "Play radio"), ("AddToPlaylist", "Add to Playlist"), ("Favorites", "Favorites"), ("EditMetadata", "Edit metadata"), ("Pins", "Pins"), ("GoTo", "Go to"), ("Download", "Download"), ("Share", "Share")] %}
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr(label) }}</span></span><input type="checkbox" role="switch" data-menu-item="{{ item }}" /></label>
-          {% endfor %}
-          {% call m::switch("/context_menu/rating_visible", localization::tr("Rating"), "") %}{% endcall %}
+        <div data-customization-tab="layout">
+          <h4>{{ localization::tr("Accessibility") }}</h4>
+          <div class="pref-group">{% call m::switch("/reduce_motion", localization::tr("Reduce motion"), "") %}{% endcall %}</div>
+          <h4>{{ localization::tr("Window") }}</h4>
+          <div class="pref-group">
+            {% call m::sidebar_mode("/layout/default_profile/left_sidebar", localization::tr("Left sidebar"), true) %}{% endcall %}
+            {% call m::sidebar_mode("/layout/default_profile/right_sidebar", localization::tr("Right sidebar"), false) %}{% endcall %}
+          </div>
+          <h4>{{ localization::tr("Narrow window") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/layout/narrow_enabled", localization::tr("Use different layout below a threshold width"), "") %}{% endcall %}
+            <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Narrow layout threshold") }}</span></span><span class="pref-unit"><input type="number" min="600" max="3000" step="10" data-setting="/layout/narrow_threshold" /><small>px</small></span></label>
+            {% call m::sidebar_mode("/layout/narrow_profile/left_sidebar", localization::tr("Left sidebar"), true) %}{% endcall %}
+            {% call m::sidebar_mode("/layout/narrow_profile/right_sidebar", localization::tr("Right sidebar"), false) %}{% endcall %}
+          </div>
+          <h4>{{ localization::tr("Navigation") }}</h4>
+          <div class="pref-group">
+            <button type="button" class="pref-row pref-link" id="pref-sidebar-items"><span class="pref-label"><span>{{ localization::tr("Sidebar items") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+            <button type="button" class="pref-row pref-link" id="pref-home-blocks"><span class="pref-label"><span>{{ localization::tr("Home blocks") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+          </div>
+        </div>
+        <div data-customization-tab="player" hidden>
+          <h4>{{ localization::tr("Bottom bar") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/show_bottom_bar_rating", localization::tr("Show ratings in the bottom bar"), "") %}{% endcall %}
+            {% call m::switch("/seekbar_waveform_enabled", localization::tr("Waveform seekbar"), "") %}{% endcall %}
+          </div>
+          <h4>{{ localization::tr("Right sidebar") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/lyrics_panel_visible", localization::tr("Show lyrics"), "") %}{% endcall %}
+            {% call m::switch("/visualizer_panel_visible", localization::tr("Show visualizer"), "") %}{% endcall %}
+            {% call m::switch("/right_panel/combined", localization::tr("Combine lyrics and visualizer"), "") %}{% endcall %}
+          </div>
+          <h4>{{ localization::tr("Fullscreen player") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/fullscreen_lyrics_visible", localization::tr("Show lyrics"), "") %}{% endcall %}
+            {% call m::switch("/fullscreen_visualizer_visible", localization::tr("Show visualizer"), "") %}{% endcall %}
+            {% call m::switch("/fullscreen_dynamic_background", localization::tr("Dynamic background"), "") %}{% endcall %}
+            {% call m::switch("/fullscreen_background_image", localization::tr("Enable background image"), "") %}{% endcall %}
+          </div>
+        </div>
+        <div data-customization-tab="menus" hidden>
+          <h4>{{ localization::tr("Item menus") }}</h4>
+          <p class="pref-note">{{ localization::tr("Select an entry to show or hide it.") }}</p>
+          <div class="pref-group menu-preview">
+            {% for (item, label, submenu, separator) in [("Play", "Play", false, false), ("PlayRadio", "Play radio", true, false), ("AddToPlaylist", "Add to Playlist", true, true), ("Favorites", "Favorites", false, false), ("EditMetadata", "Edit metadata", false, true), ("GoTo", "Go to", true, false), ("Share", "Share", false, false), ("Download", "Download", false, true), ("Pins", "Saved", false, true)] %}
+            {% if separator %}<hr />{% endif %}<button type="button" class="menu-preview-entry" data-menu-item="{{ item }}" aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span>{{ localization::tr(label) }}</span>{% if submenu %}{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}{% endif %}</button>
+            {% endfor %}
+            <hr /><button type="button" class="menu-preview-entry" data-menu-rating aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span class="menu-preview-stars">{% for star in ["rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-non-starred-symbolic", "rufin-non-starred-symbolic"] %}{% call m::icon(star) %}{% endcall %}{% endfor %}</span><small>{{ localization::tr("Rating") }}</small></button>
+          </div>
         </div>
       </section>
       <section id="pref-theme" role="tabpanel" hidden>
@@ -68,23 +96,150 @@
         <div id="theme-accent-menu" class="media-menu" popover="auto" role="menu" aria-label="{{ localization::tr("Accent color") }}"></div>
       </section>
       <section id="pref-integrations" role="tabpanel" hidden>
-        <h4>{{ localization::tr("Discord") }}</h4>
-        <div class="pref-group">
-          {% call m::switch("/discord_presence_enabled", localization::tr("Discord Rich Presence"), "") %}{% endcall %}
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Status display") }}</span></span><select data-setting="/discord_display_type"><option value='"application"'>{{ localization::tr("Application name") }}</option><option value='"song"'>{{ localization::tr("Song title") }}</option><option value='"artist"'>{{ localization::tr("Artist name") }}</option></select></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Metadata source") }}</span><small>{{ localization::tr("Source to use for cover images and song/artist links") }}</small></span><select data-setting="/discord_link_type"><option value='"none"'>{{ localization::tr("None") }}</option><option value='"last_fm"'>Last.fm</option><option value='"musicbrainz"'>MusicBrainz</option><option value='"musicbrainz_last_fm"'>{{ localization::tr("MusicBrainz + Last.fm") }}</option></select></label>
-          {% call m::switch("/discord_show_paused", localization::tr("Show paused status"), "") %}{% endcall %}
-          {% call m::switch("/discord_show_as_listening", localization::tr("Use listening activity"), localization::tr("Set the Discord activity type to Listening")) %}{% endcall %}
+        <div class="integrations">
+          <nav class="integration-list" aria-label="{{ localization::tr("Integrations") }}">
+            <h5>{{ localization::tr("Scrobbling") }}</h5>
+            <div class="integration-group" id="integrations-scrobbling">
+              {% call m::integration_row("lastfm", "Last.fm") %}{% endcall %}
+              {% call m::integration_row("listenbrainz", "ListenBrainz") %}{% endcall %}
+              {% call m::integration_row("librefm", "Libre.fm") %}{% endcall %}
+              {% call m::integration_row("add_server", localization::tr("Add server")) %}{% endcall %}
+            </div>
+            <h5>{{ localization::tr("Lookups") }}</h5>
+            <div class="integration-group">
+              {% call m::integration_row("metadata", localization::tr("Metadata")) %}{% endcall %}
+              {% call m::integration_row("lyrics", localization::tr("Lyrics")) %}{% endcall %}
+            </div>
+            <h5>{{ localization::tr("Presence and links") }}</h5>
+            <div class="integration-group">
+              {% call m::integration_row("discord", "Discord") %}{% endcall %}
+              {% call m::integration_row("links", localization::tr("Page links")) %}{% endcall %}
+            </div>
+            <h5>{{ localization::tr("Remote folders") }}</h5>
+            <div class="integration-group">
+              {% call m::integration_row("webdav", localization::tr("WebDAV / Nextcloud")) %}{% endcall %}
+              {% call m::integration_row("smb", localization::tr("SMB / Samba")) %}{% endcall %}
+            </div>
+          </nav>
+          <div class="integration-detail">
+            <div class="integration-page" data-integration-page="lastfm" data-account="lastfm">
+              {% call m::integration_hero("Last.fm", localization::tr("Not connected"), localization::tr("Connect")) %}{% endcall %}
+              <h4>{{ localization::tr("Scrobbling") }}</h4>
+              <div class="pref-group">{% call m::scrobbling_switches() %}{% endcall %}</div>
+              <h4>{{ localization::tr("Your own API key") }}</h4>
+              <p class="pref-note">{{ localization::tr("Optional. Rufin has its own.") }}</p>
+              <div class="pref-group">
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("API key") }}</span></span><input type="password" autocomplete="off" id="lastfm-api-key" /></label>
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Shared secret") }}</span></span><input type="password" autocomplete="off" id="lastfm-api-secret" /></label>
+                {% call m::link_row("https://www.last.fm/api/account/create", localization::tr("Create API keys"), "") %}{% endcall %}
+              </div>
+            </div>
+            <div class="integration-page" data-integration-page="listenbrainz" data-account="listenbrainz" hidden>
+              {% call m::integration_hero("ListenBrainz", localization::tr("Not connected"), localization::tr("Connect")) %}{% endcall %}
+              <h4>{{ localization::tr("Account") }}</h4>
+              <div class="pref-group">
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("User token") }}</span></span><input type="password" autocomplete="off" id="listenbrainz-token" /></label>
+                {% call m::link_row("https://listenbrainz.org/settings/", localization::tr("Find your token"), "") %}{% endcall %}
+              </div>
+              <h4>{{ localization::tr("Scrobbling") }}</h4>
+              <div class="pref-group">{% call m::scrobbling_switches() %}{% endcall %}</div>
+            </div>
+            <div class="integration-page" data-integration-page="librefm" data-account="librefm" hidden>
+              {% call m::integration_hero("Libre.fm", localization::tr("Not connected"), localization::tr("Connect")) %}{% endcall %}
+              <h4>{{ localization::tr("Scrobbling") }}</h4>
+              <p class="pref-note">{{ localization::tr("If the page doesn't load, then Libre.fm blocks your IP range/VPN") }}</p>
+              <div class="pref-group">{% call m::scrobbling_switches() %}{% endcall %}</div>
+            </div>
+            <div class="integration-page" data-integration-page="server" hidden>
+              {% call m::integration_hero("", "", localization::tr("Connect")) %}{% endcall %}
+              <h4>{{ localization::tr("Server") }}</h4>
+              <div class="pref-group">
+                <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Protocol") }}</span></span><span class="pref-value" id="server-protocol"></span></div>
+                <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Server URL") }}</span><small id="server-url"></small></span></div>
+                <label class="pref-row" id="server-token-row"><span class="pref-label"><span>{{ localization::tr("User token") }}</span></span><input type="password" autocomplete="off" id="server-token" /></label>
+                <label class="pref-row" data-sign-in><span class="pref-label"><span>{{ localization::tr("Username") }}</span></span><input autocomplete="off" id="server-username" /></label>
+                <label class="pref-row" data-sign-in><span class="pref-label"><span>{{ localization::tr("Password") }}</span></span><input type="password" autocomplete="off" id="server-password" /></label>
+              </div>
+              <h4>{{ localization::tr("Scrobbling") }}</h4>
+              <div class="pref-group">{% call m::scrobbling_switches() %}{% endcall %}</div>
+              <div class="pref-group"><button type="button" class="pref-row pref-action destructive" id="server-remove">{{ localization::tr("Remove server") }}</button></div>
+            </div>
+            <div class="integration-page" data-integration-page="add_server" hidden>
+              {% call m::integration_hero(localization::tr("Add server"), localization::tr("Self-hosted scrobbling"), "") %}{% endcall %}
+              <div class="segmented pref-tabs" role="radiogroup" aria-label="{{ localization::tr("Protocol") }}">
+                <label><input type="radio" name="add-server-protocol" value="listenbrainz" checked />{{ localization::tr("ListenBrainz API") }}</label>
+                <label><input type="radio" name="add-server-protocol" value="audioscrobbler" />{{ localization::tr("Audioscrobbler API") }}</label>
+              </div>
+              <p class="pref-note" data-protocol="listenbrainz">{{ localization::tr("Koito, Maloja and other ListenBrainz servers.") }}</p>
+              <p class="pref-note" data-protocol="audioscrobbler" hidden>{{ localization::tr("GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is an API key.") }}</p>
+              <div class="pref-group">
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Name") }}</span></span><input autocomplete="off" id="add-server-name" /></label>
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Server URL") }}</span></span><input type="url" autocomplete="off" id="add-server-url" /></label>
+                <label class="pref-row" data-protocol="listenbrainz"><span class="pref-label"><span>{{ localization::tr("User token") }}</span></span><input type="password" autocomplete="off" id="add-server-token" /></label>
+                <label class="pref-row" data-protocol="audioscrobbler" hidden><span class="pref-label"><span>{{ localization::tr("Username") }}</span></span><input autocomplete="off" id="add-server-username" /></label>
+                <label class="pref-row" data-protocol="audioscrobbler" hidden><span class="pref-label"><span>{{ localization::tr("Password") }}</span></span><input type="password" autocomplete="off" id="add-server-password" /></label>
+              </div>
+              <div class="pref-actions"><button type="button" class="primary" id="add-server-connect">{{ localization::tr("Connect") }}</button></div>
+            </div>
+            <div class="integration-page" data-integration-page="metadata" hidden>
+              {% call m::integration_hero(localization::tr("Metadata"), localization::tr("Covers and artist images your library doesn't have"), "") %}{% endcall %}
+              <div class="pref-group">{% call m::switch("/external_metadata_enabled", localization::tr("External metadata lookup"), localization::tr("Also album types and tag suggestions")) %}{% endcall %}</div>
+              <h4>{{ localization::tr("Album covers") }}</h4>
+              <p class="pref-note">{{ localization::tr("Asked in this order.") }}</p>
+              <div class="pref-group" data-providers="/cover_providers" data-enabled-by="/external_metadata_enabled"></div>
+              <h4>{{ localization::tr("Artist images") }}</h4>
+              <p class="pref-note">{{ localization::tr("Asked in this order.") }}</p>
+              <div class="pref-group" data-providers="/artist_image_providers" data-enabled-by="/external_metadata_enabled"></div>
+              <h4>{{ localization::tr("fanart.tv key") }}</h4>
+              <p class="pref-note">{{ localization::tr("Optional. New images show up sooner with your own key.") }}</p>
+              <div class="pref-group">
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Personal API key") }}</span></span><input type="password" autocomplete="off" data-setting="/fanart_api_key" /></label>
+                {% call m::link_row("https://fanart.tv/get-an-api-key/", localization::tr("Get a personal key"), "") %}{% endcall %}
+              </div>
+            </div>
+            <div class="integration-page" data-integration-page="lyrics" hidden>
+              {% call m::integration_hero(localization::tr("Lyrics"), localization::tr("Lyrics your library doesn't have"), "") %}{% endcall %}
+              <div class="pref-group">
+                {% call m::switch("/external_lyrics_enabled", localization::tr("External lyrics lookup"), "") %}{% endcall %}
+                {% call m::switch("/prefer_server_lyrics", localization::tr("Prefer server lyrics"), "") %}{% endcall %}
+              </div>
+              <h4>{{ localization::tr("Providers") }}</h4>
+              <p class="pref-note">{{ localization::tr("The closest match wins; on a tie, the higher one.") }}</p>
+              <div class="pref-group" data-providers="/external_lyrics_providers" data-enabled-by="/external_lyrics_enabled"></div>
+            </div>
+            <div class="integration-page" data-integration-page="discord" hidden>
+              {% call m::integration_hero("Discord", localization::tr("Shows what you play on your Discord profile"), "") %}{% endcall %}
+              <div class="pref-group">{% call m::switch("/discord_presence_enabled", localization::tr("Discord Rich Presence"), "") %}{% endcall %}</div>
+              <h4>{{ localization::tr("Status") }}</h4>
+              <div class="pref-group">
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Status display") }}</span></span><select data-setting="/discord_display_type"><option value='"application"'>{{ localization::tr("Application name") }}</option><option value='"song"'>{{ localization::tr("Song title") }}</option><option value='"artist"'>{{ localization::tr("Artist name") }}</option></select></label>
+                {% call m::switch("/discord_links", localization::tr("Song and artist links"), localization::tr("MusicBrainz or Last.fm")) %}{% endcall %}
+                {% call m::switch("/discord_show_paused", localization::tr("Show paused status"), "") %}{% endcall %}
+                {% call m::switch("/discord_show_as_listening", localization::tr("Use listening activity"), localization::tr("Set the Discord activity type to Listening")) %}{% endcall %}
+              </div>
+            </div>
+            <div class="integration-page" data-integration-page="links" hidden>
+              {% call m::integration_hero(localization::tr("Page links"), localization::tr("Service icons on album and artist pages"), "") %}{% endcall %}
+              <div class="pref-group">{% call m::switch("/external_site_links/enabled", localization::tr("Show external site links"), "") %}{% endcall %}</div>
+              <h4>{{ localization::tr("Services") }}</h4>
+              <div class="pref-group">
+                {% for (path, name) in [("/external_site_links/lastfm", "Last.fm"), ("/external_site_links/musicbrainz", "MusicBrainz")] %}
+                <label class="pref-row"><span class="pref-label"><span>{{ name }}</span></span><input type="checkbox" role="switch" data-setting="{{ path }}" /></label>
+                {% endfor %}
+                <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Server") }}</span></span><input type="checkbox" role="switch" data-setting="/external_site_links/server" /></label>
+              </div>
+            </div>
+            {% for (kind, name, status, add) in [("webdav", "WebDAV / Nextcloud", "Remote folders over WebDAV", "Add WebDAV folder"), ("smb", "SMB / Samba", "Remote folders on a Windows share or NAS", "Add SMB folder")] %}
+            <div class="integration-page" data-integration-page="{{ kind }}" hidden>
+              {% call m::integration_hero(localization::tr(name), localization::tr(status), "") %}{% endcall %}
+              <div class="pref-group">
+                <div data-folders="{{ kind }}"></div>
+                <button type="button" class="pref-row pref-link" data-file-connection="{{ kind }}">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}<span class="pref-label"><span>{{ localization::tr(add) }}</span></span></button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
         </div>
-        <h4>{{ localization::tr("External site links") }}</h4>
-        <div class="pref-group">
-          {% call m::switch("/external_site_links/enabled", localization::tr("Show external site links"), localization::tr("Show external service icons on album and artist pages")) %}{% endcall %}
-          {% call m::switch("/external_site_links/lastfm", "Last.fm", "") %}{% endcall %}
-          {% call m::switch("/external_site_links/musicbrainz", "MusicBrainz", "") %}{% endcall %}
-          {% call m::switch("/external_site_links/server", localization::tr("Server"), "") %}{% endcall %}
-        </div>
-        <div class="pref-group-header"><h4>{{ localization::tr("File connections") }}</h4><span><button type="button" data-file-connection="webdav">{{ localization::tr("WebDAV / Nextcloud") }}</button><button type="button" data-file-connection="smb">{{ localization::tr("SMB / Samba") }}</button></span></div>
-        <div class="pref-group" id="pref-file-connections"></div>
       </section>
       <section id="pref-playback" role="tabpanel" hidden>
         <h4>{{ localization::tr("Queue and transitions") }}</h4>
@@ -163,4 +318,16 @@
       </section>
     </div>
   </div>
+</dialog>
+<dialog id="sidebar-items-dialog" class="pref-dialog" aria-labelledby="sidebar-items-title">
+  <header class="pref-header"><span></span><h3 id="sidebar-items-title">{{ localization::tr("Sidebar items") }}</h3><button type="button" class="icon-button" data-close="sidebar-items-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
+  <div class="pref-group">{% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}</div>
+  <h4>{{ localization::tr("Pages") }}</h4>
+  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
+  <div class="pref-group" id="pref-routes"></div>
+</dialog>
+<dialog id="home-blocks-dialog" class="pref-dialog" aria-labelledby="home-blocks-title">
+  <header class="pref-header"><span></span><h3 id="home-blocks-title">{{ localization::tr("Home blocks") }}</h3><button type="button" class="icon-button" data-close="home-blocks-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
+  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
+  <div class="pref-group" id="pref-home-blocks-list"></div>
 </dialog>

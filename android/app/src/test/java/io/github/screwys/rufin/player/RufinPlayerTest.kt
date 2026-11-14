@@ -36,7 +36,7 @@ class RufinPlayerTest {
                 musicbrainzRecordingId = null, musicbrainzReleaseTrackId = null, musicbrainzAlbumId = null,
                 musicbrainzReleaseGroupId = null, primaryArtistMusicbrainzId = null,
                 artists = emptyList(), albumArtists = emptyList(), genres = emptyList(), moods = emptyList(),
-                albumTags = null, sourceLoudness = null, albumLoudness = null,
+                albumTags = null, sourceLoudness = null, albumLoudness = null, groupings = emptyList(),
             ),
             state = TrackState(false, null, null, 0L, 0L),
             access = TrackAccess(null, "", null, null, null, false),

@@ -282,10 +282,10 @@ internal fun BrowseMenuSheet(
                     }
                 }
                 // The radio row lifts above the big buttons and takes them over: while it is there, they start the radio.
-                val plays = listOfNotNull(
-                    Triple("rufin-media-playback-start-symbolic", "Play", QueuePlacement.Replace(0UL)).takeIf { radio || offered.play },
-                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent).takeIf { radio || offered.playNext },
-                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End).takeIf { radio || offered.playLater })
+                val plays = if (radio || offered.play) listOf(
+                    Triple("rufin-media-playback-start-symbolic", "Play", QueuePlacement.Replace(0UL)),
+                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent),
+                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End)) else emptyList()
                 val duration = if (LocalReduceMotion.current) 0 else 380
                 val motion = tween<IntSize>(duration, easing = FastOutSlowInEasing)
                 SharedTransitionLayout {

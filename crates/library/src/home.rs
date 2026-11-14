@@ -179,18 +179,19 @@ pub struct HomePage {
     pub recently_released: HomeSectionRows,
     pub genres: Vec<TagRow>,
     pub provider_sections: Vec<HomeProviderSection>,
+    /// Whether a play changes the page: it shows Rufin's own Most played or Recently played.
+    pub reads_plays: bool,
 }
 
-/// Album keys and titles of each Home block, chosen from the resident Catalog.
+/// Album keys and titles of the showcase and Explore, chosen from the resident Catalog.
 #[derive(Default)]
 struct Chosen {
     showcase: Vec<(AlbumKey, String)>,
     explore: Vec<(AlbumKey, String)>,
-    most_played: Vec<(TrackKey, String)>,
-    recently_played: Vec<(TrackKey, String)>,
-    newly_added: Vec<(AlbumKey, String)>,
-    recently_released: Vec<(AlbumKey, String)>,
 }
+
+/// A block's tracks and albums, each with the title Home gives it.
+type BlockRows = (Vec<(TrackKey, String)>, Vec<(AlbumKey, String)>);
 
 impl Catalog {
     pub async fn home_page(
@@ -238,7 +239,7 @@ impl Catalog {
         } else {
             blocks
         };
-        let (chosen, sections, genres) = {
+        let (chosen, rows, reads_plays, sections, genres) = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
             let Some(owner) = snapshot.source_slot(source) else {
@@ -283,7 +284,7 @@ impl Catalog {
                     album_artist,
                 })
             };
-            let sections = provider
+            let mut sections = provider
                 .into_iter()
                 .map(|(section, (title, tracks, albums, artists))| {
                     let tracks = tracks
@@ -322,116 +323,129 @@ impl Catalog {
                     .map(|position| walk.member(position))
                     .collect();
             }
-            let tracks = || {
-                snapshot.tracks.iter().filter(|(_, track)| {
-                    track.source == owner
+            // A provider section replaces Rufin's own block when it has rows. It holds the
+            // server's top rows of the whole library, so a selected folder keeps Rufin's own,
+            // which is chosen only where it shows.
+            let mut provided = |kind: HomeBlockKind| -> Option<BlockRows> {
+                kind.section_kind()
+                    .filter(|_| folder.is_none())
+                    .and_then(HomeSectionKind::source_section)
+                    .and_then(|section| sections.remove(section))
+                    .filter(|(_, tracks, albums, _)| {
+                        blocks.contains(&kind) && (!tracks.is_empty() || !albums.is_empty())
+                    })
+                    .map(|(_, tracks, albums, _)| (tracks, albums))
+            };
+            // The selected source's tracks in the music folder that hold plays or source
+            // counts, each with its plays.
+            let played = || {
+                snapshot.stats.keys().filter_map(|slot| {
+                    let track = snapshot.tracks.live(*slot)?;
+                    (track.source == owner
                         && track.indexed()
                         && scope
-                            .is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
+                            .is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder)))
+                    .then(|| (context.played(*slot, track), track))
                 })
             };
-            if blocks.contains(&HomeBlockKind::MostPlayed) {
-                let played = tracks()
-                    .map(|(slot, track)| (context.played(slot, track).plays, track))
-                    .filter(|(plays, _)| *plays > 0)
-                    .collect::<Vec<_>>();
-                let order = |a: &(u32, &TrackRec), b: &(u32, &TrackRec)| {
-                    (b.0.cmp(&a.0))
-                        .then_with(|| snapshot.track_sort(a.1).cmp(&snapshot.track_sort(b.1)))
-                        .then(a.1.key.cmp(&b.1.key))
-                };
-                chosen.most_played = first(played, order)
+            let track_rows = |tracks: Vec<&TrackRec>| -> BlockRows {
+                let rows = tracks.into_iter().map(|track| {
+                    (
+                        TrackKey::from_raw(i64::from(track.key)),
+                        snapshot.text(track.title).to_owned(),
+                    )
+                });
+                (rows.collect(), Vec::new())
+            };
+            let album_rows = |albums: Vec<&AlbumRec>| -> BlockRows {
+                let rows = albums
                     .into_iter()
-                    .map(|(_, track)| {
-                        (
-                            TrackKey::from_raw(i64::from(track.key)),
-                            snapshot.text(track.title).to_owned(),
-                        )
-                    })
-                    .collect();
-            }
-            if blocks.contains(&HomeBlockKind::RecentlyPlayed) {
-                let played = tracks()
-                    .filter_map(|(slot, track)| {
-                        Some((
-                            (
-                                std::cmp::Reverse(context.played(slot, track).last?),
-                                track.key,
-                            ),
-                            track,
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                chosen.recently_played = first(played, |a, b| a.0.cmp(&b.0))
-                    .into_iter()
-                    .map(|(_, track)| {
-                        (
-                            TrackKey::from_raw(i64::from(track.key)),
-                            snapshot.text(track.title).to_owned(),
-                        )
-                    })
-                    .collect();
-            }
-            if blocks.contains(&HomeBlockKind::NewlyAdded) {
-                let added = albums().collect::<Vec<_>>();
-                let order = |a: &&AlbumRec, b: &&AlbumRec| {
-                    (a.added == u32::MAX)
-                        .cmp(&(b.added == u32::MAX))
-                        .then(b.added.cmp(&a.added))
-                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
-                        .then(a.key.cmp(&b.key))
-                };
-                chosen.newly_added = first(added, order)
-                    .into_iter()
-                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
-                    .collect();
-            }
-            if blocks.contains(&HomeBlockKind::RecentlyReleased) {
-                let released = albums()
-                    .filter(|album| {
-                        album.release != 0 || (album.year != i16::MIN && album.year != 0)
-                    })
-                    .collect::<Vec<_>>();
-                let dated = |value: u32| (value != 0).then_some(value);
-                let year = |value: i16| (value != i16::MIN).then_some(value);
-                let order = |a: &&AlbumRec, b: &&AlbumRec| {
-                    dated(a.release)
-                        .is_none()
-                        .cmp(&dated(b.release).is_none())
-                        .then(b.release.cmp(&a.release))
-                        .then(year(a.year).is_none().cmp(&year(b.year).is_none()))
-                        .then(b.year.cmp(&a.year))
-                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
-                        .then(a.key.cmp(&b.key))
-                };
-                chosen.recently_released = first(released, order)
-                    .into_iter()
-                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
-                    .collect();
-            }
-            (chosen, sections, blocks.contains(&HomeBlockKind::Genres))
+                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)));
+                (Vec::new(), rows.collect())
+            };
+            let mut reads_plays = false;
+            let most_played = match provided(HomeBlockKind::MostPlayed) {
+                Some(rows) => rows,
+                None if blocks.contains(&HomeBlockKind::MostPlayed) => {
+                    reads_plays = true;
+                    let played = played()
+                        .map(|(played, track)| (played.plays, track))
+                        .filter(|(plays, _)| *plays > 0)
+                        .collect::<Vec<_>>();
+                    let order = |a: &(u32, &TrackRec), b: &(u32, &TrackRec)| {
+                        (b.0.cmp(&a.0))
+                            .then_with(|| snapshot.track_sort(a.1).cmp(&snapshot.track_sort(b.1)))
+                            .then(a.1.key.cmp(&b.1.key))
+                    };
+                    track_rows(first(played, order).into_iter().map(|row| row.1).collect())
+                }
+                None => BlockRows::default(),
+            };
+            let recently_played = match provided(HomeBlockKind::RecentlyPlayed) {
+                Some(rows) => rows,
+                None if blocks.contains(&HomeBlockKind::RecentlyPlayed) => {
+                    reads_plays = true;
+                    let played = played()
+                        .filter_map(|(played, track)| {
+                            Some(((std::cmp::Reverse(played.last?), track.key), track))
+                        })
+                        .collect::<Vec<_>>();
+                    track_rows(
+                        first(played, |a, b| a.0.cmp(&b.0))
+                            .into_iter()
+                            .map(|row| row.1)
+                            .collect(),
+                    )
+                }
+                None => BlockRows::default(),
+            };
+            let newly_added = match provided(HomeBlockKind::NewlyAdded) {
+                Some(rows) => rows,
+                None if blocks.contains(&HomeBlockKind::NewlyAdded) => {
+                    let order = |a: &&AlbumRec, b: &&AlbumRec| {
+                        (a.added == u32::MAX)
+                            .cmp(&(b.added == u32::MAX))
+                            .then(b.added.cmp(&a.added))
+                            .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
+                            .then(a.key.cmp(&b.key))
+                    };
+                    album_rows(first(albums().collect(), order))
+                }
+                None => BlockRows::default(),
+            };
+            let recently_released = match provided(HomeBlockKind::RecentlyReleased) {
+                Some(rows) => rows,
+                None if blocks.contains(&HomeBlockKind::RecentlyReleased) => {
+                    let released = albums()
+                        .filter(|album| {
+                            album.release != 0 || (album.year != i16::MIN && album.year != 0)
+                        })
+                        .collect::<Vec<_>>();
+                    let dated = |value: u32| (value != 0).then_some(value);
+                    let year = |value: i16| (value != i16::MIN).then_some(value);
+                    let order = |a: &&AlbumRec, b: &&AlbumRec| {
+                        dated(a.release)
+                            .is_none()
+                            .cmp(&dated(b.release).is_none())
+                            .then(b.release.cmp(&a.release))
+                            .then(year(a.year).is_none().cmp(&year(b.year).is_none()))
+                            .then(b.year.cmp(&a.year))
+                            .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
+                            .then(a.key.cmp(&b.key))
+                    };
+                    album_rows(first(released, order))
+                }
+                None => BlockRows::default(),
+            };
+            (
+                chosen,
+                [most_played, newly_added, recently_played, recently_released],
+                reads_plays,
+                sections,
+                blocks.contains(&HomeBlockKind::Genres),
+            )
         };
-        let mut sections = sections;
-        // A provider section replaces Rufin's own block when it has rows. It holds the
-        // server's top rows of the whole library, so a selected folder keeps Rufin's own.
-        let mut provided = |kind: HomeBlockKind| {
-            kind.section_kind()
-                .filter(|_| folder.is_none())
-                .and_then(HomeSectionKind::source_section)
-                .and_then(|section| sections.remove(section))
-                .filter(|(_, tracks, albums, _)| {
-                    blocks.contains(&kind) && (!tracks.is_empty() || !albums.is_empty())
-                })
-                .map(|(_, tracks, albums, _)| (tracks, albums))
-        };
-        let most_played =
-            provided(HomeBlockKind::MostPlayed).unwrap_or((chosen.most_played, Vec::new()));
-        let newly_added =
-            provided(HomeBlockKind::NewlyAdded).unwrap_or((Vec::new(), chosen.newly_added));
-        let recently_played =
-            provided(HomeBlockKind::RecentlyPlayed).unwrap_or((chosen.recently_played, Vec::new()));
-        let recently_released = provided(HomeBlockKind::RecentlyReleased)
-            .unwrap_or((Vec::new(), chosen.recently_released));
+        let [most_played, newly_added, recently_played, recently_released] = rows;
         let genres = if genres {
             let read = crate::ListRead {
                 folder,
@@ -584,6 +598,7 @@ impl Catalog {
                     },
                 )
                 .collect(),
+            reads_plays,
         };
         transaction.commit().await?;
         Ok(page)

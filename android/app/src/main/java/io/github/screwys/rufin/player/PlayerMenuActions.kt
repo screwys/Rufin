@@ -47,14 +47,14 @@ private fun rememberSleepTimer(player: PlayerConnection): Pair<SleepTimerView?, 
     return timer to timer?.let { sleepTimerText(it, now) }
 }
 
-/** The row atop the player's More sheet: Play random, Sleep timer and Auto DJ. */
+/** The row atop the player's More sheet: Mix, Sleep timer and Auto DJ. */
 @Composable
 internal fun PlayerMenuActions(player: PlayerConnection, onRandom: () -> Unit, onSleepTimer: () -> Unit, onAutoDjSettings: () -> Unit) {
     val autoDj by remember(player) { derivedStateOf { player.playback?.controls?.autoDjEnabled == true } }
     val (timer, text) = rememberSleepTimer(player)
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-            PlayerMenuTile("rufin-random-symbolic", translate("Play random"), Modifier.weight(1f), onClick = onRandom)
+            PlayerMenuTile("rufin-mix-symbolic", translate("Mix"), Modifier.weight(1f), onClick = onRandom)
             PlayerMenuTile("rufin-sleep-timer-symbolic", text?.short?.ifEmpty { null } ?: translate("Sleep timer"),
                 Modifier.weight(1f), active = timer != null, onClick = onSleepTimer)
             PlayerMenuTile("rufin-auto-dj-symbolic", translate("Auto DJ"), Modifier.weight(1f), active = autoDj,

@@ -140,7 +140,7 @@ pub use queue::{
     QueueProvenance, QueueRank, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
     QueueUpdate, shuffle_order,
 };
-pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
+pub use radio::{PlayedFilter, RadioSeed, RandomCriteria, RandomPick};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,

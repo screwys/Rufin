@@ -2,7 +2,7 @@ use super::Shell;
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::add_widget_click;
 use adw::prelude::*;
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 use std::rc::Rc;
 impl Shell {
     pub(crate) fn present_full_artwork(self: &Rc<Self>, candidates: ArtworkBinding) {

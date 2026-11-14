@@ -49,7 +49,4 @@
   <object class="AdwSwitchRow" id="combine">
     <property name="title" translatable="yes">Combine lyrics and visualizer</property>
   </object>
-  <object class="AdwSwitchRow" id="waveform_row">
-    <property name="title" translatable="yes">Waveform seekbar</property>
-  </object>
 </interface>

@@ -25,19 +25,6 @@ pub enum DisplayType {
     Track,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum LinkType {
-    #[serde(rename = "last_fm")]
-    LastFm,
-    #[serde(rename = "musicbrainz")]
-    #[default]
-    MusicBrainz,
-    #[serde(rename = "musicbrainz_last_fm")]
-    MusicBrainzLastFm,
-    #[serde(rename = "none")]
-    None,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Settings {
@@ -47,8 +34,9 @@ pub struct Settings {
     pub client_id: String,
     #[serde(rename = "discord_display_type")]
     pub display_type: DisplayType,
-    #[serde(rename = "discord_link_type")]
-    pub link_type: LinkType,
+    /// Song and artist links: MusicBrainz when the track has its IDs, Last.fm otherwise.
+    #[serde(rename = "discord_links")]
+    pub links: bool,
     #[serde(rename = "discord_show_paused")]
     pub show_paused: bool,
     #[serde(rename = "discord_show_as_listening")]
@@ -61,7 +49,7 @@ impl Default for Settings {
             enabled: false,
             client_id: DEFAULT_CLIENT_ID.to_string(),
             display_type: DisplayType::Application,
-            link_type: LinkType::MusicBrainz,
+            links: true,
             show_paused: false,
             show_as_listening: true,
         }
@@ -100,7 +88,7 @@ pub(crate) fn follow(
             let (before, after) = (&previous.ui, &current.ui);
             if before.rich_presence != after.rich_presence
                 || before.application.private_mode != after.application.private_mode
-                || before.lastfm_api_key != after.lastfm_api_key
+                || before.lookup_policy() != after.lookup_policy()
             {
                 match (shown(current), &running) {
                     (true, Some(running)) => running
@@ -301,50 +289,26 @@ fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
         .map(str::trim)
         .filter(|artist| !artist.is_empty())
         .unwrap_or(track_artist);
-    let mut details = None;
-    let mut state = None;
-    if matches!(
-        activity.settings.link_type,
-        LinkType::LastFm | LinkType::MusicBrainzLastFm
-    ) {
-        state = lastfm_artist_url(track_artist);
-        details = lastfm_track_url(
-            album_artist,
-            &track.row.track.metadata.album,
-            &track.row.track.metadata.title,
-        );
+    if !activity.settings.links {
+        return (None, None);
     }
-    if matches!(
-        activity.settings.link_type,
-        LinkType::MusicBrainz | LinkType::MusicBrainzLastFm
-    ) {
-        if activity.settings.link_type == LinkType::MusicBrainz {
-            state = track
-                .row
-                .track
-                .metadata
-                .primary_artist_musicbrainz_id
+    let metadata = &track.row.track.metadata;
+    let details = metadata
+        .musicbrainz_release_track_id
+        .as_deref()
+        .and_then(|id| musicbrainz_url("track", id))
+        .or_else(|| {
+            metadata
+                .musicbrainz_recording_id
                 .as_deref()
-                .and_then(|id| musicbrainz_url("artist", id));
-        }
-        details = track
-            .row
-            .track
-            .metadata
-            .musicbrainz_release_track_id
-            .as_deref()
-            .and_then(|id| musicbrainz_url("track", id))
-            .or_else(|| {
-                track
-                    .row
-                    .track
-                    .metadata
-                    .musicbrainz_recording_id
-                    .as_deref()
-                    .and_then(|id| musicbrainz_url("recording", id))
-            })
-            .or(details);
-    }
+                .and_then(|id| musicbrainz_url("recording", id))
+        })
+        .or_else(|| lastfm_track_url(album_artist, &metadata.album, &metadata.title));
+    let state = metadata
+        .primary_artist_musicbrainz_id
+        .as_deref()
+        .and_then(|id| musicbrainz_url("artist", id))
+        .or_else(|| lastfm_artist_url(track_artist));
     (details, state)
 }
 

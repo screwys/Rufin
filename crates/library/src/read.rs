@@ -354,6 +354,7 @@ pub struct TrackRow {
     pub release_date: Option<String>,
     pub source_path: Option<String>,
     pub audio: AudioProperties,
+    pub groupings: Vec<String>,
     pub artwork_binding: Option<Vec<u8>>,
 }
 
@@ -371,6 +372,8 @@ pub struct AlbumRow {
     pub release_date: Option<String>,
     /// As stored when it is no date.
     pub date_added: Option<String>,
+    /// Which mix, edition or remaster the album is, shown beside its year.
+    pub version: Option<String>,
     pub is_compilation: bool,
     pub release_class: AlbumReleaseClass,
     pub state: TrackState,
@@ -837,6 +840,7 @@ impl<'a> Builder<'a> {
             release_date: stored.release_date,
             source_path: stored.source_path,
             audio: stored.audio,
+            groupings: stored.groupings,
             artwork_binding: got.binding(self.context.track_art(&self.covers, record))?,
         }))
     }
@@ -870,6 +874,7 @@ impl<'a> Builder<'a> {
                 audio_properties: row.audio,
                 comment: optional(self.snapshot, record.comment),
                 bpm: row.bpm,
+                groupings: row.groupings,
                 ..metadata.clone()
             },
             media_uri: row.media_uri,
@@ -899,7 +904,7 @@ impl<'a> Builder<'a> {
         totals.albums = u32::from(totals.tracks > 0);
         totals.downloaded = self.downloaded(folder).albums[slot as usize];
         let runs = snapshot.album_runs(record);
-        let (release_date, date_added) =
+        let (release_date, date_added, version) =
             got.album_texts.get(&key.raw()).cloned().unwrap_or_default();
         Ok(Some(AlbumRow {
             album_key: key,
@@ -912,6 +917,7 @@ impl<'a> Builder<'a> {
             year: year_of(record.year).map(i64::from),
             release_date,
             date_added,
+            version,
             is_compilation: record.flags & COMPILATION != 0,
             release_class: AlbumReleaseClass::of(record.flags),
             state: state(
@@ -1238,6 +1244,7 @@ impl<'a> Builder<'a> {
                     release_date: None,
                     source_path: None,
                     audio: AudioProperties::default(),
+                    groupings: Vec::new(),
                     artwork_binding: None,
                 });
                 let listened = self

@@ -15,7 +15,12 @@ const SETTINGS: &[&str] = &[
     "/prefer_distinct_track_covers",
     "/use_sort_tags",
     "/external_metadata_enabled",
+    "/cover_providers",
+    "/artist_image_providers",
+    "/fanart_api_key",
     "/external_lyrics_enabled",
+    "/prefer_server_lyrics",
+    "/external_lyrics_providers",
     "/reduce_motion",
     "/layout/default_profile/left_sidebar",
     "/layout/default_profile/right_sidebar",
@@ -24,8 +29,11 @@ const SETTINGS: &[&str] = &[
     "/layout/narrow_profile/left_sidebar",
     "/layout/narrow_profile/right_sidebar",
     "/lyrics_panel_visible",
+    "/visualizer_panel_visible",
+    "/right_panel/combined",
     "/right_panel/queue_visible",
     "/show_bottom_bar_rating",
+    "/seekbar_waveform_enabled",
     "/sidebar/pins_visible",
     "/context_menu/items",
     "/context_menu/rating_visible",
@@ -33,7 +41,7 @@ const SETTINGS: &[&str] = &[
     "/accent_preference",
     "/discord_presence_enabled",
     "/discord_display_type",
-    "/discord_link_type",
+    "/discord_links",
     "/discord_show_paused",
     "/discord_show_as_listening",
     "/external_site_links/enabled",
@@ -56,6 +64,7 @@ const SETTINGS: &[&str] = &[
     "/auto_dj_refill_threshold",
     "/clear_queue_includes_current",
     "/fullscreen_lyrics_visible",
+    "/fullscreen_visualizer_visible",
     "/fullscreen_dynamic_background",
     "/fullscreen_background_image",
     "/show_downloaded_badges",
@@ -80,7 +89,12 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         .iter()
         .map(|entry| {
             let route = rufin_core::route::sidebar_route_descriptor(entry.item);
-            json!({"item": entry.item, "title": localization::tr(route.title), "icon": route.icon_name, "visible": entry.visible})
+            let subtitle = if entry.item == rufin_core::settings::SidebarRouteItem::Moods {
+                localization::tr("Files need Mood/BPM tags written on them. Not supported for Jellyfin")
+            } else {
+                String::new()
+            };
+            json!({"item": entry.item, "title": localization::tr(route.title), "subtitle": subtitle, "icon": route.icon_name, "visible": entry.visible})
         })
         .collect::<Vec<_>>();
     let (themes, theme_errors) = themes(&settings);
@@ -91,9 +105,39 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         .into_iter()
         .map(|row| json!({"block": row.block, "title": localization::tr(&row.title), "visible": row.visible, "can_toggle": row.can_toggle}))
         .collect::<Vec<_>>();
+    let lyrics = rufin_core::settings::ExternalLyricsProvider::all()
+        .into_iter()
+        .map(|provider| provider_json(json!(provider.key()), localization::tr(provider.title())))
+        .collect::<Vec<_>>();
+    let providers = json!({
+        "/cover_providers": rufin_core::settings::CoverProvider::all().into_iter().map(|provider| provider_json(json!(provider), String::new())).collect::<Vec<_>>(),
+        "/artist_image_providers": rufin_core::settings::ArtistImageProvider::all().into_iter().map(|provider| provider_json(json!(provider), String::new())).collect::<Vec<_>>(),
+        "/external_lyrics_providers": lyrics,
+    });
     Ok(
-        json!({"values": values, "routes": routes, "home_blocks": blocks, "themes": themes, "theme_errors": theme_errors}),
+        json!({"values": values, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors}),
     )
+}
+
+/// A provider of an ordered list by its stored key, with its name and what it finds, as GTK's
+/// Integrations rows show them.
+fn provider_json(key: Value, title: String) -> Value {
+    let (name, subtitle) = match key.as_str().unwrap_or_default() {
+        "musicbrainz" => ("MusicBrainz", String::new()),
+        "lastfm" => ("Last.fm", String::new()),
+        "fanart" => ("fanart.tv", String::new()),
+        "commons" => ("Wikimedia Commons", String::new()),
+        "lrclib" | "simpmusic" => ("", localization::tr("Synced and plain lyrics")),
+        "netease" => ("", localization::tr("Synced lyrics, some word by word")),
+        "genius" => ("", localization::tr("Plain lyrics")),
+        _ => ("", String::new()),
+    };
+    let title = if title.is_empty() {
+        name.to_owned()
+    } else {
+        title
+    };
+    json!({"key": key, "title": title, "subtitle": subtitle})
 }
 
 /// Every theme GTK's Theme page shows, System first: the colors its preview draws and the
@@ -173,11 +217,15 @@ async fn read(State(products): State<ProductHandles>) -> Result<Response<Body>, 
 enum Edit {
     /// One of `SETTINGS`, replaced with `value`.
     Set { path: String, value: Value },
+    /// A sidebar entry shown or hidden, moved by `delta`, or dropped before or after `target`.
     Route {
         item: rufin_core::settings::SidebarRouteItem,
         visible: Option<bool>,
         #[serde(default)]
         delta: isize,
+        target: Option<rufin_core::settings::SidebarRouteItem>,
+        #[serde(default)]
+        after: bool,
     },
     /// A theme from the Theme page, with the accent its tile picked when it has its own.
     Theme {
@@ -189,6 +237,9 @@ enum Edit {
         visible: Option<bool>,
         #[serde(default)]
         delta: i32,
+        target: Option<library::HomeBlockKind>,
+        #[serde(default)]
+        after: bool,
     },
 }
 
@@ -198,11 +249,18 @@ async fn write(
 ) -> Result<Response<Body>, Error> {
     let edit: Edit = body(request).await?;
     let settings = products.settings.clone();
+    let artwork = products.artwork.clone();
     tokio::task::spawn_blocking(move || match edit {
         Edit::Set { path, value } => {
             if !SETTINGS.contains(&path.as_str()) {
                 return Err(bad_request(format!("{path} is not a preference")));
             }
+            // Covers and artist images still missing are asked for again, as GTK does.
+            let retry_artwork = match path.as_str() {
+                "/external_metadata_enabled" => value == json!(true),
+                "/cover_providers" | "/artist_image_providers" | "/fanart_api_key" => true,
+                _ => false,
+            };
             settings
                 .update_preferences(|ui| {
                     if path == "/playback/volume_scale" {
@@ -215,12 +273,18 @@ async fn write(
                     *ui = serde_json::from_value(stored).map_err(|e| e.to_string())?;
                     Ok(())
                 })
-                .map_err(bad_request)
+                .map_err(bad_request)?;
+            if retry_artwork && let Err(error) = artwork.retry_external() {
+                tracing::warn!(%error, path, "failed to retry external artwork");
+            }
+            Ok(())
         }
         Edit::Route {
             item,
             visible,
             delta,
+            target,
+            after,
         } => {
             if let Some(visible) = visible {
                 settings
@@ -229,6 +293,14 @@ async fn write(
             }
             if delta != 0 {
                 settings.move_route(item, delta).map_err(bad_request)?;
+            }
+            if let Some(target) = target {
+                settings
+                    .update_preferences(|ui| {
+                        ui.sidebar.reorder_route(item, target, after);
+                        Ok(())
+                    })
+                    .map_err(bad_request)?;
             }
             Ok(())
         }
@@ -247,6 +319,8 @@ async fn write(
             block,
             visible,
             delta,
+            target,
+            after,
         } => {
             if let Some(visible) = visible {
                 settings
@@ -256,6 +330,11 @@ async fn write(
             if delta != 0 {
                 settings
                     .move_home_block(block, delta)
+                    .map_err(bad_request)?;
+            }
+            if let Some(target) = target {
+                settings
+                    .reorder_home_block(block, target, after)
                     .map_err(bad_request)?;
             }
             Ok(())

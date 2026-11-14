@@ -86,7 +86,7 @@ fn latest_slot<T>() -> (LatestSender<T>, LatestReceiver<T>) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ArtworkKey {
     album: library::AlbumCover,
-    lastfm_api_key: String,
+    lookups: metadata_lookup::LookupPolicy,
 }
 
 pub(crate) struct ArtworkRequest {
@@ -150,10 +150,10 @@ enum ArtworkState {
     },
 }
 
-/// The presence settings and the Last.fm key, as committed.
+/// The presence settings and the cover providers, as committed.
 struct Committed {
     settings: Settings,
-    lastfm_api_key: String,
+    lookups: metadata_lookup::LookupPolicy,
 }
 
 impl Discord {
@@ -173,7 +173,7 @@ impl Discord {
         settings.enabled &= !stored.ui.application.private_mode;
         Committed {
             settings,
-            lastfm_api_key: stored.ui.lastfm_api_key.clone(),
+            lookups: stored.ui.lookup_policy(),
         }
     }
 
@@ -233,7 +233,7 @@ impl Discord {
                     ArtworkState::Pending { key, .. }
                         if Some(key) != ArtworkKey::from_view(
                             view,
-                            &committed.lastfm_api_key,
+                            &committed.lookups,
                         ).as_ref()
                 )
             {
@@ -251,7 +251,7 @@ impl Discord {
             self.clear(state);
             return;
         };
-        activity.large_image = self.artwork_image(state, &committed.lastfm_api_key, view);
+        activity.large_image = self.artwork_image(state, &committed.lookups, view);
         let activity = Arc::new(activity);
         state.activity = Some(Arc::clone(&activity));
         if !matches!(state.artwork, ArtworkState::Pending { .. }) {
@@ -272,10 +272,10 @@ impl Discord {
     fn artwork_image(
         &self,
         state: &mut State,
-        lastfm_api_key: &str,
+        lookups: &metadata_lookup::LookupPolicy,
         view: &TransportView,
     ) -> String {
-        let Some(key) = ArtworkKey::from_view(view, lastfm_api_key) else {
+        let Some(key) = ArtworkKey::from_view(view, lookups) else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
             return APP_ICON_ASSET.to_string();
@@ -373,7 +373,7 @@ impl State {
 }
 
 impl ArtworkKey {
-    fn from_view(view: &TransportView, lastfm_api_key: &str) -> Option<Self> {
+    fn from_view(view: &TransportView, lookups: &metadata_lookup::LookupPolicy) -> Option<Self> {
         let track = &view.current.as_ref()?;
         let album_artist = track
             .row
@@ -395,7 +395,7 @@ impl ArtworkKey {
                     .as_deref(),
                 track.row.track.metadata.musicbrainz_album_id.as_deref(),
             )?,
-            lastfm_api_key: lastfm_api_key.to_string(),
+            lookups: lookups.clone(),
         })
     }
 }

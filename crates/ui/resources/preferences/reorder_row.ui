@@ -11,6 +11,11 @@
         <style><class name="dim-label"/></style>
       </object>
     </child>
+    <child type="prefix">
+      <object class="GtkImage" id="icon">
+        <property name="visible">false</property>
+      </object>
+    </child>
     <child type="suffix">
       <object class="GtkButton" id="up">
         <property name="icon-name">rufin-go-up-symbolic</property>

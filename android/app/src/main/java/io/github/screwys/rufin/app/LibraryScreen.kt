@@ -47,6 +47,7 @@ import io.github.screwys.rufin.ui.focusRing
 import io.github.screwys.rufin.player.SidebarPlayer
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.more.MoreContent
+import io.github.screwys.rufin.settings.IntegrationPage
 import io.github.screwys.rufin.browse.PinsContent
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.rememberPlayerConnection
@@ -292,6 +293,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var metadata by remember { mutableStateOf<BrowseItem?>(null) }
     var moreStack by rememberSaveable { mutableStateOf(listOf(MoreDestination.Root)) }
     val moreDestination = moreStack.last()
+    var integration by rememberSaveable { mutableStateOf<IntegrationPage?>(null) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     // Closes once the page the drawer picked has composed, so building that page never uses up the slide.
@@ -490,7 +492,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             LocalSelectMode provides select) {
         // The route roots carry this bar, so it moves with its page instead of shifting the page beside it.
         val shellBar: @Composable () -> Unit = {
-            ShellTopBar(browse, moreDestination, if (tabs) null else rootRoute?.title, searchExpanded, searchFocus, tabs, !split,
+            ShellTopBar(browse, moreDestination, if (moreDestination == MoreDestination.Integration) integration?.name.orEmpty() else translate(moreDestination.title),
+                if (tabs) null else rootRoute?.title, searchExpanded, searchFocus, tabs, !split,
                 onMenu = { scope.launch { drawer.open() } },
                 onBack = { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) else selectTab(ShellTab.Home) },
                 onSearch = { if (searchExpanded) leaveInput() else { searchExpanded = true; focusSearch++ } },
@@ -596,7 +599,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                 Text(label("Home"), Modifier.weight(1f).padding(start = if (tabs) 2.dp else 16.dp), maxLines = 1,
                                     style = MaterialTheme.typography.titleLarge)
                                 if (width == ShellWidth.Tv && hasMedia) NowPlayingChip(player) { fullPlayer = true }
-                                PlayerIconButton("rufin-random-symbolic", "Play random", { random = true })
+                                PlayerIconButton("rufin-mix-symbolic", "Mix", { random = true })
                                 queueToggle()
                             }
                         } else Column(Modifier.fillMaxSize()) {
@@ -608,6 +611,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     when (browse.section) {
                         AppSection.More -> routeState.SaveableStateProvider("section:More") {
                             MoreContent(model, preferences, player, browse, moreDestination, { moreStack = moreStack + it },
+                                integration, { page ->
+                                    integration = page
+                                    if (moreDestination != MoreDestination.Integration) moreStack = moreStack + MoreDestination.Integration
+                                }, { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) },
                                 onAddSource = { editSourceId = null; sources = true }, onEditSource = { editSourceId = it; sources = true },
                                 onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
                         }
@@ -747,7 +754,7 @@ internal val LocalTinyScreen = compositionLocalOf { false }
 /** The top bar of route roots, Search, Saved and the pages of the ☰ menu: route tools live here. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination,
+private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTitle: String,
     /** The route's own name, where no tabs under the bar show it. */
     route: String?, searchExpanded: Boolean, searchFocus: FocusRequester,
     /** ☰ opens the sidebar where none is docked. */
@@ -783,7 +790,7 @@ private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination,
             AppSection.Browse -> route ?: translate("Library")
             AppSection.Search -> translate("Search")
             AppSection.Pins -> translate("Saved")
-            AppSection.More -> translate(more.title)
+            AppSection.More -> moreTitle
         }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
     }, actions = {
         if (browse.section == AppSection.Browse && search) PlayerIconButton(if (searchExpanded) "rufin-window-close-symbolic" else "rufin-search-symbolic",

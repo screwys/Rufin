@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use localization::msgid;
+use rufin_core::artwork::ArtworkBinding;
 
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;

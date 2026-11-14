@@ -15,6 +15,7 @@ mod page;
 mod pins;
 mod playlists;
 mod preferences;
+mod scrobbling;
 mod smart_playlists;
 mod source;
 pub use controller::{Controller, ControllerStatus, controller_addresses};
@@ -63,7 +64,10 @@ fn artwork_previews<'a>(
         .map(|binding| {
             products
                 .artwork
-                .preview(artwork::ArtworkBinding::opaque(binding), allow_external)
+                .preview(
+                    rufin_core::artwork::ArtworkBinding::opaque(binding),
+                    allow_external,
+                )
                 .map(|preview| {
                     format!(
                         "data:image/png;base64,{}",
@@ -181,6 +185,7 @@ fn routes() -> Router<ProductHandles> {
         .merge(connect::routes())
         .merge(equalizer::routes())
         .merge(preferences::routes())
+        .merge(scrobbling::routes())
         .merge(activity::routes())
         .merge(metadata::routes())
         .merge(smart_playlists::routes())
