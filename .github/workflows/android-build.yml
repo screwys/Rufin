@@ -82,8 +82,9 @@ jobs:
           cache-read-only: ${{ github.event_name != 'push' }}
 
       - name: Restore Robolectric runtime cache
+        id: robolectric
         if: matrix.check == 'build' && inputs.release_tag == ''
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.m2/repository/org/robolectric
           key: ${{ runner.os }}-robolectric-${{ hashFiles('android/app/build.gradle.kts', 'android/app/src/test/**') }}
@@ -114,8 +115,9 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: 'false'
-          # Profiles, the NDK and target flags are outside rust-cache's own key.
-          key: ${{ matrix.check }}-${{ hashFiles('Cargo.toml', '.cargo/config.toml', 'xtask/src/android.rs') }}
+          # rust-cache keys rustc, the lockfile and the crate manifests itself; this keeps the
+          # two checks' artifacts apart.
+          key: ${{ matrix.check }}
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> android/build/rust
@@ -159,10 +161,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Saved even when a check fails, so the slow SDK download happens once per key.
+      # Only main saves caches: copies saved by pull requests fill the repository's 10 GB and
+      # evict main's, so later runs download the SDK again. Saved even when a check fails.
       - name: Save GStreamer SDK
-        if: always() && steps.gstreamer.outputs.cache-hit != 'true' && hashFiles('android/.toolchains/gstreamer-1.28.7/arm64/lib/pkgconfig/gstreamer-1.0.pc') != ''
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.gstreamer.outputs.cache-hit != 'true' && hashFiles('android/.toolchains/gstreamer-1.28.7/arm64/lib/pkgconfig/gstreamer-1.0.pc') != ''
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: android/.toolchains/gstreamer-1.28.7
           key: ${{ steps.gstreamer.outputs.cache-primary-key }}
+
+      - name: Save Robolectric runtime cache
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.robolectric.outcome == 'success' && steps.robolectric.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ steps.robolectric.outputs.cache-primary-key }}
