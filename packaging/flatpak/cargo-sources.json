@@ -9310,14 +9310,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/swarm-discovery/swarm-discovery-0.6.3.crate",
-        "sha256": "1b4877f20f064de34b77d79237c9caa37c393590af8ef5a2f3253d59be5a338b",
-        "dest": "cargo/vendor/swarm-discovery-0.6.3"
+        "url": "https://static.crates.io/crates/swarm-discovery/swarm-discovery-0.6.5.crate",
+        "sha256": "d7e56b7e93eaffb9baba3e64936a5912540847516fc5f26d66ad18044b8d4a14",
+        "dest": "cargo/vendor/swarm-discovery-0.6.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"1b4877f20f064de34b77d79237c9caa37c393590af8ef5a2f3253d59be5a338b\", \"files\": {}}",
-        "dest": "cargo/vendor/swarm-discovery-0.6.3",
+        "contents": "{\"package\": \"d7e56b7e93eaffb9baba3e64936a5912540847516fc5f26d66ad18044b8d4a14\", \"files\": {}}",
+        "dest": "cargo/vendor/swarm-discovery-0.6.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
