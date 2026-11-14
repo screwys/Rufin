@@ -14,9 +14,40 @@ let selectedGenre = null;
 
 const genreRowHeight = 36;
 
+/** The counts of tracks and of albums; the field shows the one of the unit chosen. */
+let limits = [100, 10];
+
+/** The kind chosen, a `played` value. */
+let played = "All";
+
+/** The unit's two choices, tracks and albums; its value is the index of the one chosen. */
+const units = () => $("random-form").elements["random-unit"];
+
+function showUnit() {
+  const albums = units().value === "1";
+  $("random-count").value = limits[Number(albums)];
+  // The first text names tracks; the others name albums and how they play.
+  [...$("random-count-label").children].forEach((text, index) => {
+    text.hidden = albums === (index === 0);
+  });
+}
+
+function choosePlayed(value) {
+  played = value;
+  for (const chip of $("random-played").children)
+    chip.setAttribute("aria-pressed", String(chip.value === value));
+}
+
+/** A year field's value; an empty or unreadable one leaves that end open. */
+function year(id) {
+  const text = $(id).value.trim(),
+    value = Number(text);
+  return /^\d+$/.test(text) && value >= 1850 && value <= 2050 ? value : null;
+}
+
 function chooseGenre(row) {
   selectedGenre = row;
-  $("random-genre").textContent = row?.name || tr("Any genre");
+  $("random-genre").firstElementChild.textContent = row?.name || tr("Any");
   if ($("genre-menu").matches(":popover-open")) $("genre-menu").hidePopover();
 }
 
@@ -32,18 +63,12 @@ async function loadRandom(reset = false) {
   if (result.total !== null) genreTotal = result.total;
   if (reset || state.randomSource !== state.source) {
     const settings = result.settings;
-    $("random-count").value = settings.limit;
-    $("use-min-year").checked = settings.min_year != null;
-    $("use-max-year").checked = settings.max_year != null;
-    $("random-min-year").disabled = settings.min_year == null;
-    $("random-max-year").disabled = settings.max_year == null;
-    for (const id of ["random-min-year", "random-max-year"]) {
-      for (const button of $(id).parentElement.querySelectorAll("button"))
-        button.disabled = $(id).disabled;
-    }
-    $("random-min-year").value = settings.min_year ?? 1850;
-    $("random-max-year").value = settings.max_year ?? 2050;
-    $("random-played").value = settings.played_filter;
+    limits = [settings.limit, settings.album_limit];
+    units().value = Number(settings.albums);
+    showUnit();
+    $("random-min-year").value = settings.min_year ?? "";
+    $("random-max-year").value = settings.max_year ?? "";
+    choosePlayed(settings.played_filter);
     chooseGenre(result.selected_genre);
     state.randomSource = state.source;
   }
@@ -73,23 +98,20 @@ async function openRandom() {
   genreOffset = 0;
   $("genre-search").value = "";
   await loadRandom(state.randomSource !== state.source);
-  $("random-dialog").showPopover();
-  $("random-count").focus();
+  openPopup($("random-dialog"), $("random"), "center");
+  units()[Number(units().value)].focus();
 }
 
 async function playRandom(mode = "replace") {
   const result = await api("/queue/random", "POST", {
     source: state.source,
     folder: state.selectedLibrary,
+    albums: units().value === "1",
     count: Number($("random-count").value),
-    min_year: $("use-min-year").checked
-      ? Number($("random-min-year").value)
-      : null,
-    max_year: $("use-max-year").checked
-      ? Number($("random-max-year").value)
-      : null,
+    min_year: year("random-min-year"),
+    max_year: year("random-max-year"),
     genre: selectedGenre?.id ?? null,
-    played: $("random-played").value,
+    played,
     mode,
   });
   if (result.empty) notice(tr("No matching tracks found"));
@@ -99,8 +121,17 @@ function init() {
   $("random-form").addEventListener("click", (event) => {
     const step = event.target.closest("[data-step]");
     if (!step) return;
-    const input = step.parentElement.querySelector("input");
-    if (!input.disabled) input.stepUp(Number(step.dataset.step));
+    $("random-count").stepUp(Number(step.dataset.step));
+  });
+  // Each unit keeps its own count.
+  for (const unit of units())
+    unit.addEventListener("change", () => {
+      limits[1 - Number(units().value)] = Number($("random-count").value);
+      showUnit();
+    });
+  $("random-played").addEventListener("click", (event) => {
+    const chip = event.target.closest("button");
+    if (chip) choosePlayed(chip.value);
   });
   $("random").addEventListener("click", () => run(openRandom));
   $("random").addEventListener("contextmenu", (event) => {
@@ -114,23 +145,13 @@ function init() {
       $("random-dialog").hidePopover();
     });
   });
-  for (const [toggle, field] of [
-    ["use-min-year", "random-min-year"],
-    ["use-max-year", "random-max-year"],
-  ]) {
-    $(toggle).addEventListener("change", () => {
-      $(field).disabled = !$(toggle).checked;
-      for (const button of $(field).parentElement.querySelectorAll("button"))
-        button.disabled = $(field).disabled;
-    });
-  }
   $("random-genre").addEventListener("click", () =>
     run(async () => {
       genreOffset = 0;
       $("genre-search").value = "";
       $("genre-options").scrollTop = 0;
       await loadRandom();
-      $("any-genre").replaceChildren(document.createTextNode(tr("Any genre")));
+      $("any-genre").replaceChildren(document.createTextNode(tr("Any")));
       $("any-genre").setAttribute("aria-selected", String(!selectedGenre));
       if (!selectedGenre) $("any-genre").append(icon("rufin-object-select-symbolic"));
       openPopup($("genre-menu"), $("random-genre"));

@@ -35,7 +35,7 @@ impl Flow {
                 name: saved
                     .map(|s| s.credentials.source_name.clone())
                     .unwrap_or_default(),
-                use_instant_mix: saved.and_then(|s| s.use_instant_mix).unwrap_or(true),
+                use_instant_mix: saved.and_then(|s| s.use_instant_mix).unwrap_or(false),
             })),
         }
     }

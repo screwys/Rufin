@@ -213,11 +213,13 @@ async fn random(
         source: String,
         folder: Option<String>,
         count: usize,
-        min_year: Option<i64>,
-        max_year: Option<i64>,
+        min_year: Option<u16>,
+        max_year: Option<u16>,
         genre: Option<library::GenreKey>,
         #[serde(default)]
         played: library::PlayedFilter,
+        #[serde(default)]
+        albums: bool,
         mode: String,
     }
     let input: Input = body(request).await?;
@@ -228,17 +230,54 @@ async fn random(
         "append" => rufin_core::playback::QueuePlacement::Last,
         _ => return Err(bad_request("Queue mode must be replace, append or next")),
     };
+    // The selection is saved as the dialogs of the other clients save theirs; the count of the
+    // unit it does not play stays as saved.
+    let genre = match input.genre {
+        Some(key) => Some(rufin_core::settings::RandomPlayGenreSelection {
+            source_id: selected.source_id.clone(),
+            music_folder_id: selected.music_folder_object_id.clone(),
+            genre_id: products
+                .library
+                .uri(library::Item::Genre(key))
+                .and_then(|uri| library::source_entity_parts(&uri))
+                .ok_or_else(|| bad_request("Genre is no longer available"))?
+                .2,
+        }),
+        None => None,
+    };
+    let settings = products.settings.clone();
+    tokio::task::spawn_blocking(move || {
+        let saved = settings.random_preferences();
+        settings.set_random_preferences(rufin_core::settings::RandomPlaySettings {
+            albums: input.albums,
+            limit: if input.albums {
+                saved.limit
+            } else {
+                input.count
+            },
+            album_limit: if input.albums {
+                input.count
+            } else {
+                saved.album_limit
+            },
+            min_year: input.min_year,
+            max_year: input.max_year,
+            genre,
+            played_filter: input.played,
+        })
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
     let request = rufin_core::playback::RandomPlayRequest {
         placement,
         requested: input.count.min(500),
         criteria: library::RandomCriteria {
-            min_year: input.min_year,
-            max_year: input.max_year,
+            min_year: input.min_year.map(i64::from),
+            max_year: input.max_year.map(i64::from),
             genre: input.genre,
             played: input.played,
-            variation: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos() as i64),
+            albums: input.albums,
         },
     };
     let empty =

@@ -599,7 +599,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                 Text(label("Home"), Modifier.weight(1f).padding(start = if (tabs) 2.dp else 16.dp), maxLines = 1,
                                     style = MaterialTheme.typography.titleLarge)
                                 if (width == ShellWidth.Tv && hasMedia) NowPlayingChip(player) { fullPlayer = true }
-                                PlayerIconButton("rufin-random-symbolic", "Play random", { random = true })
+                                PlayerIconButton("rufin-mix-symbolic", "Mix", { random = true })
                                 queueToggle()
                             }
                         } else Column(Modifier.fillMaxSize()) {

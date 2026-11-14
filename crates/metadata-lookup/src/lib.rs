@@ -8,7 +8,10 @@ pub use cache::{CacheMode, LookupCache, cache_time};
 mod cover;
 mod http;
 mod images;
+mod listenbrainz;
 mod musicbrainz;
+
+pub use listenbrainz::similar_artists;
 
 pub use images::{
     ArtworkQuery, ArtworkResult, download_artwork, lookup_artist_image, search_artwork,
