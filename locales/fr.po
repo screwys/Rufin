@@ -1444,6 +1444,11 @@ msgstr "Désactivé"
 msgid "Disc number"
 msgstr "Numéro de disque"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Numéro de disque"
+
 msgid "Disc {number}"
 msgstr "Disque {number}"
 

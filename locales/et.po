@@ -1452,6 +1452,11 @@ msgstr "Pole kasutusel"
 msgid "Disc number"
 msgstr "Plaadi number"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Plaadi number"
+
 msgid "Disc {number}"
 msgstr "Plaat {number}"
 

@@ -1436,6 +1436,11 @@ msgstr "Отключено"
 msgid "Disc number"
 msgstr "Номер диска"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Номер диска"
+
 msgid "Disc {number}"
 msgstr "Диск {number}"
 

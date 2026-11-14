@@ -1611,6 +1611,11 @@ msgstr "Atspējots"
 msgid "Disc number"
 msgstr "Diska numurs"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Diska numurs"
+
 msgid "Disc {number}"
 msgstr "Disks {number}"
 
