@@ -30,6 +30,33 @@ fn genre_credits_from_item(source: &SubsonicSource, item: &Value) -> Vec<library
         .collect()
 }
 
+/// A song's groupings, each value once.
+pub(super) fn groupings(values: Vec<String>) -> Vec<String> {
+    let mut groupings = Vec::<String>::new();
+    for value in values {
+        let value = value.trim();
+        if !value.is_empty() && !groupings.iter().any(|known| known == value) {
+            groupings.push(value.to_owned());
+        }
+    }
+    groupings
+}
+
+/// The titled discs of `discs`: (number, title) pairs as a server lists them.
+pub(super) fn disc_titles<'a>(
+    discs: impl Iterator<Item = (Option<i64>, Option<&'a str>)>,
+) -> Vec<library::DiscTitle> {
+    discs
+        .filter_map(|(disc, title)| {
+            let (disc, title) = (disc?, title?.trim());
+            (!title.is_empty()).then(|| library::DiscTitle {
+                disc,
+                title: title.to_owned(),
+            })
+        })
+        .collect()
+}
+
 pub(super) fn moods_from_item(
     source: &SubsonicSource,
     moods: Vec<String>,
@@ -166,6 +193,11 @@ pub(super) fn album_from_json(
             genres: genre_credits_from_item(source, album),
             release_types: library::normalize_release_types(json::strings(&album["releaseTypes"])),
             version,
+            disc_titles: disc_titles(
+                json::items(&album["discTitles"])
+                    .iter()
+                    .map(|disc| (disc["disc"].as_i64(), disc["title"].as_str())),
+            ),
             ..Default::default()
         },
         user_data: library::NativeUserState {
@@ -263,6 +295,7 @@ pub(super) fn track_from_json(
             album_artists: artist_credits_from_item(source, &song["albumArtists"]),
             genres: genre_credits_from_item(source, song),
             moods: moods_from_item(source, json::strings(&song["moods"])),
+            groupings: groupings(json::strings(&song["groupings"])),
             ..Default::default()
         },
         user_data: library::NativeUserState {

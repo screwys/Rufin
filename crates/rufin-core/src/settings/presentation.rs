@@ -257,6 +257,7 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
         LibraryField::PlayCount => msgid("Plays"),
         LibraryField::UserRating => msgid("Rating"),
         LibraryField::Genre => msgid("Genre"),
+        LibraryField::Grouping => msgid("Grouping"),
         LibraryField::Bpm => msgid("BPM"),
         LibraryField::Bitrate => msgid("Bitrate"),
         LibraryField::SampleRate => msgid("Sample rate"),
@@ -448,6 +449,7 @@ pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
         | LibraryField::Channels => audio_property_field(&row.audio, field),
         LibraryField::Format => row.source_format.clone().unwrap_or_default(),
         LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
+        LibraryField::Grouping => row.groupings.join(", "),
         LibraryField::Source => row.source_name.clone(),
         LibraryField::DiscNumber => row.disc_number.to_string(),
         LibraryField::TrackNumber => {
@@ -615,6 +617,19 @@ pub fn stored_rating(value: Option<i64>) -> String {
     value
         .map(|value| format!("{:.1}", value as f64 / 2.0))
         .unwrap_or_default()
+}
+
+/// A disc separator's text: the disc's number with its title beside it.
+pub fn disc_heading(disc: i64, titles: &[library::DiscTitle]) -> String {
+    let number = if disc > 0 {
+        localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+    } else {
+        localization::tr("Unknown disc")
+    };
+    match titles.iter().find(|title| title.disc == disc) {
+        Some(title) => format!("{number} · {}", title.title),
+        None => number,
+    }
 }
 
 /// An album's year with its version beside it, so mixes and editions of one album tell apart.

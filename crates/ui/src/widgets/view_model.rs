@@ -445,6 +445,8 @@ mod imp {
         pub(super) start: RefCell<Option<Rc<dyn Fn(&super::RowList)>>>,
         pub(super) ready_handler: RefCell<Option<Rc<dyn Fn(u32, u32)>>>,
         pub(super) sections: RefCell<Vec<(u32, i64)>>,
+        /// The titles its disc sections show beside their numbers.
+        pub(super) disc_titles: RefCell<Vec<library::DiscTitle>>,
         pub(super) collection_selection:
             RefCell<Option<crate::widgets::selection::CollectionSelection>>,
         pub(super) reread: RefCell<Option<(ReadCancellation, tokio::task::AbortHandle)>>,
@@ -531,13 +533,29 @@ impl RowList {
         (start, end)
     }
 
-    pub fn section_value(&self, start: u32) -> Option<i64> {
+    /// The heading of the disc section starting at `start`.
+    pub fn section_heading(&self, start: u32) -> Option<String> {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         let sections = self.imp().sections.borrow();
-        sections
+        let index = sections
             .binary_search_by_key(&start, |section| section.0)
-            .ok()
-            .map(|index| sections[index].1)
+            .ok()?;
+        Some(rufin_core::settings::presentation::disc_heading(
+            sections[index].1,
+            &self.imp().disc_titles.borrow(),
+        ))
+    }
+
+    /// Shows `titles` beside the numbers of the discs they name.
+    pub fn set_disc_titles(&self, titles: Vec<library::DiscTitle>) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        if *self.imp().disc_titles.borrow() == titles {
+            return;
+        }
+        self.imp().disc_titles.replace(titles);
+        if self.n_items() > 0 && !self.imp().sections.borrow().is_empty() {
+            self.emit_by_name::<()>("sections-changed", &[&0u32, &self.n_items()]);
+        }
     }
 
     pub fn connect_sections_changed(

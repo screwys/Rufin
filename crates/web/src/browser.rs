@@ -609,19 +609,23 @@ pub(super) fn library(
             .collect(),
         cards,
         album_tracks: matches!(token.route, rufin_core::route::Route::AlbumDetail(_)),
-        disc_headers: opened
-            .view
-            .disc_sections()
-            .iter()
-            .map(|(start, disc)| {
-                let title = if *disc > 0 {
-                    localization::tr("Disc {number}").replace("{number}", &disc.to_string())
-                } else {
-                    localization::tr("Unknown disc")
-                };
-                (*start as usize, title)
-            })
-            .collect(),
+        disc_headers: {
+            let titles = match header {
+                Some(library::Header::Album(album)) => album.metadata.disc_titles.as_slice(),
+                _ => &[],
+            };
+            opened
+                .view
+                .disc_sections()
+                .iter()
+                .map(|(start, disc)| {
+                    (
+                        *start as usize,
+                        rufin_core::settings::presentation::disc_heading(*disc, titles),
+                    )
+                })
+                .collect()
+        },
         page: token.json(),
         title: page::title(products, token, header),
         back: page::parent(token).map_or_else(String::new, |parent| parent.json()),

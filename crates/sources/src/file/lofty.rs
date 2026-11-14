@@ -72,6 +72,16 @@ fn metadata_key_is_writable(tag_type: lofty::tag::TagType, key: ItemKey) -> bool
             )
 }
 
+/// Grouping's item: ID3v2 keeps it in GRP1, where iTunes moved it when TIT1 became the work,
+/// as Navidrome reads it.
+pub(crate) fn grouping_key(tag_type: lofty::tag::TagType) -> ItemKey {
+    if tag_type == lofty::tag::TagType::Id3v2 {
+        ItemKey::AppleId3v2ContentGroup
+    } else {
+        ItemKey::ContentGroup
+    }
+}
+
 pub(crate) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
     // Lofty's generic MP4 conversion writes `tmpo` as text and can preserve an
     // existing integer atom beside it, so that path is not a safe BPM writer.
