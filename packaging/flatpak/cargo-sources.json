@@ -9310,14 +9310,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/swarm-discovery/swarm-discovery-0.6.3.crate",
-        "sha256": "1b4877f20f064de34b77d79237c9caa37c393590af8ef5a2f3253d59be5a338b",
-        "dest": "cargo/vendor/swarm-discovery-0.6.3"
+        "url": "https://static.crates.io/crates/swarm-discovery/swarm-discovery-0.6.5.crate",
+        "sha256": "d7e56b7e93eaffb9baba3e64936a5912540847516fc5f26d66ad18044b8d4a14",
+        "dest": "cargo/vendor/swarm-discovery-0.6.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"1b4877f20f064de34b77d79237c9caa37c393590af8ef5a2f3253d59be5a338b\", \"files\": {}}",
-        "dest": "cargo/vendor/swarm-discovery-0.6.3",
+        "contents": "{\"package\": \"d7e56b7e93eaffb9baba3e64936a5912540847516fc5f26d66ad18044b8d4a14\", \"files\": {}}",
+        "dest": "cargo/vendor/swarm-discovery-0.6.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -9739,14 +9739,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.26.5.crate",
-        "sha256": "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67",
-        "dest": "cargo/vendor/tokio-rustls-0.26.5"
+        "url": "https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.26.6.crate",
+        "sha256": "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db",
+        "dest": "cargo/vendor/tokio-rustls-0.26.6"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67\", \"files\": {}}",
-        "dest": "cargo/vendor/tokio-rustls-0.26.5",
+        "contents": "{\"package\": \"c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db\", \"files\": {}}",
+        "dest": "cargo/vendor/tokio-rustls-0.26.6",
         "dest-filename": ".cargo-checksum.json"
     },
     {
