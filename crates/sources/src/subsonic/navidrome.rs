@@ -596,6 +596,13 @@ fn album_from_navidrome(
             version: tag_values(&album["tags"], "albumversion")
                 .into_iter()
                 .next(),
+            disc_titles: super::disc_titles(
+                album["discs"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(disc, title)| (disc.parse().ok(), title.as_str())),
+            ),
             ..Default::default()
         },
         user_data: library::NativeUserState {
@@ -729,6 +736,7 @@ fn track_from_navidrome(
             album_artists: album_artists,
             genres: genre_credits(source, &track["genres"]),
             moods: super::moods_from_item(source, tag_values(&track["tags"], "mood")),
+            groupings: super::groupings(tag_values(&track["tags"], "grouping")),
             ..Default::default()
         },
         user_data: library::NativeUserState {

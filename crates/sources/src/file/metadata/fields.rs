@@ -120,6 +120,7 @@ fields![
         3
     ),
     ("album_sort", "Album sort", AlbumTitleSortOrder, Text, 1),
+    ("disc_subtitle", "Disc subtitle", SetSubtitle, Text, 1),
     ("grouping", "Grouping", ContentGroup, Text, 3),
     ("track_total", "Total tracks", TrackTotal, Number, 3),
     ("disc_total", "Total discs", DiscTotal, Number, 3),
@@ -153,13 +154,23 @@ fields![
     ("copyright", "Copyright", CopyrightMessage, Text, 7),
 ];
 
-fn writable(writer: MetadataWriter, field: &Field) -> bool {
-    if field.key == "bpm" {
-        super::super::lofty::bpm_key(writer.file_type().primary_tag_type()).is_some()
+/// The item a field edits in `tag_type`: grouping's is the one the scan reads.
+fn item(field: &Field, tag_type: TagType) -> ItemKey {
+    if field.item == ItemKey::ContentGroup {
+        super::super::lofty::grouping_key(tag_type)
     } else {
-        writer.metadata_key_is_writable(field.item)
-            && (field.label.is_none()
-                || canonical(writer.file_type().primary_tag_type(), field.item))
+        field.item
+    }
+}
+
+fn writable(writer: MetadataWriter, field: &Field) -> bool {
+    let tag_type = writer.file_type().primary_tag_type();
+    if field.key == "bpm" {
+        super::super::lofty::bpm_key(tag_type).is_some()
+    } else {
+        let item = item(field, tag_type);
+        writer.metadata_key_is_writable(item)
+            && (field.label.is_none() || canonical(tag_type, item))
     }
 }
 
@@ -183,7 +194,7 @@ pub(super) fn read(
         .filter(|field| field.scopes & scope != 0)
         .filter_map(|field| {
             if field.label.is_some()
-                && tag.is_some_and(|tag| !canonical(tag.tag_type(), field.item))
+                && tag.is_some_and(|tag| !canonical(tag.tag_type(), item(field, tag.tag_type())))
             {
                 return None;
             }
@@ -210,7 +221,7 @@ pub(super) fn read(
                 _ if field.part.is_some() => tag.map(|tag| part_values(tag, field).join("; ")),
                 _ => Some(
                     tag.into_iter()
-                        .flat_map(|tag| tag.get_strings(field.item))
+                        .flat_map(|tag| tag.get_strings(item(field, tag.tag_type())))
                         .collect::<Vec<_>>()
                         .join("; "),
                 ),
@@ -295,7 +306,7 @@ pub(super) fn apply(
             super::super::lofty::bpm_key(writer.file_type().primary_tag_type())
                 .ok_or(SourceMetadataError::Unavailable)?
         } else {
-            field.item
+            item(field, writer.file_type().primary_tag_type())
         };
         let list = |tag: &mut Tag, item| {
             for value in value

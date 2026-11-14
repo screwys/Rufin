@@ -358,7 +358,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .into_iter()
             .find(|file| file.kind == library::LocalFileKind::Media)
             .unwrap();
-        assert_eq!(observation.parse_version, Some(21));
+        assert_eq!(observation.parse_version, Some(22));
         assert_eq!(observation.state, library::LocalFileState::Accepted);
         catalog.close().await.unwrap();
     }

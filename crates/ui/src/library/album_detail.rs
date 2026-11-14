@@ -1608,7 +1608,8 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Album
         | LibraryField::Artist
         | LibraryField::AlbumArtist
-        | LibraryField::Genre => 160,
+        | LibraryField::Genre
+        | LibraryField::Grouping => 160,
         LibraryField::ReleaseDate | LibraryField::DateAdded => 96,
         _ => crate::widgets::library_fields::column_width(field),
     }

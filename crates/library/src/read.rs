@@ -354,6 +354,7 @@ pub struct TrackRow {
     pub release_date: Option<String>,
     pub source_path: Option<String>,
     pub audio: AudioProperties,
+    pub groupings: Vec<String>,
     pub artwork_binding: Option<Vec<u8>>,
 }
 
@@ -839,6 +840,7 @@ impl<'a> Builder<'a> {
             release_date: stored.release_date,
             source_path: stored.source_path,
             audio: stored.audio,
+            groupings: stored.groupings,
             artwork_binding: got.binding(self.context.track_art(&self.covers, record))?,
         }))
     }
@@ -872,6 +874,7 @@ impl<'a> Builder<'a> {
                 audio_properties: row.audio,
                 comment: optional(self.snapshot, record.comment),
                 bpm: row.bpm,
+                groupings: row.groupings,
                 ..metadata.clone()
             },
             media_uri: row.media_uri,
@@ -1241,6 +1244,7 @@ impl<'a> Builder<'a> {
                     release_date: None,
                     source_path: None,
                     audio: AudioProperties::default(),
+                    groupings: Vec::new(),
                     artwork_binding: None,
                 });
                 let listened = self

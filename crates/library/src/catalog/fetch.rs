@@ -11,7 +11,7 @@ use crate::artwork::{AlbumCover, ArtworkCandidate, ArtworkImage};
 use crate::{AlbumMetadata, LibraryResult, TrackAccess, TrackMetadata};
 
 /// Columns after the part and the key; a part with fewer pads with NULL.
-const COLUMNS: usize = 5;
+const COLUMNS: usize = 6;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Part {
@@ -82,6 +82,7 @@ impl Part {
                     "track.release_date".into(),
                     source_path.into(),
                     "json_extract(details.metadata,'$.audio_properties')".into(),
+                    "json_extract(details.metadata,'$.groupings')".into(),
                 ],
                 "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN sources source ON source.source_key=track.source_key".into(),
             ),
@@ -212,6 +213,7 @@ pub(crate) struct TrackText {
     pub(crate) release_date: Option<String>,
     pub(crate) source_path: Option<String>,
     pub(crate) audio: crate::AudioProperties,
+    pub(crate) groupings: Vec<String>,
 }
 
 /// A playlist's or smart playlist's own binding and the candidate its mosaic picks compose.
@@ -430,6 +432,7 @@ pub(crate) async fn run(
                         release_date: text(&rows, 4),
                         source_path: text(&rows, 5),
                         audio: json(&rows, 6)?,
+                        groupings: json(&rows, 7)?,
                     },
                 );
             }

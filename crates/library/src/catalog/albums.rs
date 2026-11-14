@@ -13,7 +13,8 @@ use super::write::Write;
 use crate::metadata::album_details_value;
 use crate::tags::TagKind;
 use crate::{
-    AlbumMetadata, AlbumReleaseClass, AlbumTags, ArtistCredit, LibraryResult, TagReference,
+    AlbumMetadata, AlbumReleaseClass, AlbumTags, ArtistCredit, DiscTitle, LibraryResult,
+    TagReference,
 };
 
 const PAGE: usize = 128;
@@ -408,6 +409,7 @@ async fn resolve_album(
             },
             release_types: Vec::new(),
             version: filled(|member| member.album_tags.as_ref()?.version.as_deref()),
+            disc_titles: disc_titles(&indexed),
         })?,
     };
     // Kept to the second: the album's date added orders albums, and readers show its date.
@@ -430,6 +432,28 @@ async fn resolve_album(
     }
     write.put(album);
     Ok(())
+}
+
+/// Each disc's title: the first its members tag it with.
+fn disc_titles(members: &[&Member]) -> Vec<DiscTitle> {
+    let mut titles = Vec::<DiscTitle>::new();
+    for member in members {
+        let Some(title) = member
+            .album_tags
+            .as_ref()
+            .and_then(|tags| tags.disc_subtitle.as_deref())
+        else {
+            continue;
+        };
+        let disc = member.track.facts.disc;
+        if !titles.iter().any(|known| known.disc == disc) {
+            titles.push(DiscTitle {
+                disc,
+                title: title.to_owned(),
+            });
+        }
+    }
+    titles
 }
 
 /// Classifies an album by its compilation flag and release types: a secondary type names the

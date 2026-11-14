@@ -1334,6 +1334,9 @@ msgstr ""
 msgid "Disc number"
 msgstr ""
 
+msgid "Disc subtitle"
+msgstr ""
+
 #, rust-format
 msgid "Disc {number}"
 msgstr ""

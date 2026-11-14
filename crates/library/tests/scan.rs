@@ -1592,7 +1592,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
                     sort_text: "albüm".into(),
                     is_compilation: Some(true),
                     release_types: vec!["album".into()],
-                    version: None,
+                    ..Default::default()
                 }),
                 album: "ALBÜM".into(),
                 artist: "Artist".into(),

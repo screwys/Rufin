@@ -109,6 +109,7 @@ pub async fn media_details(
                     LibraryField::Album,
                     LibraryField::AlbumArtist,
                     LibraryField::Genre,
+                    LibraryField::Grouping,
                     LibraryField::ReleaseDate,
                     LibraryField::Year,
                     LibraryField::TrackNumber,

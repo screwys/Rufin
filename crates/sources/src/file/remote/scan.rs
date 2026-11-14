@@ -10,7 +10,7 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::walk::{self, Entry, Root};
 use crate::{LocalImageRef, SourceError, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 12;
+pub(crate) const PARSER_VERSION: i64 = 13;
 
 pub(crate) fn audio_revision(
     path: &str,
