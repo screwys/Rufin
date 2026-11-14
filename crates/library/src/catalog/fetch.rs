@@ -11,7 +11,7 @@ use crate::artwork::{AlbumCover, ArtworkCandidate, ArtworkImage};
 use crate::{AlbumMetadata, LibraryResult, TrackAccess, TrackMetadata};
 
 /// Columns after the part and the key; a part with fewer pads with NULL.
-const COLUMNS: usize = 5;
+const COLUMNS: usize = 6;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Part {
@@ -82,6 +82,7 @@ impl Part {
                     "track.release_date".into(),
                     source_path.into(),
                     "json_extract(details.metadata,'$.audio_properties')".into(),
+                    "json_extract(details.metadata,'$.groupings')".into(),
                 ],
                 "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN sources source ON source.source_key=track.source_key".into(),
             ),
@@ -103,6 +104,7 @@ impl Part {
                 vec![
                     "album.release_date".into(),
                     "coalesce(date(album.date_added),album.date_added,date(album.first_seen_at,'unixepoch'))".into(),
+                    "json_extract(album.metadata,'$.version')".into(),
                 ],
                 "JOIN albums album ON album.album_key=requested.value".into(),
             ),
@@ -211,6 +213,7 @@ pub(crate) struct TrackText {
     pub(crate) release_date: Option<String>,
     pub(crate) source_path: Option<String>,
     pub(crate) audio: crate::AudioProperties,
+    pub(crate) groupings: Vec<String>,
 }
 
 /// A playlist's or smart playlist's own binding and the candidate its mosaic picks compose.
@@ -226,7 +229,8 @@ pub(crate) struct Got {
     pub(crate) tracks: HashMap<i64, TrackText>,
     /// A full view's details and its CUE window; the rest of the access its row fills.
     pub(crate) views: HashMap<i64, (TrackMetadata, TrackAccess)>,
-    pub(crate) album_texts: HashMap<i64, (Option<String>, Option<String>)>,
+    /// An album's release date, date added and version.
+    pub(crate) album_texts: HashMap<i64, (Option<String>, Option<String>, Option<String>)>,
     pub(crate) album_views: HashMap<i64, AlbumMetadata>,
     pub(crate) artist_views: HashMap<i64, Option<String>>,
     /// Stored pictures by art part and key.
@@ -428,6 +432,7 @@ pub(crate) async fn run(
                         release_date: text(&rows, 4),
                         source_path: text(&rows, 5),
                         audio: json(&rows, 6)?,
+                        groupings: json(&rows, 7)?,
                     },
                 );
             }
@@ -447,7 +452,7 @@ pub(crate) async fn run(
             }
             Part::AlbumText => {
                 got.album_texts
-                    .insert(key, (text(&rows, 2), text(&rows, 3)));
+                    .insert(key, (text(&rows, 2), text(&rows, 3), text(&rows, 4)));
             }
             Part::AlbumView => {
                 got.album_views.insert(key, json(&rows, 2)?);

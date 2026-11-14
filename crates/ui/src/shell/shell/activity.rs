@@ -655,7 +655,7 @@ impl ActivityView {
                         .tracks
                         .first()
                         .and_then(|row| row.artwork_binding.as_deref())
-                        .map(artwork::ArtworkBinding::opaque)
+                        .map(rufin_core::artwork::ArtworkBinding::opaque)
                         .unwrap_or_default();
                     view.data.replace(Some(data));
                     if (artwork_changed || view.background_texture.borrow().is_none())

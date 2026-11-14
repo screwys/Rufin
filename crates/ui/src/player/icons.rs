@@ -6,8 +6,6 @@ use playback::QueueRepeatMode;
 
 use localization::tr;
 
-pub const TRANSPORT_ICON_SIZE: i32 = 23;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VolumeIcon {
     Low,
@@ -128,15 +126,11 @@ pub fn volume_icon_button(label: &str) -> (gtk::Button, gtk::Image, Rc<Cell<Volu
 }
 
 pub fn auto_dj_icon_button(label: &str) -> gtk::Button {
-    let icon = transport_image("rufin-auto-dj-symbolic");
-    icon.set_pixel_size(TRANSPORT_ICON_SIZE);
-    widget_icon_button(label, &icon)
+    widget_icon_button(label, &transport_image("rufin-auto-dj-symbolic"))
 }
 
-pub fn random_clover_icon_button(label: &str) -> gtk::Button {
-    let icon = transport_image("rufin-random-symbolic");
-    icon.set_pixel_size(TRANSPORT_ICON_SIZE);
-    widget_icon_button(label, &icon)
+pub fn mix_icon_button(label: &str) -> gtk::Button {
+    widget_icon_button(label, &transport_image("rufin-mix-symbolic"))
 }
 
 pub fn queue_sidebar_button(label: &str) -> (gtk::Button, gtk::Image) {

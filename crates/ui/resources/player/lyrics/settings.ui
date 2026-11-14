@@ -12,10 +12,8 @@
     <property name="title" translatable="yes">Lyrics</property>
     <property name="icon-name">rufin-text-center-symbolic</property>
     <child>
-      <object class="AdwPreferencesGroup" id="sources">
-        <property name="title" translatable="yes">Sources</property>
-        <child><object class="AdwSwitchRow" id="external"><property name="title" translatable="yes">External lyrics lookup</property></object></child>
-        <child><object class="AdwSwitchRow" id="prefer_server"><property name="title" translatable="yes">Prefer server lyrics</property></object></child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Storage</property>
         <child><object class="AdwSwitchRow" id="save_to_source"><property name="title" translatable="yes">Saves lyrics to your source</property><property name="subtitle" translatable="yes">Save action saves the lyrics directly to your source</property></object></child>
         <child>
           <object class="AdwActionRow" id="save_automatically">

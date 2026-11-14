@@ -5,17 +5,39 @@ use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::scrobbling::retry::{DeliveryError, Submission, SubmissionTrack, USER_AGENT};
-use crate::scrobbling::settings::ListenBrainzSettings;
 
-const API_URL: &str = "https://api.listenbrainz.org/1/submit-listens";
+const LISTENBRAINZ_API_URL: &str = "https://api.listenbrainz.org";
 
-pub fn connect(user_token: &str) -> Result<String, String> {
+/// A server that takes ListenBrainz submissions: its name and API root.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Service {
+    name: String,
+    root: String,
+}
+
+impl Service {
+    pub(crate) fn listenbrainz() -> Self {
+        Self::server("ListenBrainz", LISTENBRAINZ_API_URL)
+    }
+
+    /// The API root is where `1/submit-listens` is, such as `…/apis/listenbrainz` on Maloja.
+    pub(crate) fn server(name: &str, url: &str) -> Self {
+        let root = url.trim().trim_end_matches('/');
+        Self {
+            name: name.into(),
+            root: root.strip_suffix("/1").unwrap_or(root).into(),
+        }
+    }
+}
+
+/// Checks a user token and answers the account's name.
+pub(crate) fn connect(service: &Service, user_token: &str) -> Result<String, String> {
     let response = Client::builder()
         .timeout(Duration::from_secs(6))
         .user_agent(USER_AGENT)
         .build()
         .map_err(|error| error.to_string())?
-        .get("https://api.listenbrainz.org/1/validate-token")
+        .get(format!("{}/1/validate-token", service.root))
         .header(AUTHORIZATION, authorization_header(user_token.trim()))
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
@@ -34,56 +56,53 @@ pub fn connect(user_token: &str) -> Result<String, String> {
 
 pub(crate) fn submit(
     client: &Client,
-    settings: &ListenBrainzSettings,
+    service: &Service,
+    user_token: &str,
     submission: &Submission,
 ) -> Result<(), DeliveryError> {
     let operation = match submission {
         Submission::NowPlaying(_) => "playing_now",
         Submission::Scrobble { .. } => "single",
     };
+    let url = format!("{}/1/submit-listens", service.root);
     debug!(
-        service = "ListenBrainz",
+        service = service.name,
         method = "POST",
-        public_url = API_URL,
+        public_url = url,
         operation,
         "sending remote request"
     );
     let started = Instant::now();
     let response = client
-        .post(API_URL)
-        .header(AUTHORIZATION, authorization_header(&settings.user_token))
+        .post(&url)
+        .header(AUTHORIZATION, authorization_header(user_token))
         .json(&payload(submission))
         .send()
         .map_err(|error| DeliveryError::retry(error.to_string()))?;
     let status = response.status();
     debug!(
-        service = "ListenBrainz",
+        service = service.name,
         method = "POST",
         operation,
         status = status.as_u16(),
         elapsed_ms = started.elapsed().as_millis(),
         "received remote response"
     );
-    if let Some(error) = delivery_error(status) {
+    if let Some(error) = delivery_error(&service.name, status) {
         return Err(error);
     }
-    debug!("submitted ListenBrainz event");
+    debug!(service = service.name, "submitted ListenBrainz event");
     Ok(())
 }
 
-fn delivery_error(status: reqwest::StatusCode) -> Option<DeliveryError> {
+fn delivery_error(name: &str, status: reqwest::StatusCode) -> Option<DeliveryError> {
+    let error = format!("{name} returned HTTP {status}");
     if status.as_u16() == 429 || status.is_server_error() {
-        Some(DeliveryError::retry(format!(
-            "ListenBrainz returned HTTP {status}"
-        )))
+        Some(DeliveryError::retry(error))
     } else if status.as_u16() == 401 {
-        Some(DeliveryError::credential_blocked(format!(
-            "ListenBrainz returned HTTP {status}"
-        )))
+        Some(DeliveryError::credential_blocked(error))
     } else if !status.is_success() {
-        Some(DeliveryError::stop(format!(
-            "ListenBrainz returned HTTP {status}"
-        )))
+        Some(DeliveryError::stop(error))
     } else {
         None
     }
@@ -164,15 +183,15 @@ mod tests {
     #[test]
     fn response_status_separates_credentials_retry_and_rejection() {
         assert!(matches!(
-            delivery_error(reqwest::StatusCode::UNAUTHORIZED),
+            delivery_error("ListenBrainz", reqwest::StatusCode::UNAUTHORIZED),
             Some(DeliveryError::CredentialBlocked(_))
         ));
         assert!(matches!(
-            delivery_error(reqwest::StatusCode::TOO_MANY_REQUESTS),
+            delivery_error("ListenBrainz", reqwest::StatusCode::TOO_MANY_REQUESTS),
             Some(DeliveryError::Retry(_))
         ));
         assert!(matches!(
-            delivery_error(reqwest::StatusCode::BAD_REQUEST),
+            delivery_error("ListenBrainz", reqwest::StatusCode::BAD_REQUEST),
             Some(DeliveryError::Stop(_))
         ));
     }

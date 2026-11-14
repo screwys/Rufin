@@ -6,9 +6,11 @@
 {% endmacro %}
 {% macro media_menu(row) %}
 <div id="{{ row.menu_id }}" class="media-menu" popover="auto" role="menu" aria-label="{{ localization::tr("More actions") }}">
-  {% if row.menu.play %}<button class="menu-item" role="menuitem" name="mode" value="replace">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>{% endif %}
-  {% if row.menu.play_next %}<button class="menu-item" role="menuitem" name="mode" value="next">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>{% endif %}
-  {% if row.menu.play_later %}<button class="menu-item" role="menuitem" name="mode" value="append">{% call icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>{% endif %}
+  {% if row.menu.play %}
+  <button class="menu-item" role="menuitem" name="mode" value="replace">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
+  <button class="menu-item" role="menuitem" name="mode" value="next">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
+  <button class="menu-item" role="menuitem" name="mode" value="append">{% call icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
+  {% endif %}
   {% if row.menu.favorite %}
   <button class="menu-item" role="menuitem" formaction="/api/favorite" name="payload" value="{{ row.favorite_payload() }}">{% if row.favorite() %}{% call icon("rufin-heart-filled-symbolic") %}{% endcall %}{{ localization::tr("Remove from Favorites") }}{% else %}{% call icon("rufin-heart-outline-symbolic") %}{% endcall %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
   {% endif %}
@@ -24,9 +26,11 @@
   <div class="cover-wrap">
     {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% else %}<a href="{{ row.href }}" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% endif %}<div class="cover{% if row.mosaic() %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork() }}" loading="lazy" alt="" /></noscript></div>{% if row.href.is_empty() %}</button>{% else %}</a>{% endif %}
     <div class="cover-controls">
-      {% if row.menu.play_next %}<button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>{% endif %}
-      {% if row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>{% endif %}
-      {% if row.menu.play_later %}<button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>{% endif %}
+      {% if row.menu.play %}
+      <button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
+      {% endif %}
       {% if row.menu.favorite %}{% call favorite(row, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
       {% call menu_button(row, "cover-menu") %}{% endcall %}
     </div>
@@ -87,12 +91,10 @@
   </form>
 </section>
 {% endmacro %}
-{% macro spin(id, min, max, value, disabled) %}
-<div class="spin" role="group" aria-labelledby="{{ id }}-label">
-  <input id="{{ id }}" type="number" min="{{ min }}" max="{{ max }}" value="{{ value }}" required{% if disabled %} disabled{% endif %}>
-  <button type="button" data-step="-1" aria-label="{{ localization::tr("Decrease") }}"{% if disabled %} disabled{% endif %}>{% call icon("rufin-list-remove-symbolic") %}{% endcall %}</button>
-  <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}"{% if disabled %} disabled{% endif %}>{% call icon("rufin-list-add-symbolic") %}{% endcall %}</button>
-</div>
-{% endmacro %}
 {% macro switch(path, label, subtitle) %}<label class="pref-row"><span class="pref-label"><span>{{ label }}</span>{% if subtitle != "" %}<small>{{ subtitle }}</small>{% endif %}</span><input type="checkbox" role="switch" data-setting="{{ path }}" /></label>{% endmacro %}
 {% macro pref_page(id, label, icon_name) %}<button type="button" role="tab" class="pref-tab" data-page="{{ id }}" aria-controls="pref-{{ id }}">{% call icon(icon_name) %}{% endcall %}<span>{{ label }}</span></button>{% endmacro %}
+{% macro sidebar_mode(path, label, left) %}<div class="pref-row"><span class="pref-label"><span>{{ label }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ label }}">{% if left %}{% for (value, title) in [("Full", "Full"), ("Compact", "Compact"), ("Hidden", "Hidden")] %}<label><input type="radio" name="{{ path }}" value='"{{ value }}"' data-setting="{{ path }}" />{{ localization::tr(title) }}</label>{% endfor %}{% else %}{% for (value, title) in [("Visible", "Visible"), ("Hidden", "Hidden")] %}<label><input type="radio" name="{{ path }}" value='"{{ value }}"' data-setting="{{ path }}" />{{ localization::tr(title) }}</label>{% endfor %}{% endif %}</div></div>{% endmacro %}
+{% macro integration_row(id, name) %}<button type="button" class="integration-row" data-integration="{{ id }}"><span class="pref-label"><span>{{ name }}</span><small data-integration-status></small></span><span class="integration-active" title="{{ localization::tr("Active") }}" hidden></span>{% call icon("rufin-go-next-symbolic") %}{% endcall %}</button>{% endmacro %}
+{% macro integration_hero(name, status, action) %}<div class="integration-hero"><span class="pref-label"><strong data-hero-name>{{ name }}</strong><small data-hero-status>{{ status }}</small></span>{% if action != "" %}<button type="button" class="primary" data-hero-action>{{ action }}</button>{% endif %}</div>{% endmacro %}
+{% macro scrobbling_switches() %}<label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Scrobble plays") }}</span></span><input type="checkbox" role="switch" data-scrobbling-switch="enabled" /></label><label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Now playing updates") }}</span></span><input type="checkbox" role="switch" data-scrobbling-switch="now_playing" /></label>{% endmacro %}
+{% macro link_row(href, title, subtitle) %}<a class="pref-row pref-link" href="{{ href }}" target="_blank" rel="noopener noreferrer"><span class="pref-label"><span>{{ title }}</span>{% if subtitle != "" %}<small>{{ subtitle }}</small>{% endif %}</span>{% call icon("rufin-external-link-symbolic") %}{% endcall %}</a>{% endmacro %}

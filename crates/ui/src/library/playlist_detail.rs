@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
 use library::{PlaylistKey, PlaylistRow, SmartPlaylistRow};
 use localization::{msgid, track_count_text};
+use rufin_core::artwork::ArtworkBinding;
 
 use crate::library::CatalogUi;
 use crate::library::routes::PageReads;

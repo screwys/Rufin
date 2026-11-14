@@ -69,8 +69,7 @@ internal enum class BrowseSwipeAction(val icon: String) {
     /** Whether the row offers it, as core's swipe Menu says. */
     fun availableFor(offered: Menu): Boolean = when (this) {
         Favorite -> offered.favorite
-        PlayLater -> offered.playLater
-        PlayNext -> offered.playNext
+        PlayLater, PlayNext -> offered.play
         Download -> offered.download
         AddToPlaylist -> offered.addToPlaylist
         PlayRadio, PlayRadioNext, PlayRadioLater -> offered.radio != null

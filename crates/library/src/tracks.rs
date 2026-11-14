@@ -130,6 +130,7 @@ impl From<TrackView> for crate::TrackRow {
             release_date: track.metadata.release_date,
             source_path: track.access.source_path,
             audio: track.metadata.audio_properties,
+            groupings: track.metadata.groupings,
             artwork_binding: track.artwork_binding,
         }
     }

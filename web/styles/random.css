@@ -1,115 +1,111 @@
 #random-dialog,
 #genre-menu {
   position: fixed;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
+  background: var(--popover, var(--sidebar));
   color: var(--text);
   box-shadow: 0 8px 30px #0005;
   max-height: calc(100dvh - 16px);
   overflow: auto;
 }
 
+/* The Mix popover, as GTK's: the unit, the kinds, a boxed list of filters and the actions. */
 #random-dialog {
-  inset: 0;
-  margin: auto;
-  width: min(460px, calc(100vw - 16px));
-  height: fit-content;
-  padding: 16px;
-  background: var(--bg);
+  inset: auto;
+  width: min(400px, calc(100vw - 16px));
+  padding: 14px;
 }
-#random-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  border-radius: 50%;
-  background: var(--hover);
+#random-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 #random-title {
-  text-align: center;
-  margin: 4px 0 24px;
-  font-size: 14px;
+  margin: 2px 4px 0;
 }
-.random-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 48px;
-}
-.random-row label {
+#random-form :is(.segmented, .pref-group) {
   margin: 0;
-  color: inherit;
 }
-.random-row select,
-#random-genre {
-  max-width: 65%;
-  margin: 0;
-  border: 0;
-  border-radius: 10px;
-  background: var(--hover);
-  font-size: 13px;
-  font-weight: 600;
+#random-played {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.year-value {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.year-value > input {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--accent);
+/* A long translation wraps inside its chip. */
+#random-played button {
+  height: auto;
+  min-height: 34px;
+  padding: 4px 8px;
+  white-space: normal;
 }
 
-.spin {
-  display: inline-flex;
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--hover);
-}
-.spin:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.spin input {
-  width: 56px;
-  padding: 8px;
-  border: 0;
-  border-radius: 0;
+#random-genre {
+  max-width: 65%;
+  padding: 6px 8px;
   background: transparent;
-  appearance: textfield;
-  outline: none;
 }
-.spin input::-webkit-inner-spin-button,
-.spin input::-webkit-outer-spin-button {
-  appearance: none;
-  margin: 0;
+#random-genre:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+#random-genre span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#random-genre::after {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask: url("/icons/rufin-go-next-symbolic.svg") center / contain no-repeat;
+  transform: rotate(90deg);
+}
+#random-min-year,
+#random-max-year {
+  width: 64px;
+  padding: 6px 4px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The count between its two round step buttons. */
+.spin {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .spin button {
-  width: 32px;
-  height: 34px;
-  padding: 8px;
-  border: 0;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
-}
-.spin button:hover {
-  background: var(--hover);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
 }
 .spin .icon {
   width: 16px;
   height: 16px;
 }
+#random-count {
+  width: 48px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+#random-count::-webkit-inner-spin-button,
+#random-count::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
 
+/* Rufin's Play Next, Play and Play Later, each as wide as its label. */
 #random-form .dialog-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 8px;
-  margin-top: 16px;
+  margin: 0;
 }
 #random-form .dialog-actions button {
   flex: none;
@@ -127,12 +123,136 @@
   width: 16px;
   height: 16px;
 }
+#random-form .spin button {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+#random-form .spin button:hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
 
 #genre-menu {
+  position: fixed;
   margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--popover, var(--sidebar));
+  color: var(--text);
+  box-shadow: 0 8px 30px #0005;
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+}
+
+/* The Mix popover, as GTK's: the unit, the kinds, a boxed list of filters and the actions. */
+#random-dialog {
+  inset: auto;
+  width: min(400px, calc(100vw - 16px));
+  padding: 14px;
+}
+#random-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+#random-title {
+  margin: 2px 4px 0;
+}
+#random-form :is(.segmented, .pref-group) {
+  margin: 0;
+}
+#random-played {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* A long translation wraps inside its chip. */
+#random-played button {
+  height: auto;
+  min-height: 34px;
+  padding: 4px 8px;
+  white-space: normal;
+}
+
+#random-genre {
+  max-width: 65%;
+  padding: 6px 8px;
+  background: transparent;
+}
+#random-genre:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+#random-genre span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#random-genre::after {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask: url("/icons/rufin-go-next-symbolic.svg") center / contain no-repeat;
+  transform: rotate(90deg);
+}
+#random-min-year,
+#random-max-year {
+  width: 64px;
+  padding: 6px 4px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The count between its two round step buttons. */
+.spin {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.spin button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+}
+.spin .icon {
+  width: 16px;
+  height: 16px;
+}
+#random-count {
+  width: 48px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+#random-count::-webkit-inner-spin-button,
+#random-count::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+/* Play takes the width the other two leave. */
+#random-form .dialog-actions {
+  justify-content: normal;
+  gap: 8px;
+  margin: 0;
+}
+#random-form .dialog-actions button {
+  font-weight: 600;
+}
+#random-form .dialog-actions .primary {
+  flex: 1;
+}
+#random-form :is(.spin, .dialog-actions) button:not(.primary) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+#random-form :is(.spin, .dialog-actions) button:not(.primary):hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+#genre-menu {
   width: min(280px, calc(100vw - 16px));
   padding: 8px;
-  background: var(--popover, var(--sidebar));
 }
 #genre-search {
   width: 100%;
@@ -156,13 +276,4 @@
 .genre-option:hover,
 #any-genre:hover {
   background: var(--hover);
-}
-#random-genre::after {
-  content: "";
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  background: currentColor;
-  mask: url("/icons/rufin-go-next-symbolic.svg") center / contain no-repeat;
-  transform: rotate(90deg);
 }

@@ -33,6 +33,7 @@ pub struct TrackMetadata {
     pub album_tags: Option<AlbumTags>,
     pub source_loudness: Option<NativeGain>,
     pub album_loudness: Option<NativeGain>,
+    pub groupings: Vec<String>,
 }
 
 /// The TrackMetadata fields stored as typed `tracks` columns. `track_details.metadata` holds
@@ -119,6 +120,19 @@ pub struct AlbumTags {
     pub sort_text: String,
     pub is_compilation: Option<bool>,
     pub release_types: Vec<String>,
+    /// Which mix, edition or remaster the album is, as its `ALBUMVERSION` tag names it.
+    pub version: Option<String>,
+    /// The title of the track's disc, as its disc subtitle tag names it.
+    pub disc_subtitle: Option<String>,
+}
+
+/// A disc's title, shown beside its number on the album page.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DiscTitle {
+    pub disc: i64,
+    pub title: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -137,6 +151,9 @@ pub struct AlbumMetadata {
     pub album_artists: Vec<ArtistCredit>,
     pub genres: Vec<TagReference>,
     pub release_types: Vec<String>,
+    /// Which mix, edition or remaster the album is; readers show it beside its year.
+    pub version: Option<String>,
+    pub disc_titles: Vec<DiscTitle>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

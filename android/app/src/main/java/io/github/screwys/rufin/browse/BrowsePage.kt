@@ -94,6 +94,8 @@ internal class BrowsePage(
         }
     }
     var supportsLetterIndex by mutableStateOf(false)
+    /** An album's disc headings by the row they stand over. */
+    var discHeadings by mutableStateOf<Map<Int, String>>(emptyMap())
         private set
     suspend fun letterPosition(letter: String): ULong? {
         val view = currentView ?: return null
@@ -270,6 +272,8 @@ internal class BrowsePage(
                 val shownFields = view?.fields().orEmpty()
                 val favoriteShown = view?.favoriteFields().orEmpty()
                 val crumbs = view?.breadcrumbs().orEmpty()
+                val discs = view?.discHeadings(detail?.discTitles.orEmpty()).orEmpty()
+                    .associate { it.start.toInt() to it.title }
                 val folders = if (route is Route.Folders) library.musicFolders() else null
                 withContext(Dispatchers.Main) {
                     Snapshot.withMutableSnapshot {
@@ -279,6 +283,7 @@ internal class BrowsePage(
                         preparedContext = if (home.isNotEmpty() || route is Route.Home) context else null
                         scrollSections = emptyList()
                         supportsLetterIndex = view?.hasLetterSections() == true
+                        discHeadings = discs
                         supportsFavoriteFilter = view?.supportsFavoriteFilter() == true
                         supportsDownloadedFilter = view?.supportsDownloadedFilter() == true
                         sortFields = sorts

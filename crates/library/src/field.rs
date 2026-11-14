@@ -21,6 +21,7 @@ pub enum LibraryField {
     PlayCount,
     UserRating,
     Genre,
+    Grouping,
     Bpm,
     Bitrate,
     SampleRate,
@@ -55,6 +56,7 @@ impl LibraryField {
             | Self::Channels
             | Self::Format
             | Self::FilePath
+            | Self::Grouping
             | Self::Source
             | Self::DiscNumber
             | Self::Tools => Self::Title,

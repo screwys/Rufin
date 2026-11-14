@@ -1,9 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
-use artwork::ArtworkBinding;
 use gtk::glib;
 use playback::{CurrentMediaId, PlaybackView, RemoteOutput};
+use rufin_core::artwork::ArtworkBinding;
 
 use localization::tr;
 use rufin_core::route::Route;

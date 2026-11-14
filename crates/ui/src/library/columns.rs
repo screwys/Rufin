@@ -4,8 +4,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use ::library::{ArtistRow, Row, TrackRow};
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
+use rufin_core::artwork::ArtworkBinding;
 
 use super::collection_context::present_track_context_menu;
 use crate::favorites::{
@@ -615,7 +615,8 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
         LibraryField::Album
         | LibraryField::Artist
         | LibraryField::AlbumArtist
-        | LibraryField::Genre => 180,
+        | LibraryField::Genre
+        | LibraryField::Grouping => 180,
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 82,
         LibraryField::ReleaseDate | LibraryField::DateAdded => 108,
         LibraryField::Year
@@ -632,7 +633,10 @@ fn track_list_column_width(field: LibraryField) -> i32 {
         LibraryField::RowIndex => 54,
         LibraryField::Title | LibraryField::TitleMerged => 320,
         LibraryField::Album => 260,
-        LibraryField::Artist | LibraryField::AlbumArtist | LibraryField::Genre => 220,
+        LibraryField::Artist
+        | LibraryField::AlbumArtist
+        | LibraryField::Genre
+        | LibraryField::Grouping => 220,
         LibraryField::Year
         | LibraryField::DiscNumber
         | LibraryField::TrackNumber

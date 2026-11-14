@@ -12,7 +12,7 @@ use crate::widgets::popup::present_light_dismiss_dialog;
 use adw::prelude::*;
 use gtk::glib;
 use localization::{result_count_text, tr};
-use lyrics::LyricsSearchResult;
+use rufin_core::lyrics::LyricsSearchResult;
 use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -29,12 +29,12 @@ fn take_dirty_lyrics_pane(dirty: &std::cell::Cell<bool>, visible: bool) -> bool 
 impl PlayerUi {
     pub fn apply_japanese_dictionary_status(
         self: &Rc<Self>,
-        status: lyrics::JapaneseDictionaryStatus,
+        status: rufin_core::lyrics::JapaneseDictionaryStatus,
     ) {
         let Some(shell) = self.shell() else {
             return;
         };
-        use lyrics::JapaneseDictionaryStatus;
+        use rufin_core::lyrics::JapaneseDictionaryStatus;
 
         let previous = self.lyrics.dictionary_toast.borrow_mut().take();
         if let Some(toast) = previous {
@@ -204,7 +204,7 @@ impl PlayerUi {
             return;
         };
         let offset_millis = lyrics.offset_millis.get();
-        let content = lyrics::lyrics_to_lrc_text(document, offset_millis);
+        let content = rufin_core::lyrics::lyrics_to_lrc_text(document, offset_millis);
         drop(projection);
         drop(lyrics);
 

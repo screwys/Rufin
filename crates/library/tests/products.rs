@@ -27,7 +27,15 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
         ] {
             let mut candidates = fixture
                 .catalog
-                .radio_candidates(fixture.source, seed.clone(), &[], 20, variation, &cancel)
+                .radio_candidates(
+                    fixture.source,
+                    seed.clone(),
+                    &[],
+                    &[],
+                    20,
+                    variation,
+                    &cancel,
+                )
                 .await
                 .unwrap();
             if matches!(seed, RadioSeed::Track(_)) {
@@ -56,7 +64,15 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
         assert_eq!(
             fixture
                 .catalog
-                .radio_candidates(fixture.source, seed, &[fixture.tracks[2]], 20, 3, &cancel,)
+                .radio_candidates(
+                    fixture.source,
+                    seed,
+                    &[],
+                    &[fixture.tracks[2]],
+                    20,
+                    3,
+                    &cancel
+                )
                 .await
                 .unwrap(),
             vec![fixture.tracks[3]]
@@ -160,11 +176,12 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
                 .unwrap()
                 .is_empty()
         );
-        let result = fixture
+        let mut result = fixture
             .catalog
-            .radio_candidates(fixture.source, seed, &[], 20, 0, &cancel)
+            .radio_candidates(fixture.source, seed, &[], &[], 20, 0, &cancel)
             .await
             .unwrap();
+        result.sort();
         assert_eq!(result, fixture.tracks[2..]);
     }
 }
@@ -199,6 +216,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
                 fixture.source,
                 RadioSeed::Track(fixture.track_uris[0].clone()),
                 &[],
+                &[],
                 1,
                 0,
                 &cancel
@@ -214,6 +232,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Album(fixture.albums[1]),
+                &[],
                 &[],
                 1,
                 2,
@@ -892,9 +911,15 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
         match block {
             HomeBlockKind::Showcase => expected.showcase = all.showcase.clone(),
             HomeBlockKind::Explore => expected.explore = all.explore.clone(),
-            HomeBlockKind::MostPlayed => expected.most_played = all.most_played.clone(),
+            HomeBlockKind::MostPlayed => {
+                expected.most_played = all.most_played.clone();
+                expected.reads_plays = true;
+            }
             HomeBlockKind::NewlyAdded => expected.newly_added = all.newly_added.clone(),
-            HomeBlockKind::RecentlyPlayed => expected.recently_played = all.recently_played.clone(),
+            HomeBlockKind::RecentlyPlayed => {
+                expected.recently_played = all.recently_played.clone();
+                expected.reads_plays = true;
+            }
             HomeBlockKind::RecentlyReleased => {
                 expected.recently_released = all.recently_released.clone()
             }
@@ -3539,31 +3564,28 @@ async fn home_search_and_radio_results_stay_bounded() {
         1
     );
 
-    let random = fixture
+    let criteria = RandomCriteria {
+        min_year: Some(2020),
+        max_year: Some(2030),
+        genre: Some(fixture.genre),
+        played: PlayedFilter::All,
+        albums: false,
+    };
+    let library::RandomPick::Tracks(random) = fixture
         .catalog
-        .random_candidates(
-            fixture.source,
-            None,
-            &RandomCriteria {
-                min_year: Some(2020),
-                max_year: Some(2030),
-                genre: Some(fixture.genre),
-                played: PlayedFilter::All,
-                variation: 7,
-            },
-            &[fixture.tracks[0]],
-            2,
-            &cancel,
-        )
+        .random_pick(fixture.source, None, &criteria, 2, 0, 7, &cancel)
         .await
-        .expect("bounded random candidates");
+        .expect("bounded random pick")
+    else {
+        panic!("tracks");
+    };
     assert_eq!(random.len(), 2);
-    assert!(!random.contains(&fixture.tracks[0]));
     let radio = fixture
         .catalog
         .radio_candidates(
             fixture.source,
             RadioSeed::Genre(fixture.genre),
+            &[],
             &[],
             3,
             9,
@@ -3584,6 +3606,7 @@ async fn home_search_and_radio_results_stay_bounded() {
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
                 &[],
+                &[],
                 2,
                 9,
                 &cancel
@@ -3599,6 +3622,7 @@ async fn home_search_and_radio_results_stay_bounded() {
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
+                &[],
                 &vec![fixture.tracks[1]; 501],
                 2,
                 9,
@@ -3613,6 +3637,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .radio_candidates(
             fixture.source,
             RadioSeed::Album(fixture.albums[0]),
+            &[],
             &[],
             2,
             0,
@@ -3640,6 +3665,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .radio_candidates(
             fixture.source,
             RadioSeed::Playlist(playlist),
+            &[],
             &[],
             2,
             0,

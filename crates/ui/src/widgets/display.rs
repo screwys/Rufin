@@ -8,7 +8,6 @@ use std::{
 #[derive(Clone)]
 pub struct DisplayEditor {
     pub group: adw::PreferencesGroup,
-    size_row: adw::ActionRow,
     size: adw::ToggleGroup,
     spacing: adw::ToggleGroup,
     spacing_row: adw::ActionRow,
@@ -18,28 +17,11 @@ pub struct DisplayEditor {
 }
 
 impl DisplayEditor {
-    pub fn prepend_rows(&self, rows: &[&adw::SwitchRow]) {
-        self.group.remove(&self.size_row);
-        self.group.remove(&self.spacing_row);
-        for row in &self.switches {
-            self.group.remove(row);
-        }
-        for row in rows {
-            self.group.add(*row);
-        }
-        self.group.add(&self.size_row);
-        self.group.add(&self.spacing_row);
-        for row in &self.switches {
-            self.group.add(row);
-        }
-    }
-
     pub fn new(value: &DisplaySettings, changed: impl Fn(&DisplaySettings) + 'static) -> Self {
         let resource = "preferences/display.ui";
         let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             display_group: adw::PreferencesGroup,
-            size_row: adw::ActionRow,
             size: adw::ToggleGroup,
             spacing: adw::ToggleGroup,
             spacing_row: adw::ActionRow,
@@ -51,7 +33,6 @@ impl DisplayEditor {
         });
         let editor = Self {
             group: display_group,
-            size_row,
             size,
             spacing,
             spacing_row,

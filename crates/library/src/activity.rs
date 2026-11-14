@@ -375,6 +375,16 @@ impl Catalog {
         Ok(blocked)
     }
 
+    /// The accounts, as service and account id, whose scrobbles are held for a new sign-in.
+    pub async fn held_listen_accounts(&self) -> LibraryResult<Vec<(String, String)>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT service,account_id FROM listen_outbox WHERE next_attempt_at IS NULL",
+        )
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
     pub async fn remove_listen_deliveries(
         &self,
         service: &str,

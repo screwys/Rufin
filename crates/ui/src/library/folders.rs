@@ -431,6 +431,7 @@ fn folder_column(
                 | LibraryField::AlbumArtist
                 | LibraryField::Album
                 | LibraryField::Genre
+                | LibraryField::Grouping
         ),
         move |row| match row {
             Row::Folder(folder) => {

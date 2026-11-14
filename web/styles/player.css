@@ -435,12 +435,6 @@
   display: none;
 }
 
-/* GTK draws Auto DJ's and Play random's icons at their 23px canvas. */
-:is(#auto-dj, #random) .icon {
-  width: 23px;
-  height: 23px;
-}
-
 /* The cover opens the fullscreen player. */
 #mini-cover {
   padding: 0;
@@ -759,7 +753,6 @@
 }
 
 #playback-settings,
-#fullscreen-settings,
 #sleep-timer {
   position: fixed;
   inset: auto;
@@ -955,13 +948,16 @@ button.lyric-line:hover {
 #app[data-sleep-label] #sleep-timer-short:not([hidden]) {
   display: inline;
 }
-#sleep-timer-presets {
+/* A grid of choices; the chosen one is filled with the accent color. */
+.chips {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+}
+#sleep-timer-presets {
+  grid-template-columns: repeat(4, 1fr);
   margin: 4px 8px 8px;
 }
-#sleep-timer-presets button {
+.chips button {
   height: 34px;
   border: 0;
   border-radius: 8px;
@@ -970,10 +966,10 @@ button.lyric-line:hover {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-#sleep-timer-presets button.wide {
+.chips button.wide {
   grid-column: span 2;
 }
-#sleep-timer-presets button[aria-pressed="true"],
+.chips button[aria-pressed="true"],
 #sleep-timer .pill.suggested {
   background: var(--blue);
   color: white;

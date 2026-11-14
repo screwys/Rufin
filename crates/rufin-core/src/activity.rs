@@ -56,7 +56,7 @@ pub async fn export_png(
     for binding in bindings {
         let request = ArtworkRequest::new(ArtworkBinding::opaque(&binding), 512)
             .cache_only()
-            .with_external(ExternalPolicy::new(true, false, ""));
+            .with_external(ExternalPolicy::new(true, false, Default::default()));
         match artwork.load(request).finish().await {
             ArtworkOutcome::Ready(image) => loaded.push((binding, image.pixels().clone())),
             ArtworkOutcome::Missing | ArtworkOutcome::Invalidated => {}

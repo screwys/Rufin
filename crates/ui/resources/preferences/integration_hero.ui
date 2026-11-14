@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <!-- The top of an integration's page: name, status and its primary action. -->
+  <object class="GtkBox" id="hero">
+    <property name="spacing">16</property>
+    <property name="margin-bottom">4</property>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
+        <property name="spacing">2</property>
+        <child>
+          <object class="GtkLabel" id="hero_name">
+            <property name="xalign">0</property>
+            <property name="wrap">true</property>
+            <style>
+              <class name="title-2" />
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="hero_status">
+            <property name="xalign">0</property>
+            <property name="wrap">true</property>
+            <style>
+              <class name="dim-label" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="hero_action">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+      </object>
+    </child>
+  </object>
+</interface>
