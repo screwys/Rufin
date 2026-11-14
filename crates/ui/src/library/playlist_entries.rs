@@ -621,7 +621,7 @@ fn install_playlist_entry_drag(
         let artwork = entry
             .artwork_binding
             .as_deref()
-            .map(artwork::ArtworkBinding::opaque)
+            .map(rufin_core::artwork::ArtworkBinding::opaque)
             .unwrap_or_default();
         let dragged = entry.entry.clone()?;
         let selection = shell

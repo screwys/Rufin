@@ -12,11 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
-import io.github.screwys.rufin.shared.rufin_core.FileIntegration
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -33,23 +30,14 @@ import kotlinx.coroutines.withContext
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (String) -> Unit,
-    embedded: Boolean = false, connectionsOnly: Boolean = false) {
+internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (String) -> Unit) {
     val state = model.sources
     var bridge by remember { mutableStateOf<SourceOwner?>(null) }
-    var connections by remember { mutableStateOf<List<FileIntegration>>(emptyList()) }
     var subtitles by remember { mutableStateOf<Map<String, String>?>(null) }
-    var editingConnection by remember { mutableStateOf<String?>(null) }
-    var addingConnection by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
         val setup = runtime.source()
         bridge = setup
-    }
-    LaunchedEffect(state, bridge) {
-        try { if (connectionsOnly) bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { model.runAction { throw error } }
     }
     // Each source's lines as GTK shows them: address and account, then cache and file mapping.
     LaunchedEffect(state, bridge) {
@@ -65,9 +53,9 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         }
     }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
-    SettingsPage(embedded = embedded) {
+    SettingsPage {
         // The rows wait for their lines, so the page draws once; without a running library they show their names.
-        if (!connectionsOnly && (subtitles != null || !model.ready)) {
+        if (subtitles != null || !model.ready) {
         SettingsGroup(translate("Sources")) {
         val sources = state?.sources.orEmpty()
         sources.forEachIndexed { index, source -> key(source.id) {
@@ -84,24 +72,6 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         }
         ActivityGroup(model)
         }
-        if (connectionsOnly) SettingsGroup(translate("File connections")) {
-            SettingsRow(translate("File connection"), leading = { RufinIcon("rufin-list-add-symbolic", null) },
-                modifier = Modifier.clickable { addingConnection = true })
-        connections.forEach { connection -> key(connection.id) {
-            SettingsRow(connection.name, summary = connection.kind,
-                leading = { SourceIcon(connection.kind, Modifier.size(24.dp)) },
-                trailing = { RufinIcon("rufin-go-next-symbolic", null) }, modifier = Modifier.clickable {
-                    editingConnection = connection.id
-                })
-        } }
-        }
-    }
-    if (addingConnection || editingConnection != null) Dialog(onDismissRequest = { model.closeSourceSetup(); addingConnection = false; editingConnection = null },
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        SourceSetupScreen(model, {
-            addingConnection = false; editingConnection = null
-            model.runAction { bridge?.let { connections = it.fileIntegrations().filter { !it.musicSource } } }
-        }, editingConnection, connectionsOnly = true)
     }
 }
 

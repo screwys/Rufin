@@ -1193,7 +1193,7 @@ impl AlbumSidePanel {
                     album,
                 ));
             self.release
-                .set_text(&album.year.map(|year| year.to_string()).unwrap_or_default());
+                .set_text(&rufin_core::settings::presentation::album_year(album));
             let facts = [
                 track_count_text(album.summary.track_count.max(0) as u64),
                 rufin_core::settings::presentation::format_duration_units(
@@ -1608,7 +1608,8 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Album
         | LibraryField::Artist
         | LibraryField::AlbumArtist
-        | LibraryField::Genre => 160,
+        | LibraryField::Genre
+        | LibraryField::Grouping => 160,
         LibraryField::ReleaseDate | LibraryField::DateAdded => 96,
         _ => crate::widgets::library_fields::column_width(field),
     }

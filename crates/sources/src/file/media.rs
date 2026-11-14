@@ -13,7 +13,7 @@ use lofty::tag::{ItemKey, Tag};
 use crate::policy::{date_year, normalized_date, stable_hash};
 
 use super::discovery;
-use super::lofty::{read_lofty_file, source_format};
+use super::lofty::{read_lofty_scan, source_format};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScannedTrack {
@@ -177,33 +177,33 @@ pub(crate) fn read_media_input(
     // searching binary interiors can mistake executable bytes for MPEG audio.
     // Optional picture data must not discard usable audio and tags.
     let mut pictures_read = true;
-    let mut tagged_file = read_lofty_file(
+    let mut read = read_lofty_scan(
         &mut *file,
         ParseOptions::new().read_cover_art(true).max_junk_bytes(2),
     )
     .or_else(|_| {
         pictures_read = false;
         file.rewind()?;
-        read_lofty_file(
+        read_lofty_scan(
             &mut *file,
             ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
         )
     })
     .ok()
     .flatten()
-    .filter(|file| file.file_type() == FileType::Mp4 || lofty_supplies_required_audio(file));
-    let discovered = if tagged_file
+    .filter(|(file, _)| file.file_type() == FileType::Mp4 || lofty_supplies_required_audio(file));
+    let discovered = if read
         .as_ref()
-        .is_none_or(|file| file.file_type() == FileType::Mp4)
+        .is_none_or(|(file, _)| file.file_type() == FileType::Mp4)
     {
         match worker.discovery.read_input(file, uri) {
             Ok(Some(metadata)) => Some(metadata),
             Ok(None) => return MediaRead::Rejected,
             Err(error) => {
                 tracing::warn!(?path, %error, "Media discovery failed");
-                if tagged_file
+                if read
                     .as_ref()
-                    .is_some_and(lofty_supplies_required_audio)
+                    .is_some_and(|(file, _)| lofty_supplies_required_audio(file))
                 {
                     None
                 } else {
@@ -214,25 +214,26 @@ pub(crate) fn read_media_input(
     } else {
         None
     };
-    if tagged_file.is_none() {
+    if read.is_none() {
         // Discovery has confirmed audio, so retain Lofty's tag recovery for
         // playable files whose frames or ID3 metadata follow leading junk.
         if file.rewind().is_err() {
             return MediaRead::Unreadable;
         }
         pictures_read = true;
-        tagged_file = read_lofty_file(&mut *file, ParseOptions::new().read_cover_art(true))
+        read = read_lofty_scan(&mut *file, ParseOptions::new().read_cover_art(true))
             .or_else(|_| {
                 pictures_read = false;
                 file.rewind()?;
-                read_lofty_file(&mut *file, ParseOptions::new().read_cover_art(false))
+                read_lofty_scan(&mut *file, ParseOptions::new().read_cover_art(false))
             })
             .ok()
             .flatten()
-            .filter(lofty_supplies_required_audio);
+            .filter(|(file, _)| lofty_supplies_required_audio(file));
     }
+    let (tagged_file, album_version) = read.unzip();
     let mut track = if let Some(tagged_file) = tagged_file.as_ref() {
-        lofty_track(&path, tagged_file, sidecar)
+        lofty_track(&path, tagged_file, album_version.flatten(), sidecar)
     } else {
         discovered_track(&path, discovered.clone().unwrap_or_default(), sidecar)
     };
@@ -265,6 +266,7 @@ pub(crate) fn read_media_input(
 fn lofty_track(
     path: &Path,
     tagged_file: &lofty::file::TaggedFile,
+    album_version: Option<String>,
     local_artwork: Option<LocalImageRef>,
 ) -> ScannedTrack {
     let tag = tagged_file
@@ -316,7 +318,12 @@ fn lofty_track(
             sort_text: sort_album.as_deref().unwrap_or(&album).to_lowercase(),
             is_compilation: album_compilation(tag, &release_types),
             release_types,
+            version: album_version,
+            disc_subtitle: tag_string(tag, |tag| {
+                tag.get_string(ItemKey::SetSubtitle).map(str::to_owned)
+            }),
         }),
+        groupings: tag.map(groupings).unwrap_or_default(),
         sort_text: sort_title.as_deref().unwrap_or(&title).to_lowercase(),
         title,
         artist,
@@ -471,7 +478,10 @@ fn discovered_track(
                 .to_lowercase(),
             is_compilation: metadata.is_compilation,
             release_types: library::normalize_release_types(metadata.release_types),
+            version: metadata.album_version,
+            disc_subtitle: metadata.disc_subtitle,
         }),
+        groupings: metadata.groupings,
         sort_text: metadata
             .sort_title
             .as_deref()
@@ -657,9 +667,10 @@ pub(crate) fn cue_track_id(cue_path: &Path, track_number: u16) -> String {
     )
 }
 
-/// An album is its MusicBrainz release, or else its title in its folder with its tagged album
-/// artists: same-titled albums in other folders stay apart, and the tracks of a compilation
-/// without an album artist stay one album. A cue sheet's album is its sheet's.
+/// An album is its MusicBrainz release, or else its title and version in its folder with its
+/// tagged album artists: same-titled albums in other folders stay apart, mixes in one folder
+/// stay apart, and the tracks of a compilation without an album artist stay one album. A cue
+/// sheet's album is its sheet's.
 pub(crate) fn album_id(
     metadata: &library::TrackMetadata,
     album_artist_tagged: bool,
@@ -673,7 +684,14 @@ pub(crate) fn album_id(
         .map(|credit| credit.object_id.as_str())
         .collect::<Vec<_>>()
         .join("\u{1f}");
-    let name = normalized_identity(&metadata.album);
+    let name = match metadata
+        .album_tags
+        .as_ref()
+        .and_then(|tags| tags.version.as_deref())
+    {
+        Some(version) => normalized_identity(&format!("{} ({version})", metadata.album)),
+        None => normalized_identity(&metadata.album),
+    };
     let release = metadata.musicbrainz_album_id.as_deref();
     let identity = if let Some(cue_path) = cue_path {
         format!(
@@ -820,6 +838,19 @@ fn tag_values(tag: &Tag, key: ItemKey) -> Vec<String> {
     tag.get_items(key)
         .filter_map(|item| item.value().text().map(ToString::to_string))
         .collect()
+}
+
+/// A track's groupings, each value once; ID3v2 separates several with NUL.
+fn groupings(tag: &Tag) -> Vec<String> {
+    let mut values = Vec::new();
+    for value in tag_values(tag, super::lofty::grouping_key(tag.tag_type())) {
+        for value in value.split('\0').map(str::trim) {
+            if !value.is_empty() && !values.iter().any(|known| known == value) {
+                values.push(value.to_owned());
+            }
+        }
+    }
+    values
 }
 
 fn album_release_types(tag: Option<&Tag>) -> Vec<String> {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,8 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.RufinIcon
@@ -63,13 +66,17 @@ internal fun SettingsPage(modifier: Modifier = Modifier, embedded: Boolean = fal
 }
 
 @Composable
-internal fun SettingsGroup(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsGroup(title: String? = null, description: String? = null, content: @Composable ColumnScope.() -> Unit) {
     // As Navic's segmented lists: a heading in the accent over the options, each its own tonal
     // segment with a small gap, the group's outer corners round.
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         title?.let {
             Text(it, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary)
+        }
+        description?.let {
+            Text(it, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 2.dp), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)),
             verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
@@ -109,9 +116,11 @@ internal fun SettingsRow(
     trailing: (@Composable () -> Unit)? = null,
     shape: Shape? = null,
     selected: Boolean = false,
+    /** An action's title takes the accent, or the error color for one that removes. */
+    titleColor: Color = Color.Unspecified,
 ) {
     ListItem(
-        headlineContent = { Text(title) },
+        headlineContent = { Text(title, color = titleColor) },
         supportingContent = summary?.let { { Text(it) } },
         leadingContent = leading,
         trailingContent = trailing,
@@ -120,6 +129,24 @@ internal fun SettingsRow(
         modifier = Modifier.clip(shape ?: RoundedCornerShape(5.dp)).then(modifier),
     )
 }
+
+/** A text setting: the row shows `summary`, and opens a dialog that edits `value`. */
+@Composable
+internal fun SettingsText(title: String, value: String, summary: String, secret: Boolean = false, enabled: Boolean = true,
+    /** Whether the dialog is open, for a page that opens it from elsewhere too. */
+    editing: MutableState<Boolean> = remember { mutableStateOf(false) }, save: (String) -> Unit) {
+    var open by editing
+    var draft by remember(value) { mutableStateOf(value) }
+    SettingsRow(title, summary = summary, modifier = Modifier.clickable(enabled = enabled) { draft = value; open = true })
+    if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(title) },
+        text = { OutlinedTextField(draft, { draft = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, colors = settingsTextFieldColors(),
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None) },
+        confirmButton = { TextButton({ save(draft); open = false }) { Text(translate("Save")) } },
+        dismissButton = { TextButton({ open = false }) { Text(translate("Cancel")) } })
+}
+
+/** What a secret's row shows: dots once one is set. */
+internal fun secretSummary(value: String, empty: String) = if (value.isBlank()) empty else "••••••••••••"
 
 @Composable
 internal fun settingsTextFieldColors() = OutlinedTextFieldDefaults.colors(
@@ -141,7 +168,7 @@ internal fun settingsButtonColors() = ButtonDefaults.outlinedButtonColors(
 /** A row of a reorderable list; `toggleable` is false where its switch cannot change, such as
  * the last visible Home block. */
 internal data class SettingsReorderItem(val id: String, val title: String, val enabled: Boolean, val reorderable: Boolean = true,
-    val toggleable: Boolean = true)
+    val toggleable: Boolean = true, val summary: String? = null)
 
 @Composable
 internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
@@ -176,7 +203,7 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
         Box(Modifier.animateBounds(lookahead, boundsTransform = { _, _ -> tween(if (reduceMotion || dragged == id) 0 else 160) })
             .onSizeChanged { heights[id] = it.height }.zIndex(if (dragged == id) 1f else 0f)
             .graphicsLayer { translationY = dragOffset }) {
-        SettingsRow(item.title,
+        SettingsRow(item.title, summary = item.summary,
             leading = {
                 Box(Modifier.size(40.dp).pointerInput(id, item.reorderable, items, gap) {
                     if (item.reorderable) detectVerticalDragGestures(

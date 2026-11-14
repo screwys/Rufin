@@ -1,8 +1,13 @@
 mod activity;
 mod player;
 mod preferences;
-pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPreferences};
-pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
+pub use app::{
+    AppearancePreferences, ApplicationPreferences, ArtistImageProvider, CoverProvider,
+    PlayerDisplayPreferences,
+};
+pub use player::{
+    ExternalLyricsProvider, PlayerPreferenceOptions, PlayerPreferences, SettingsError,
+};
 pub use preferences::{CommittedPreferences, PreferenceSubscription};
 pub mod app;
 pub mod context_menu;
@@ -858,15 +863,15 @@ pub(crate) fn load_provider_secret(
 }
 
 fn scrobbling_secrets_present(settings: &ScrobblingSettings) -> bool {
-    crate::scrobbling::secret_descriptors()
+    crate::scrobbling::secret_descriptors(settings)
         .iter()
         .any(|descriptor| !descriptor.value(settings).trim().is_empty())
 }
 
-pub(crate) fn scrobbling_secret_key(descriptor: crate::scrobbling::SecretDescriptor) -> SecretKey {
+pub(crate) fn scrobbling_secret_key(descriptor: &crate::scrobbling::SecretDescriptor) -> SecretKey {
     SecretKey::namespaced(
         descriptor.namespace(),
-        descriptor.kind(),
+        &descriptor.kind(),
         descriptor.label(),
     )
 }
@@ -876,15 +881,16 @@ pub(crate) fn read_scrobbling(
     secrets: &dyn SecretStore,
 ) -> Result<ScrobblingSettings, String> {
     let mut settings = stored.scrobbling_runtime_settings();
-    for descriptor in crate::scrobbling::secret_descriptors() {
-        if let Some(credential) = stored.scrobbling_credentials.get(descriptor.kind()) {
-            *descriptor.value_mut(&mut settings) =
-                load_provider_secret(secrets, credential)?.unwrap_or_default();
+    for descriptor in crate::scrobbling::secret_descriptors(&settings) {
+        if let Some(credential) = stored.scrobbling_credentials.get(&descriptor.kind()) {
+            let value = load_provider_secret(secrets, credential)?.unwrap_or_default();
+            descriptor.set(&mut settings, value);
         } else if stored.scrobbling_secrets_present && descriptor.value(&settings).is_empty() {
-            *descriptor.value_mut(&mut settings) = secrets
-                .load_secret(&scrobbling_secret_key(*descriptor))
+            let value = secrets
+                .load_secret(&scrobbling_secret_key(&descriptor))
                 .map_err(|error| error.to_string())?
                 .unwrap_or_default();
+            descriptor.set(&mut settings, value);
         }
     }
     settings.sanitize();
@@ -898,25 +904,31 @@ pub(crate) fn store_scrobbling(
 ) -> Result<(), String> {
     let mut input = input.clone();
     input.sanitize();
-    for descriptor in crate::scrobbling::secret_descriptors() {
+    let descriptors = crate::scrobbling::secret_descriptors(&input);
+    // The secrets of servers that are gone go with them.
+    stored.scrobbling_credentials.retain(|kind, _| {
+        descriptors
+            .iter()
+            .any(|descriptor| descriptor.kind() == *kind)
+    });
+    for descriptor in descriptors {
+        let kind = descriptor.kind();
         let value = descriptor.value(&input);
         if value.is_empty() {
-            stored.scrobbling_credentials.remove(descriptor.kind());
+            stored.scrobbling_credentials.remove(&kind);
         } else if stored
             .scrobbling_credentials
-            .get(descriptor.kind())
+            .get(&kind)
             .map(|credential| load_provider_secret(secrets, credential))
             .transpose()?
             .flatten()
             .as_deref()
             != Some(value)
         {
-            stored.scrobbling_credentials.insert(
-                descriptor.kind().to_owned(),
-                seal_credential(secrets, value)?,
-            );
+            let credential = seal_credential(secrets, value)?;
+            stored.scrobbling_credentials.insert(kind, credential);
         }
-        descriptor.value_mut(&mut input).clear();
+        descriptor.set(&mut input, String::new());
     }
     stored.ui.lastfm_api_key = input.lastfm.api_key.clone();
     input.lastfm.api_key.clear();
@@ -949,6 +961,12 @@ pub(crate) fn persist_scrobbling_settings(
         }
         scrobbling.listenbrainz.enabled = kept.listenbrainz.enabled;
         scrobbling.listenbrainz.now_playing_enabled = kept.listenbrainz.now_playing_enabled;
+        for server in &mut scrobbling.servers {
+            if let Some(kept) = kept.server(&server.id) {
+                server.enabled = kept.enabled;
+                server.now_playing_enabled = kept.now_playing_enabled;
+            }
+        }
         stored.scrobbling = scrobbling;
         stored.scrobbling_credentials = prepared.scrobbling_credentials;
         stored.scrobbling_secrets_present = false;
@@ -1498,7 +1516,7 @@ mod tests {
 
         assert_eq!(
             store.loads.load(Ordering::Relaxed),
-            crate::scrobbling::secret_descriptors().len()
+            crate::scrobbling::secret_descriptors(&Default::default()).len()
         );
         assert!(!file.load().scrobbling_secrets_present);
     }

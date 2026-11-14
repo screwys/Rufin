@@ -163,8 +163,10 @@ input[role="switch"]:checked::before {
   flex: 1;
   display: grid;
   place-items: center;
+  margin: 0;
   padding: 6px 10px;
   border-radius: 6px;
+  color: inherit;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;

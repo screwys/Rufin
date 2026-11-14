@@ -257,6 +257,7 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
         LibraryField::PlayCount => msgid("Plays"),
         LibraryField::UserRating => msgid("Rating"),
         LibraryField::Genre => msgid("Genre"),
+        LibraryField::Grouping => msgid("Grouping"),
         LibraryField::Bpm => msgid("BPM"),
         LibraryField::Bitrate => msgid("Bitrate"),
         LibraryField::SampleRate => msgid("Sample rate"),
@@ -448,6 +449,7 @@ pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
         | LibraryField::Channels => audio_property_field(&row.audio, field),
         LibraryField::Format => row.source_format.clone().unwrap_or_default(),
         LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
+        LibraryField::Grouping => row.groupings.join(", "),
         LibraryField::Source => row.source_name.clone(),
         LibraryField::DiscNumber => row.disc_number.to_string(),
         LibraryField::TrackNumber => {
@@ -490,7 +492,7 @@ pub fn album_field(album: &library::AlbumRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
         LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
-        LibraryField::Year => optional_year(album.year),
+        LibraryField::Year => album_year(album),
         LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
         LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
         LibraryField::LastPlayed => display_unix_date(album.state.last_played),
@@ -615,6 +617,29 @@ pub fn stored_rating(value: Option<i64>) -> String {
     value
         .map(|value| format!("{:.1}", value as f64 / 2.0))
         .unwrap_or_default()
+}
+
+/// A disc separator's text: the disc's number with its title beside it.
+pub fn disc_heading(disc: i64, titles: &[library::DiscTitle]) -> String {
+    let number = if disc > 0 {
+        localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+    } else {
+        localization::tr("Unknown disc")
+    };
+    match titles.iter().find(|title| title.disc == disc) {
+        Some(title) => format!("{number} · {}", title.title),
+        None => number,
+    }
+}
+
+/// An album's year with its version beside it, so mixes and editions of one album tell apart.
+pub fn album_year(album: &library::AlbumRow) -> String {
+    let year = optional_year(album.year);
+    match album.version.as_deref() {
+        Some(version) if year.is_empty() => version.to_owned(),
+        Some(version) => format!("{year} · {version}"),
+        None => year,
+    }
 }
 
 pub fn optional_year(year: Option<i64>) -> String {

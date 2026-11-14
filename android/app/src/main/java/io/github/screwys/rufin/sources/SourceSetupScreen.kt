@@ -30,10 +30,14 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null, connectionsOnly: Boolean = false,
-    welcome: SourceWelcome? = null) {
+internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sourceId: String? = null,
+    /** A remote folder of this kind, "webdav" or "smb", to add or edit: a connection, not a music source. */
+    connection: String? = null, welcome: SourceWelcome? = null) {
     val setup = remember(model, sourceId) { model.sourceSetupSession(sourceId) }
     val form = setup.form
+    LaunchedEffect(setup) {
+        if (connection != null && sourceId == null) { setup.selectProvider(connection); setup.form.integration = true }
+    }
     // The first source ends on the loading page instead of closing.
     var loading by rememberSaveable { mutableStateOf(false) }
     val autofillManager = LocalAutofillManager.current
@@ -46,7 +50,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     val close: () -> Unit = { model.closeSourceSetup(); onClose() }
     val added: () -> Unit = { if (welcome != null) loading = true else close() }
     // Back leaves a new source's form for the list, as the bar's arrow does.
-    val back: () -> Unit = { if (sourceId == null && form.kind != null) { setup.cancelAuthorization(); form.kind = null } else close() }
+    val back: () -> Unit = { if (sourceId == null && connection == null && form.kind != null) { setup.cancelAuthorization(); form.kind = null } else close() }
     BackHandler(onBack = back)
     if (loading && welcome != null) {
         SourceLoadingPage(model, welcome, close)
@@ -75,7 +79,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
             // The greeting has no bar: its own first line carries Skip.
             if (welcome == null || form.kind != null) TopAppBar(title = {
                 Text(setup.providers.firstOrNull { it.first == form.kind }?.second ?: translate(
-                    if (sourceId != null) "Edit Source" else if (connectionsOnly) "File connection" else "Add Source"))
+                    if (sourceId != null) "Edit Source" else "Add Source"))
             }, navigationIcon = {
                 IconButton(back) {
                     RufinIcon("rufin-go-previous-symbolic", translate("Back"))
@@ -113,17 +117,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
             }
             setup.failure?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
             if (!setup.ready) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { if (setup.failure == null) CircularProgressIndicator() }
-            else if (form.kind == null && connectionsOnly) LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
-                item { SettingsGroup {
-                setup.providers.filter { it.first in setOf("webdav", "smb") }.forEach { provider ->
-                    SettingsRow(provider.second, leading = { SourceIcon(provider.first, Modifier.size(24.dp)) },
-                        trailing = { RufinIcon("rufin-go-next-symbolic", null) }, modifier = Modifier.clickable {
-                            setup.selectProvider(provider.first)
-                            setup.form.integration = true
-                        })
-                }
-                } }
-            } else if (form.kind == null) SourceChoices(model, setup, welcome, Modifier.weight(1f), chooseFolder::launch, added, close)
+            else if (form.kind == null) SourceChoices(model, setup, welcome, Modifier.weight(1f), chooseFolder::launch, added, close)
             else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (form.offersHalfStarSetting) SourceRatingSettings(setup)
                 SettingsGroup {
@@ -185,7 +179,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
                 }
-                if (sourceId != null && !form.integration && !connectionsOnly) item { SourceActions(model, sourceId, form.name, close) }
+                if (sourceId != null && !form.integration && connection == null) item { SourceActions(model, sourceId, form.name, close) }
             }
         }
     }

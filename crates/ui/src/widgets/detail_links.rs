@@ -272,6 +272,7 @@ mod tests {
             year: None,
             release_date: None,
             date_added: None,
+            version: None,
             is_compilation: false,
             release_class: library::AlbumReleaseClass::Album,
             state: Default::default(),

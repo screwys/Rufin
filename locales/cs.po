@@ -62,6 +62,11 @@ msgstr ""
 "budou vypnuta"
 
 msgid ""
+"GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
+"an API key."
+msgstr ""
+
+msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
 "Rufin. If it is installed as a flatpak, this is not needed."
 msgstr ""
@@ -246,9 +251,6 @@ msgstr "Všechny skladby"
 msgid "+5 min"
 msgstr ""
 
-msgid ". You only need to fill email and an application name parts"
-msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
-
 msgid "1 day"
 msgstr ""
 
@@ -313,9 +315,6 @@ msgstr "API klíče"
 msgid "API key"
 msgstr "API klíč"
 
-msgid "API keys"
-msgstr "API klíče"
-
 msgid "About Rufin"
 msgstr "O aplikaci Rufin"
 
@@ -339,8 +338,18 @@ msgid "Accessibility"
 msgstr ""
 
 #, fuzzy
+#| msgid "Play count"
+msgid "Account"
+msgstr "Počet přehrání"
+
+#, fuzzy
 #| msgid "Server Actions"
 msgid "Actions"
+msgstr "Akce serveru"
+
+#, fuzzy
+#| msgid "Server Actions"
+msgid "Active"
 msgstr "Akce serveru"
 
 msgid "Activity"
@@ -352,9 +361,19 @@ msgid "Add Manually"
 msgstr "Přidat pravidlo"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add SMB folder"
+msgstr "Přidat složku"
+
+#, fuzzy
 #| msgid "Sources"
 msgid "Add Source"
 msgstr "Zdroje"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add WebDAV folder"
+msgstr "Přidat složku"
 
 msgid "Add a matching server prefix"
 msgstr "Přidejte odpovídající prefix serveru"
@@ -407,6 +426,9 @@ msgstr "Místní hudební složka"
 msgid "Add rule"
 msgstr "Přidat pravidlo"
 
+msgid "Add server"
+msgstr "Přidat server"
+
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
 
@@ -450,6 +472,11 @@ msgstr "Interpret alba"
 
 msgid "Album artists"
 msgstr "Interpreti alba"
+
+#, fuzzy
+#| msgid "Albums"
+msgid "Album covers"
+msgstr "Alba"
 
 #, fuzzy
 #| msgid "Album title"
@@ -500,9 +527,6 @@ msgstr "Všechny playlisty"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "Všechny skladby"
-
 msgid "All"
 msgstr ""
 
@@ -515,6 +539,9 @@ msgid "Allow permanently deleting tracks"
 msgstr ""
 
 msgid "Allow remote connections"
+msgstr ""
+
+msgid "Also album types and tag suggestions"
 msgstr ""
 
 #, fuzzy
@@ -532,9 +559,6 @@ msgstr ""
 
 msgid "Anonymous"
 msgstr ""
-
-msgid "Any genre"
-msgstr "Všechny žánry"
 
 msgid "Any"
 msgstr ""
@@ -575,6 +599,11 @@ msgstr "Alba interpretů"
 #| msgid "Artist albums"
 msgid "Artist details"
 msgstr "Alba interpretů"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Artist images"
+msgstr "Jméno interpreta"
 
 msgid "Artist name"
 msgstr "Jméno interpreta"
@@ -627,6 +656,11 @@ msgstr ""
 msgid "Ascending"
 msgstr "Sestupně"
 
+#, fuzzy
+#| msgid "Nothing in this folder"
+msgid "Asked in this order."
+msgstr "V této složce nic není"
+
 msgid "Audio effects"
 msgstr ""
 
@@ -650,13 +684,13 @@ msgstr "Zpracování zvuku není během odesílání k dispozici"
 msgid "Audio"
 msgstr "Zvuk"
 
+msgid "Audioscrobbler API"
+msgstr ""
+
 msgid "August {year}"
 msgstr ""
 
 msgid "Authentication"
-msgstr ""
-
-msgid "Authorization timed out"
 msgstr ""
 
 msgid "Auto DJ refill threshold"
@@ -792,6 +826,9 @@ msgstr "Přehrát náhodně"
 msgid "Blue"
 msgstr "Modrá"
 
+msgid "Bottom bar"
+msgstr ""
+
 msgid "Brightness (%)"
 msgstr ""
 
@@ -912,6 +949,11 @@ msgstr "Změnit"
 
 msgid "Check for updates"
 msgstr ""
+
+#, fuzzy
+#| msgid "Connecting to music server..."
+msgid "Checking the user token..."
+msgstr "Připojování k hudebnímu serveru..."
 
 #, fuzzy
 #| msgid "Locate Folder"
@@ -1249,9 +1291,6 @@ msgstr "Spojení"
 msgid "Contents"
 msgstr "Kontextové menu"
 
-msgid "Context Menus"
-msgstr "Kontextové menu"
-
 #, fuzzy
 #| msgid "Connecting to {device}..."
 msgid "Continue from {device}"
@@ -1364,7 +1403,9 @@ msgstr "Nelze aktualizovat oblíbené"
 msgid "Couldn't connect to the server"
 msgstr "Nelze se připojit k {service}"
 
-msgid "Couldn't connect to {service}"
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect"
 msgstr "Nelze se připojit k {service}"
 
 #, fuzzy
@@ -1375,6 +1416,11 @@ msgstr "Nelze načíst tuto složku"
 msgid "Couldn't load this folder"
 msgstr "Nelze načíst tuto složku"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Couldn't open the sign-in page: {error}"
+msgstr "Nelze aktualizovat oblíbené"
+
 msgid "Couldn't search for lyrics"
 msgstr "Nepodařilo se vyhledat text skladby"
 
@@ -1383,6 +1429,17 @@ msgstr ""
 
 msgid "Country"
 msgstr ""
+
+msgid "Covers and artist images your library doesn't have"
+msgstr ""
+
+msgid "Covers, artist images, tags"
+msgstr ""
+
+#, fuzzy
+#| msgid "API keys"
+msgid "Create API keys"
+msgstr "API klíče"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1479,12 +1536,6 @@ msgstr ""
 
 msgid "Decrease"
 msgstr "Snížit"
-
-msgid "Default left sidebar"
-msgstr "Výchozí levý postranní panel"
-
-msgid "Default right sidebar"
-msgstr "Výchozí pravý postranní panel"
 
 #, fuzzy
 #| msgid "Restore Default"
@@ -1635,9 +1686,6 @@ msgstr "Rozšířené informace o přehrávání"
 msgid "Discord access in Flatpak"
 msgstr ""
 
-msgid "Discord"
-msgstr "Discord"
-
 msgid "Display"
 msgstr ""
 
@@ -1731,6 +1779,11 @@ msgid "Drag to reorder"
 msgstr "Přetažením změňte pořadí"
 
 #, fuzzy
+#| msgid "Drag to reorder"
+msgid "Drag to reorder."
+msgstr "Přetažením změňte pořadí"
+
+#, fuzzy
 #| msgid "Preset"
 msgid "Duplicate preset"
 msgstr "Předvolba"
@@ -1765,6 +1818,9 @@ msgid "EPs"
 msgstr "EP"
 
 msgid "ERB"
+msgstr ""
+
+msgid "Each plays whole"
 msgstr ""
 
 #, fuzzy
@@ -1871,8 +1927,11 @@ msgstr "Nelze načíst tuto složku"
 msgid "Ends around {time}"
 msgstr ""
 
-msgid "Enter API credentials first"
-msgstr "Nejprve zadejte přihlašovací údaje k API"
+msgid "Enter a name and URL."
+msgstr ""
+
+msgid "Enter a name and the server's URL."
+msgstr ""
 
 msgid "Enter a server address and API key"
 msgstr "Zadejte adresu serveru a API klíč"
@@ -1882,6 +1941,14 @@ msgstr "Zadejte adresu serveru, uživatelské jméno a heslo"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr ""
+
+msgid "Enter your user token first"
+msgstr ""
+
+#, fuzzy
+#| msgid "Enter a server address, username, and password"
+msgid "Enter your username and password."
+msgstr "Zadejte adresu serveru, uživatelské jméno a heslo"
 
 msgid "Entire Library"
 msgstr "Celá knihovna"
@@ -1964,9 +2031,6 @@ msgstr "Externí vyhledávání textů skladeb"
 
 msgid "External metadata lookup"
 msgstr "Externí vyhledávání metadat"
-
-msgid "External site links"
-msgstr "Odkazy na externí stránky"
 
 msgid "FFT size"
 msgstr ""
@@ -2053,11 +2117,6 @@ msgid "File connection"
 msgstr "Spojení"
 
 #, fuzzy
-#| msgid "Connection"
-msgid "File connections"
-msgstr "Spojení"
-
-#, fuzzy
 #| msgid "Folder"
 msgid "File format"
 msgstr "Složka"
@@ -2092,7 +2151,9 @@ msgstr ""
 msgid "Find shares"
 msgstr ""
 
-msgid "Find your ListenBrainz user token"
+#, fuzzy
+#| msgid "Find your ListenBrainz user token"
+msgid "Find your token"
 msgstr "Najděte svůj uživatelský token ListenBrainz"
 
 #, fuzzy
@@ -2242,11 +2303,8 @@ msgstr "Žánr"
 msgid "Genres"
 msgstr "Žánry"
 
-msgid "Gestures"
+msgid "Get a personal key"
 msgstr ""
-
-msgid "Get token"
-msgstr "Získat token"
 
 msgid "Go to Album"
 msgstr "Přejít do alba"
@@ -2321,11 +2379,13 @@ msgstr "Podržte a přetáhněte pro změnu velikosti"
 msgid "Hold to reorder"
 msgstr "Přetažením změňte pořadí"
 
-msgid "Home Blocks"
-msgstr "Bloky domovské stránky"
-
 msgid "Home Profile"
 msgstr ""
+
+#, fuzzy
+#| msgid "Home Blocks"
+msgid "Home blocks"
+msgstr "Bloky domovské stránky"
 
 msgid "Home"
 msgstr "Domovská stránka"
@@ -2343,9 +2403,6 @@ msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 "Pokud se stránka nenačte, znamená to, že Libre.fm blokuje váš rozsah IP "
 "adres/VPN"
-
-msgid "If you do not have API keys, create them"
-msgstr "Pokud nemáte klíče API, vytvořte si je"
 
 #, fuzzy
 #| msgid "Choose playback output"
@@ -2436,6 +2493,11 @@ msgstr ""
 msgid "Item is no longer available"
 msgstr "Úprava metadat již není k dispozici"
 
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Item menus"
+msgstr "Kontextové menu"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2484,6 +2546,11 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr "Klávesové zkratky"
 
+#, fuzzy
+#| msgid "Find your ListenBrainz user token"
+msgid "Koito, Maloja and other ListenBrainz servers."
+msgstr "Najděte svůj uživatelský token ListenBrainz"
+
 msgid "LED spectrum"
 msgstr ""
 
@@ -2521,9 +2588,6 @@ msgstr "Naposledy hrálo"
 msgid "Last played"
 msgstr "Naposledy hrálo"
 
-msgid "Last.fm scrobbling"
-msgstr "Scrobblování na Last.fm"
-
 msgid "Last.fm"
 msgstr "Last.fm"
 
@@ -2535,6 +2599,11 @@ msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
+
+#, fuzzy
+#| msgid "Hide sidebar"
+msgid "Left sidebar"
+msgstr "Skrýt postranní panel"
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -2557,17 +2626,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Sidebar Items"
-msgid "Library Items"
+msgid "Library items"
 msgstr "Položky postranního panelu"
 
 msgid "Library"
 msgstr "Knihovna"
-
-msgid "Libre.fm scrobbling"
-msgstr "Scrobblování na Libre.fm"
-
-msgid "Libre.fm"
-msgstr "Libre.fm"
 
 msgid "Light"
 msgstr "Světlé"
@@ -2593,11 +2656,18 @@ msgstr ""
 msgid "Linked file"
 msgstr ""
 
-msgid "ListenBrainz scrobbling"
-msgstr "Scrobblování na ListenBrainz"
+msgid "Links"
+msgstr ""
 
-msgid "ListenBrainz"
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "ListenBrainz API"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "ListenBrainz scrobbling"
+msgid "ListenBrainz or Audioscrobbler API"
+msgstr "Scrobblování na ListenBrainz"
 
 #, fuzzy
 #| msgid "Searching for devices..."
@@ -2719,6 +2789,9 @@ msgstr ""
 msgid "Lookup"
 msgstr ""
 
+msgid "Lookups"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Normalizace hlasitosti"
 
@@ -2743,6 +2816,9 @@ msgid "Lyrics storage"
 msgstr "Texty skladeb načteny"
 
 msgid "Lyrics will appear here."
+msgstr ""
+
+msgid "Lyrics your library doesn't have"
 msgstr ""
 
 msgid "Lyrics"
@@ -2799,6 +2875,11 @@ msgstr "Maximální rok"
 msgid "Menu"
 msgstr "Menu"
 
+#, fuzzy
+#| msgid "Menu"
+msgid "Menus"
+msgstr "Menu"
+
 msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
 
@@ -2818,9 +2899,6 @@ msgstr "Zdroj metadat"
 #, fuzzy
 #| msgid "Metadata source"
 msgid "Metadata saved"
-msgstr "Zdroj metadat"
-
-msgid "Metadata source"
 msgstr "Zdroj metadat"
 
 msgid "Metadata was saved, but refreshing the source failed."
@@ -2855,6 +2933,19 @@ msgid "Mirrored bars"
 msgstr ""
 
 msgid "Mirrored"
+msgstr ""
+
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Přehrát náhodně (později)"
+
+#, fuzzy
+#| msgid "Play random (play next)"
+msgid "Mix (play next)"
+msgstr "Přehrát náhodně (příště)"
+
+msgid "Mix"
 msgstr ""
 
 msgid "Mode"
@@ -2904,12 +2995,6 @@ msgstr "Pozice"
 msgid "Move down"
 msgstr "Posunout dolů"
 
-msgid "Move provider down"
-msgstr "Posunout poskytovatele dolů"
-
-msgid "Move provider up"
-msgstr "Posunout poskytovatele nahoru"
-
 msgid "Move up"
 msgstr "Posunout nahoru"
 
@@ -2942,9 +3027,6 @@ msgstr "Toto zařízení"
 msgid "Music"
 msgstr "Všechna hudba"
 
-msgid "MusicBrainz + Last.fm"
-msgstr "MusicBrainz + Last.fm"
-
 #, fuzzy
 #| msgid "MusicBrainz artist ID"
 msgid "MusicBrainz album artist ID"
@@ -2952,6 +3034,11 @@ msgstr "ID interpreta v MusicBrainz"
 
 msgid "MusicBrainz artist ID"
 msgstr "ID interpreta v MusicBrainz"
+
+#, fuzzy
+#| msgid "MusicBrainz + Last.fm"
+msgid "MusicBrainz or Last.fm"
+msgstr "MusicBrainz + Last.fm"
 
 msgid "MusicBrainz recording ID"
 msgstr "ID nahrávky v MusicBrainz"
@@ -2988,11 +3075,8 @@ msgstr "Jméno"
 msgid "Narrow layout threshold"
 msgstr "Prahová hodnota pro úzké rozvržení"
 
-msgid "Narrow left sidebar"
-msgstr "Úzký levý postranní panel"
-
-msgid "Narrow right sidebar"
-msgstr "Úzký pravý postranní panel"
+msgid "Narrow window"
+msgstr ""
 
 msgid "Navidrome"
 msgstr "Navidrome"
@@ -3245,6 +3329,16 @@ msgstr "Není připojeno"
 msgid "Not needed for most servers"
 msgstr ""
 
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Zatím nic nepřehráváno"
+
+#, fuzzy
+#| msgid "Not connected"
+msgid "Not set"
+msgstr "Není připojeno"
+
 msgid "Not valid"
 msgstr ""
 
@@ -3326,12 +3420,6 @@ msgstr ""
 msgid "Only fill missing information"
 msgstr ""
 
-msgid "Only played tracks"
-msgstr "Pouze přehrané skladby"
-
-msgid "Only unplayed tracks"
-msgstr "Pouze nepřehrané skladby"
-
 msgid "Opacity (%)"
 msgstr ""
 
@@ -3411,6 +3499,12 @@ msgstr "Zahájení autorizace na Last.fm..."
 msgid "Opening Libre.fm authorization..."
 msgstr "Zahájení autorizace na Libre.fm..."
 
+msgid "Optional. New images show up sooner with your own key."
+msgstr ""
+
+msgid "Optional. Rufin has its own."
+msgstr ""
+
 #, fuzzy
 #| msgid "Server Actions"
 msgid "Options"
@@ -3456,6 +3550,12 @@ msgstr ""
 
 msgid "Overview"
 msgstr "Přehled"
+
+msgid "Page links"
+msgstr ""
+
+msgid "Pages"
+msgstr ""
 
 msgid "Parametric"
 msgstr ""
@@ -3514,11 +3614,13 @@ msgstr "Percentuální"
 msgid "Performer"
 msgstr ""
 
+#, fuzzy
+#| msgid "Use API key"
+msgid "Personal API key"
+msgstr "Použít API klíč"
+
 msgid "Pink"
 msgstr "Růžová"
-
-msgid "Pins"
-msgstr "Připnuto"
 
 msgid "Plain lyrics"
 msgstr "Jednoduché texty"
@@ -3553,9 +3655,6 @@ msgstr "Přehrát interpreta"
 msgid "Play count"
 msgstr "Počet přehrání"
 
-msgid "Play filter"
-msgstr "Filtr přehrání"
-
 msgid "Play genre"
 msgstr "Přehrát žánr"
 
@@ -3577,15 +3676,6 @@ msgstr "Pustit Rádio"
 
 msgid "Play radio"
 msgstr "Pustit Rádio"
-
-msgid "Play random (play later)"
-msgstr "Přehrát náhodně (později)"
-
-msgid "Play random (play next)"
-msgstr "Přehrát náhodně (příště)"
-
-msgid "Play random"
-msgstr "Přehrát náhodně"
 
 msgid "Play track"
 msgstr "Přehrát skladbu"
@@ -3611,6 +3701,16 @@ msgstr "Rychlost přehrávání"
 
 msgid "Playback"
 msgstr "Přehrávání"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Přehráno"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Player"
+msgstr "Přehráno"
 
 #, fuzzy
 #| msgid "Playing on {device}"
@@ -3688,9 +3788,6 @@ msgstr "Pop"
 msgid "Port"
 msgstr ""
 
-msgid "Position"
-msgstr "Pozice"
-
 msgid "Preamp"
 msgstr ""
 
@@ -3708,6 +3805,11 @@ msgstr "Nastavení"
 
 msgid "Preparing library..."
 msgstr "Příprava knihovny..."
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Presence and links"
+msgstr "Zachovat výšku tónu"
 
 #, fuzzy
 #| msgid "Preserve pitch"
@@ -3784,6 +3886,14 @@ msgstr ""
 
 msgid "Pronunciation"
 msgstr "Výslovnost"
+
+msgid "Protocol"
+msgstr ""
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Providers"
+msgstr "Složky"
 
 msgid "Proxy casting through Rufin"
 msgstr "Proxy casting přes Rufin"
@@ -3974,6 +4084,19 @@ msgstr ""
 msgid "Remixes"
 msgstr ""
 
+msgid "Remote folders on a Windows share or NAS"
+msgstr ""
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remote folders over WebDAV"
+msgstr "Odebrat složku"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remote folders"
+msgstr "Odebrat složku"
+
 msgid "Remote lyrics"
 msgstr "Vzdálené texty skladeb"
 
@@ -4046,6 +4169,11 @@ msgstr "Odebrat pravidlo"
 #, fuzzy
 #| msgid "Remove folder"
 msgid "Remove search"
+msgstr "Odebrat složku"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove server"
 msgstr "Odebrat složku"
 
 #, fuzzy
@@ -4161,6 +4289,16 @@ msgstr ""
 
 msgid "Ribbon"
 msgstr ""
+
+#, fuzzy
+#| msgid "Rich presence"
+msgid "Rich Presence on"
+msgstr "Rozšířené informace o přehrávání"
+
+#, fuzzy
+#| msgid "Narrow right sidebar"
+msgid "Right sidebar"
+msgstr "Úzký pravý postranní panel"
 
 msgid "Rise speed (%)"
 msgstr ""
@@ -4313,6 +4451,12 @@ msgstr ""
 msgid "Scheduled backup password saved"
 msgstr ""
 
+msgid "Scrobble plays"
+msgstr ""
+
+msgid "Scrobbling"
+msgstr "Scrobblování"
+
 msgid "Search Again"
 msgstr "Hledat znovu"
 
@@ -4433,6 +4577,9 @@ msgstr "Vyhledávání v přehrávání"
 msgid "Seek to {time}"
 msgstr ""
 
+msgid "Seekbar"
+msgstr "Indikátor průběhu"
+
 #, fuzzy
 #| msgid "Select Music Folder"
 msgid "Segment end"
@@ -4465,6 +4612,9 @@ msgstr "Vyberte Zdroj"
 msgid "Select all"
 msgstr "Vybrat vše"
 
+msgid "Select an entry to show or hide it."
+msgstr ""
+
 #, fuzzy
 #| msgid "Select All"
 msgid "Select {title}"
@@ -4488,6 +4638,11 @@ msgstr "Výběr"
 
 msgid "Self-host an Iroh Relay"
 msgstr ""
+
+#, fuzzy
+#| msgid "Last.fm scrobbling"
+msgid "Self-hosted scrobbling"
+msgstr "Scrobblování na Last.fm"
 
 msgid "September {year}"
 msgstr ""
@@ -4516,6 +4671,11 @@ msgid "Server Settings"
 msgstr "Nastavení serveru"
 
 #, fuzzy
+#| msgid "Server"
+msgid "Server URL"
+msgstr "Server"
+
+#, fuzzy
 #| msgid "Server path"
 msgid "Server default"
 msgstr "Cesta k serveru"
@@ -4531,6 +4691,16 @@ msgstr "Prefix serveru se neshoduje"
 
 msgid "Server"
 msgstr "Server"
+
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "Service icons on album and artist pages"
+msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
+
+#, fuzzy
+#| msgid "Servers"
+msgid "Services"
+msgstr "Servery"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
@@ -4591,9 +4761,6 @@ msgstr "Zobrazit texty skladeb"
 
 msgid "Show downloaded badge"
 msgstr "Zobrazit odznak stažení"
-
-msgid "Show external service icons on album and artist pages"
-msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
 
 msgid "Show external site links"
 msgstr "Zobrazit odkazy na externí stránky"
@@ -4657,6 +4824,9 @@ msgstr "Nejlepší"
 msgid "Shows what you are playing on your Discord profile"
 msgstr ""
 
+msgid "Shows what you play on your Discord profile"
+msgstr ""
+
 msgid "Shuffle"
 msgstr "Promíchání"
 
@@ -4665,6 +4835,11 @@ msgstr "Položky postranního panelu"
 
 msgid "Sidebar item {position}"
 msgstr "Položka postranního panelu {position}"
+
+#, fuzzy
+#| msgid "Sidebar Items"
+msgid "Sidebar items"
+msgstr "Položky postranního panelu"
 
 msgid "Sidebar route by position"
 msgstr "Rozložení postranního panelu podle pozice"
@@ -4680,6 +4855,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in again"
+msgstr ""
+
 msgid "Sign in to Plex first"
 msgstr ""
 
@@ -4691,6 +4869,11 @@ msgstr ""
 
 msgid "Sign in"
 msgstr ""
+
+#, fuzzy
+#| msgid "Hide lyrics"
+msgid "Signing in..."
+msgstr "Skrýt text skladby"
 
 #, fuzzy
 #| msgid "Play artist"
@@ -4753,6 +4936,9 @@ msgstr ""
 msgid "Some playlist entries could not be imported"
 msgstr ""
 
+msgid "Song and artist links"
+msgstr ""
+
 msgid "Song title"
 msgstr "Název skladby"
 
@@ -4800,9 +4986,6 @@ msgstr "Úprava metadat již není k dispozici"
 #| msgid "This isn't available"
 msgid "Source setup is unavailable"
 msgstr "Toto není dostupné"
-
-msgid "Source to use for cover images and song/artist links"
-msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"
 
 #, fuzzy
 #| msgid "Sources"
@@ -4867,6 +5050,11 @@ msgstr "Automatické aktualizace"
 msgid "Status display"
 msgstr "Zobrazení stavu"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Status"
+msgstr "Automatické aktualizace"
+
 msgid "Stereo for lossy formats"
 msgstr ""
 
@@ -4914,6 +5102,9 @@ msgstr ""
 msgid "Swipe left"
 msgstr ""
 
+msgid "Swipe on a row"
+msgstr ""
+
 #, fuzzy
 #| msgid "Copy"
 msgid "Swipe right"
@@ -4939,8 +5130,16 @@ msgstr ""
 msgid "Sync folder"
 msgstr "Odebrat složku"
 
+#, fuzzy
+#| msgid "Synced lyrics"
+msgid "Synced and plain lyrics"
+msgstr "Synchronizované texty"
+
 msgid "Synced lyrics"
 msgstr "Synchronizované texty"
+
+msgid "Synced lyrics, some word by word"
+msgstr ""
 
 msgid "System default"
 msgstr "Výchozí nastavení systému"
@@ -4984,10 +5183,16 @@ msgstr ""
 msgid "The anchored track is gone"
 msgstr ""
 
+msgid "The closest match wins; on a tie, the higher one."
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 
 msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr ""
+
+msgid "The sheet a long press opens. Tap an entry to show or hide it."
 msgstr ""
 
 msgid "TheAudioDB album ID"
@@ -5205,6 +5410,11 @@ msgid "Unmuted"
 msgstr "Zrušeno ztlumení"
 
 #, fuzzy
+#| msgid "Never Played"
+msgid "Unplayed"
+msgstr "Nikdy nepřehráno"
+
+#, fuzzy
 #| msgid "Saved"
 msgid "Unsaved"
 msgstr "Uloženo"
@@ -5295,16 +5505,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Používat místní soubory pro přehrávání, texty skladeb a úpravy podporovaných "
 "metadat"
-
-#, fuzzy
-#| msgid "Maximum year"
-msgid "Use maximum year"
-msgstr "Maximální rok"
-
-#, fuzzy
-#| msgid "Minimum year"
-msgid "Use minimum year"
-msgstr "Minimální rok"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5454,6 +5654,11 @@ msgstr "Rok"
 msgid "Yearly"
 msgstr "Rok"
 
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
+msgstr "Rok"
+
 msgid "Yellow"
 msgstr "Žlutá"
 
@@ -5465,6 +5670,11 @@ msgstr ""
 
 msgid "Your music belongs here"
 msgstr ""
+
+#, fuzzy
+#| msgid "API key"
+msgid "Your own API key"
+msgstr "API klíč"
 
 msgid "Your queue is empty."
 msgstr ""
@@ -5511,8 +5721,8 @@ msgstr "je to stejné"
 msgid "excludes"
 msgstr "vyloučit"
 
-msgid "here"
-msgstr "zde"
+msgid "fanart.tv key"
+msgstr ""
 
 msgid "in the last"
 msgstr ""
@@ -5596,6 +5806,15 @@ msgstr[0] "{count} složka vybrána"
 msgstr[1] "{count} složky vybrány"
 msgstr[2] "{count} složek vybráno"
 
+#, fuzzy
+#| msgid "{count} folder selected"
+#| msgid_plural "{count} folders selected"
+msgid "{count} folder"
+msgid_plural "{count} folders"
+msgstr[0] "{count} složka vybrána"
+msgstr[1] "{count} složky vybrány"
+msgstr[2] "{count} složek vybráno"
+
 msgid "{count} line could not be read."
 msgid_plural "{count} lines could not be read."
 msgstr[0] ""
@@ -5660,6 +5879,9 @@ msgstr[1] ""
 msgstr[2] ""
 
 msgid "{minutes} min"
+msgstr ""
+
+msgid "{shown} of {total} shown"
 msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"
@@ -5747,6 +5969,93 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#~ msgid "All tracks"
+#~ msgstr "Všechny skladby"
+
+#~ msgid "Any genre"
+#~ msgstr "Všechny žánry"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Pouze přehrané skladby"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Pouze nepřehrané skladby"
+
+#~ msgid "Play filter"
+#~ msgstr "Filtr přehrání"
+
+#~ msgid "Play random"
+#~ msgstr "Přehrát náhodně"
+
+#, fuzzy
+#~| msgid "Maximum year"
+#~ msgid "Use maximum year"
+#~ msgstr "Maximální rok"
+
+#, fuzzy
+#~| msgid "Minimum year"
+#~ msgid "Use minimum year"
+#~ msgstr "Minimální rok"
+
+#~ msgid ". You only need to fill email and an application name parts"
+#~ msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
+
+#~ msgid "Default left sidebar"
+#~ msgstr "Výchozí levý postranní panel"
+
+#~ msgid "Default right sidebar"
+#~ msgstr "Výchozí pravý postranní panel"
+
+#~ msgid "Discord"
+#~ msgstr "Discord"
+
+#~ msgid "Enter API credentials first"
+#~ msgstr "Nejprve zadejte přihlašovací údaje k API"
+
+#~ msgid "External site links"
+#~ msgstr "Odkazy na externí stránky"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "File connections"
+#~ msgstr "Spojení"
+
+#~ msgid "Get token"
+#~ msgstr "Získat token"
+
+#~ msgid "If you do not have API keys, create them"
+#~ msgstr "Pokud nemáte klíče API, vytvořte si je"
+
+#~ msgid "Libre.fm scrobbling"
+#~ msgstr "Scrobblování na Libre.fm"
+
+#~ msgid "Libre.fm"
+#~ msgstr "Libre.fm"
+
+#~ msgid "Metadata source"
+#~ msgstr "Zdroj metadat"
+
+#~ msgid "Move provider down"
+#~ msgstr "Posunout poskytovatele dolů"
+
+#~ msgid "Move provider up"
+#~ msgstr "Posunout poskytovatele nahoru"
+
+#~ msgid "Narrow left sidebar"
+#~ msgstr "Úzký levý postranní panel"
+
+#~ msgid "Pins"
+#~ msgstr "Připnuto"
+
+#~ msgid "Position"
+#~ msgstr "Pozice"
+
+#~ msgid "Source to use for cover images and song/artist links"
+#~ msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"
+
+#~ msgid "here"
+#~ msgstr "zde"
+
 #~ msgid "Appears On"
 #~ msgstr "Objevuje se v"
 
@@ -5803,9 +6112,6 @@ msgstr ""
 
 #~ msgid "Server lyrics are off in private mode"
 #~ msgstr "V soukromém režimu nejsou texty skladeb ze serveru k dispozici"
-
-#~ msgid "Servers"
-#~ msgstr "Servery"
 
 #, fuzzy
 #~| msgid "No folder selected"
@@ -6015,9 +6321,6 @@ msgstr ""
 #~ msgstr ""
 #~ "Pokud je to možné, zachovejte plynulé přechody mezi skladbami v albu"
 
-#~ msgid "Seekbar"
-#~ msgstr "Indikátor průběhu"
-
 #, fuzzy
 #~| msgid "Sources"
 #~ msgid "Adding source"
@@ -6110,9 +6413,6 @@ msgstr ""
 #~ msgid "Remove Local Folder"
 #~ msgstr "Odebrat místní složku"
 
-#~ msgid "Played"
-#~ msgstr "Přehráno"
-
 #~ msgid "Prefer server playlist covers"
 #~ msgstr "Upřednostnit obaly playlistů ze serveru"
 
@@ -6146,9 +6446,6 @@ msgstr ""
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Uloženo, synchronizuje se s náhledem pro nalezení shod"
-
-#~ msgid "Add server"
-#~ msgstr "Přidat server"
 
 #~ msgid "Jellyfin, Navidrome, or OpenSubsonic"
 #~ msgstr "Jellyfin, Navidrome, nebo OpenSubsonic"
@@ -6246,9 +6543,6 @@ msgstr ""
 
 #~ msgid "macOS"
 #~ msgstr "macOS"
-
-#~ msgid "Scrobbling"
-#~ msgstr "Scrobblování"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekundy"

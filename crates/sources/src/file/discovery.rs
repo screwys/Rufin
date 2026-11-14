@@ -48,6 +48,9 @@ pub(crate) struct Metadata {
     pub(crate) musicbrainz_release_track_id: Option<String>,
     pub(crate) release_types: Vec<String>,
     pub(crate) is_compilation: Option<bool>,
+    pub(crate) album_version: Option<String>,
+    pub(crate) disc_subtitle: Option<String>,
+    pub(crate) groupings: Vec<String>,
     pub(crate) duration_seconds: u32,
     pub(crate) artwork_index: Option<u32>,
     pub(crate) source_format: Option<String>,
@@ -417,6 +420,21 @@ fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) ->
         musicbrainz_release_track_id: tags.extended(&["musicbrainz_releasetrackid"]),
         release_types,
         is_compilation,
+        album_version: tags.extended(&["albumversion", "musicbrainz_albumcomment"]),
+        disc_subtitle: tags.extended(&["discsubtitle", "setsubtitle"]),
+        groupings: {
+            let mut values = Vec::<String>::new();
+            for value in tags
+                .strings::<gst::tags::Grouping>()
+                .into_iter()
+                .chain(tags.extended_values(&["grouping"]))
+            {
+                if !value.trim().is_empty() && !values.iter().any(|known| *known == value.trim()) {
+                    values.push(value.trim().to_owned());
+                }
+            }
+            values
+        },
         duration_seconds,
         artwork_index: tags.images().next().map(|_| 0),
         source_format: None,

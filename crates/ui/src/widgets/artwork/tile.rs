@@ -12,8 +12,8 @@ struct CoverReveal {
 #[derive(Clone)]
 struct BoundRequest {
     owner: Weak<super::ArtworkState>,
-    request: artwork::ArtworkRequest,
-    key: artwork::ArtworkKey,
+    request: rufin_core::artwork::ArtworkRequest,
+    key: rufin_core::artwork::ArtworkKey,
     playback: bool,
     display_size: i32,
 }
@@ -268,8 +268,8 @@ impl ArtworkTile {
     pub(super) fn bind_artwork_request(
         &self,
         owner: Weak<super::ArtworkState>,
-        key: artwork::ArtworkKey,
-        request: artwork::ArtworkRequest,
+        key: rufin_core::artwork::ArtworkKey,
+        request: rufin_core::artwork::ArtworkRequest,
         playback: bool,
         display_size: i32,
     ) {

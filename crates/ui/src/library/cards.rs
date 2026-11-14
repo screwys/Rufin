@@ -8,9 +8,9 @@ use crate::widgets::cover_controls::{
 };
 use crate::widgets::interactions::ContextMenuOpen;
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use localization::msgid;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 use std::rc::Rc;
 

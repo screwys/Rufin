@@ -17,6 +17,7 @@ impl AndroidLibrary {
             label: label.into(),
             links,
             genres: Vec::new(),
+            disc_titles: Vec::new(),
         };
         let genres = |genres: Vec<(library::GenreKey, String)>| {
             genres
@@ -112,6 +113,7 @@ impl AndroidLibrary {
                     artist_text: credited.display_text().to_string(),
                     artist_links: AndroidArtistLink::from_detail_links(&credited)?,
                     genres: genres(listed),
+                    disc_titles: album.metadata.disc_titles.clone(),
                     ..summary(
                         Row::Album(album.row.clone()),
                         album.row.artwork_binding.iter().cloned().collect(),

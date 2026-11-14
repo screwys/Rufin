@@ -482,6 +482,7 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 album_artists: artists.remove(&entity.key).unwrap_or_default(),
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 release_types,
+                ..Default::default()
             };
             let artwork = binding(row)?;
             let first_seen = number(row, "first_seen_at");

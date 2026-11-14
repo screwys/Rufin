@@ -1,7 +1,7 @@
 use adw::prelude::*;
 use gtk::glib;
 use localization::tr;
-use lyrics::{LyricsSearchContent, LyricsSearchResult};
+use rufin_core::lyrics::{LyricsSearchContent, LyricsSearchResult};
 use rufin_core::settings::presentation::format_duration;
 use std::{cell::Cell, rc::Rc};
 
@@ -41,7 +41,7 @@ impl LyricsEditor {
                 let delta = value.saturating_sub(previous);
                 if delta != 0 {
                     let (start, end) = buffer.bounds();
-                    buffer.set_text(&lyrics::shift_lrc_text_timestamps(
+                    buffer.set_text(&rufin_core::lyrics::shift_lrc_text_timestamps(
                         &buffer.text(&start, &end, false),
                         delta,
                     ));

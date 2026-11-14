@@ -18,9 +18,11 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
     env::set_current_dir(&root)?;
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["metadata"] => metadata(),
-        ["build", distribution @ ("stable" | "development")] => build(&root, distribution, None),
+        ["build", distribution @ ("stable" | "development")] => {
+            build(&root, distribution, None, false)
+        }
         ["build", distribution @ ("stable" | "development"), abi] => {
-            build(&root, distribution, Some(abi))
+            build(&root, distribution, Some(abi), false)
         }
         ["native", variant, distribution @ ("stable" | "development"), abis] => {
             native(&root, variant, distribution, abis)
@@ -81,7 +83,9 @@ fn execute(command: &mut Command) -> Result<()> {
     }
 }
 
-fn build(root: &Path, distribution: &str, abi: Option<&str>) -> Result<()> {
+/// Builds the APKs of `distribution`; with `check`, the same Gradle run also runs CI's Android
+/// check, its unit tests and lint, on that build.
+fn build(root: &Path, distribution: &str, abi: Option<&str>, check: bool) -> Result<()> {
     let android = root.join("android");
     let (variant, build_type, prefix) = if distribution == "development" {
         ("DevelopmentDebug", "debug", "Rufin.Devel")
@@ -104,6 +108,9 @@ fn build(root: &Path, distribution: &str, abi: Option<&str>) -> Result<()> {
         .arg("-p")
         .arg(&android)
         .arg(format!("assemble{variant}"));
+    if check {
+        gradle.args([format!("test{variant}UnitTest"), format!("lint{variant}")]);
+    }
     if let Some(abi) = abi {
         gradle.arg(format!("-PandroidAbis={abi}"));
     }
@@ -690,19 +697,12 @@ fn install(root: &Path) -> Result<()> {
         "adb",
         ["-s", serial, "shell", "getprop", "ro.product.cpu.abi"],
     )?;
-    let artifacts = root.join(".local/artifacts");
-    let apk = [
-        artifacts.join(format!("Rufin-android-{}.apk", abi.trim())),
-        artifacts.join(format!("Rufin.Devel-{}.apk", abi.trim())),
-    ]
-    .into_iter()
-    .filter(|path| path.is_file())
-    .map(|path| path.metadata()?.modified().map(|modified| (modified, path)))
-    .collect::<std::io::Result<Vec<_>>>()?
-    .into_iter()
-    .max_by_key(|(modified, _)| *modified)
-    .map(|(_, path)| path)
-    .ok_or("Build an APK first with just build apk or just build apk-dev.")?;
+    let abi = abi.trim();
+    // A device check runs the Devel debug build of its own ABI only, checked as CI checks it.
+    build(root, "development", Some(abi), true)?;
+    let apk = root
+        .join(".local/artifacts")
+        .join(format!("Rufin.Devel-{abi}.apk"));
     execute(
         Command::new("adb")
             .args(["-s", serial, "install", "--user", "0", "-r"])

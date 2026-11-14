@@ -6,7 +6,7 @@ fn artwork_revision<'a>(bindings: impl IntoIterator<Item = &'a [u8]>) -> String 
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     for binding in bindings {
-        artwork::ArtworkBinding::opaque(binding)
+        rufin_core::artwork::ArtworkBinding::opaque(binding)
             .stable_identity()
             .hash(&mut hash);
     }

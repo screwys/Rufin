@@ -85,8 +85,15 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
                 .ancestors()
                 .find(|parent| parent.attribute("class") == Some("AdwExpanderRow"))
                 .map(|node| property(node, "title"));
-            let group = expander
-                .clone()
+            // A page inside a page, like each integration's, names where its rows are.
+            let nested_page = node
+                .ancestors()
+                .filter(|parent| parent.attribute("class") == Some("AdwPreferencesPage"))
+                .find(|parent| parent.parent_element() != Some(document.root_element()))
+                .map(|node| property(node, "title"))
+                .filter(|title| !title.is_empty());
+            let group = nested_page
+                .or(expander)
                 .or_else(|| group.map(|node| property(node, "title")))
                 .unwrap_or_default();
             add(
@@ -95,17 +102,9 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
                 title,
                 &property(node, "subtitle"),
                 &group,
-                expander,
+                None,
             );
         }
-    }
-    for title in [
-        super::DEFAULT_LEFT_TITLE,
-        super::DEFAULT_RIGHT_TITLE,
-        super::NARROW_LEFT_TITLE,
-        super::NARROW_RIGHT_TITLE,
-    ] {
-        add(&mut items, Page::Customization, tr(title), "", "", None);
     }
     for title in [
         super::general::NORMALIZATION_SCOPE_TITLE,
@@ -118,45 +117,50 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
     ] {
         add(&mut items, Page::Playback, tr(title), "", "", None);
     }
-    for (id, titles) in [
+    // Sidebar items and Home blocks are edited in their own dialogs; their rows open them.
+    for (target, titles) in [
         (
-            "sidebar_items",
-            rufin_core::settings::SidebarRouteItem::all()
-                .iter()
-                .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title))
+            tr("Sidebar items"),
+            std::iter::once(tr("Saved"))
+                .chain(
+                    rufin_core::settings::SidebarRouteItem::all()
+                        .iter()
+                        .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title)),
+                )
                 .collect::<Vec<_>>(),
         ),
         (
-            "home_blocks",
+            tr("Home blocks"),
             rufin_core::settings::HomeBlockKind::all()
                 .iter()
                 .map(|item| tr(rufin_core::settings::presentation::home_block_title(*item)))
                 .collect(),
         ),
     ] {
-        let bytes = gtk::gio::resources_lookup_data(
-            &format!("{}preferences/appearance.ui", crate::ui_resource::UI_PREFIX),
-            gtk::gio::ResourceLookupFlags::NONE,
-        )
-        .unwrap();
-        let document = roxmltree::Document::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
-        let group = property(
-            document
-                .descendants()
-                .find(|node| node.attribute("id") == Some(id))
-                .unwrap(),
-            "title",
-        );
         for title in titles {
             add(
                 &mut items,
                 Page::Customization,
                 title,
                 "",
-                &group,
-                Some(group.clone()),
+                &target,
+                Some(target.clone()),
             );
         }
+    }
+    for title in super::customization::MENU_ENTRIES
+        .iter()
+        .map(|(_, title, _, _)| *title)
+        .chain([super::customization::RATING_ENTRY])
+    {
+        add(
+            &mut items,
+            Page::Customization,
+            tr(title),
+            "",
+            &tr("Item menus"),
+            None,
+        );
     }
     for rule in rufin_core::downloads::DownloadRule::ALL {
         add(
@@ -194,7 +198,7 @@ fn add(
     title: String,
     subtitle: &str,
     group: &str,
-    expander_title: Option<String>,
+    target: Option<String>,
 ) {
     let context = if group.is_empty() {
         page.title()
@@ -206,6 +210,6 @@ fn add(
         searchable_text: format!("{title} {subtitle} {context}").to_lowercase(),
         title,
         context,
-        expander_title,
+        target,
     });
 }

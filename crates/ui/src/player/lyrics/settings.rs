@@ -1,6 +1,5 @@
 use crate::player::PlayerUi;
 use crate::shell::shell::Shell;
-use lyrics::ExternalLyricsProvider;
 use std::rc::Rc;
 impl PlayerUi {
     pub fn set_external_lyrics_enabled(self: &Rc<Self>, value: bool) -> bool {
@@ -21,53 +20,11 @@ impl PlayerUi {
         })
     }
 
-    pub fn set_external_lyrics_provider_enabled(
-        self: &Rc<Self>,
-        provider: ExternalLyricsProvider,
-        enabled: bool,
-    ) -> bool {
-        self.update_lyrics_settings("lyrics provider setting", false, |settings| {
-            let has_provider = settings.external_lyrics_providers.contains(&provider);
-            if has_provider == enabled {
-                return false;
-            }
-            if enabled {
-                settings.external_lyrics_providers.push(provider);
-            } else {
-                settings
-                    .external_lyrics_providers
-                    .retain(|candidate| *candidate != provider);
-            }
-            true
-        })
-    }
-
-    pub fn move_external_lyrics_provider(
-        self: &Rc<Self>,
-        provider: ExternalLyricsProvider,
-        direction: isize,
-    ) -> bool {
-        self.update_lyrics_settings("lyrics provider order", false, |settings| {
-            settings.move_external_lyrics_provider(provider, direction)
-        })
-    }
-
-    pub fn reorder_external_lyrics_provider(
-        self: &Rc<Self>,
-        source: ExternalLyricsProvider,
-        target: ExternalLyricsProvider,
-        after: bool,
-    ) -> bool {
-        self.update_lyrics_settings("lyrics provider order", false, |settings| {
-            settings.reorder_external_lyrics_provider(source, target, after)
-        })
-    }
-
     pub fn update_lyrics_settings(
         self: &Rc<Self>,
         warning_action: &'static str,
         rerender_lyrics: bool,
-        update: impl FnOnce(&mut lyrics::UserPreferences) -> bool,
+        update: impl FnOnce(&mut rufin_core::lyrics::UserPreferences) -> bool,
     ) -> bool {
         let updated = self.shell().is_some_and(|shell| {
             shell
@@ -90,7 +47,7 @@ impl PlayerUi {
         self: &Rc<Self>,
         warning_action: &'static str,
         rerender_lyrics: bool,
-        edit: impl FnOnce(&mut lyrics::UserPreferences),
+        edit: impl FnOnce(&mut rufin_core::lyrics::UserPreferences),
     ) -> bool {
         self.update_lyrics_settings(warning_action, rerender_lyrics, move |settings| {
             let previous = settings.clone();
@@ -163,8 +120,6 @@ fn present_lyrics_settings_dialog(owner: &Rc<Shell>, pages: MediaSettingsPages, 
     present_light_dismiss_dialog(&dialog, window);
 }
 
-use std::cell::RefCell;
-
 use adw::prelude::*;
 use localization::{
     default_language_preference, language_option_index, language_options, msgid, tr,
@@ -193,9 +148,6 @@ fn build_lyrics_settings(
     let resource = "player/lyrics/settings.ui";
     crate::objects!(builder, resource, {
         page: adw::PreferencesPage,
-        sources: adw::PreferencesGroup,
-        external: adw::SwitchRow,
-        prefer_server: adw::SwitchRow,
         save_to_source: adw::SwitchRow,
         save_automatically: adw::ActionRow,
         automatic_toggle: gtk::Switch,
@@ -213,16 +165,6 @@ fn build_lyrics_settings(
         font: adw::ComboRow,
         size: adw::SpinRow,
         size_adjustment: gtk::Adjustment,
-    });
-
-    external.set_active(settings.external_lyrics_enabled);
-    prefer_server.set_active(settings.prefer_server_lyrics);
-    prefer_server.set_sensitive(settings.external_lyrics_enabled);
-    let prefer_server_shell = Rc::clone(shell);
-    prefer_server.connect_active_notify(move |row| {
-        prefer_server_shell.set_lyrics_setting("lyrics search setting", false, |settings| {
-            settings.prefer_server_lyrics = row.is_active()
-        });
     });
 
     save_to_source.set_active(settings.save_lyrics_to_source);
@@ -297,24 +239,6 @@ fn build_lyrics_settings(
         storage_row.set_visible(enabled && uses_local_storage());
     });
 
-    let provider_rows = Rc::new(RefCell::new(Vec::new()));
-    populate_provider_rows(shell, &sources, &provider_rows);
-    let external_shell = Rc::clone(shell);
-    let external_sources = sources.downgrade();
-    let external_provider_rows = Rc::clone(&provider_rows);
-    let external_prefer_server = prefer_server.clone();
-    let external_save_automatically = save_automatically.clone();
-    external.connect_active_notify(move |row| {
-        if !external_shell.set_external_lyrics_enabled(row.is_active()) {
-            return;
-        }
-        external_prefer_server.set_sensitive(row.is_active());
-        external_save_automatically.set_sensitive(row.is_active());
-        let Some(sources) = external_sources.upgrade() else {
-            return;
-        };
-        populate_provider_rows(&external_shell, &sources, &external_provider_rows);
-    });
     translations.set_active(settings.prefer_translations);
 
     let translation_languages = Rc::new(
@@ -442,7 +366,7 @@ fn build_lyrics_settings(
             .checked_sub(1)
             .and_then(|index| selected_families.get(index as usize))
             .cloned();
-        let edit = |settings: &mut lyrics::UserPreferences| {
+        let edit = |settings: &mut rufin_core::lyrics::UserPreferences| {
             if fullscreen {
                 settings.fullscreen_lyrics_font_family = family;
             } else {
@@ -465,7 +389,7 @@ fn build_lyrics_settings(
     size.connect_value_notify(move |row| {
         let size = row.value().round() as u16;
         let value = (size != 19).then_some(size);
-        let edit = |settings: &mut lyrics::UserPreferences| {
+        let edit = |settings: &mut rufin_core::lyrics::UserPreferences| {
             if fullscreen {
                 settings.fullscreen_lyrics_font_size = value;
             } else {
@@ -477,139 +401,6 @@ fn build_lyrics_settings(
         }
     });
     page
-}
-
-fn populate_provider_rows(
-    shell: &Rc<crate::player::PlayerUi>,
-    group: &adw::PreferencesGroup,
-    rows: &Rc<RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
-) {
-    for row in rows.borrow_mut().drain(..) {
-        if let Some(row) = row.upgrade() {
-            group.remove(&row);
-        }
-    }
-
-    let Some(window_shell) = shell.shell() else {
-        return;
-    };
-    let settings = window_shell
-        .settings
-        .current
-        .borrow()
-        .lyrics
-        .preferences
-        .clone();
-    let enabled = settings.external_lyrics_providers;
-    let mut providers = enabled.clone();
-    providers.extend(
-        ExternalLyricsProvider::all()
-            .into_iter()
-            .filter(|provider| !enabled.contains(provider)),
-    );
-    for (index, provider) in providers.into_iter().enumerate() {
-        let provider_enabled = enabled.contains(&provider);
-        let row = adw::ActionRow::builder()
-            .title(tr(provider.title()))
-            .build();
-        row.add_css_class("lyrics-provider-order");
-        row.set_sensitive(settings.external_lyrics_enabled);
-        if provider_enabled {
-            let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-            drag.add_css_class("dim-label");
-            drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-            row.add_prefix(&drag);
-
-            let source = gtk::DragSource::builder()
-                .actions(gtk::gdk::DragAction::MOVE)
-                .build();
-            let provider_id = provider.key().to_string();
-            source.connect_prepare(move |_, _, _| {
-                Some(gtk::gdk::ContentProvider::for_value(
-                    &provider_id.to_value(),
-                ))
-            });
-            drag.add_controller(source);
-
-            let drop_target =
-                gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-            let drop_shell = Rc::clone(shell);
-            let drop_group = group.downgrade();
-            let drop_rows = Rc::downgrade(rows);
-            let drop_row = row.downgrade();
-            drop_target.connect_drop(move |_, value, _, y| {
-                let Ok(source_id) = value.get::<String>() else {
-                    return false;
-                };
-                let Some(source_provider) = ExternalLyricsProvider::from_key(&source_id) else {
-                    return false;
-                };
-                let Some(row) = drop_row.upgrade() else {
-                    return false;
-                };
-                let after = y > f64::from(row.height()) / 2.0;
-                if !drop_shell.reorder_external_lyrics_provider(source_provider, provider, after) {
-                    return false;
-                }
-                let (Some(group), Some(rows)) = (drop_group.upgrade(), drop_rows.upgrade()) else {
-                    return false;
-                };
-                populate_provider_rows(&drop_shell, &group, &rows);
-                true
-            });
-            row.add_controller(drop_target);
-
-            let up = small_icon_button("rufin-go-up-symbolic", msgid("Move provider up"));
-            up.set_sensitive(index > 0);
-            let up_shell = Rc::clone(shell);
-            let up_group = group.downgrade();
-            let up_rows = Rc::clone(rows);
-            up.connect_clicked(move |_| {
-                if !up_shell.move_external_lyrics_provider(provider, -1) {
-                    return;
-                }
-                let Some(group) = up_group.upgrade() else {
-                    return;
-                };
-                populate_provider_rows(&up_shell, &group, &up_rows);
-            });
-            row.add_suffix(&up);
-            let down = small_icon_button("rufin-go-down-symbolic", msgid("Move provider down"));
-            down.set_sensitive(index + 1 < enabled.len());
-            let down_shell = Rc::clone(shell);
-            let down_group = group.downgrade();
-            let down_rows = Rc::clone(rows);
-            down.connect_clicked(move |_| {
-                if !down_shell.move_external_lyrics_provider(provider, 1) {
-                    return;
-                }
-                let Some(group) = down_group.upgrade() else {
-                    return;
-                };
-                populate_provider_rows(&down_shell, &group, &down_rows);
-            });
-            row.add_suffix(&down);
-        }
-        let toggle = gtk::Switch::builder()
-            .active(provider_enabled)
-            .valign(gtk::Align::Center)
-            .build();
-        let provider_shell = Rc::clone(shell);
-        let provider_group = group.downgrade();
-        let provider_rows = Rc::clone(rows);
-        toggle.connect_active_notify(move |switch| {
-            if !provider_shell.set_external_lyrics_provider_enabled(provider, switch.is_active()) {
-                return;
-            }
-            let Some(group) = provider_group.upgrade() else {
-                return;
-            };
-            populate_provider_rows(&provider_shell, &group, &provider_rows);
-        });
-        row.add_suffix(&toggle);
-        group.add(&row);
-        rows.borrow_mut().push(row.downgrade());
-    }
 }
 
 fn system_font_families(widget: &impl IsA<gtk::Widget>) -> Vec<String> {
@@ -633,14 +424,6 @@ fn rgba_hex(color: &gtk::gdk::RGBA) -> String {
         (color.green() * 255.0).round() as u8,
         (color.blue() * 255.0).round() as u8,
     )
-}
-
-fn small_icon_button(icon: &str, label: &str) -> gtk::Button {
-    let button = gtk::Button::from_icon_name(icon);
-    button.add_css_class("flat");
-    button.add_css_class("circular");
-    button.set_tooltip_text(Some(&tr(label)));
-    button
 }
 
 pub(crate) fn connect_lyrics_settings_controls(shell: &Rc<Shell>) {

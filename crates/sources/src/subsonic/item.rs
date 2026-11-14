@@ -30,6 +30,33 @@ fn genre_credits_from_item(source: &SubsonicSource, item: &Value) -> Vec<library
         .collect()
 }
 
+/// A song's groupings, each value once.
+pub(super) fn groupings(values: Vec<String>) -> Vec<String> {
+    let mut groupings = Vec::<String>::new();
+    for value in values {
+        let value = value.trim();
+        if !value.is_empty() && !groupings.iter().any(|known| known == value) {
+            groupings.push(value.to_owned());
+        }
+    }
+    groupings
+}
+
+/// The titled discs of `discs`: (number, title) pairs as a server lists them.
+pub(super) fn disc_titles<'a>(
+    discs: impl Iterator<Item = (Option<i64>, Option<&'a str>)>,
+) -> Vec<library::DiscTitle> {
+    discs
+        .filter_map(|(disc, title)| {
+            let (disc, title) = (disc?, title?.trim());
+            (!title.is_empty()).then(|| library::DiscTitle {
+                disc,
+                title: title.to_owned(),
+            })
+        })
+        .collect()
+}
+
 pub(super) fn moods_from_item(
     source: &SubsonicSource,
     moods: Vec<String>,
@@ -139,7 +166,16 @@ pub(super) fn album_from_json(
                 .unwrap_or_default()
         }
     };
+    let version = clean_optional(json::field(album, "version"));
+    // Navidrome appends the version to the name by default; Rufin shows it beside the year.
     let title = album_title(album);
+    let title = match version
+        .as_deref()
+        .and_then(|version| title.strip_suffix(&format!(" ({version})")))
+    {
+        Some(name) => name.to_owned(),
+        None => title,
+    };
     Ok(Some(library::AlbumObservation {
         metadata: library::AlbumMetadata {
             sort_text: clean_optional(json::field(album, "sortName"))
@@ -156,6 +192,12 @@ pub(super) fn album_from_json(
             album_artists: album_artists,
             genres: genre_credits_from_item(source, album),
             release_types: library::normalize_release_types(json::strings(&album["releaseTypes"])),
+            version,
+            disc_titles: disc_titles(
+                json::items(&album["discTitles"])
+                    .iter()
+                    .map(|disc| (disc["disc"].as_i64(), disc["title"].as_str())),
+            ),
             ..Default::default()
         },
         user_data: library::NativeUserState {
@@ -253,6 +295,7 @@ pub(super) fn track_from_json(
             album_artists: artist_credits_from_item(source, &song["albumArtists"]),
             genres: genre_credits_from_item(source, song),
             moods: moods_from_item(source, json::strings(&song["moods"])),
+            groupings: groupings(json::strings(&song["groupings"])),
             ..Default::default()
         },
         user_data: library::NativeUserState {

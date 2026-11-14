@@ -10,7 +10,8 @@ use std::thread;
 
 use crate::runtime::{
     LastFmPreferences, LibreFmPreferences, ListenBrainzPreferences, ScrobblingConnection,
-    ScrobblingConnectionEvent, ScrobblingPreferences,
+    ScrobblingConnectionEvent, ScrobblingPreferences, ScrobblingServerPreferences,
+    ScrobblingServerRequest,
 };
 use async_channel::{Receiver, bounded};
 use library::{Change, Scope};
@@ -21,10 +22,10 @@ mod settings;
 pub use retry::Scrobbler;
 use secrets::{SecretStore, SwitchableSecretStore};
 pub use services::audioscrobbler::{AudioscrobblerAuthorization, AudioscrobblerSession};
-pub use services::listenbrainz::connect as connect_listenbrainz;
+use services::{audioscrobbler, listenbrainz};
 pub use settings::{
-    AudioscrobblerSettings, LASTFM_API_SECRET, LASTFM_SESSION, LIBREFM_SESSION, LISTENBRAINZ_TOKEN,
-    ListenBrainzSettings, SecretDescriptor, Settings, secret_descriptors,
+    AudioscrobblerSettings, ListenBrainzSettings, ScrobblingProtocol, SecretDescriptor,
+    ServerSettings, Settings, lastfm_application, secret_descriptors,
 };
 use tracing::warn;
 
@@ -156,7 +157,29 @@ impl ScrobblingOwner {
         if let Err(error) = self.scrobbler.install(settings, self.settings.load()) {
             warn!(%error, "could not update external scrobbling settings");
         }
-        Ok(preferences(&self.scrobbler.settings()))
+        Ok(preferences(&self.scrobbler.settings(), &self.scrobbler))
+    }
+
+    /// Edits the accounts with their secrets and saves them, on a blocking thread.
+    async fn edit_accounts(
+        &self,
+        edit: impl FnOnce(&mut Settings) -> Result<(), String> + Send + 'static,
+    ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
+        let owner = self.clone();
+        let scope = self.settings.load().secret_scope_id.clone();
+        self.runtime
+            .spawn_blocking(move || {
+                let _work = owner
+                    .credential_work
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                let mut settings = owner.loaded_settings();
+                edit(&mut settings)?;
+                owner.commit(settings, &scope)
+            })
+            .await
+            .map_err(|error| crate::settings::SettingsError::from(error.to_string()))?
+            .map_err(Into::into)
     }
 
     fn connect_account(
@@ -276,6 +299,43 @@ impl ScrobblingOwner {
 }
 
 impl ScrobblingOwner {
+    /// `server` signed in: with the user token it accepts for ListenBrainz, or with the session
+    /// key a username and password give for Audioscrobbler. The password is not kept.
+    async fn signed_in(
+        &self,
+        mut server: ServerSettings,
+        username: String,
+        secret: String,
+    ) -> Result<ServerSettings, crate::settings::SettingsError> {
+        let (name, url) = (server.name.clone(), server.url.clone());
+        let protocol = server.protocol;
+        let (username, secret) = self
+            .runtime
+            .spawn_blocking(move || match protocol {
+                ScrobblingProtocol::ListenBrainz => {
+                    let secret = secret.trim().to_owned();
+                    if secret.is_empty() {
+                        return Err(localization::tr("Enter your user token first"));
+                    }
+                    let service = listenbrainz::Service::server(&name, &url);
+                    listenbrainz::connect(&service, &secret).map(|username| (username, secret))
+                }
+                ScrobblingProtocol::Audioscrobbler => {
+                    if username.trim().is_empty() || secret.is_empty() {
+                        return Err(localization::tr("Enter your username and password."));
+                    }
+                    let service = audioscrobbler::Service::server(&name, &url);
+                    audioscrobbler::mobile_session(&service, &username, &secret)
+                        .map(|session| (session.username, session.session_key))
+                }
+            })
+            .await
+            .map_err(|error| crate::settings::SettingsError::from(error.to_string()))??;
+        server.username = username;
+        server.secret = secret;
+        Ok(server)
+    }
+
     fn loaded_settings(&self) -> Settings {
         if self.secrets.is_persistent() {
             load_scrobbling_settings(&self.settings, &self.secrets)
@@ -319,37 +379,69 @@ fn switches(settings: &mut Settings, preferences: &ScrobblingPreferences) {
     settings.librefm.now_playing_enabled = preferences.librefm.now_playing_enabled;
     settings.listenbrainz.enabled = preferences.listenbrainz.enabled;
     settings.listenbrainz.now_playing_enabled = preferences.listenbrainz.now_playing_enabled;
+    for server in &mut settings.servers {
+        if let Some(switches) = preferences.servers.iter().find(|s| s.id == server.id) {
+            server.enabled = switches.enabled;
+            server.now_playing_enabled = switches.now_playing_enabled;
+        }
+    }
 }
 
-fn preferences(settings: &Settings) -> ScrobblingPreferences {
+/// What the clients show of `settings`. An account whose credentials stopped working shows
+/// signed out.
+fn preferences(settings: &Settings, scrobbler: &Scrobbler) -> ScrobblingPreferences {
+    let signed_out = scrobbler.signed_out(settings);
     ScrobblingPreferences {
         lastfm: LastFmPreferences {
             enabled: settings.lastfm.enabled,
             api_key: settings.lastfm.api_key.clone(),
             api_secret: settings.lastfm.api_secret.clone(),
             username: settings.lastfm.username.clone(),
-            connected: !settings.lastfm.session_key.is_empty(),
+            connected: !settings.lastfm.session_key.is_empty()
+                && !signed_out.iter().any(|account| account == settings::LASTFM),
             now_playing_enabled: settings.lastfm.now_playing_enabled,
         },
         librefm: LibreFmPreferences {
             enabled: settings.librefm.enabled,
             username: settings.librefm.username.clone(),
-            connected: !settings.librefm.session_key.is_empty(),
+            connected: !settings.librefm.session_key.is_empty()
+                && !signed_out
+                    .iter()
+                    .any(|account| account == settings::LIBREFM),
             now_playing_enabled: settings.librefm.now_playing_enabled,
         },
         listenbrainz: ListenBrainzPreferences {
             enabled: settings.listenbrainz.enabled,
             username: settings.listenbrainz.username.clone(),
             user_token: settings.listenbrainz.user_token.clone(),
+            connected: !settings.listenbrainz.user_token.is_empty()
+                && !signed_out
+                    .iter()
+                    .any(|account| account == settings::LISTENBRAINZ),
             now_playing_enabled: settings.listenbrainz.now_playing_enabled,
         },
+        servers: settings
+            .servers
+            .iter()
+            .map(|server| ScrobblingServerPreferences {
+                id: server.id.clone(),
+                name: server.name.clone(),
+                protocol: server.protocol,
+                url: server.url.clone(),
+                enabled: server.enabled,
+                now_playing_enabled: server.now_playing_enabled,
+                username: server.username.clone(),
+                connected: !server.secret.is_empty()
+                    && !signed_out.contains(&settings::server_account(&server.id)),
+            })
+            .collect(),
     }
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl ScrobblingOwner {
     pub fn preferences(&self) -> ScrobblingPreferences {
-        preferences(&self.scrobbler.settings())
+        preferences(&self.scrobbler.settings(), &self.scrobbler)
     }
 
     pub fn save(
@@ -370,36 +462,108 @@ impl ScrobblingOwner {
             && ((preferences.lastfm.enabled && applied.lastfm.session_key.is_empty())
                 || (preferences.librefm.enabled && applied.librefm.session_key.is_empty())
                 || (preferences.listenbrainz.enabled
-                    && applied.listenbrainz.user_token.is_empty()));
+                    && applied.listenbrainz.user_token.is_empty())
+                || applied
+                    .servers
+                    .iter()
+                    .any(|server| server.enabled && server.secret.is_empty()));
         if needs_credentials {
             self.reload_credentials();
         }
-        Ok(self::preferences(&applied))
+        Ok(self::preferences(&applied, &self.scrobbler))
     }
 
+    /// Signs in to ListenBrainz with a user token it accepts.
     pub async fn connect_listenbrainz(
         &self,
         user_token: String,
     ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
-        let owner = self.clone();
-        let scope = self.settings.load().secret_scope_id.clone();
-        self.runtime
+        let user_token = user_token.trim().to_owned();
+        let token = user_token.clone();
+        let username = self
+            .runtime
             .spawn_blocking(move || {
-                let result = connect_listenbrainz(&user_token).and_then(|username| {
-                    let _work = owner
-                        .credential_work
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner());
-                    let mut settings = owner.loaded_settings();
-                    settings.listenbrainz.user_token = user_token;
-                    settings.listenbrainz.username = username;
-                    owner.commit(settings, &scope)
-                });
-                result
+                listenbrainz::connect(&listenbrainz::Service::listenbrainz(), &token)
             })
             .await
-            .map_err(|error| crate::settings::SettingsError::from(error.to_string()))?
-            .map_err(Into::into)
+            .map_err(|error| crate::settings::SettingsError::from(error.to_string()))??;
+        self.edit_accounts(move |settings| {
+            settings.listenbrainz.user_token = user_token;
+            settings.listenbrainz.username = username;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Adds a server, switched on, once it accepts the sign-in. The new server is the last of
+    /// `servers`.
+    pub async fn add_server(
+        &self,
+        request: ScrobblingServerRequest,
+    ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
+        let server = ServerSettings {
+            id: crate::settings::random_identity("")?,
+            name: request.name.trim().to_owned(),
+            protocol: request.protocol,
+            url: request.url.trim().to_owned(),
+            enabled: true,
+            now_playing_enabled: true,
+            username: String::new(),
+            secret: String::new(),
+        };
+        if server.name.is_empty() || reqwest::Url::parse(&server.url).is_err() {
+            return Err(localization::tr("Enter a name and the server's URL.").into());
+        }
+        let server = self
+            .signed_in(server, request.username, request.secret)
+            .await?;
+        self.edit_accounts(move |settings| {
+            settings.servers.push(server);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Signs in to a server again, with the credentials `ScrobblingServerRequest` takes.
+    pub async fn sign_in_server(
+        &self,
+        id: String,
+        username: String,
+        secret: String,
+    ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
+        let removed = || {
+            crate::settings::SettingsError::from("The scrobbling server was removed.".to_string())
+        };
+        let server = self
+            .scrobbler
+            .settings()
+            .server(&id)
+            .cloned()
+            .ok_or_else(removed)?;
+        let server = self.signed_in(server, username, secret).await?;
+        self.edit_accounts(move |settings| {
+            let current = settings
+                .servers
+                .iter_mut()
+                .find(|current| current.id == server.id)
+                .ok_or("The scrobbling server was removed.")?;
+            current.username = server.username;
+            current.secret = server.secret;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Removes a server; scrobbles still waiting for it are dropped.
+    pub async fn remove_server(
+        &self,
+        id: String,
+    ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
+        self.edit_accounts(move |settings| {
+            settings.servers.retain(|server| server.id != id);
+            Ok(())
+        })
+        .await
     }
 
     pub async fn load_preferences(
@@ -433,9 +597,6 @@ pub enum ScrobblingCredentialEdit {
         api_key: Option<String>,
         api_secret: Option<String>,
     },
-    ListenBrainz {
-        user_token: String,
-    },
 }
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl ScrobblingOwner {
@@ -452,7 +613,7 @@ impl ScrobblingOwner {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner());
                 let mut settings = owner.loaded_settings();
-                let mut preferences = preferences(&settings);
+                let mut preferences = preferences(&settings, &owner.scrobbler);
                 match edit {
                     ScrobblingCredentialEdit::LastFm {
                         api_key,
@@ -464,9 +625,6 @@ impl ScrobblingOwner {
                         if let Some(value) = api_secret {
                             preferences.lastfm.api_secret = value;
                         }
-                    }
-                    ScrobblingCredentialEdit::ListenBrainz { user_token } => {
-                        preferences.listenbrainz.user_token = user_token
                     }
                 }
                 if settings.lastfm.api_key != preferences.lastfm.api_key

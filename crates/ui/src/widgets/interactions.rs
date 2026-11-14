@@ -132,10 +132,7 @@ enum ContextMenuSection {
 impl ContextMenuSection {
     fn for_item(item: ContextMenuItem) -> Self {
         match item {
-            ContextMenuItem::Play
-            | ContextMenuItem::PlayNext
-            | ContextMenuItem::PlayLater
-            | ContextMenuItem::PlayRadio => Self::Playback,
+            ContextMenuItem::Play | ContextMenuItem::PlayRadio => Self::Playback,
             ContextMenuItem::AddToPlaylist | ContextMenuItem::Favorites => Self::Collection,
             ContextMenuItem::EditMetadata
             | ContextMenuItem::Pins
@@ -177,17 +174,17 @@ impl ContextMenuSurface {
         &self.target
     }
 
-    /// The Play submenu: Play, Play Next and Play Later as `menu` offers them, each also
+    /// The Play submenu, when `menu` offers it: Play, Play Next and Play Later, each also
     /// shuffled. Its row body plays.
     pub fn append_play_actions(&self, menu: &Menu, run: impl Fn(QueuePlacement, bool) + 'static) {
-        let placements = [
-            (menu.play, QueuePlacement::Now, PLAY_ICON),
-            (menu.play_next, QueuePlacement::Next, PLAY_NEXT_ICON),
-            (menu.play_later, QueuePlacement::Last, PLAY_LATER_ICON),
-        ];
-        if !placements.iter().any(|(shown, _, _)| *shown) {
+        if !menu.play {
             return;
         }
+        let placements = [
+            (QueuePlacement::Now, PLAY_ICON),
+            (QueuePlacement::Next, PLAY_NEXT_ICON),
+            (QueuePlacement::Last, PLAY_LATER_ICON),
+        ];
         let run = Rc::new(run);
         let submenu = gio::Menu::new();
         for (shuffled, labels) in [
@@ -205,16 +202,13 @@ impl ContextMenuSurface {
             ),
         ] {
             let section = gio::Menu::new();
-            for ((shown, placement, icon), label) in placements.iter().zip(labels) {
-                if *shown {
-                    let run = Rc::clone(&run);
-                    let placement = *placement;
-                    let action = self.action(true, move || run(placement, shuffled));
-                    if placement == QueuePlacement::Now && !shuffled {
-                        self.submenu_default(&tr(msgid("Play")), &action);
-                    }
-                    section.append_item(&menu_action_item(&tr(label), &action, icon));
+            for ((placement, icon), label) in placements.into_iter().zip(labels) {
+                let run = Rc::clone(&run);
+                let action = self.action(true, move || run(placement, shuffled));
+                if placement == QueuePlacement::Now && !shuffled {
+                    self.submenu_default(&tr(msgid("Play")), &action);
                 }
+                section.append_item(&menu_action_item(&tr(label), &action, icon));
             }
             submenu.append_section(None, &section);
         }

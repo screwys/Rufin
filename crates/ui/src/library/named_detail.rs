@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
-use artwork::ArtworkBinding;
 use library::{GenreKey, MoodKey, TagRow};
 use localization::{msgid, track_count_text};
+use rufin_core::artwork::ArtworkBinding;
 
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;

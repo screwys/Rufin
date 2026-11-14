@@ -922,14 +922,10 @@ pub fn track_table(
                 .child()
                 .and_downcast::<gtk::Label>()
                 .expect("disc heading");
-            let disc = sections.section_value(header.start());
-            label.set_visible(disc.is_some());
-            if let Some(disc) = disc {
-                label.set_label(&if disc > 0 {
-                    localization::tr("Disc {number}").replace("{number}", &disc.to_string())
-                } else {
-                    localization::tr("Unknown disc")
-                });
+            let heading = sections.section_heading(header.start());
+            label.set_visible(heading.is_some());
+            if let Some(heading) = heading {
+                label.set_label(&heading);
             }
         });
         table.table.set_header_factory(Some(&factory));
@@ -965,7 +961,7 @@ fn install_track_column_drag_source<T: TrackPresentation>(
             item_at_from_item::<T>(&item).map(|track| {
                 let artwork = track
                     .artwork()
-                    .map(artwork::ArtworkBinding::opaque)
+                    .map(rufin_core::artwork::ArtworkBinding::opaque)
                     .unwrap_or_default();
                 (
                     item.position(),

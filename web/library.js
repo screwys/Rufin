@@ -508,9 +508,12 @@ async function showTrackMenu(index, row, anchor, event) {
   if (!selected(index)) selectTrack(index);
   const media = { page: opened, ranges: selection }, menu = row.menu, many = selectedMany();
   const actions = [];
-  if (menu.play) actions.push([tr("Play"), () => playSelection(index, row)]);
-  if (menu.play_next) actions.push([tr("Play Next"), () => queueMedia(media, "next")]);
-  if (menu.play_later) actions.push([tr("Play Later"), () => queueMedia(media, "append")]);
+  if (menu.play)
+    actions.push(
+      [tr("Play"), () => playSelection(index, row)],
+      [tr("Play Next"), () => queueMedia(media, "next")],
+      [tr("Play Later"), () => queueMedia(media, "append")],
+    );
   if (menu.radio) actions.push(radioMenu(menu.radio));
   actions.push(null);
   if (menu.add_to_playlist) actions.push(playlistMenu(media));
@@ -779,9 +782,12 @@ function bindCard(card) {
     const play = (mode) => queueMedia(mediaSelection(kind, row), mode);
     const menu = async (anchor, event) => {
       const actions = [], options = row.menu;
-      if (options.play) actions.push([tr("Play"), () => play("replace")]);
-      if (options.play_next) actions.push([tr("Play Next"), () => play("next")]);
-      if (options.play_later) actions.push([tr("Play Later"), () => play("append")]);
+      if (options.play)
+        actions.push(
+          [tr("Play"), () => play("replace")],
+          [tr("Play Next"), () => play("next")],
+          [tr("Play Later"), () => play("append")],
+        );
       if (options.radio) actions.push(radioMenu(options.radio));
       actions.push(null);
       if (options.add_to_playlist)

@@ -213,11 +213,13 @@ async fn random(
         source: String,
         folder: Option<String>,
         count: usize,
-        min_year: Option<i64>,
-        max_year: Option<i64>,
+        min_year: Option<u16>,
+        max_year: Option<u16>,
         genre: Option<library::GenreKey>,
         #[serde(default)]
         played: library::PlayedFilter,
+        #[serde(default)]
+        albums: bool,
         mode: String,
     }
     let input: Input = body(request).await?;
@@ -228,17 +230,54 @@ async fn random(
         "append" => rufin_core::playback::QueuePlacement::Last,
         _ => return Err(bad_request("Queue mode must be replace, append or next")),
     };
+    // The selection is saved as the dialogs of the other clients save theirs; the count of the
+    // unit it does not play stays as saved.
+    let genre = match input.genre {
+        Some(key) => Some(rufin_core::settings::RandomPlayGenreSelection {
+            source_id: selected.source_id.clone(),
+            music_folder_id: selected.music_folder_object_id.clone(),
+            genre_id: products
+                .library
+                .uri(library::Item::Genre(key))
+                .and_then(|uri| library::source_entity_parts(&uri))
+                .ok_or_else(|| bad_request("Genre is no longer available"))?
+                .2,
+        }),
+        None => None,
+    };
+    let settings = products.settings.clone();
+    tokio::task::spawn_blocking(move || {
+        let saved = settings.random_preferences();
+        settings.set_random_preferences(rufin_core::settings::RandomPlaySettings {
+            albums: input.albums,
+            limit: if input.albums {
+                saved.limit
+            } else {
+                input.count
+            },
+            album_limit: if input.albums {
+                input.count
+            } else {
+                saved.album_limit
+            },
+            min_year: input.min_year,
+            max_year: input.max_year,
+            genre,
+            played_filter: input.played,
+        })
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
     let request = rufin_core::playback::RandomPlayRequest {
         placement,
         requested: input.count.min(500),
         criteria: library::RandomCriteria {
-            min_year: input.min_year,
-            max_year: input.max_year,
+            min_year: input.min_year.map(i64::from),
+            max_year: input.max_year.map(i64::from),
             genre: input.genre,
             played: input.played,
-            variation: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos() as i64),
+            albums: input.albums,
         },
     };
     let empty =
@@ -302,7 +341,10 @@ async fn lyrics_events(State(products): State<ProductHandles>) -> Response<Body>
     event_response(Body::new(StreamBody::new(stream)))
 }
 
-pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) -> Value {
+pub(super) fn lyrics_json(
+    current: &CurrentLyrics,
+    settings: &rufin_core::lyrics::Settings,
+) -> Value {
     let mut value = match current {
         CurrentLyrics::Cleared => json!({"state":"empty"}),
         CurrentLyrics::Loading { .. } => json!({"state":"loading"}),
@@ -314,8 +356,8 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
                 ..
             }) => {
                 let readings = document.lines.iter().map(|line| {
-                    let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
-                    let reading = if settings.preferences.show_furigana { supplied.and_then(|supplied|lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
+                    let supplied = rufin_core::lyrics::pronunciation_line_for(line, pronunciation.as_deref());
+                    let reading = if settings.preferences.show_furigana { supplied.and_then(|supplied|rufin_core::lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
                     json!({"segments":reading.map(|reading|reading.segments.into_iter().map(|segment|json!({"surface":segment.surface,"furigana":segment.furigana})).collect::<Vec<_>>()),"romanization":if settings.preferences.show_romanization { supplied.map(|line|&line.text) } else { None }})
                 }).collect::<Vec<_>>();
                 json!({"state":"ready","document":document,"pronunciation":pronunciation,"readings":readings,"show_romanization":settings.preferences.show_romanization,"font_size":settings.preferences.lyrics_font_size.unwrap_or(19)})
@@ -429,7 +471,7 @@ async fn artwork(
     }
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
     let external = products.settings.load().artwork_policy();
-    let binding = artwork::ArtworkBinding::opaque(&binding);
+    let binding = rufin_core::artwork::ArtworkBinding::opaque(&binding);
     let size = parameters
         .get("size")
         .map(|value| value.parse::<u32>())
@@ -441,9 +483,9 @@ async fn artwork(
         .get("original")
         .is_some_and(|value| value == "true");
     let request = if original {
-        artwork::ArtworkRequest::original(binding, size)
+        rufin_core::artwork::ArtworkRequest::original(binding, size)
     } else {
-        artwork::ArtworkRequest::new(binding, size)
+        rufin_core::artwork::ArtworkRequest::new(binding, size)
     }
     .with_external(external);
     let (bytes, mime) = if original {
@@ -453,16 +495,17 @@ async fn artwork(
             .await
             .map_err(internal)?
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
-        let mime = artwork::image_mime(&bytes)
+        let mime = rufin_core::artwork::image_mime(&bytes)
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
         (bytes, mime)
     } else {
         let image = match products.artwork.load(request).finish().await {
-            artwork::ArtworkOutcome::Ready(image) => image,
-            artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Invalidated => {
+            rufin_core::artwork::ArtworkOutcome::Ready(image) => image,
+            rufin_core::artwork::ArtworkOutcome::Missing
+            | rufin_core::artwork::ArtworkOutcome::Invalidated => {
                 return Err(error(StatusCode::NOT_FOUND, "No cover image"));
             }
-            artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
+            rufin_core::artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
         };
         let png = tokio::task::spawn_blocking(move || {
             image.pixels().resized_to_cover(size)?.encode_png()

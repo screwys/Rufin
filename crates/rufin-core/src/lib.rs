@@ -5,6 +5,7 @@ uniffi::setup_scaffolding!();
 pub mod activity;
 mod album_release;
 pub mod app;
+pub mod artwork;
 pub mod backup;
 pub mod collection_context;
 pub mod connect;
