@@ -319,7 +319,11 @@ fn lofty_track(
             is_compilation: album_compilation(tag, &release_types),
             release_types,
             version: album_version,
+            disc_subtitle: tag_string(tag, |tag| {
+                tag.get_string(ItemKey::SetSubtitle).map(str::to_owned)
+            }),
         }),
+        groupings: tag.map(groupings).unwrap_or_default(),
         sort_text: sort_title.as_deref().unwrap_or(&title).to_lowercase(),
         title,
         artist,
@@ -475,7 +479,9 @@ fn discovered_track(
             is_compilation: metadata.is_compilation,
             release_types: library::normalize_release_types(metadata.release_types),
             version: metadata.album_version,
+            disc_subtitle: metadata.disc_subtitle,
         }),
+        groupings: metadata.groupings,
         sort_text: metadata
             .sort_title
             .as_deref()
@@ -832,6 +838,19 @@ fn tag_values(tag: &Tag, key: ItemKey) -> Vec<String> {
     tag.get_items(key)
         .filter_map(|item| item.value().text().map(ToString::to_string))
         .collect()
+}
+
+/// A track's groupings, each value once; ID3v2 separates several with NUL.
+fn groupings(tag: &Tag) -> Vec<String> {
+    let mut values = Vec::new();
+    for value in tag_values(tag, super::lofty::grouping_key(tag.tag_type())) {
+        for value in value.split('\0').map(str::trim) {
+            if !value.is_empty() && !values.iter().any(|known| known == value) {
+                values.push(value.to_owned());
+            }
+        }
+    }
+    values
 }
 
 fn album_release_types(tag: Option<&Tag>) -> Vec<String> {

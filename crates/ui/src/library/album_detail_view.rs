@@ -48,6 +48,8 @@ impl CatalogUi {
                 PRIMARY_ROUTE_MARGIN_START,
             );
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
+        rows.list_model()
+            .set_disc_titles(album.metadata.disc_titles.clone());
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             rows.clone(),
             LibraryListKey::AlbumDetailTracks,
@@ -134,6 +136,7 @@ impl CatalogUi {
             let album = Rc::clone(&current_album);
             let showcase = showcase_view.clone();
             let route_stack = route_stack.clone();
+            let list = rows.list_model().downgrade();
             Rc::new(move |header| {
                 let (Some(shell), Some(::library::Header::Album(next))) = (shell.upgrade(), header)
                 else {
@@ -141,6 +144,9 @@ impl CatalogUi {
                     return;
                 };
                 route_stack.set_visible_child_name("content");
+                if let Some(list) = list.upgrade() {
+                    list.set_disc_titles(next.metadata.disc_titles.clone());
+                }
                 showcase.show_row(library::Row::Album(next.row.clone()));
                 showcase.set_title(&next.metadata.title);
                 showcase.replace_summary(&album_summary_items(&next));

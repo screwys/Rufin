@@ -191,6 +191,8 @@ pub struct AndroidDetailSummary {
     pub links: Vec<AndroidDetailLink>,
     /// The genres an album or playlist header lists, each opening its genre page.
     pub genres: Vec<AndroidGenreLink>,
+    /// An album's disc titles, for its disc headings.
+    pub disc_titles: Vec<library::DiscTitle>,
 }
 
 #[derive(uniffi::Record)]
@@ -223,6 +225,13 @@ pub struct AndroidMusicFolderState {
 pub struct AndroidBreadcrumb {
     pub title: String,
     pub route: Route,
+}
+
+/// A disc's heading over the row at `start`.
+#[derive(uniffi::Record)]
+pub struct AndroidDiscHeading {
+    pub start: u64,
+    pub title: String,
 }
 
 #[derive(uniffi::Record)]

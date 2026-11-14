@@ -6,10 +6,11 @@ mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
     AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink, AndroidDetailSummary,
-    AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection, AndroidHomeSectionKind,
-    AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened, AndroidPinPage,
-    AndroidPlaylistImport, AndroidReading, AndroidRecentResult, AndroidRouteDescriptor,
-    AndroidRouteSetting, AndroidRowRange, AndroidRows, AndroidScrollSection, AndroidSortField,
+    AndroidDiscHeading, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
+    AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
+    AndroidPinPage, AndroidPlaylistImport, AndroidReading, AndroidRecentResult,
+    AndroidRouteDescriptor, AndroidRouteSetting, AndroidRowRange, AndroidRows,
+    AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
@@ -413,6 +414,18 @@ impl AndroidView {
 
     pub fn has_letter_sections(&self) -> bool {
         self.view.has_letter_sections()
+    }
+
+    /// The disc headings of an album's tracks, `titles` beside their numbers.
+    pub fn disc_headings(&self, titles: Vec<library::DiscTitle>) -> Vec<AndroidDiscHeading> {
+        self.view
+            .disc_sections()
+            .iter()
+            .map(|(start, disc)| AndroidDiscHeading {
+                start: u64::from(*start),
+                title: rufin_core::settings::presentation::disc_heading(*disc, &titles),
+            })
+            .collect()
     }
 
     pub async fn sections(self: Arc<Self>) -> Result<Vec<AndroidScrollSection>, AndroidError> {

@@ -212,6 +212,7 @@
   <object class="GtkLabel" id="field_Copyright"><property name="label" translatable="yes">Copyright</property></object>
   <object class="GtkLabel" id="field_Country"><property name="label" translatable="yes">Country</property></object>
   <object class="GtkLabel" id="field_Date"><property name="label" translatable="yes">Date</property></object>
+  <object class="GtkLabel" id="field_Disc_subtitle"><property name="label" translatable="yes">Disc subtitle</property></object>
   <object class="GtkLabel" id="field_Grouping"><property name="label" translatable="yes">Grouping</property></object>
   <object class="GtkLabel" id="field_Labels"><property name="label" translatable="yes">Labels</property></object>
   <object class="GtkLabel" id="field_Mood"><property name="label" translatable="yes">Mood</property></object>

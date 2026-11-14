@@ -237,7 +237,8 @@ pub fn column_width(field: LibraryField) -> i32 {
         LibraryField::Album
         | LibraryField::Artist
         | LibraryField::AlbumArtist
-        | LibraryField::Genre => 220,
+        | LibraryField::Genre
+        | LibraryField::Grouping => 220,
         LibraryField::ReleaseDate | LibraryField::DateAdded => 118,
         LibraryField::LastPlayed => 148,
         LibraryField::PlayCount => play_count_column_width(),
