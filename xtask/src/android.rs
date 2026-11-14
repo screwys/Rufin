@@ -83,9 +83,9 @@ fn execute(command: &mut Command) -> Result<()> {
     }
 }
 
-/// Builds the APKs of `distribution`; with `lint`, the same Gradle run lints the variant CI
-/// lints, on that build.
-fn build(root: &Path, distribution: &str, abi: Option<&str>, lint: bool) -> Result<()> {
+/// Builds the APKs of `distribution`; with `check`, the same Gradle run also runs CI's Android
+/// check, its unit tests and lint, on that build.
+fn build(root: &Path, distribution: &str, abi: Option<&str>, check: bool) -> Result<()> {
     let android = root.join("android");
     let (variant, build_type, prefix) = if distribution == "development" {
         ("DevelopmentDebug", "debug", "Rufin.Devel")
@@ -108,8 +108,8 @@ fn build(root: &Path, distribution: &str, abi: Option<&str>, lint: bool) -> Resu
         .arg("-p")
         .arg(&android)
         .arg(format!("assemble{variant}"));
-    if lint {
-        gradle.arg(format!("lint{variant}"));
+    if check {
+        gradle.args([format!("test{variant}UnitTest"), format!("lint{variant}")]);
     }
     if let Some(abi) = abi {
         gradle.arg(format!("-PandroidAbis={abi}"));
@@ -698,7 +698,7 @@ fn install(root: &Path) -> Result<()> {
         ["-s", serial, "shell", "getprop", "ro.product.cpu.abi"],
     )?;
     let abi = abi.trim();
-    // A device check runs the Devel debug build of its own ABI only, linted as CI lints it.
+    // A device check runs the Devel debug build of its own ABI only, checked as CI checks it.
     build(root, "development", Some(abi), true)?;
     let apk = root
         .join(".local/artifacts")
