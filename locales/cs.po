@@ -1648,6 +1648,11 @@ msgstr "Číslo disku"
 
 #, fuzzy
 #| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Číslo disku"
+
+#, fuzzy
+#| msgid "Disc number"
 msgid "Disc {number}"
 msgstr "Číslo disku"
 

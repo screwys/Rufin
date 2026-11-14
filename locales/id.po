@@ -1455,6 +1455,11 @@ msgid "Disc number"
 msgstr "Nomor disc"
 
 #, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Nomor disc"
+
+#, fuzzy
 msgid "Disc {number}"
 msgstr "Disc {number}"
 

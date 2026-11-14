@@ -1609,6 +1609,11 @@ msgstr "光碟編號"
 
 #, fuzzy
 #| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "光碟編號"
+
+#, fuzzy
+#| msgid "Disc number"
 msgid "Disc {number}"
 msgstr "光碟編號"
 

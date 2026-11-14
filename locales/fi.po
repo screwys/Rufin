@@ -1579,6 +1579,11 @@ msgstr "Levynumero"
 
 #, fuzzy
 #| msgid "Disc number"
+msgid "Disc subtitle"
+msgstr "Levynumero"
+
+#, fuzzy
+#| msgid "Disc number"
 msgid "Disc {number}"
 msgstr "Levynumero"
 

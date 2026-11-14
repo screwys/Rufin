@@ -1313,6 +1313,9 @@ msgstr ""
 msgid "Disc number"
 msgstr ""
 
+msgid "Disc subtitle"
+msgstr ""
+
 msgid "Disc {number}"
 msgstr ""
 
