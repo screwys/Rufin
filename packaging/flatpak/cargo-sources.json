@@ -2732,14 +2732,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/flate2/flate2-1.1.10.crate",
-        "sha256": "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb",
-        "dest": "cargo/vendor/flate2-1.1.10"
+        "url": "https://static.crates.io/crates/flate2/flate2-1.1.11.crate",
+        "sha256": "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4",
+        "dest": "cargo/vendor/flate2-1.1.11"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb\", \"files\": {}}",
-        "dest": "cargo/vendor/flate2-1.1.10",
+        "contents": "{\"package\": \"626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4\", \"files\": {}}",
+        "dest": "cargo/vendor/flate2-1.1.11",
         "dest-filename": ".cargo-checksum.json"
     },
     {
