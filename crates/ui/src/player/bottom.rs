@@ -151,7 +151,7 @@ pub struct PlayerControls {
     pub transport: gtk::Box,
     pub transport_slot: gtk::Box,
     pub transport_buttons: gtk::Fixed,
-    pub random_button: gtk::Button,
+    pub mix_button: gtk::Button,
     pub previous_button: gtk::Button,
     pub play_button: gtk::Button,
     pub play_icon: gtk::Image,
@@ -201,7 +201,7 @@ pub struct NowPlayingControls {
 pub struct TransportControls {
     pub root: gtk::Box,
     pub buttons: gtk::Fixed,
-    pub random_button: gtk::Button,
+    pub mix_button: gtk::Button,
     pub previous_button: gtk::Button,
     pub play_button: gtk::Button,
     pub play_icon: gtk::Image,
@@ -520,7 +520,7 @@ pub fn build_bottom_player() -> PlayerControls {
     let TransportControls {
         root: transport,
         buttons: transport_buttons,
-        random_button,
+        mix_button,
         previous_button,
         play_button,
         play_icon,
@@ -604,7 +604,7 @@ pub fn build_bottom_player() -> PlayerControls {
         transport,
         transport_slot,
         transport_buttons,
-        random_button,
+        mix_button,
         previous_button,
         play_button,
         play_icon,
@@ -762,7 +762,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     let next_button = skip_icon_button(true, "Next");
     let shuffle_button = shuffle_icon_button("Shuffle");
     let repeat_button = repeat_icon_button("Repeat off");
-    let random_button = random_clover_icon_button("Play random");
+    let mix_button = mix_icon_button("Mix");
 
     configure_transport_side_button(&dj_button);
     configure_transport_side_button(&shuffle_button);
@@ -770,7 +770,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     configure_play_button(&play_button);
     configure_transport_side_button(&next_button);
     configure_transport_side_button(&repeat_button);
-    configure_transport_side_button(&random_button);
+    configure_transport_side_button(&mix_button);
 
     put_transport_button(
         &transport_buttons,
@@ -823,7 +823,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     );
     put_transport_button(
         &transport_buttons,
-        &random_button,
+        &mix_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         3.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
@@ -869,7 +869,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     TransportControls {
         root: transport,
         buttons: transport_buttons,
-        random_button,
+        mix_button,
         previous_button,
         play_button,
         play_icon,
@@ -2073,7 +2073,7 @@ impl crate::player::PlayerUi {
             (player.previous_button.upcast_ref(), -1.0, true),
             (player.next_button.upcast_ref(), 1.0, true),
             (player.repeat_button.upcast_ref(), 2.0, !compact),
-            (player.random_button.upcast_ref(), 3.0, all_buttons),
+            (player.mix_button.upcast_ref(), 3.0, all_buttons),
         ] {
             if button.parent().as_ref() != Some(player.transport_buttons.upcast_ref()) {
                 continue;
@@ -2222,7 +2222,7 @@ impl crate::player::PlayerUi {
         let player = &self.views.player_controls;
         [
             player.dj_button.clone().upcast(),
-            player.random_button.clone().upcast(),
+            player.mix_button.clone().upcast(),
             player.sleep_timer.button().clone().upcast(),
             player.settings_button.clone().upcast(),
             player.volume_button.clone().upcast(),
@@ -2981,9 +2981,9 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
         .player_ui
         .views
         .player_controls
-        .random_button
-        .connect_clicked(move |_| {
-            crate::shell::player::random_play::present_random_play_dialog(&random_shell)
+        .mix_button
+        .connect_clicked(move |button| {
+            crate::shell::player::random_play::present_mix_popover(button, &random_shell)
         });
 
     let queue_shell = Rc::clone(shell);

@@ -138,19 +138,19 @@
         <property name="title" translatable="yes">Queue</property>
         <child>
           <object class="AdwShortcutsItem" id="shortcut_play_random">
-            <property name="title" translatable="yes">Play random</property>
+            <property name="title" translatable="yes">Mix</property>
             <property name="action-name">win.play-random</property>
           </object>
         </child>
         <child>
           <object class="AdwShortcutsItem" id="shortcut_play_random_next">
-            <property name="title" translatable="yes">Play random (play next)</property>
+            <property name="title" translatable="yes">Mix (play next)</property>
             <property name="action-name">win.play-random-next</property>
           </object>
         </child>
         <child>
           <object class="AdwShortcutsItem" id="shortcut_play_random_later">
-            <property name="title" translatable="yes">Play random (play later)</property>
+            <property name="title" translatable="yes">Mix (play later)</property>
             <property name="action-name">win.play-random-later</property>
           </object>
         </child>

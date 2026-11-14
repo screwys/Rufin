@@ -27,15 +27,17 @@ pub async fn play_saved_random(
             let genre = saved_random_genre(&catalog, &settings, &selected).await?;
             let request = RandomPlayRequest {
                 placement,
-                requested: settings.limit,
+                requested: if settings.albums {
+                    settings.album_limit
+                } else {
+                    settings.limit
+                },
                 criteria: library::RandomCriteria {
                     min_year: settings.min_year.map(i64::from),
                     max_year: settings.max_year.map(i64::from),
                     genre: genre.map(|genre| library::GenreKey::from_raw(genre.key)),
                     played: settings.played_filter,
-                    variation: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |duration| duration.as_nanos() as i64),
+                    albums: settings.albums,
                 },
             };
             queue_random(&catalog, &selected, request, &queue).await
@@ -117,22 +119,41 @@ pub async fn queue_random(
 ) -> Result<bool, String> {
     let cancellation = ReadCancellation::new();
     let (source, folder) = random_library(selected);
-    let order = catalog
-        .random_candidates(
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    let pick = catalog
+        .random_pick(
             source,
             folder,
             &request.criteria,
-            &[],
             request.requested,
+            now,
+            random_u64() as i64,
             &cancellation,
         )
         .await
         .map_err(|error| error.to_string())?;
-    if order.is_empty() {
-        return Ok(true);
-    }
+    let load = match pick {
+        library::RandomPick::Tracks(tracks) if !tracks.is_empty() => {
+            library::QueueLoad::track_keys(tracks, QueueProvenance::Random)
+        }
+        // Each album whole, in its own order, as its page plays it.
+        library::RandomPick::Albums(albums) if !albums.is_empty() => library::QueueLoad::Tracks(
+            albums
+                .into_iter()
+                .map(|album| {
+                    (
+                        library::MemberRead::new(library::Collection::Album(album)).selection(),
+                        QueueProvenance::Random,
+                    )
+                })
+                .collect(),
+        ),
+        _ => return Ok(true),
+    };
     queue.play_selection(crate::playback::PlayRequest::from_input(
-        library::QueueLoad::track_keys(order, QueueProvenance::Random),
+        load,
         request.placement,
     ));
     Ok(false)
@@ -178,14 +199,28 @@ pub(crate) async fn radio_candidates(
         fallback_sources.push(selected.source_key);
     }
     candidates.truncate(requested);
+    let mut similar = None;
     for source_key in fallback_sources {
         if candidates.len() == requested {
             break;
         }
+        // The seed's similar artists are looked up once, when a fallback first needs them.
+        let similar = match &similar {
+            Some(similar) => similar,
+            None => similar.insert(
+                similar_artist_mbids(catalog, &source_owner, seed_source_key, &seed, cancellation)
+                    .await,
+            ),
+        };
+        let similar = catalog
+            .artists_with_mbids(source_key, similar, cancellation)
+            .await
+            .map_err(|error| error.to_string())?;
         let fallback = catalog
             .radio_candidates(
                 source_key,
                 seed.clone(),
+                &similar,
                 &candidates,
                 requested - candidates.len(),
                 random_u64() as i64,
@@ -196,6 +231,53 @@ pub(crate) async fn radio_candidates(
         candidates.extend(fallback);
     }
     Ok(candidates)
+}
+
+/// The MusicBrainz ids of the artists ListenBrainz's listeners play alongside the seed's first
+/// two artists. None where external lookups are off, the seed's artists carry no ids, or the
+/// lookup fails: the Catalog's own relations then pick alone.
+async fn similar_artist_mbids(
+    catalog: &Catalog,
+    source_owner: &SourceOwner,
+    seed_source: Option<SourceKey>,
+    seed: &RadioSeed,
+    cancellation: &ReadCancellation,
+) -> Vec<String> {
+    let Some(seed_source) = seed_source else {
+        return Vec::new();
+    };
+    if !source_owner
+        .shared
+        .settings
+        .committed()
+        .allows_external_metadata_lookup()
+    {
+        return Vec::new();
+    }
+    let Ok(mut artists) = catalog
+        .radio_artist_mbids(seed_source, seed, cancellation)
+        .await
+    else {
+        return Vec::new();
+    };
+    artists.truncate(2);
+    if artists.is_empty() {
+        return Vec::new();
+    }
+    let cache = metadata_lookup::LookupCache::new(
+        catalog.clone(),
+        tokio::runtime::Handle::current(),
+        metadata_lookup::CacheMode::Use,
+    );
+    tokio::task::spawn_blocking(move || {
+        artists
+            .iter()
+            .filter_map(|artist| metadata_lookup::similar_artists(&cache, artist).ok())
+            .flatten()
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn source_seed(

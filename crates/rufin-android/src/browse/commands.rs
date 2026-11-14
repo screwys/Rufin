@@ -387,7 +387,7 @@ impl AndroidLibrary {
         settings: rufin_core::settings::RandomPlaySettings,
     ) -> Result<String, AndroidError> {
         let Some(selected) = self.source.selected_library() else {
-            return Ok(localization::tr("Any genre"));
+            return Ok(localization::tr("Any"));
         };
         let catalog = self.catalog.clone();
         let genre = self
@@ -398,7 +398,7 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        Ok(genre.map_or_else(|| localization::tr("Any genre"), |genre| genre.name))
+        Ok(genre.map_or_else(|| localization::tr("Any"), |genre| genre.name))
     }
 
     pub async fn random_play(

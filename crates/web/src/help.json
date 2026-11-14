@@ -238,15 +238,17 @@
       "mode": "replace"
     },
     "POST /api/playback/auto-dj": "Toggle Auto DJ using the app’s existing settings.",
-    "GET /api/random?source=...": "Saved random-play settings and genres. Use q and offset to browse genres, 64 at a time.",
+    "GET /api/random?source=...": "Saved Mix settings and genres. Use q and offset to browse genres, 64 at a time.",
     "POST /api/queue/random": {
       "source": "source ID",
-      "count": 100,
+      "albums": false,
+      "count": "tracks, or whole albums when albums is true",
       "min_year": null,
       "max_year": null,
       "genre": null,
-      "played": "All | Played | Unplayed",
-      "mode": "replace | next | append"
+      "played": "All | Unplayed | Played | NotPlayedRecently | RecentlyAdded",
+      "mode": "replace | next | append",
+      "note": "Saves the selection as the app's Mix settings."
     },
     "GET /api/equalizer": "Current equalizer editor. Optional output selects an existing output identity; omitted follows the selected output.",
     "POST /api/equalizer": "Shared EQ operations: preview {output,edit}, commit {output}, select {output,preset:null or ID}, save {output,name:null or text}, duplicate {output,name}, rename {id,name}, delete {id}, import {output,text,format:Json|Apo}, export {output,format}, assign {output,assigned}, apply {output}. Edits use enum objects such as {BandGain:{index:0,value:6}} and {Enabled:{value:true}}. Preview does not write settings; commit persists the final editor. Cast previews await apply except discrete bypass/format changes.",

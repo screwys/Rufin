@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -12,25 +13,31 @@ use localization::tr;
 use crate::shell::shell::Shell;
 use rufin_core::settings::{RandomPlayGenreSelection, RandomPlaySettings};
 
-const MIN_LIMIT: f64 = 1.0;
-const MAX_LIMIT: f64 = 500.0;
-const MIN_YEAR: f64 = 1850.0;
-const MAX_YEAR: f64 = 2050.0;
-const DEFAULT_MIN_YEAR: f64 = 2000.0;
-const DEFAULT_MAX_YEAR: f64 = 2020.0;
+/// The kinds the popover offers, each with its button's id.
+const KINDS: [(PlayedFilter, &str); 5] = [
+    (PlayedFilter::All, "kind_all"),
+    (PlayedFilter::Unplayed, "kind_unplayed"),
+    (PlayedFilter::Played, "kind_played"),
+    (PlayedFilter::NotPlayedRecently, "kind_not_played_recently"),
+    (PlayedFilter::RecentlyAdded, "kind_recently_added"),
+];
 
 #[derive(Clone)]
-struct RandomPlayControls {
-    limit: gtk::SpinButton,
-    min_year_enabled: gtk::CheckButton,
-    min_year: gtk::SpinButton,
-    max_year_enabled: gtk::CheckButton,
-    max_year: gtk::SpinButton,
+struct MixControls {
+    /// Tracks, or albums.
+    unit: adw::ToggleGroup,
+    kinds: [gtk::ToggleButton; 5],
     genre: gtk::DropDown,
-    played_filter: gtk::DropDown,
+    min_year: gtk::Entry,
+    max_year: gtk::Entry,
+    /// The count of the unit chosen.
+    limit: adw::SpinRow,
+    /// The counts of tracks and of albums.
+    limits: Rc<Cell<[usize; 2]>>,
 }
 
-pub(crate) fn present_random_play_dialog(shell: &Rc<Shell>) {
+/// Opens the Mix popover over `anchor`, the player's Mix button.
+pub(crate) fn present_mix_popover(anchor: &gtk::Button, shell: &Rc<Shell>) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
@@ -49,123 +56,124 @@ pub(crate) fn present_random_play_dialog(shell: &Rc<Shell>) {
         .map(|(_, genres)| genres)
     });
     let shell = Rc::downgrade(shell);
+    let anchor = anchor.downgrade();
     glib::spawn_future_local(async move {
-        let Some(shell) = shell.upgrade() else {
+        let (Some(shell), Some(anchor)) = (shell.upgrade(), anchor.upgrade()) else {
             return;
         };
         match task.await.ok().and_then(Result::ok) {
-            Some(genres) => present_random_play_dialog_loaded(&shell, selected, genres),
-            None => warn!("failed to load Random Play genres"),
+            Some(genres) => present_mix_popover_loaded(&anchor, &shell, selected, genres),
+            None => warn!("failed to load Mix genres"),
         }
     });
 }
 
-fn present_random_play_dialog_loaded(
+fn present_mix_popover_loaded(
+    anchor: &gtk::Button,
     shell: &Rc<Shell>,
     selected: rufin_core::runtime::SelectedLibrary,
     genres: Vec<GenreChoice>,
 ) {
-    let played_filters = [
-        PlayedFilter::All,
-        PlayedFilter::Unplayed,
-        PlayedFilter::Played,
-    ];
     let saved = shell.settings.current.borrow().random_play.clone();
-    let selected_genre = saved.selected_genre_id(
-        &selected.source_id,
-        selected.music_folder_object_id.as_deref(),
-    );
-
     let resource = "player/random_play.ui";
     let builder = crate::ui_resource::builder(resource);
-    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "random_play_dialog");
-    let controls = RandomPlayControls {
-        limit: crate::ui_resource::object(&builder, resource, "limit"),
-        min_year_enabled: crate::ui_resource::object(&builder, resource, "min_year_enabled"),
-        min_year: crate::ui_resource::object(&builder, resource, "min_year"),
-        max_year_enabled: crate::ui_resource::object(&builder, resource, "max_year_enabled"),
-        max_year: crate::ui_resource::object(&builder, resource, "max_year"),
+    let content: gtk::Box = crate::ui_resource::object(&builder, resource, "mix");
+    let controls = MixControls {
+        unit: crate::ui_resource::object(&builder, resource, "unit"),
+        kinds: KINDS.map(|(_, id)| crate::ui_resource::object(&builder, resource, id)),
         genre: crate::ui_resource::object(&builder, resource, "genre"),
-        played_filter: crate::ui_resource::object(&builder, resource, "played_filter"),
+        min_year: crate::ui_resource::object(&builder, resource, "min_year"),
+        max_year: crate::ui_resource::object(&builder, resource, "max_year"),
+        limit: crate::ui_resource::object(&builder, resource, "limit"),
+        limits: Rc::new(Cell::new([saved.limit, saved.album_limit])),
     };
-    configure_spinner(&controls.limit, saved.limit as f64, MIN_LIMIT, MAX_LIMIT);
-    configure_spinner(
-        &controls.min_year,
-        saved.min_year.map_or(DEFAULT_MIN_YEAR, f64::from),
-        MIN_YEAR,
-        MAX_YEAR,
-    );
-    configure_spinner(
-        &controls.max_year,
-        saved.max_year.map_or(DEFAULT_MAX_YEAR, f64::from),
-        MIN_YEAR,
-        MAX_YEAR,
-    );
-    configure_genre_dropdown(&controls.genre, &genres, selected_genre);
-    configure_played_filter_dropdown(
-        &controls.played_filter,
-        &played_filters,
-        saved.played_filter,
-    );
     controls
-        .min_year_enabled
-        .set_active(saved.min_year.is_some());
-    controls
-        .max_year_enabled
-        .set_active(saved.max_year.is_some());
-    controls.min_year.set_sensitive(saved.min_year.is_some());
-    controls.max_year.set_sensitive(saved.max_year.is_some());
-    connect_year_toggle(&controls.min_year_enabled, &controls.min_year);
-    connect_year_toggle(&controls.max_year_enabled, &controls.max_year);
-
-    let play_next: gtk::Button = crate::ui_resource::object(&builder, resource, "play_next");
-    let play_now: gtk::Button = crate::ui_resource::object(&builder, resource, "play_now");
-    let play_later: gtk::Button = crate::ui_resource::object(&builder, resource, "play_later");
-    drop(builder);
-
-    connect_action(
-        &play_next,
-        shell,
-        &dialog,
-        &controls,
-        &genres,
-        &selected,
-        QueuePlacement::Next,
-    );
-    connect_action(
-        &play_now,
-        shell,
-        &dialog,
-        &controls,
-        &genres,
-        &selected,
-        QueuePlacement::Now,
-    );
-    connect_action(
-        &play_later,
-        shell,
-        &dialog,
-        &controls,
-        &genres,
-        &selected,
-        QueuePlacement::Last,
-    );
-
-    shell.present_selected_dialog(&dialog);
-}
-
-fn configure_spinner(spinner: &gtk::SpinButton, default: f64, min: f64, max: f64) {
-    spinner.set_range(min, max);
-    spinner.set_increments(1.0, 10.0);
-    spinner.set_climb_rate(1.0);
-    spinner.set_value(default);
-}
-
-fn connect_year_toggle(check: &gtk::CheckButton, spinner: &gtk::SpinButton) {
-    let spinner = spinner.clone();
-    check.connect_toggled(move |check| {
-        spinner.set_sensitive(check.is_active());
+        .unit
+        .set_active_name(Some(if saved.albums { "albums" } else { "tracks" }));
+    show_unit(&controls.limit, saved.albums, controls.limits.get());
+    // Each unit keeps its own count.
+    controls.unit.connect_active_name_notify({
+        let limit = controls.limit.clone();
+        let counts = Rc::clone(&controls.limits);
+        move |unit| {
+            let albums = unit.active_name().as_deref() == Some("albums");
+            let mut limits = counts.get();
+            limits[usize::from(!albums)] = limit.value() as usize;
+            counts.set(limits);
+            show_unit(&limit, albums, limits);
+        }
     });
+    let kind = KINDS
+        .iter()
+        .position(|(kind, _)| *kind == saved.played_filter)
+        .unwrap_or_default();
+    controls.kinds[kind].set_active(true);
+    configure_genre_dropdown(
+        &controls.genre,
+        &genres,
+        saved.selected_genre_id(
+            &selected.source_id,
+            selected.music_folder_object_id.as_deref(),
+        ),
+    );
+    for (entry, year) in [
+        (&controls.min_year, saved.min_year),
+        (&controls.max_year, saved.max_year),
+    ] {
+        entry.set_text(&year.map(|year| year.to_string()).unwrap_or_default());
+    }
+
+    let popover = gtk::Popover::new();
+    popover.set_autohide(true);
+    popover.set_position(gtk::PositionType::Top);
+    popover.set_child(Some(&content));
+    for (id, placement) in [
+        ("play_next", QueuePlacement::Next),
+        ("play_later", QueuePlacement::Last),
+        ("play_now", QueuePlacement::Now),
+    ] {
+        let button: gtk::Button = crate::ui_resource::object(&builder, resource, id);
+        let shell = Rc::clone(shell);
+        let popover = popover.downgrade();
+        let controls = controls.clone();
+        let genres = genres.clone();
+        let selected = selected.clone();
+        button.connect_clicked(move |_| {
+            let settings = settings_from_controls(
+                &controls,
+                &genres,
+                selected.source_id.clone(),
+                selected.music_folder_object_id.clone(),
+            );
+            shell
+                .settings
+                .update_app_settings("mix settings", |current| {
+                    if current.random_play == settings {
+                        return false;
+                    }
+                    current.random_play = settings.clone();
+                    true
+                });
+            play_random(&shell, settings, placement);
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+        });
+    }
+    popover.set_parent(anchor);
+    popover.connect_closed(|popover| popover.unparent());
+    popover.popup();
+}
+
+/// Shows the count of the unit chosen, named after it.
+fn show_unit(limit: &adw::SpinRow, albums: bool, limits: [usize; 2]) {
+    limit.set_title(&if albums { tr("Albums") } else { tr("Tracks") });
+    limit.set_subtitle(&if albums {
+        tr("Each plays whole")
+    } else {
+        String::new()
+    });
+    limit.set_value(limits[usize::from(albums)] as f64);
 }
 
 fn configure_genre_dropdown(
@@ -174,11 +182,18 @@ fn configure_genre_dropdown(
     selected: Option<&str>,
 ) {
     let mut labels = Vec::with_capacity(genres.len() + 1);
-    labels.push(tr("Any genre"));
+    labels.push(tr("Any"));
     labels.extend(genres.iter().map(|genre| genre.name.clone()));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     let model = gtk::StringList::new(&refs);
     dropdown.set_model(Some(&model));
+    // The search matches any part of a genre's name; without an expression it finds nothing.
+    dropdown.set_expression(Some(gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        gtk::Expression::NONE,
+        "string",
+    )));
+    dropdown.set_search_match_mode(gtk::StringFilterMatchMode::Substring);
     dropdown.set_selected(
         selected
             .and_then(|selected| genres.iter().position(|genre| genre.object_id == selected))
@@ -186,101 +201,43 @@ fn configure_genre_dropdown(
     );
 }
 
-fn configure_played_filter_dropdown(
-    dropdown: &gtk::DropDown,
-    filters: &[PlayedFilter],
-    selected: PlayedFilter,
-) {
-    let labels = filters
-        .iter()
-        .map(|filter| match filter {
-            PlayedFilter::All => tr("All tracks"),
-            PlayedFilter::Unplayed => tr("Only unplayed tracks"),
-            PlayedFilter::Played => tr("Only played tracks"),
-        })
-        .collect::<Vec<_>>();
-    let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
-    let model = gtk::StringList::new(&refs);
-    dropdown.set_model(Some(&model));
-    dropdown.set_sensitive(filters.len() > 1);
-    dropdown.set_selected(
-        filters
-            .iter()
-            .position(|filter| *filter == selected)
-            .unwrap_or_default() as u32,
-    );
-}
-
-fn connect_action(
-    button: &gtk::Button,
-    shell: &Rc<Shell>,
-    dialog: &adw::Dialog,
-    controls: &RandomPlayControls,
-    genres: &[GenreChoice],
-    selected: &rufin_core::runtime::SelectedLibrary,
-    placement: QueuePlacement,
-) {
-    let shell = Rc::clone(shell);
-    let dialog = dialog.downgrade();
-    let controls = controls.clone();
-    let genres = genres.to_vec();
-    let selected = selected.clone();
-    button.connect_clicked(move |_| {
-        let Some(settings) = settings_from_controls(
-            &controls,
-            &genres,
-            selected.source_id.clone(),
-            selected.music_folder_object_id.clone(),
-        ) else {
-            return;
-        };
-        shell
-            .settings
-            .update_app_settings("random play settings", |current| {
-                if current.random_play == settings {
-                    return false;
-                }
-                current.random_play = settings.clone();
-                true
-            });
-        play_random(&shell, settings, placement);
-        if let Some(dialog) = dialog.upgrade() {
-            dialog.close();
-        }
-    });
-}
-
 fn settings_from_controls(
-    controls: &RandomPlayControls,
+    controls: &MixControls,
     genres: &[GenreChoice],
     source_id: sources::SourceId,
     music_folder_id: Option<String>,
-) -> Option<RandomPlaySettings> {
-    let genre_id = selected_genre(genres, controls.genre.selected());
-    let played_filter = [
-        PlayedFilter::All,
-        PlayedFilter::Unplayed,
-        PlayedFilter::Played,
-    ]
-    .get(controls.played_filter.selected() as usize)
-    .copied()?;
-    Some(RandomPlaySettings {
-        limit: controls.limit.value_as_int().clamp(1, 500) as usize,
-        min_year: controls
-            .min_year_enabled
-            .is_active()
-            .then(|| controls.min_year.value_as_int().clamp(1850, 2050) as u16),
-        max_year: controls
-            .max_year_enabled
-            .is_active()
-            .then(|| controls.max_year.value_as_int().clamp(1850, 2050) as u16),
-        genre: genre_id.map(|genre_id| RandomPlayGenreSelection {
-            source_id,
-            music_folder_id,
-            genre_id,
+) -> RandomPlaySettings {
+    let albums = controls.unit.active_name().as_deref() == Some("albums");
+    let mut limits = controls.limits.get();
+    limits[usize::from(albums)] = controls.limit.value() as usize;
+    // An empty or unreadable year leaves that end open.
+    let year = |entry: &gtk::Entry| {
+        entry
+            .text()
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|year| (1850..=2050).contains(year))
+    };
+    RandomPlaySettings {
+        albums,
+        limit: limits[0],
+        album_limit: limits[1],
+        min_year: year(&controls.min_year),
+        max_year: year(&controls.max_year),
+        genre: selected_genre(genres, controls.genre.selected()).map(|genre_id| {
+            RandomPlayGenreSelection {
+                source_id,
+                music_folder_id,
+                genre_id,
+            }
         }),
-        played_filter,
-    })
+        played_filter: KINDS
+            .iter()
+            .zip(&controls.kinds)
+            .find(|(_, button)| button.is_active())
+            .map_or(PlayedFilter::All, |((kind, _), _)| *kind),
+    }
 }
 
 pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
@@ -310,7 +267,7 @@ fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlac
                 feedback.show_feedback_toast(message.text().to_string());
             }
             Ok(false) => {}
-            Err(error) => warn!(%error, "failed to select Random Play tracks"),
+            Err(error) => warn!(%error, "failed to select Mix tracks"),
         }
     });
 }

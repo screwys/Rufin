@@ -1475,6 +1475,12 @@ dialog.alert.playlist-delete-dialog .message-area {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
+/* A kind of the Mix popover: the chosen one is filled with the accent. */
+.mix-kind:checked {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+
 .home-row {
   margin: 0 -6px;
   padding: 6px;

@@ -91,13 +91,6 @@
   </form>
 </section>
 {% endmacro %}
-{% macro spin(id, min, max, value, disabled) %}
-<div class="spin" role="group" aria-labelledby="{{ id }}-label">
-  <input id="{{ id }}" type="number" min="{{ min }}" max="{{ max }}" value="{{ value }}" required{% if disabled %} disabled{% endif %}>
-  <button type="button" data-step="-1" aria-label="{{ localization::tr("Decrease") }}"{% if disabled %} disabled{% endif %}>{% call icon("rufin-list-remove-symbolic") %}{% endcall %}</button>
-  <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}"{% if disabled %} disabled{% endif %}>{% call icon("rufin-list-add-symbolic") %}{% endcall %}</button>
-</div>
-{% endmacro %}
 {% macro switch(path, label, subtitle) %}<label class="pref-row"><span class="pref-label"><span>{{ label }}</span>{% if subtitle != "" %}<small>{{ subtitle }}</small>{% endif %}</span><input type="checkbox" role="switch" data-setting="{{ path }}" /></label>{% endmacro %}
 {% macro pref_page(id, label, icon_name) %}<button type="button" role="tab" class="pref-tab" data-page="{{ id }}" aria-controls="pref-{{ id }}">{% call icon(icon_name) %}{% endcall %}<span>{{ label }}</span></button>{% endmacro %}
 {% macro sidebar_mode(path, label, left) %}<div class="pref-row"><span class="pref-label"><span>{{ label }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ label }}">{% if left %}{% for (value, title) in [("Full", "Full"), ("Compact", "Compact"), ("Hidden", "Hidden")] %}<label><input type="radio" name="{{ path }}" value='"{{ value }}"' data-setting="{{ path }}" />{{ localization::tr(title) }}</label>{% endfor %}{% else %}{% for (value, title) in [("Visible", "Visible"), ("Hidden", "Hidden")] %}<label><input type="radio" name="{{ path }}" value='"{{ value }}"' data-setting="{{ path }}" />{{ localization::tr(title) }}</label>{% endfor %}{% endif %}</div></div>{% endmacro %}

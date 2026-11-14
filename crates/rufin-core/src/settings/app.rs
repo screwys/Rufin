@@ -94,6 +94,7 @@ impl Default for ExternalSiteLinkSettings {
 }
 
 const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
+const DEFAULT_RANDOM_PLAY_ALBUM_LIMIT: usize = 10;
 const MIN_RANDOM_PLAY_LIMIT: usize = 1;
 const MAX_RANDOM_PLAY_LIMIT: usize = 500;
 const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
@@ -112,7 +113,11 @@ pub struct RandomPlayGenreSelection {
 #[serde(default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct RandomPlaySettings {
+    /// Whole albums in place of tracks.
+    pub albums: bool,
     pub limit: super::visualizer::PreferenceIndex,
+    /// How many albums, when it plays albums.
+    pub album_limit: super::visualizer::PreferenceIndex,
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
     pub genre: Option<RandomPlayGenreSelection>,
@@ -122,7 +127,9 @@ pub struct RandomPlaySettings {
 impl Default for RandomPlaySettings {
     fn default() -> Self {
         Self {
+            albums: false,
             limit: DEFAULT_RANDOM_PLAY_LIMIT,
+            album_limit: DEFAULT_RANDOM_PLAY_ALBUM_LIMIT,
             min_year: None,
             max_year: None,
             genre: None,
@@ -146,6 +153,9 @@ impl RandomPlaySettings {
     fn sanitize(&mut self) {
         self.limit = self
             .limit
+            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
+        self.album_limit = self
+            .album_limit
             .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
         self.min_year = self
             .min_year
