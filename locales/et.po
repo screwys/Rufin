@@ -552,9 +552,6 @@ msgstr "Kõik esitusloendid"
 msgid "All time"
 msgstr "Läbi aegade"
 
-msgid "All tracks"
-msgstr "Kõik lood"
-
 msgid "All"
 msgstr "Kõik"
 
@@ -583,9 +580,6 @@ msgstr "Anonüümne (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonüümne"
-
-msgid "Any genre"
-msgstr "Iga žanr"
 
 msgid "Any"
 msgstr "Ükspuha milline"
@@ -1607,6 +1601,9 @@ msgstr "EP-plaadid"
 msgid "ERB"
 msgstr "ERB"
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Muuda laulusõnu"
 
@@ -2582,6 +2579,19 @@ msgstr "Peegeldatud ribad"
 msgid "Mirrored"
 msgstr "Peegeldatud"
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Esita (hiljem) juhuslikult"
+
+#, fuzzy
+#| msgid "Play next"
+msgid "Mix (play next)"
+msgstr "Esita järgmisena"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr "Režiim"
 
@@ -2903,6 +2913,11 @@ msgstr "Pole ühendatud"
 msgid "Not needed for most servers"
 msgstr "Pole enamuse serverite puhul vajalik"
 
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Mitte midagi pole esitatud"
+
 msgid "Not set"
 msgstr "Määratlemata"
 
@@ -2986,12 +3001,6 @@ msgstr "Tuvastus"
 
 msgid "Only fill missing information"
 msgstr "Täida vaid puuduv teave"
-
-msgid "Only played tracks"
-msgstr "Vaid esitatud lood"
-
-msgid "Only unplayed tracks"
-msgstr "Vaid esitamata lood"
 
 msgid "Opacity (%)"
 msgstr "Läbipaistmatus (%)"
@@ -3194,9 +3203,6 @@ msgstr "Esita esitajat"
 msgid "Play count"
 msgstr "Esituskordi"
 
-msgid "Play filter"
-msgstr "Esituste filter"
-
 msgid "Play genre"
 msgstr "Kuula žanri alusel"
 
@@ -3214,15 +3220,6 @@ msgstr "Esita järgmiseks raadiorežiimis"
 
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
-
-msgid "Play random (play later)"
-msgstr "Esita (hiljem) juhuslikult"
-
-msgid "Play random (play next)"
-msgstr "Esita (kohe) juhuslikult"
-
-msgid "Play random"
-msgstr "Esita juhuslikult"
 
 msgid "Play track"
 msgstr "Esita lugu"
@@ -3244,6 +3241,11 @@ msgstr "Taasesituse kiirus"
 
 msgid "Playback"
 msgstr "Taasesitus"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Esitatud"
 
 #, fuzzy
 #| msgid "Played"
@@ -4715,6 +4717,11 @@ msgstr "Lõpeta summutamine"
 msgid "Unmuted"
 msgstr "Summutamine on lõpetatud"
 
+#, fuzzy
+#| msgid "Ever played"
+msgid "Unplayed"
+msgstr "Esitatud"
+
 msgid "Unsaved"
 msgstr "Salvestamata"
 
@@ -4789,12 +4796,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Kasuta kohalikke faile taasesituseks, laulusõnade jaoks ning toetatud "
 "metateabe muutmiseks"
-
-msgid "Use maximum year"
-msgstr "Kasuta maksimaalset aastat"
-
-msgid "Use minimum year"
-msgstr "Kasuta minimaalset aastat"
 
 #, fuzzy
 #| msgid "Use source setting"
@@ -4931,6 +4932,11 @@ msgstr "Aasta"
 
 msgid "Yearly"
 msgstr "Igaaastaselt"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
+msgstr "Aasta"
 
 msgid "Yellow"
 msgstr "Kollane"
@@ -5239,6 +5245,33 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "All tracks"
+#~ msgstr "Kõik lood"
+
+#~ msgid "Any genre"
+#~ msgstr "Iga žanr"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Vaid esitatud lood"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Vaid esitamata lood"
+
+#~ msgid "Play filter"
+#~ msgstr "Esituste filter"
+
+#~ msgid "Play random (play next)"
+#~ msgstr "Esita (kohe) juhuslikult"
+
+#~ msgid "Play random"
+#~ msgstr "Esita juhuslikult"
+
+#~ msgid "Use maximum year"
+#~ msgstr "Kasuta maksimaalset aastat"
+
+#~ msgid "Use minimum year"
+#~ msgstr "Kasuta minimaalset aastat"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
@@ -6104,9 +6137,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #, fuzzy
 #~ msgid "Play Last"
 #~ msgstr "Esita hiljem"
-
-#~ msgid "Play next"
-#~ msgstr "Esita järgmisena"
 
 #~ msgid "Play now"
 #~ msgstr "Esita kohe"

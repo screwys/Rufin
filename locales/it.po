@@ -542,9 +542,6 @@ msgstr "Tutte le Playlist"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "Tutte le Tracce"
-
 msgid "All"
 msgstr "Tutto"
 
@@ -575,9 +572,6 @@ msgstr "Anonimo (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonimo"
-
-msgid "Any genre"
-msgstr "Qualunque genere"
 
 msgid "Any"
 msgstr "Qualunque"
@@ -1734,6 +1728,9 @@ msgstr ""
 msgid "ERB"
 msgstr ""
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr ""
 
@@ -2726,6 +2723,15 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+msgid "Mix (play later)"
+msgstr ""
+
+msgid "Mix (play next)"
+msgstr ""
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3055,6 +3061,9 @@ msgstr ""
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not played recently"
+msgstr ""
+
 msgid "Not set"
 msgstr ""
 
@@ -3131,12 +3140,6 @@ msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
-msgstr ""
-
-msgid "Only played tracks"
-msgstr ""
-
-msgid "Only unplayed tracks"
 msgstr ""
 
 msgid "Opacity (%)"
@@ -3338,9 +3341,6 @@ msgstr ""
 msgid "Play count"
 msgstr ""
 
-msgid "Play filter"
-msgstr ""
-
 msgid "Play genre"
 msgstr ""
 
@@ -3357,15 +3357,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play random (play later)"
-msgstr ""
-
-msgid "Play random (play next)"
-msgstr ""
-
-msgid "Play random"
 msgstr ""
 
 msgid "Play track"
@@ -3387,6 +3378,9 @@ msgid "Playback speed"
 msgstr ""
 
 msgid "Playback"
+msgstr ""
+
+msgid "Played"
 msgstr ""
 
 msgid "Player"
@@ -4869,6 +4863,9 @@ msgstr ""
 msgid "Unmuted"
 msgstr ""
 
+msgid "Unplayed"
+msgstr ""
+
 msgid "Unsaved"
 msgstr ""
 
@@ -4947,12 +4944,6 @@ msgid "Use listening activity"
 msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
-msgstr ""
-
-msgid "Use maximum year"
-msgstr ""
-
-msgid "Use minimum year"
 msgstr ""
 
 #, fuzzy
@@ -5085,6 +5076,9 @@ msgid "Year"
 msgstr ""
 
 msgid "Yearly"
+msgstr ""
+
+msgid "Years"
 msgstr ""
 
 msgid "Yellow"
@@ -5371,6 +5365,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "All tracks"
+#~ msgstr "Tutte le Tracce"
+
+#~ msgid "Any genre"
+#~ msgstr "Qualunque genere"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ""

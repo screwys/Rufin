@@ -527,9 +527,6 @@ msgstr "Všechny playlisty"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "Všechny skladby"
-
 msgid "All"
 msgstr ""
 
@@ -562,9 +559,6 @@ msgstr ""
 
 msgid "Anonymous"
 msgstr ""
-
-msgid "Any genre"
-msgstr "Všechny žánry"
 
 msgid "Any"
 msgstr ""
@@ -1826,6 +1820,9 @@ msgstr "EP"
 msgid "ERB"
 msgstr ""
 
+msgid "Each plays whole"
+msgstr ""
+
 #, fuzzy
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
@@ -2938,6 +2935,19 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Přehrát náhodně (později)"
+
+#, fuzzy
+#| msgid "Play random (play next)"
+msgid "Mix (play next)"
+msgstr "Přehrát náhodně (příště)"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3320,6 +3330,11 @@ msgid "Not needed for most servers"
 msgstr ""
 
 #, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Zatím nic nepřehráváno"
+
+#, fuzzy
 #| msgid "Not connected"
 msgid "Not set"
 msgstr "Není připojeno"
@@ -3404,12 +3419,6 @@ msgstr ""
 
 msgid "Only fill missing information"
 msgstr ""
-
-msgid "Only played tracks"
-msgstr "Pouze přehrané skladby"
-
-msgid "Only unplayed tracks"
-msgstr "Pouze nepřehrané skladby"
 
 msgid "Opacity (%)"
 msgstr ""
@@ -3646,9 +3655,6 @@ msgstr "Přehrát interpreta"
 msgid "Play count"
 msgstr "Počet přehrání"
 
-msgid "Play filter"
-msgstr "Filtr přehrání"
-
 msgid "Play genre"
 msgstr "Přehrát žánr"
 
@@ -3670,15 +3676,6 @@ msgstr "Pustit Rádio"
 
 msgid "Play radio"
 msgstr "Pustit Rádio"
-
-msgid "Play random (play later)"
-msgstr "Přehrát náhodně (později)"
-
-msgid "Play random (play next)"
-msgstr "Přehrát náhodně (příště)"
-
-msgid "Play random"
-msgstr "Přehrát náhodně"
 
 msgid "Play track"
 msgstr "Přehrát skladbu"
@@ -3704,6 +3701,11 @@ msgstr "Rychlost přehrávání"
 
 msgid "Playback"
 msgstr "Přehrávání"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Přehráno"
 
 #, fuzzy
 #| msgid "Played"
@@ -5408,6 +5410,11 @@ msgid "Unmuted"
 msgstr "Zrušeno ztlumení"
 
 #, fuzzy
+#| msgid "Never Played"
+msgid "Unplayed"
+msgstr "Nikdy nepřehráno"
+
+#, fuzzy
 #| msgid "Saved"
 msgid "Unsaved"
 msgstr "Uloženo"
@@ -5498,16 +5505,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Používat místní soubory pro přehrávání, texty skladeb a úpravy podporovaných "
 "metadat"
-
-#, fuzzy
-#| msgid "Maximum year"
-msgid "Use maximum year"
-msgstr "Maximální rok"
-
-#, fuzzy
-#| msgid "Minimum year"
-msgid "Use minimum year"
-msgstr "Minimální rok"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5655,6 +5652,11 @@ msgstr "Rok"
 #, fuzzy
 #| msgid "Year"
 msgid "Yearly"
+msgstr "Rok"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
 msgstr "Rok"
 
 msgid "Yellow"
@@ -5966,6 +5968,34 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "All tracks"
+#~ msgstr "Všechny skladby"
+
+#~ msgid "Any genre"
+#~ msgstr "Všechny žánry"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Pouze přehrané skladby"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Pouze nepřehrané skladby"
+
+#~ msgid "Play filter"
+#~ msgstr "Filtr přehrání"
+
+#~ msgid "Play random"
+#~ msgstr "Přehrát náhodně"
+
+#, fuzzy
+#~| msgid "Maximum year"
+#~ msgid "Use maximum year"
+#~ msgstr "Maximální rok"
+
+#, fuzzy
+#~| msgid "Minimum year"
+#~ msgid "Use minimum year"
+#~ msgstr "Minimální rok"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"

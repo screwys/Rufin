@@ -514,9 +514,6 @@ msgstr "所有播放清單"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "所有曲目"
-
 msgid "All"
 msgstr ""
 
@@ -547,9 +544,6 @@ msgstr ""
 
 msgid "Anonymous"
 msgstr ""
-
-msgid "Any genre"
-msgstr "任何曲風"
 
 msgid "Any"
 msgstr ""
@@ -1781,6 +1775,9 @@ msgstr ""
 msgid "ERB"
 msgstr ""
 
+msgid "Each plays whole"
+msgstr ""
+
 #, fuzzy
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
@@ -2865,6 +2862,19 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "任意播放（稍候播放）"
+
+#, fuzzy
+#| msgid "Play random (play next)"
+msgid "Mix (play next)"
+msgstr "任意播放（接續播放）"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3242,6 +3252,11 @@ msgid "Not needed for most servers"
 msgstr ""
 
 #, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "尚未播放任何內容"
+
+#, fuzzy
 #| msgid "Not connected"
 msgid "Not set"
 msgstr "未連接"
@@ -3326,12 +3341,6 @@ msgstr ""
 
 msgid "Only fill missing information"
 msgstr ""
-
-msgid "Only played tracks"
-msgstr "僅播放過的曲目"
-
-msgid "Only unplayed tracks"
-msgstr "僅未播放過的曲目"
 
 msgid "Opacity (%)"
 msgstr ""
@@ -3562,9 +3571,6 @@ msgstr "播放藝人"
 msgid "Play count"
 msgstr "播放次數"
 
-msgid "Play filter"
-msgstr "播放篩選內容"
-
 msgid "Play genre"
 msgstr "播放曲風"
 
@@ -3586,15 +3592,6 @@ msgstr "播放電台"
 
 msgid "Play radio"
 msgstr "播放電台"
-
-msgid "Play random (play later)"
-msgstr "任意播放（稍候播放）"
-
-msgid "Play random (play next)"
-msgstr "任意播放（接續播放）"
-
-msgid "Play random"
-msgstr "任意播放"
 
 msgid "Play track"
 msgstr "播放曲目"
@@ -3620,6 +3617,11 @@ msgstr "播放速度"
 
 msgid "Playback"
 msgstr "播放"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "已播放"
 
 #, fuzzy
 #| msgid "Played"
@@ -5276,6 +5278,11 @@ msgid "Unmuted"
 msgstr ""
 
 #, fuzzy
+#| msgid "Never Played"
+msgid "Unplayed"
+msgstr "從未播放"
+
+#, fuzzy
 #| msgid "Saved"
 msgid "Unsaved"
 msgstr "已儲存"
@@ -5362,16 +5369,6 @@ msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
-
-#, fuzzy
-#| msgid "Maximum year"
-msgid "Use maximum year"
-msgstr "最大年份"
-
-#, fuzzy
-#| msgid "Minimum year"
-msgid "Use minimum year"
-msgstr "最小年份"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5511,6 +5508,11 @@ msgstr "年份"
 #, fuzzy
 #| msgid "Year"
 msgid "Yearly"
+msgstr "年份"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
 msgstr "年份"
 
 msgid "Yellow"
@@ -5792,6 +5794,34 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "All tracks"
+#~ msgstr "所有曲目"
+
+#~ msgid "Any genre"
+#~ msgstr "任何曲風"
+
+#~ msgid "Only played tracks"
+#~ msgstr "僅播放過的曲目"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "僅未播放過的曲目"
+
+#~ msgid "Play filter"
+#~ msgstr "播放篩選內容"
+
+#~ msgid "Play random"
+#~ msgstr "任意播放"
+
+#, fuzzy
+#~| msgid "Maximum year"
+#~ msgid "Use maximum year"
+#~ msgstr "最大年份"
+
+#, fuzzy
+#~| msgid "Minimum year"
+#~ msgid "Use minimum year"
+#~ msgstr "最小年份"
 
 #~ msgid "Default left sidebar"
 #~ msgstr "預設左側邊欄"

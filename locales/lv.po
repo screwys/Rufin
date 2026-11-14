@@ -556,9 +556,6 @@ msgstr "Visi atskaņošanas saraksti"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "Visas dziesmas"
-
 msgid "All"
 msgstr "Visi"
 
@@ -589,9 +586,6 @@ msgstr "Anonīms (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonīms"
-
-msgid "Any genre"
-msgstr "Jebkurš žanrs"
 
 msgid "Any"
 msgstr "Jebkurš"
@@ -1789,6 +1783,9 @@ msgstr "EP"
 msgid "ERB"
 msgstr ""
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Rediģēt tekstus"
 
@@ -2872,6 +2869,19 @@ msgstr "Atspoguļotas joslas"
 msgid "Mirrored"
 msgstr "Atspoguļotas joslas"
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Atskaņot nejaušā secībā (atskaņot vēlāk)"
+
+#, fuzzy
+#| msgid "Play next"
+msgid "Mix (play next)"
+msgstr "Atskaņot nākamo"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3229,6 +3239,11 @@ msgstr "Nav savienots"
 msgid "Not needed for most servers"
 msgstr "Nav nepieciešams lielākajai daļai serveru"
 
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Vēl nekas nav atskaņots"
+
 msgid "Not set"
 msgstr "Nav iestatīts"
 
@@ -3310,12 +3325,6 @@ msgstr ""
 
 msgid "Only fill missing information"
 msgstr ""
-
-msgid "Only played tracks"
-msgstr "Tikai atskaņotās dziesmas"
-
-msgid "Only unplayed tracks"
-msgstr "Tikai neatskaņotās dziesmas"
 
 msgid "Opacity (%)"
 msgstr "Caurspīdīgums (%)"
@@ -3530,9 +3539,6 @@ msgstr "Atskaņot mākslinieku"
 msgid "Play count"
 msgstr "Atskaņošanas skaits"
 
-msgid "Play filter"
-msgstr "Atskaņošanas filtrs"
-
 msgid "Play genre"
 msgstr "Atskaņot pēc žanra"
 
@@ -3555,15 +3561,6 @@ msgstr "Atskaņot radio"
 msgid "Play radio"
 msgstr "Atskaņot radio"
 
-msgid "Play random (play later)"
-msgstr "Atskaņot nejaušā secībā (atskaņot vēlāk)"
-
-msgid "Play random (play next)"
-msgstr "Atskaņot nejaušā secībā (atskaņot nākamo)"
-
-msgid "Play random"
-msgstr "Atskaņot nejaušā secībā"
-
 msgid "Play track"
 msgstr "Atskaņot dziesmu"
 
@@ -3584,6 +3581,11 @@ msgstr "Atskaņošanas ātrums"
 
 msgid "Playback"
 msgstr "Atskaņošana"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Atskaņots"
 
 #, fuzzy
 #| msgid "Played"
@@ -5221,6 +5223,11 @@ msgid "Unmuted"
 msgstr "Skaņa atjaunota"
 
 #, fuzzy
+#| msgid "Never Played"
+msgid "Unplayed"
+msgstr "Nekad neatskaņotie"
+
+#, fuzzy
 #| msgid "Saved"
 msgid "Unsaved"
 msgstr "Saglabāts"
@@ -5305,12 +5312,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Izmantot lokālos failus atskaņošanai, tekstu un atbalstīto metadatu "
 "rediģēšanai"
-
-msgid "Use maximum year"
-msgstr "Izmantot maksimālo gadu"
-
-msgid "Use minimum year"
-msgstr "Izmantojiet minimālo gadu"
 
 #, fuzzy
 #| msgid "Use source setting"
@@ -5454,6 +5455,11 @@ msgstr "Gads"
 #, fuzzy
 #| msgid "Year"
 msgid "Yearly"
+msgstr "Gads"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
 msgstr "Gads"
 
 msgid "Yellow"
@@ -5793,6 +5799,33 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "All tracks"
+#~ msgstr "Visas dziesmas"
+
+#~ msgid "Any genre"
+#~ msgstr "Jebkurš žanrs"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Tikai atskaņotās dziesmas"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Tikai neatskaņotās dziesmas"
+
+#~ msgid "Play filter"
+#~ msgstr "Atskaņošanas filtrs"
+
+#~ msgid "Play random (play next)"
+#~ msgstr "Atskaņot nejaušā secībā (atskaņot nākamo)"
+
+#~ msgid "Play random"
+#~ msgstr "Atskaņot nejaušā secībā"
+
+#~ msgid "Use maximum year"
+#~ msgstr "Izmantot maksimālo gadu"
+
+#~ msgid "Use minimum year"
+#~ msgstr "Izmantojiet minimālo gadu"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ""
@@ -6658,9 +6691,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #, fuzzy
 #~ msgid "Play Last"
 #~ msgstr "Atskaņot vēlāk"
-
-#~ msgid "Play next"
-#~ msgstr "Atskaņot nākamo"
 
 #~ msgid "Play now"
 #~ msgstr "Atskaņot tagad"

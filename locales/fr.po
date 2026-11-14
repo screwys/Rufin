@@ -553,9 +553,6 @@ msgstr "Toutes les playlists"
 msgid "All time"
 msgstr "Tout le temps"
 
-msgid "All tracks"
-msgstr "Tous les morceaux"
-
 msgid "All"
 msgstr "Tout"
 
@@ -582,9 +579,6 @@ msgstr "Anonyme (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonyme"
-
-msgid "Any genre"
-msgstr "Tous les genres"
 
 msgid "Any"
 msgstr "Tout"
@@ -1599,6 +1593,9 @@ msgstr "EPs"
 msgid "ERB"
 msgstr "ERB"
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Modifier les paroles"
 
@@ -2578,6 +2575,19 @@ msgstr "Barres en miroir"
 msgid "Mirrored"
 msgstr "En miroir"
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Lire en aléatoire (plus tard)"
+
+#, fuzzy
+#| msgid "Play random (play next)"
+msgid "Mix (play next)"
+msgstr "Lire en aléatoire (ensuite)"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr "Mode"
 
@@ -2894,6 +2904,11 @@ msgid "Not needed for most servers"
 msgstr "Pas nécessaire pour la plupart des serveurs"
 
 #, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Aucune lecture pour l’instant"
+
+#, fuzzy
 #| msgid "Not connected"
 msgid "Not set"
 msgstr "Non connecté"
@@ -2974,12 +2989,6 @@ msgstr "Recherches en ligne"
 
 msgid "Only fill missing information"
 msgstr "Ne renseignez que les informations manquantes"
-
-msgid "Only played tracks"
-msgstr "Uniquement les morceaux déjà lus"
-
-msgid "Only unplayed tracks"
-msgstr "Uniquement les morceaux non lus"
 
 msgid "Opacity (%)"
 msgstr "Opacité (%)"
@@ -3180,9 +3189,6 @@ msgstr "Lire l’artiste"
 msgid "Play count"
 msgstr "Nombre de lectures"
 
-msgid "Play filter"
-msgstr "Filtre de lecture"
-
 msgid "Play genre"
 msgstr "Lire le genre"
 
@@ -3200,15 +3206,6 @@ msgstr "Lire la radio ensuite"
 
 msgid "Play radio"
 msgstr "Lire la radio"
-
-msgid "Play random (play later)"
-msgstr "Lire en aléatoire (plus tard)"
-
-msgid "Play random (play next)"
-msgstr "Lire en aléatoire (ensuite)"
-
-msgid "Play random"
-msgstr "Lire en aléatoire"
 
 msgid "Play track"
 msgstr "Lire le morceau"
@@ -3230,6 +3227,11 @@ msgstr "Vitesse de lecture"
 
 msgid "Playback"
 msgstr "Lecture"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Lu"
 
 #, fuzzy
 #| msgid "Played"
@@ -4684,6 +4686,11 @@ msgstr "Rétablir le son"
 msgid "Unmuted"
 msgstr "Son rétabli"
 
+#, fuzzy
+#| msgid "Ever played"
+msgid "Unplayed"
+msgstr "Déjà écouté"
+
 msgid "Unsaved"
 msgstr "Non enregistré"
 
@@ -4757,12 +4764,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Utiliser les fichiers locaux pour la lecture, les paroles et la modification "
 "des métadonnées prises en charge"
-
-msgid "Use maximum year"
-msgstr "Utiliser l’année maximale"
-
-msgid "Use minimum year"
-msgstr "Utiliser l’année minimale"
 
 msgid "Use sort tags"
 msgstr "Utiliser les balises de tri"
@@ -4890,6 +4891,11 @@ msgstr "Année"
 
 msgid "Yearly"
 msgstr "Annuel"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
+msgstr "Année"
 
 msgid "Yellow"
 msgstr "Jaune"
@@ -5198,6 +5204,30 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "All tracks"
+#~ msgstr "Tous les morceaux"
+
+#~ msgid "Any genre"
+#~ msgstr "Tous les genres"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Uniquement les morceaux déjà lus"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Uniquement les morceaux non lus"
+
+#~ msgid "Play filter"
+#~ msgstr "Filtre de lecture"
+
+#~ msgid "Play random"
+#~ msgstr "Lire en aléatoire"
+
+#~ msgid "Use maximum year"
+#~ msgstr "Utiliser l’année maximale"
+
+#~ msgid "Use minimum year"
+#~ msgstr "Utiliser l’année minimale"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ""

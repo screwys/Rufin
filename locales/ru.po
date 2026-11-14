@@ -550,9 +550,6 @@ msgstr "Все плейлисты"
 msgid "All time"
 msgstr "Всё время"
 
-msgid "All tracks"
-msgstr "Все треки"
-
 msgid "All"
 msgstr "Все"
 
@@ -579,9 +576,6 @@ msgstr "Анонимный (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Анонимный"
-
-msgid "Any genre"
-msgstr "Любой жанр"
 
 msgid "Any"
 msgstr "Любой"
@@ -1590,6 +1584,9 @@ msgstr "EP-альбомы"
 msgid "ERB"
 msgstr "ERB"
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Редактировать текст песни"
 
@@ -2567,6 +2564,19 @@ msgstr "Отражённые полосы"
 msgid "Mirrored"
 msgstr "Зеркальные"
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Воспроизвести в случайном порядке (позже)"
+
+#, fuzzy
+#| msgid "Play next"
+msgid "Mix (play next)"
+msgstr "Воспроизвести следующий трек"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr "Режим"
 
@@ -2882,6 +2892,11 @@ msgstr "Не подключено"
 msgid "Not needed for most servers"
 msgstr "Не требуется для большинства серверов"
 
+#, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Сейчас не играет"
+
 msgid "Not set"
 msgstr "Не задано"
 
@@ -2961,12 +2976,6 @@ msgstr "Онлайн-поиск"
 
 msgid "Only fill missing information"
 msgstr "Заполните только недостающую информацию"
-
-msgid "Only played tracks"
-msgstr "Только проигранные треки"
-
-msgid "Only unplayed tracks"
-msgstr "Только непрослушанные треки"
 
 msgid "Opacity (%)"
 msgstr "Прозрачность (%)"
@@ -3168,9 +3177,6 @@ msgstr "Воспроизвести исполнителя"
 msgid "Play count"
 msgstr "Количество воспроизведений"
 
-msgid "Play filter"
-msgstr "Воспроизвести фильтр"
-
 msgid "Play genre"
 msgstr "Воспроизвести жанр"
 
@@ -3188,15 +3194,6 @@ msgstr "Воспроизвести радио следующим"
 
 msgid "Play radio"
 msgstr "Воспроизвести радио"
-
-msgid "Play random (play later)"
-msgstr "Воспроизвести в случайном порядке (позже)"
-
-msgid "Play random (play next)"
-msgstr "Воспроизвести в случайном порядке (следующим)"
-
-msgid "Play random"
-msgstr "Воспроизвести в случайном порядке"
 
 msgid "Play track"
 msgstr "Воспроизвести трек"
@@ -3218,6 +3215,11 @@ msgstr "Скорость воспроизведения"
 
 msgid "Playback"
 msgstr "Плеер"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Воспроизведено"
 
 #, fuzzy
 #| msgid "Played"
@@ -4670,6 +4672,11 @@ msgstr "Включить звук"
 msgid "Unmuted"
 msgstr "Звук включен"
 
+#, fuzzy
+#| msgid "Ever played"
+msgid "Unplayed"
+msgstr "Когда-либо воспроизводили"
+
 msgid "Unsaved"
 msgstr "Несохраненный"
 
@@ -4745,12 +4752,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 "Использовать локальные файлы для воспроизведения, текстов песен и "
 "редактирования поддерживаемых метаданных"
-
-msgid "Use maximum year"
-msgstr "Использовать максимальный год"
-
-msgid "Use minimum year"
-msgstr "Использовать минимальный год"
 
 msgid "Use sort tags"
 msgstr "Использовать теги сортировки"
@@ -4877,6 +4878,11 @@ msgstr "Год"
 
 msgid "Yearly"
 msgstr "Ежегодно"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
+msgstr "Год"
 
 msgid "Yellow"
 msgstr "Жёлтый"
@@ -5199,6 +5205,33 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "All tracks"
+#~ msgstr "Все треки"
+
+#~ msgid "Any genre"
+#~ msgstr "Любой жанр"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Только проигранные треки"
+
+#~ msgid "Only unplayed tracks"
+#~ msgstr "Только непрослушанные треки"
+
+#~ msgid "Play filter"
+#~ msgstr "Воспроизвести фильтр"
+
+#~ msgid "Play random (play next)"
+#~ msgstr "Воспроизвести в случайном порядке (следующим)"
+
+#~ msgid "Play random"
+#~ msgstr "Воспроизвести в случайном порядке"
+
+#~ msgid "Use maximum year"
+#~ msgstr "Использовать максимальный год"
+
+#~ msgid "Use minimum year"
+#~ msgstr "Использовать минимальный год"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ""
@@ -6028,9 +6061,6 @@ msgstr "Добро пожаловать в программу установки
 #, fuzzy
 #~ msgid "Play Last"
 #~ msgstr "Воспроизвести позже"
-
-#~ msgid "Play next"
-#~ msgstr "Воспроизвести следующий трек"
 
 #~ msgid "Play now"
 #~ msgstr "Воспроизвести сейчас"
