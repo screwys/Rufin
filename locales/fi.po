@@ -518,9 +518,6 @@ msgstr "Kaikki soittolistat"
 msgid "All time"
 msgstr ""
 
-msgid "All tracks"
-msgstr "Kaikki kappaleet"
-
 msgid "All"
 msgstr "Kaikki"
 
@@ -551,9 +548,6 @@ msgstr "Anonyymi (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonyymi"
-
-msgid "Any genre"
-msgstr "Mikä tahansa tyylilaji"
 
 msgid "Any"
 msgstr "Mikä tahansa"
@@ -1754,6 +1748,9 @@ msgstr ""
 msgid "ERB"
 msgstr ""
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Muokkaa sanoituksia"
 
@@ -2822,6 +2819,19 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play random (play later)"
+msgid "Mix (play later)"
+msgstr "Toista satunnainen (toista myöhemmin)"
+
+#, fuzzy
+#| msgid "Play random (play next)"
+msgid "Mix (play next)"
+msgstr "Toista satunnainen (toista seuraavaksi)"
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3189,6 +3199,11 @@ msgid "Not needed for most servers"
 msgstr "Ei tarvita useimpien palvelinten kanssa"
 
 #, fuzzy
+#| msgid "Nothing played yet"
+msgid "Not played recently"
+msgstr "Mitään ei ole vielä toistettu"
+
+#, fuzzy
 #| msgid "Not connected"
 msgid "Not set"
 msgstr "Ei yhdistetty"
@@ -3270,12 +3285,6 @@ msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
-msgstr ""
-
-msgid "Only played tracks"
-msgstr "Vain toistetut kappaleet"
-
-msgid "Only unplayed tracks"
 msgstr ""
 
 msgid "Opacity (%)"
@@ -3495,9 +3504,6 @@ msgstr "Toista esittäjä"
 msgid "Play count"
 msgstr "Toistokerrat"
 
-msgid "Play filter"
-msgstr ""
-
 msgid "Play genre"
 msgstr ""
 
@@ -3519,15 +3525,6 @@ msgstr "Toista satunnainen (toista seuraavaksi)"
 
 msgid "Play radio"
 msgstr ""
-
-msgid "Play random (play later)"
-msgstr "Toista satunnainen (toista myöhemmin)"
-
-msgid "Play random (play next)"
-msgstr "Toista satunnainen (toista seuraavaksi)"
-
-msgid "Play random"
-msgstr "Toista satunnainen"
 
 msgid "Play track"
 msgstr "Toista kappale"
@@ -3553,6 +3550,11 @@ msgstr "Toistonopeus"
 
 msgid "Playback"
 msgstr "Toisto"
+
+#, fuzzy
+#| msgid "Played"
+msgid "Played"
+msgstr "Toistettu"
 
 #, fuzzy
 #| msgid "Played"
@@ -5209,6 +5211,11 @@ msgid "Unmuted"
 msgstr "Ääni palautettu"
 
 #, fuzzy
+#| msgid "Never Played"
+msgid "Unplayed"
+msgstr "Ei koskaan toistettu"
+
+#, fuzzy
 #| msgid "Saved"
 msgid "Unsaved"
 msgstr "Tallennettu"
@@ -5293,16 +5300,6 @@ msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
-
-#, fuzzy
-#| msgid "Maximum year"
-msgid "Use maximum year"
-msgstr "Vuosi enintään"
-
-#, fuzzy
-#| msgid "Minimum year"
-msgid "Use minimum year"
-msgstr "Vuosi vähintään"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -5451,6 +5448,11 @@ msgstr "Vuosi"
 #, fuzzy
 #| msgid "Year"
 msgid "Yearly"
+msgstr "Vuosi"
+
+#, fuzzy
+#| msgid "Year"
+msgid "Years"
 msgstr "Vuosi"
 
 msgid "Yellow"
@@ -5761,6 +5763,28 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "All tracks"
+#~ msgstr "Kaikki kappaleet"
+
+#~ msgid "Any genre"
+#~ msgstr "Mikä tahansa tyylilaji"
+
+#~ msgid "Only played tracks"
+#~ msgstr "Vain toistetut kappaleet"
+
+#~ msgid "Play random"
+#~ msgstr "Toista satunnainen"
+
+#, fuzzy
+#~| msgid "Maximum year"
+#~ msgid "Use maximum year"
+#~ msgstr "Vuosi enintään"
+
+#, fuzzy
+#~| msgid "Minimum year"
+#~ msgid "Use minimum year"
+#~ msgstr "Vuosi vähintään"
 
 #~ msgid "Default left sidebar"
 #~ msgstr "Oletusarvoinen vasen sivupalkki"

@@ -556,9 +556,6 @@ msgstr "Semua Playlist"
 msgid "All time"
 msgstr "Sepanjang waktu"
 
-msgid "All tracks"
-msgstr "Semua lagu"
-
 msgid "All"
 msgstr "Semua"
 
@@ -585,9 +582,6 @@ msgstr "Anonim (WebDAV / SMB)"
 
 msgid "Anonymous"
 msgstr "Anonim"
-
-msgid "Any genre"
-msgstr "Semua genre"
 
 msgid "Any"
 msgstr "Semua"
@@ -1612,6 +1606,9 @@ msgstr "EP"
 msgid "ERB"
 msgstr "ERB"
 
+msgid "Each plays whole"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Edit Lirik"
 
@@ -2590,6 +2587,15 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+msgid "Mix (play later)"
+msgstr ""
+
+msgid "Mix (play next)"
+msgstr ""
+
+msgid "Mix"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2901,6 +2907,9 @@ msgstr ""
 msgid "Not needed for most servers"
 msgstr ""
 
+msgid "Not played recently"
+msgstr ""
+
 msgid "Not set"
 msgstr ""
 
@@ -2978,12 +2987,6 @@ msgid "Online Lookups"
 msgstr ""
 
 msgid "Only fill missing information"
-msgstr ""
-
-msgid "Only played tracks"
-msgstr ""
-
-msgid "Only unplayed tracks"
 msgstr ""
 
 msgid "Opacity (%)"
@@ -3183,9 +3186,6 @@ msgstr ""
 msgid "Play count"
 msgstr ""
 
-msgid "Play filter"
-msgstr ""
-
 msgid "Play genre"
 msgstr ""
 
@@ -3202,15 +3202,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play random (play later)"
-msgstr ""
-
-msgid "Play random (play next)"
-msgstr ""
-
-msgid "Play random"
 msgstr ""
 
 msgid "Play track"
@@ -3232,6 +3223,9 @@ msgid "Playback speed"
 msgstr ""
 
 msgid "Playback"
+msgstr ""
+
+msgid "Played"
 msgstr ""
 
 msgid "Player"
@@ -4640,6 +4634,11 @@ msgstr ""
 msgid "Unmuted"
 msgstr ""
 
+#, fuzzy
+#| msgid "Ever played"
+msgid "Unplayed"
+msgstr "Pernah diputar"
+
 msgid "Unsaved"
 msgstr ""
 
@@ -4710,12 +4709,6 @@ msgid "Use listening activity"
 msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
-msgstr ""
-
-msgid "Use maximum year"
-msgstr ""
-
-msgid "Use minimum year"
 msgstr ""
 
 msgid "Use sort tags"
@@ -4842,6 +4835,9 @@ msgid "Year"
 msgstr ""
 
 msgid "Yearly"
+msgstr ""
+
+msgid "Years"
 msgstr ""
 
 msgid "Yellow"
@@ -5135,6 +5131,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "All tracks"
+#~ msgstr "Semua lagu"
+
+#~ msgid "Any genre"
+#~ msgstr "Semua genre"
 
 #~ msgid ". You only need to fill email and an application name parts"
 #~ msgstr ". Anda hanya perlu mengisi bagian email dan nama aplikasi"
