@@ -32,7 +32,7 @@ use crate::widgets::detail_links::DetailLinkBinding;
 use crate::widgets::interactions::{CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers};
 use crate::widgets::library_fields::COLLECTION_GRID_CARD_MARGIN;
 use crate::widgets::selection::PlayTarget;
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::album_row_artist_links;
@@ -43,9 +43,13 @@ type HomeRowBinding = Rc<dyn Fn(library::Row)>;
 struct MountedHomeSection {
     shell: std::rc::Weak<CatalogUi>,
     data: Rc<RefCell<Vec<library::Row>>>,
-    /// The scrolling row of entries.
+    /// The scrolling row: the columns built, then `rest`.
     row: gtk::Box,
-    /// Each shown entry's binding, in the order of `data`.
+    /// As wide as the columns not built yet, so the row scrolls its whole length from the start.
+    rest: gtk::Box,
+    /// The scroller's position, which says how far the row shows.
+    adjustment: glib::WeakRef<gtk::Adjustment>,
+    /// Each built entry's binding, in the order of `data`.
     cells: Rc<RefCell<Vec<HomeRowBinding>>>,
     /// The rows each column shows; 1 for cards.
     column_rows: usize,
@@ -59,6 +63,9 @@ impl MountedHomeSection {
                 && previous.iter().zip(&items).all(|(a, b)| match (a, b) {
                     (library::Row::Track(a), library::Row::Track(b)) => a.media_uri == b.media_uri,
                     (library::Row::Album(a), library::Row::Album(b)) => a.media_uri == b.media_uri,
+                    (library::Row::Artist(a), library::Row::Artist(b)) => {
+                        a.media_uri == b.media_uri
+                    }
                     (library::Row::Tag(a), library::Row::Tag(b)) => a.key == b.key,
                     _ => false,
                 })
@@ -79,18 +86,39 @@ impl MountedHomeSection {
         self.render();
     }
 
-    /// Builds the row's columns: cards, or columns of rows.
+    /// Starts the row over.
     fn render(&self) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
         while let Some(child) = self.row.first_child() {
             self.row.remove(&child);
         }
+        self.cells.borrow_mut().clear();
+        self.row.append(&self.rest);
+        self.fill();
+    }
+
+    /// Builds the columns, of cards or of rows, as far as the scroller shows the row. The ones
+    /// past it are built when the row scrolls or widens to them.
+    fn fill(&self) {
+        let (Some(shell), Some(adjustment)) = (self.shell.upgrade(), self.adjustment.upgrade())
+        else {
+            return;
+        };
+        let (width, gap) = column_size(self.column_rows);
+        let data = self.data.borrow();
+        let columns = data.len().div_ceil(self.column_rows);
+        // Before its first allocation the scroller shows no more than the route's width.
+        let end = match adjustment.page_size() {
+            page if page > 0.0 => scrolled(&adjustment, &self.row) + page,
+            _ => f64::from(shell.route_width()),
+        };
+        let shown = (end / f64::from(width + gap)).ceil() as usize;
         let mut cells = self.cells.borrow_mut();
-        cells.clear();
-        for items in self.data.borrow().chunks(self.column_rows) {
+        let built = cells.len().div_ceil(self.column_rows);
+        // One column past the ones shown, so keyboard focus moving on scrolls the row to it.
+        let wanted = (shown + 1).min(columns).max(built);
+        for items in data.chunks(self.column_rows).take(wanted).skip(built) {
             let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            column.set_width_request(width);
             for item in items.iter().cloned() {
                 let (cell, bind) = match item {
                     library::Row::Album(album) if self.column_rows == 1 => {
@@ -104,13 +132,8 @@ impl MountedHomeSection {
                 cells.push(bind);
                 column.append(&cell);
             }
-            let width = if self.column_rows == 1 {
-                CARD_WIDTH
-            } else {
-                ROW_COLUMN_WIDTH
-            };
             // A column stays its width: cards expand to fill grid cells and a long title asks for
-            // more, so a short row would widen them past the height measured below.
+            // more.
             let clamp = adw::Clamp::builder()
                 .maximum_size(width)
                 .tightening_threshold(width)
@@ -118,12 +141,13 @@ impl MountedHomeSection {
                 .hexpand(false)
                 .child(&column)
                 .build();
-            self.row.append(&clamp);
-            // The scroller measures its row with no width, but a card's square cover follows its
-            // width: the column takes the height its content has at its own width.
-            let height = column.measure(gtk::Orientation::Vertical, width).1;
-            column.set_size_request(width, height);
+            self.row
+                .insert_child_after(&clamp, self.rest.prev_sibling().as_ref());
         }
+        let rest = (columns - wanted) as i32;
+        self.rest.set_visible(rest > 0);
+        self.rest
+            .set_width_request((rest * (width + gap) - gap).max(0));
     }
 
     fn update(&self, mut update: impl FnMut(&mut library::Row) -> bool) {
@@ -168,16 +192,39 @@ fn column_rows(section: &HomeSection) -> usize {
     if section.shows_rows() { 2 } else { 1 }
 }
 
+/// The width of a column of `rows` rows and the gap to the next one.
+fn column_size(rows: usize) -> (i32, i32) {
+    if rows == 1 {
+        (CARD_WIDTH, CARD_GAP)
+    } else {
+        (ROW_COLUMN_WIDTH, ROW_COLUMN_GAP)
+    }
+}
+
+/// How far `adjustment` has scrolled `row` from its start, which is its right end in a
+/// right-to-left layout.
+fn scrolled(adjustment: &gtk::Adjustment, row: &impl IsA<gtk::Widget>) -> f64 {
+    if row.direction() == gtk::TextDirection::Rtl {
+        adjustment.upper() - adjustment.page_size() - adjustment.value()
+    } else {
+        adjustment.value() - adjustment.lower()
+    }
+}
+
 /// Scrolls `scroller` forward or back by the whole columns, `stride` apart, that fit its width, as
 /// Home's ‹ › do.
 fn scroll_page(scroller: &gtk::ScrolledWindow, stride: f64, forward: bool) {
     let adjustment = scroller.hadjustment();
     let columns = (adjustment.page_size() / stride).floor().max(1.0);
-    let first = (adjustment.value() / stride).round();
-    let to = ((first + if forward { columns } else { -columns }) * stride).clamp(
-        adjustment.lower(),
-        adjustment.upper() - adjustment.page_size(),
-    );
+    let first = (scrolled(&adjustment, scroller) / stride).round();
+    let length = adjustment.upper() - adjustment.lower() - adjustment.page_size();
+    let from_start =
+        ((first + if forward { columns } else { -columns }) * stride).clamp(0.0, length.max(0.0));
+    let to = if scroller.direction() == gtk::TextDirection::Rtl {
+        adjustment.upper() - adjustment.page_size() - from_start
+    } else {
+        adjustment.lower() + from_start
+    };
     let target = adw::PropertyAnimationTarget::new(&adjustment, "value");
     let scroll = adw::TimedAnimation::new(scroller, adjustment.value(), to, 250, target);
     scroll.set_easing(adw::Easing::EaseOutCubic);
@@ -737,11 +784,7 @@ impl CatalogUi {
         header.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         section.append(&header);
 
-        let (width, gap) = if rows == 1 {
-            (CARD_WIDTH, CARD_GAP)
-        } else {
-            (ROW_COLUMN_WIDTH, ROW_COLUMN_GAP)
-        };
+        let (width, gap) = column_size(rows);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, gap);
         row.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         row.set_margin_end(COLLECTION_GRID_CARD_MARGIN);
@@ -752,24 +795,28 @@ impl CatalogUi {
         scroller.set_hexpand(true);
         scroller.set_child(Some(&row));
         section.append(&scroller);
+        let adjustment = scroller.hadjustment();
         let mounted = MountedHomeSection {
             shell: Rc::downgrade(self),
             data: Rc::new(RefCell::new(items)),
             row,
+            rest: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            adjustment: adjustment.downgrade(),
             cells: Rc::new(RefCell::new(Vec::new())),
             column_rows: rows,
         };
         mounted.render();
-        // ‹ › scroll the row and rest at its ends.
-        let adjustment = scroller.hadjustment();
+        // The row builds as far as it shows; ‹ › scroll it and rest at its ends.
         let ends = {
             let previous = header.previous();
             let next = header.next();
+            let mounted = mounted.clone();
             move |adjustment: &gtk::Adjustment| {
-                previous.set_sensitive(adjustment.value() > adjustment.lower());
-                next.set_sensitive(
-                    adjustment.value() + adjustment.page_size() < adjustment.upper() - 1.0,
-                );
+                mounted.fill();
+                let from_start = scrolled(adjustment, &mounted.row);
+                let length = adjustment.upper() - adjustment.lower() - adjustment.page_size();
+                previous.set_sensitive(from_start > 0.0);
+                next.set_sensitive(from_start < length - 1.0);
             }
         };
         ends(&adjustment);
@@ -827,7 +874,7 @@ fn home_showcase_page(
     view.replace_summary(&[
         (
             "rufin-x-office-calendar-symbolic",
-            album.year.map(|year| year.to_string()).unwrap_or_default(),
+            rufin_core::settings::presentation::album_year(&album),
         ),
         (
             "rufin-tracks-symbolic",
@@ -874,6 +921,7 @@ fn home_album_card(
 ) -> (gtk::Widget, HomeRowBinding) {
     let cell = AlbumGridCell::new(shell, &rufin_core::settings::layout::HOME_ALBUM_FIELDS);
     cell.enable_card_activation();
+    cell.set_cover_size(CARD_WIDTH);
     cell.bind(0, album);
     let widget = cell.widget();
     (
@@ -892,6 +940,7 @@ fn home_artist_card(
 ) -> (gtk::Widget, HomeRowBinding) {
     let cell = ArtistGridCell::new(shell, &rufin_core::settings::layout::HOME_ARTIST_FIELDS);
     cell.enable_card_activation();
+    cell.set_cover_size(CARD_WIDTH);
     cell.bind(0, artist);
     let widget = cell.widget();
     (

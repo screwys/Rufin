@@ -508,7 +508,7 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
                         marquee = true)
                     if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, Modifier.rufinMarquee().padding(top = 2.dp),
                         style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    FactsPill(listOfNotNull(item.row.year?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it.toString()) },
+                    FactsPill(listOfNotNull(item.row.yearText?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it) },
                         Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
                         Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)), Modifier.padding(top = 8.dp))
                     }
@@ -767,7 +767,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                     BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true, showDownloadBadge = false)
                     Text(item.row.subtitle, Modifier.rufinMarquee(), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }
+                        item.row.yearText?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it) }
                         SummaryFact("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount))
                         SummaryFact("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
                     }

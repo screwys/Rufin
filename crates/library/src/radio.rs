@@ -7,7 +7,7 @@ use sqlx::{QueryBuilder, Sqlite};
 
 use crate::catalog::snapshot::Packed;
 use crate::catalog::snapshot::TrackRec;
-use crate::catalog::views::Context;
+use crate::catalog::views::{Context, known};
 use crate::{
     AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult, PlaylistKey,
     ReadCancellation, SourceKey, TrackKey,
@@ -74,7 +74,14 @@ pub enum PlayedFilter {
     All,
     Unplayed,
     Played,
+    /// Not played in the last six months, or never.
+    NotPlayedRecently,
+    /// Added in the last 30 days.
+    RecentlyAdded,
 }
+
+const RECENT_PLAY_SECONDS: i64 = 180 * 86_400;
+const RECENT_ADDITION_SECONDS: i64 = 30 * 86_400;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RandomCriteria {
@@ -82,7 +89,15 @@ pub struct RandomCriteria {
     pub max_year: Option<i64>,
     pub genre: Option<GenreKey>,
     pub played: PlayedFilter,
-    pub variation: i64,
+    /// Whole albums, each of whose tracks matches, in place of tracks.
+    pub albums: bool,
+}
+
+/// What a random pick chose, in the order it plays.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RandomPick {
+    Tracks(Vec<TrackKey>),
+    Albums(Vec<AlbumKey>),
 }
 
 impl Catalog {
@@ -173,12 +188,64 @@ impl Catalog {
             .await?)
     }
 
-    /// Tracks related to a seed by artist, album or genre, from a variation-chosen point in key
-    /// order, then any others when the related ones run out. Queued tracks are left out.
+    /// The MusicBrainz ids of a seed's artists in `source`: a track's or album's artists, or the
+    /// artist itself. A genre or playlist has none.
+    pub async fn radio_artist_mbids(
+        &self,
+        source: SourceKey,
+        seed: &RadioSeed,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        let mut connection = self.acquire_cancellable(cancellation).await?;
+        let artists = match seed {
+            RadioSeed::Track(uri) => sqlx::query_scalar::<_, Option<String>>("SELECT artist.musicbrainz_artist_id FROM tracks track JOIN track_links link ON link.track_key=track.track_key AND link.role=0 JOIN artists artist ON artist.artist_key=link.target WHERE track.source_key=?1 AND track.media_uri=?2 ORDER BY link.position")
+                .bind(source)
+                .bind(uri),
+            RadioSeed::Album(key) => sqlx::query_scalar("SELECT artist.musicbrainz_artist_id FROM album_links link JOIN artists artist ON artist.artist_key=link.target WHERE link.album_key=?2 AND link.role=0 AND artist.source_key=?1 ORDER BY link.position")
+                .bind(source)
+                .bind(key),
+            RadioSeed::Artist(key) | RadioSeed::AlbumArtist(key) => sqlx::query_scalar(
+                "SELECT musicbrainz_artist_id FROM artists WHERE source_key=?1 AND artist_key=?2",
+            )
+            .bind(source)
+            .bind(key),
+            RadioSeed::Genre(_) | RadioSeed::Playlist(_) => return Ok(Vec::new()),
+        };
+        Ok(artists
+            .fetch_all(&mut *connection)
+            .await?
+            .into_iter()
+            .flatten()
+            .filter(|mbid| !mbid.is_empty())
+            .collect())
+    }
+
+    /// The artists of `source` with one of the MusicBrainz ids `mbids`.
+    pub async fn artists_with_mbids(
+        &self,
+        source: SourceKey,
+        mbids: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<ArtistKey>> {
+        if mbids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut connection = self.acquire_cancellable(cancellation).await?;
+        Ok(sqlx::query_scalar("SELECT artist_key FROM artists WHERE source_key=?1 AND musicbrainz_artist_id IN (SELECT value FROM json_each(?2))")
+            .bind(source)
+            .bind(serde_json::to_string(mbids)?)
+            .fetch_all(&mut *connection)
+            .await?)
+    }
+
+    /// Tracks related to a seed, chosen evenly within each kind of relation: its artists, the
+    /// artists of `similar`, its genres and albums by its artists, then any others when the
+    /// related ones run out. Queued tracks are left out.
     pub async fn radio_candidates(
         &self,
         source: SourceKey,
         seed: RadioSeed,
+        similar: &[ArtistKey],
         extra_excluded: &[TrackKey],
         requested: usize,
         variation: i64,
@@ -267,12 +334,17 @@ impl Catalog {
             .map(|key| key.raw())
             .chain(queued)
             .collect::<HashSet<_>>();
+        let similar = similar
+            .iter()
+            .filter_map(|artist| snapshot.artists.slot(artist.raw()))
+            .collect::<HashSet<_>>();
         let by_artist = !matches!(seed, RadioSeed::AlbumArtist(_));
-        let candidates = pivoted(
+        let eligible = || {
             snapshot
                 .tracks
                 .iter()
-                .filter(|(_, track)| {
+                .map(|(_, track)| track)
+                .filter(|track| {
                     track.source == owner
                         && track.indexed()
                         && !excluded.contains(&i64::from(track.key))
@@ -280,49 +352,64 @@ impl Catalog {
                         && (!matches!(seed, RadioSeed::Album(_))
                             || seed_album.is_none_or(|album| track.album != album))
                 })
-                .map(|(_, track)| track),
-            variation,
-        );
-        let related = |track: &TrackRec| {
-            let runs = snapshot.track_runs(track);
-            (by_artist && runs[0].iter().any(|artist| artists.contains(artist)))
-                || related_albums.contains(&track.album)
-                || runs[2].iter().any(|genre| genres.contains(genre))
         };
-        let mut chosen = Vec::with_capacity(requested);
-        if related_seed {
-            chosen.extend(
-                candidates
-                    .iter()
-                    .filter(|track| related(track))
-                    .map(|track| i64::from(track.key))
-                    .take(requested),
-            );
+        // How close a track is to the seed: its artist, an artist of `similar`, its albums'
+        // artists or genres, or nothing.
+        let closeness = |track: &TrackRec| {
+            let runs = snapshot.track_runs(track);
+            if !related_seed {
+                3
+            } else if by_artist && runs[0].iter().any(|artist| artists.contains(artist)) {
+                0
+            } else if runs[0].iter().any(|artist| similar.contains(artist)) {
+                1
+            } else if related_albums.contains(&track.album)
+                || runs[2].iter().any(|genre| genres.contains(genre))
+            {
+                2
+            } else {
+                3
+            }
+        };
+        // A third each from the seed's artists and from similar ones, the rest from its genres;
+        // a group that runs short leaves its share to the next, and unrelated tracks fill up.
+        let share = requested.div_ceil(3);
+        let mut chosen = Vec::<&TrackRec>::with_capacity(requested);
+        for (group, share) in [(0, share), (1, share), (2, requested), (3, requested)] {
+            if group == 3 {
+                // The related ones play mixed, ahead of the unrelated.
+                crate::shuffle_order(&mut chosen, variation as u64);
+            }
+            let wanted = (chosen.len() + share).min(requested) - chosen.len();
+            if wanted > 0 {
+                chosen.extend(sampled(
+                    eligible().filter(|track| closeness(track) == group),
+                    wanted,
+                    (variation as u64).wrapping_add(group),
+                ));
+            }
         }
-        let picked = chosen.iter().copied().collect::<HashSet<_>>();
-        let rest = requested - chosen.len();
-        chosen.extend(
-            candidates
-                .iter()
-                .map(|track| i64::from(track.key))
-                .filter(|key| !picked.contains(key))
-                .take(rest),
-        );
-        Ok(chosen.into_iter().map(TrackKey::from_raw).collect())
+        Ok(chosen
+            .into_iter()
+            .map(|track| TrackKey::from_raw(i64::from(track.key)))
+            .collect())
     }
 
-    /// Visible tracks of a source that match the criteria, from a variation-chosen point in
-    /// key order. Queued tracks are left out.
-    pub async fn random_candidates(
+    /// `requested` tracks, or whole albums, of a source that match the criteria at `now` (unix
+    /// seconds), chosen evenly as `variation` picks.
+    /// The music folder narrows the tracks; an album counts with a track in it and every track
+    /// matching. Queued tracks are left out, and albums holding one.
+    pub async fn random_pick(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
         criteria: &RandomCriteria,
-        extra_excluded: &[TrackKey],
         requested: usize,
+        now: i64,
+        variation: i64,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
-        require_radio_bounds(extra_excluded.len(), requested)?;
+    ) -> LibraryResult<RandomPick> {
+        require_radio_bounds(0, requested)?;
         let queued = {
             let mut connection = self.acquire_cancellable(cancellation).await?;
             queued_tracks(&mut connection).await?
@@ -330,77 +417,123 @@ impl Catalog {
         self.loaded().await;
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
+        let none = || {
+            if criteria.albums {
+                RandomPick::Albums(Vec::new())
+            } else {
+                RandomPick::Tracks(Vec::new())
+            }
+        };
         let Some(owner) = snapshot.source_slot(source) else {
-            return Ok(Vec::new());
+            return Ok(none());
         };
         let folder = match folder {
             Some(folder) => match snapshot.folders.slot(folder.raw()) {
                 Some(slot) => Some(slot),
-                None => return Ok(Vec::new()),
+                None => return Ok(none()),
             },
             None => None,
         };
         let genre = match criteria.genre {
             Some(genre) => match snapshot.tags.slot(genre.raw()) {
                 Some(slot) => Some(slot),
-                None => return Ok(Vec::new()),
+                None => return Ok(none()),
             },
             None => None,
         };
-        let excluded = extra_excluded
-            .iter()
-            .map(|key| key.raw())
-            .chain(queued)
-            .collect::<HashSet<_>>();
+        let queued = queued.into_iter().collect::<HashSet<_>>();
         let year = |track: &TrackRec| (track.year != i16::MIN).then_some(i64::from(track.year));
-        let candidates = pivoted(
-            snapshot
-                .tracks
-                .iter()
-                .filter(|(slot, track)| {
-                    let runs = snapshot.track_runs(track);
-                    let plays = context.played(*slot, track).plays;
-                    track.source == owner
-                        && track.indexed()
-                        && !excluded.contains(&i64::from(track.key))
-                        && folder.is_none_or(|folder| runs[3].contains(&folder))
-                        && criteria
-                            .min_year
-                            .is_none_or(|min| year(track).is_some_and(|year| year >= min))
-                        && criteria
-                            .max_year
-                            .is_none_or(|max| year(track).is_some_and(|year| year <= max))
-                        && genre.is_none_or(|genre| runs[2].contains(&genre))
-                        && match criteria.played {
-                            PlayedFilter::All => true,
-                            PlayedFilter::Unplayed => plays == 0,
-                            PlayedFilter::Played => plays > 0,
-                        }
-                })
-                .map(|(_, track)| track),
-            criteria.variation,
-        );
-        Ok(candidates
+        let matches = |slot: u32, track: &TrackRec| {
+            let played = context.played(slot, track);
+            !queued.contains(&i64::from(track.key))
+                && criteria
+                    .min_year
+                    .is_none_or(|min| year(track).is_some_and(|year| year >= min))
+                && criteria
+                    .max_year
+                    .is_none_or(|max| year(track).is_some_and(|year| year <= max))
+                && genre.is_none_or(|genre| snapshot.track_runs(track)[2].contains(&genre))
+                && match criteria.played {
+                    PlayedFilter::All => true,
+                    PlayedFilter::Unplayed => played.plays == 0,
+                    PlayedFilter::Played => played.plays > 0,
+                    PlayedFilter::NotPlayedRecently => played
+                        .last
+                        .is_none_or(|last| i64::from(last) < now - RECENT_PLAY_SECONDS),
+                    PlayedFilter::RecentlyAdded => known(track.added)
+                        .is_some_and(|added| i64::from(added) >= now - RECENT_ADDITION_SECONDS),
+                }
+        };
+        let in_folder = |track: &TrackRec| {
+            folder.is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
+        };
+        let tracks = snapshot
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.source == owner && track.indexed());
+        let seed = variation as u64;
+        if !criteria.albums {
+            let chosen = sampled(
+                tracks.filter(|(slot, track)| in_folder(track) && matches(*slot, track)),
+                requested,
+                seed,
+            );
+            return Ok(RandomPick::Tracks(
+                chosen
+                    .into_iter()
+                    .map(|(_, track)| TrackKey::from_raw(i64::from(track.key)))
+                    .collect(),
+            ));
+        }
+        // Each album's slot with whether a track is in the folder and whether all match.
+        let mut albums = std::collections::HashMap::<u32, (bool, bool)>::new();
+        for (slot, track) in tracks {
+            if let Some(album) = context.album_of(track) {
+                let (inside, all) = albums.entry(album).or_insert((false, true));
+                *inside |= in_folder(track);
+                *all = *all && matches(slot, track);
+            }
+        }
+        let mut eligible = albums
             .into_iter()
-            .take(requested)
-            .map(|track| TrackKey::from_raw(i64::from(track.key)))
-            .collect())
+            .filter(|(_, (inside, all))| *inside && *all)
+            .map(|(album, _)| album)
+            .collect::<Vec<_>>();
+        // The map's order differs between runs; the variation alone picks.
+        eligible.sort_unstable();
+        Ok(RandomPick::Albums(
+            sampled(eligible.into_iter(), requested, seed)
+                .into_iter()
+                .filter_map(|album| snapshot.albums.key_of(album))
+                .map(AlbumKey::from_raw)
+                .collect(),
+        ))
     }
 }
 
-/// Tracks in key order from a point a variation picks, wrapping around.
-fn pivoted<'a>(tracks: impl Iterator<Item = &'a TrackRec>, variation: i64) -> Vec<&'a TrackRec> {
-    let mut tracks = tracks.collect::<Vec<_>>();
-    tracks.sort_unstable_by_key(|track| track.key);
-    let max = tracks.last().map_or(0, |track| i64::from(track.key));
-    let pivot = if max == 0 {
-        0
-    } else {
-        variation.rem_euclid(max + 1)
+/// `count` of `items`, each as likely as the others, in a shuffled order: one pass that holds
+/// only the chosen.
+fn sampled<T>(items: impl Iterator<Item = T>, count: usize, mut seed: u64) -> Vec<T> {
+    let mut next = || {
+        seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut n = seed;
+        n = (n ^ (n >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        n = (n ^ (n >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        n ^ (n >> 31)
     };
-    let split = tracks.partition_point(|track| i64::from(track.key) < pivot);
-    tracks.rotate_left(split);
-    tracks
+    let mut chosen = Vec::with_capacity(count);
+    for (seen, item) in items.enumerate() {
+        if chosen.len() < count {
+            chosen.push(item);
+        } else {
+            let at = ((u128::from(next()) * (seen as u128 + 1)) >> 64) as usize;
+            if at < count {
+                chosen[at] = item;
+            }
+        }
+    }
+    crate::shuffle_order(&mut chosen, next());
+    chosen
 }
 
 /// Keys of the tracks in the saved queue.

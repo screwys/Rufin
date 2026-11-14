@@ -6,6 +6,7 @@ use crate::presence::Settings as RichPresenceSettings;
 use library::PlayedFilter;
 use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
+pub use metadata_lookup::{ArtistImageProvider, CoverProvider};
 use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
     PlaybackSettings, QueueRepeatMode,
@@ -93,6 +94,7 @@ impl Default for ExternalSiteLinkSettings {
 }
 
 const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
+const DEFAULT_RANDOM_PLAY_ALBUM_LIMIT: usize = 10;
 const MIN_RANDOM_PLAY_LIMIT: usize = 1;
 const MAX_RANDOM_PLAY_LIMIT: usize = 500;
 const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
@@ -111,7 +113,11 @@ pub struct RandomPlayGenreSelection {
 #[serde(default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct RandomPlaySettings {
+    /// Whole albums in place of tracks.
+    pub albums: bool,
     pub limit: super::visualizer::PreferenceIndex,
+    /// How many albums, when it plays albums.
+    pub album_limit: super::visualizer::PreferenceIndex,
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
     pub genre: Option<RandomPlayGenreSelection>,
@@ -121,7 +127,9 @@ pub struct RandomPlaySettings {
 impl Default for RandomPlaySettings {
     fn default() -> Self {
         Self {
+            albums: false,
             limit: DEFAULT_RANDOM_PLAY_LIMIT,
+            album_limit: DEFAULT_RANDOM_PLAY_ALBUM_LIMIT,
             min_year: None,
             max_year: None,
             genre: None,
@@ -145,6 +153,9 @@ impl RandomPlaySettings {
     fn sanitize(&mut self) {
         self.limit = self
             .limit
+            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
+        self.album_limit = self
+            .album_limit
             .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
         self.min_year = self
             .min_year
@@ -204,6 +215,15 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     cast_proxy_enabled: bool = false => set_cast_proxy_enabled;
     #[serde(default = "default_true")]
     external_metadata_enabled: bool = true => set_external_metadata_enabled;
+    /// The album cover providers asked, in order; those left out are off.
+    #[serde(default = "default_cover_providers")]
+    cover_providers: Vec<metadata_lookup::CoverProvider> = default_cover_providers() => set_cover_providers;
+    /// The artist image providers asked, in order; those left out are off.
+    #[serde(default = "default_artist_image_providers")]
+    artist_image_providers: Vec<metadata_lookup::ArtistImageProvider> = default_artist_image_providers() => set_artist_image_providers;
+    /// The user's own fanart.tv key, sent beside Rufin's.
+    #[serde(default)]
+    fanart_api_key: String = String::new() => set_fanart_api_key;
     #[serde(default)]
     prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
     #[serde(default)]
@@ -411,8 +431,20 @@ impl Settings {
         artwork::ExternalPolicy::new(
             self.application.external_metadata_enabled,
             self.allows_external_metadata_lookup(),
-            self.lastfm_api_key.clone(),
+            self.lookup_policy(),
         )
+    }
+
+    /// The cover and artist image providers, in order, with their keys.
+    pub fn lookup_policy(&self) -> metadata_lookup::LookupPolicy {
+        metadata_lookup::LookupPolicy {
+            covers: self.application.cover_providers.clone(),
+            artist_images: self.application.artist_image_providers.clone(),
+            lastfm_api_key: crate::scrobbling::lastfm_application(&self.lastfm_api_key, "")
+                .0
+                .to_owned(),
+            fanart_api_key: self.application.fanart_api_key.clone(),
+        }
     }
 
     pub fn sanitize(&mut self) {
@@ -429,6 +461,9 @@ impl Settings {
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
+        self.application.fanart_api_key = self.application.fanart_api_key.trim().to_string();
+        dedupe(&mut self.application.cover_providers);
+        dedupe(&mut self.application.artist_image_providers);
         self.cast_network_interface = self
             .cast_network_interface
             .as_deref()
@@ -554,6 +589,24 @@ fn default_starting_page() -> SidebarRouteItem {
 
 fn default_release_check_interval_hours() -> u32 {
     6
+}
+
+fn default_cover_providers() -> Vec<metadata_lookup::CoverProvider> {
+    metadata_lookup::CoverProvider::all().into()
+}
+
+fn default_artist_image_providers() -> Vec<metadata_lookup::ArtistImageProvider> {
+    metadata_lookup::ArtistImageProvider::all().into()
+}
+
+/// Keeps the first of each provider.
+fn dedupe<T: PartialEq + Copy>(providers: &mut Vec<T>) {
+    let mut seen = Vec::with_capacity(providers.len());
+    providers.retain(|provider| {
+        let first = !seen.contains(provider);
+        seen.push(*provider);
+        first
+    });
 }
 
 fn default_true() -> bool {

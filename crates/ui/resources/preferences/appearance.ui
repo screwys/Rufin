@@ -2,146 +2,256 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20" />
   <requires lib="libadwaita" version="1.9" />
-  <object class="AdwPreferencesPage" id="appearance_page">
-    <property name="title" translatable="yes">Customization</property>
-    <property name="icon-name">rufin-preferences-desktop-appearance-symbolic</property>
+  <object class="GtkBox" id="appearance_page">
+    <property name="orientation">vertical</property>
     <child>
-      <object class="AdwPreferencesGroup">
-        <property name="title" translatable="yes">Accessibility</property>
+      <object class="AdwClamp">
+        <property name="maximum-size">600</property>
+        <property name="tightening-threshold">400</property>
+        <property name="margin-top">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="child">
+          <object class="AdwInlineViewSwitcher">
+            <property name="stack">tabs</property>
+            <property name="homogeneous">true</property>
+            <property name="hexpand">true</property>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwViewStack" id="tabs">
+        <property name="vexpand">true</property>
         <child>
-          <object class="AdwSwitchRow" id="reduce_motion">
-            <property name="title" translatable="yes">Reduce motion</property>
+          <object class="AdwViewStackPage">
+            <property name="name">layout</property>
+            <property name="title" translatable="yes">Layout</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Accessibility</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="reduce_motion">
+                        <property name="title" translatable="yes">Reduce motion</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Window</property>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title" translatable="yes">Left sidebar</property>
+                        <child type="suffix">
+                          <object class="AdwToggleGroup" id="default_left">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="name">full</property><property name="label" translatable="yes">Full</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">compact</property><property name="label" translatable="yes">Compact</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">hidden</property><property name="label" translatable="yes">Hidden</property></object></child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title" translatable="yes">Right sidebar</property>
+                        <child type="suffix">
+                          <object class="AdwToggleGroup" id="default_right">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="name">visible</property><property name="label" translatable="yes">Visible</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">hidden</property><property name="label" translatable="yes">Hidden</property></object></child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Narrow window</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="narrow_row">
+                        <property name="title" translatable="yes">Use different layout below a threshold width</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSpinRow" id="threshold_row">
+                        <property name="title" translatable="yes">Narrow layout threshold</property>
+                        <property name="digits">0</property>
+                        <property name="numeric">true</property>
+                        <child type="suffix">
+                          <object class="GtkLabel">
+                            <property name="label">px</property>
+                            <style>
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow" id="narrow_left_row">
+                        <property name="title" translatable="yes">Left sidebar</property>
+                        <child type="suffix">
+                          <object class="AdwToggleGroup" id="narrow_left">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="name">full</property><property name="label" translatable="yes">Full</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">compact</property><property name="label" translatable="yes">Compact</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">hidden</property><property name="label" translatable="yes">Hidden</property></object></child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow" id="narrow_right_row">
+                        <property name="title" translatable="yes">Right sidebar</property>
+                        <child type="suffix">
+                          <object class="AdwToggleGroup" id="narrow_right">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="name">visible</property><property name="label" translatable="yes">Visible</property></object></child>
+                            <child><object class="AdwToggle"><property name="name">hidden</property><property name="label" translatable="yes">Hidden</property></object></child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Navigation</property>
+                    <child>
+                      <object class="AdwActionRow" id="sidebar_items_row">
+                        <property name="title" translatable="yes">Sidebar items</property>
+                        <property name="activatable">true</property>
+                        <child type="suffix">
+                          <object class="GtkImage">
+                            <property name="icon-name">rufin-go-next-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow" id="home_blocks_row">
+                        <property name="title" translatable="yes">Home blocks</property>
+                        <property name="activatable">true</property>
+                        <child type="suffix">
+                          <object class="GtkImage">
+                            <property name="icon-name">rufin-go-next-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
           </object>
         </child>
-      </object>
-    </child>
-    <child>
-      <object class="AdwPreferencesGroup" id="layout_group">
-        <property name="title" translatable="yes">Layout</property>
-      </object>
-    </child>
-    <child>
-      <object class="AdwPreferencesGroup" id="sidebar_items_group">
         <child>
-          <object class="AdwExpanderRow" id="sidebar_items">
-            <property name="title" translatable="yes">Sidebar Items</property>
-            <property name="expanded">false</property>
-            <child>
-              <object class="AdwSwitchRow" id="sidebar_pins_row">
-                <property name="title" translatable="yes">Pins</property>
-                <property name="subtitle" translatable="yes">Fixed position</property>
+          <object class="AdwViewStackPage">
+            <property name="name">player</property>
+            <property name="title" translatable="yes">Player</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Bottom bar</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="bottom_bar_rating_row">
+                        <property name="title" translatable="yes">Show ratings in the bottom bar</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="waveform_row">
+                        <property name="title" translatable="yes">Waveform seekbar</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Right sidebar</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="lyrics_panel_row">
+                        <property name="title" translatable="yes">Show lyrics</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="visualizer_panel_row">
+                        <property name="title" translatable="yes">Show visualizer</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="combine_panels_row">
+                        <property name="title" translatable="yes">Combine lyrics and visualizer</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Fullscreen player</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="fullscreen_lyrics">
+                        <property name="title" translatable="yes">Show lyrics</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="fullscreen_visualizer">
+                        <property name="title" translatable="yes">Show visualizer</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="dynamic_background">
+                        <property name="title" translatable="yes">Dynamic background</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="background_image">
+                        <property name="title" translatable="yes">Enable background image</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
               </object>
-            </child>
+            </property>
           </object>
         </child>
-      </object>
-    </child>
-    <child>
-      <object class="AdwPreferencesGroup" id="home_blocks_group">
         <child>
-          <object class="AdwExpanderRow" id="home_blocks">
-            <property name="title" translatable="yes">Home Blocks</property>
-            <property name="expanded">false</property>
+          <object class="AdwViewStackPage">
+            <property name="name">menus</property>
+            <property name="title" translatable="yes">Menus</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup" id="menu_group">
+                    <property name="title" translatable="yes">Item menus</property>
+                    <property name="description" translatable="yes">Select an entry to show or hide it.</property>
+                    <child>
+                      <object class="GtkBox" id="menu_preview">
+                        <property name="orientation">vertical</property>
+                        <property name="halign">center</property>
+                        <property name="width-request">260</property>
+                        <property name="margin-top">8</property>
+                        <style>
+                          <class name="card" />
+                          <class name="menu-preview" />
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
           </object>
         </child>
-      </object>
-    </child>
-    <child>
-      <object class="AdwPreferencesGroup" id="context_menus_group">
-        <child>
-          <object class="AdwExpanderRow" id="context_menus">
-            <property name="title" translatable="yes">Context Menus</property>
-            <property name="expanded">false</property>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_play">
-                <property name="title" translatable="yes">Play</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_play_next">
-                <property name="title" translatable="yes">Play Next</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_play_later">
-                <property name="title" translatable="yes">Play Later</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_play_radio">
-                <property name="title" translatable="yes">Play radio</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_playlist">
-                <property name="title" translatable="yes">Add to Playlist</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_favorites">
-                <property name="title" translatable="yes">Favorites</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_metadata">
-                <property name="title" translatable="yes">Edit metadata</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_pins">
-                <property name="title" translatable="yes">Pins</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_go_to">
-                <property name="title" translatable="yes">Go to</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_download">
-                <property name="title" translatable="yes">Download</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_share">
-                <property name="title" translatable="yes">Share</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwSwitchRow" id="context_menu_rating_row">
-                <property name="title" translatable="yes">Rating</property>
-              </object>
-            </child>
-          </object>
-        </child>
-      </object>
-    </child>
-  </object>
-  <object class="AdwSwitchRow" id="lyrics_panel_row">
-    <property name="title" translatable="yes">Show lyrics</property>
-  </object>
-  <object class="AdwSwitchRow" id="visualizer_panel_row">
-    <property name="title" translatable="yes">Show visualizer</property>
-  </object>
-  <object class="AdwSwitchRow" id="combine_panels_row">
-    <property name="title" translatable="yes">Combine lyrics and visualizer</property>
-  </object>
-  <object class="AdwSwitchRow" id="bottom_bar_rating_row">
-    <property name="title" translatable="yes">Show ratings in the bottom bar</property>
-  </object>
-  <object class="AdwSwitchRow" id="narrow_row">
-    <property name="title" translatable="yes">Use different layout below a threshold width</property>
-  </object>
-  <object class="AdwSpinRow" id="threshold_row">
-    <property name="title" translatable="yes">Narrow layout threshold</property>
-    <property name="digits">0</property>
-    <property name="numeric">true</property>
-    <child type="suffix">
-      <object class="GtkLabel">
-        <property name="label">px</property>
-        <style>
-          <class name="dim-label" />
-        </style>
       </object>
     </child>
   </object>

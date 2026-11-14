@@ -37,31 +37,20 @@ pub type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync
 pub struct ExternalPolicy {
     pub allow_cached: bool,
     pub allow_network: bool,
-    pub allow_musicbrainz: bool,
-    pub lastfm_api_key: String,
+    /// The providers online covers and artist images are looked up at.
+    pub lookups: metadata_lookup::LookupPolicy,
 }
 
 impl ExternalPolicy {
-    pub fn new(allow_cached: bool, allow_network: bool, lastfm_api_key: impl Into<String>) -> Self {
+    pub fn new(
+        allow_cached: bool,
+        allow_network: bool,
+        lookups: metadata_lookup::LookupPolicy,
+    ) -> Self {
         Self {
             allow_cached,
             allow_network,
-            allow_musicbrainz: true,
-            lastfm_api_key: lastfm_api_key.into(),
-        }
-    }
-
-    pub const fn with_musicbrainz(mut self, allow: bool) -> Self {
-        self.allow_musicbrainz = allow;
-        self
-    }
-
-    pub const fn disabled() -> Self {
-        Self {
-            allow_cached: false,
-            allow_network: false,
-            allow_musicbrainz: false,
-            lastfm_api_key: String::new(),
+            lookups,
         }
     }
 }
@@ -81,7 +70,7 @@ impl ArtworkRequest {
             binding,
             fetch_size: ImageSize::Thumbnail(render_size.max(1)),
             render_size: render_size.max(1),
-            external: ExternalPolicy::disabled(),
+            external: ExternalPolicy::default(),
             cache_only: false,
         }
     }

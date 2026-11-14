@@ -150,7 +150,7 @@ pub trait NamedCollectionRow: CollectionRow {
     }
     fn field(&self, field: LibraryField) -> String;
     fn route(&self) -> Route;
-    fn artwork(&self) -> Vec<artwork::ArtworkBinding>;
+    fn artwork(&self) -> Vec<rufin_core::artwork::ArtworkBinding>;
     fn present_context(
         &self,
         target: &gtk::Widget,
@@ -222,14 +222,14 @@ impl NamedCollectionRow for TagRow {
     fn route(&self) -> Route {
         Route::of_tag(self)
     }
-    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
+    fn artwork(&self) -> Vec<rufin_core::artwork::ArtworkBinding> {
         self.artwork_binding
             .as_ref()
             .filter(|_| self.kind == TagKind::Genre)
             .map(std::slice::from_ref)
             .unwrap_or(&self.representative_artwork)
             .iter()
-            .map(|binding| artwork::ArtworkBinding::opaque(binding))
+            .map(|binding| rufin_core::artwork::ArtworkBinding::opaque(binding))
             .collect()
     }
     fn field(&self, field: LibraryField) -> String {
@@ -296,7 +296,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
     fn route(&self) -> Route {
         Route::of_playlist(self)
     }
-    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
+    fn artwork(&self) -> Vec<rufin_core::artwork::ArtworkBinding> {
         let binding = match self {
             Self::Playlist(row) => return playlist_artwork(row),
             Self::SmartPlaylist(row) => &row.artwork_binding,
@@ -304,7 +304,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
         };
         binding
             .iter()
-            .map(|binding| artwork::ArtworkBinding::opaque(binding))
+            .map(|binding| rufin_core::artwork::ArtworkBinding::opaque(binding))
             .collect()
     }
     fn present_context(

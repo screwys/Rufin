@@ -222,67 +222,6 @@ impl UserPreferences {
     pub const fn external_lyrics_network_allowed(&self, private_mode: bool) -> bool {
         self.external_lyrics_enabled && !private_mode
     }
-
-    pub fn move_external_lyrics_provider(
-        &mut self,
-        provider: ExternalLyricsProvider,
-        direction: isize,
-    ) -> bool {
-        let Some(index) = self
-            .external_lyrics_providers
-            .iter()
-            .position(|candidate| *candidate == provider)
-        else {
-            return false;
-        };
-        let Some(next) = index.checked_add_signed(direction) else {
-            return false;
-        };
-        if next >= self.external_lyrics_providers.len() {
-            return false;
-        }
-        self.external_lyrics_providers.swap(index, next);
-        true
-    }
-
-    pub fn reorder_external_lyrics_provider(
-        &mut self,
-        source: ExternalLyricsProvider,
-        target: ExternalLyricsProvider,
-        after: bool,
-    ) -> bool {
-        if source == target {
-            return false;
-        }
-        let before = self.external_lyrics_providers.clone();
-        let Some(source_index) = self
-            .external_lyrics_providers
-            .iter()
-            .position(|provider| *provider == source)
-        else {
-            return false;
-        };
-        let provider = self.external_lyrics_providers.remove(source_index);
-        let Some(mut target_index) = self
-            .external_lyrics_providers
-            .iter()
-            .position(|provider| *provider == target)
-        else {
-            self.external_lyrics_providers.insert(
-                source_index.min(self.external_lyrics_providers.len()),
-                provider,
-            );
-            return false;
-        };
-        if after {
-            target_index += 1;
-        }
-        self.external_lyrics_providers.insert(
-            target_index.min(self.external_lyrics_providers.len()),
-            provider,
-        );
-        self.external_lyrics_providers != before
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -983,54 +922,6 @@ mod tests {
         );
         assert_eq!(settings.preferences.lyrics_font_size, Some(28));
         assert_eq!(settings.preferences.lyrics_highlight_color, None);
-    }
-
-    #[test]
-    fn enabled_providers_can_be_reordered_by_drop_position() {
-        let mut settings = Settings {
-            preferences: UserPreferences {
-                external_lyrics_providers: vec![
-                    ExternalLyricsProvider::Lrclib,
-                    ExternalLyricsProvider::Netease,
-                    ExternalLyricsProvider::Genius,
-                ],
-                ..UserPreferences::default()
-            },
-            ..Settings::default()
-        };
-
-        assert!(settings.preferences.reorder_external_lyrics_provider(
-            ExternalLyricsProvider::Genius,
-            ExternalLyricsProvider::Lrclib,
-            false,
-        ));
-        assert_eq!(
-            settings.preferences.external_lyrics_providers,
-            vec![
-                ExternalLyricsProvider::Genius,
-                ExternalLyricsProvider::Lrclib,
-                ExternalLyricsProvider::Netease,
-            ]
-        );
-
-        assert!(settings.preferences.reorder_external_lyrics_provider(
-            ExternalLyricsProvider::Genius,
-            ExternalLyricsProvider::Netease,
-            true,
-        ));
-        assert_eq!(
-            settings.preferences.external_lyrics_providers,
-            vec![
-                ExternalLyricsProvider::Lrclib,
-                ExternalLyricsProvider::Netease,
-                ExternalLyricsProvider::Genius,
-            ]
-        );
-        assert!(!settings.preferences.reorder_external_lyrics_provider(
-            ExternalLyricsProvider::SimpMusic,
-            ExternalLyricsProvider::Lrclib,
-            false,
-        ));
     }
 
     #[test]

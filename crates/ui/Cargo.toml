@@ -13,7 +13,6 @@ publish.workspace = true
 [dependencies]
 adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
 app-identity.workspace = true
-artwork.workspace = true
 async-channel.workspace = true
 audio-processing.workspace = true
 desktop-integration.workspace = true
@@ -21,7 +20,6 @@ directories.workspace = true
 gtk = { workspace = true, features = ["v4_20"] }
 library.workspace = true
 localization.workspace = true
-lyrics.workspace = true
 playback.workspace = true
 process-memory.workspace = true
 pulldown-cmark.workspace = true

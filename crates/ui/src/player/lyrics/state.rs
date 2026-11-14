@@ -2,7 +2,7 @@ use super::{search::LyricsSearchDialog, view::LyricsPane};
 use crate::widgets::lyrics_editor::parse_lyrics_offset_millis;
 use adw::prelude::*;
 use gtk::glib;
-use lyrics::playback_position_for_lyrics_position;
+use rufin_core::lyrics::playback_position_for_lyrics_position;
 use std::cell::{Cell, RefCell};
 pub struct LyricsState {
     pub panel_visible: Cell<bool>,
@@ -50,7 +50,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use localization::tr;
-use lyrics::LyricsDocument;
+use rufin_core::lyrics::LyricsDocument;
 use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
 
 use crate::player::PlayerUi;

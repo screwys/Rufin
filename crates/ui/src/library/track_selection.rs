@@ -168,7 +168,7 @@ use crate::widgets::selection::{
 use crate::widgets::media_drag::{
     MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider,
 };
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 pub fn install_track_drag_source(
     target: &impl IsA<gtk::Widget>,
     artwork: &Rc<crate::widgets::artwork::ArtworkState>,

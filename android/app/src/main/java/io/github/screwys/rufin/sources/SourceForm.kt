@@ -17,7 +17,7 @@ internal class SourceForm {
     var secret by mutableStateOf("")
     var verification by mutableStateOf("")
     var trustInvalidCertificate by mutableStateOf(false)
-    var instantMix by mutableStateOf(true)
+    var instantMix by mutableStateOf(false)
     var halfStars by mutableStateOf(false)
     var offersHalfStarSetting by mutableStateOf(false)
     var manualEmby by mutableStateOf(false)
@@ -44,7 +44,7 @@ internal class SourceForm {
         username = saved.credentials.username
         trustInvalidCertificate = saved.credentials.trustInvalidCert
         subsonicAuth = saved.credentials.openSubsonicAuthentication?.name?.lowercase() ?: "password"
-        instantMix = saved.useInstantMix ?: true
+        instantMix = saved.useInstantMix ?: false
         manualEmby = !saved.embyConnect
         saved.plexSettings?.let { settings ->
             url = settings.addressOverride.orEmpty()

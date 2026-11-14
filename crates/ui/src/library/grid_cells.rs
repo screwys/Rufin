@@ -643,6 +643,10 @@ impl AlbumGridCell {
         });
     }
 
+    pub fn set_cover_size(&self, size: i32) {
+        self.body.set_cover_size(size);
+    }
+
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(RefCell::new(None::<AlbumRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play album"));
@@ -741,6 +745,10 @@ impl ArtistGridCell {
             &self.current,
             rufin_core::route::Route::of_artist,
         );
+    }
+
+    pub fn set_cover_size(&self, size: i32) {
+        self.body.set_cover_size(size);
     }
 
     pub(crate) fn set_play_count_caption(&self, count: i64) {
@@ -968,6 +976,7 @@ impl MediaPlayingBinding {
 
 pub struct CollectionGridCardCell {
     pub card: CollectionGridCardView,
+    cover: gtk::Widget,
     pub title: gtk::Label,
     fields: RefCell<Vec<CollectionGridFieldCell>>,
     ready: Cell<bool>,
@@ -1007,14 +1016,20 @@ impl CollectionGridCardCell {
         for field in &field_cells {
             card.append(&field.widget);
         }
-        let cell = Self {
+        Self {
             card,
+            cover,
             title,
             fields: RefCell::new(field_cells),
             ready: Cell::new(false),
             playing_target: RefCell::new(None),
-        };
-        cell
+        }
+    }
+
+    /// Sets the square cover's size, for a card of a set width outside a grid: its height then
+    /// measures the same without a width, as a horizontal scroller asks for it.
+    fn set_cover_size(&self, size: i32) {
+        self.cover.set_size_request(size, size);
     }
 
     pub fn set_folder(&self, folder: bool) {

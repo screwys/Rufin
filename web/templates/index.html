@@ -239,7 +239,6 @@
         <header class="fullscreen-topbar">
           <button type="button" id="close-fullscreen" class="icon-button" title="{{ localization::tr("Close fullscreen player") }}" aria-label="{{ localization::tr("Close fullscreen player") }}">{% call m::icon("rufin-go-down-symbolic") %}{% endcall %}</button>
           <button type="button" id="fullscreen-pane" class="icon-button" title="{{ localization::tr("Switch pane") }}" aria-label="{{ localization::tr("Switch pane") }}">{% call m::icon("rufin-view-dual-symbolic") %}{% endcall %}</button>
-          <button type="button" id="fullscreen-customize" class="icon-button" title="{{ localization::tr("Customize display") }}" aria-label="{{ localization::tr("Customize display") }}" aria-haspopup="menu">{% call m::icon("rufin-sliders-2-symbolic") %}{% endcall %}</button>
         </header>
         <div class="fullscreen-panes">
           <div id="fullscreen-first" class="fullscreen-pane">
@@ -257,11 +256,6 @@
           <div id="fullscreen-second" class="fullscreen-pane fullscreen-card"></div>
         </div>
       </section>
-      <div id="fullscreen-settings" popover="auto" role="menu" aria-label="{{ localization::tr("Customize display") }}">
-        <label class="menu-switch">{{ localization::tr("Show lyrics") }}<input type="checkbox" role="switch" data-setting="/fullscreen_lyrics_visible" /></label>
-        <label class="menu-switch">{{ localization::tr("Dynamic background") }}<input type="checkbox" role="switch" data-setting="/fullscreen_dynamic_background" /></label>
-        <label class="menu-switch">{{ localization::tr("Enable background image") }}<input type="checkbox" role="switch" data-setting="/fullscreen_background_image" /></label>
-      </div>
 
       <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
         <input type="hidden" name="id" value="{{ page.source }}" />
@@ -337,11 +331,11 @@
               <button
                 id="random"
                 class="icon-button"
-                aria-label="{{ localization::tr("Play random") }}"
-                title="{{ localization::tr("Play random") }}"
+                aria-label="{{ localization::tr("Mix") }}"
+                title="{{ localization::tr("Mix") }}"
                 aria-haspopup="dialog"
               >
-                {% call m::icon("rufin-random-symbolic") %}{% endcall %}
+                {% call m::icon("rufin-mix-symbolic") %}{% endcall %}
               </button>
             </div>
           </div>
@@ -419,7 +413,7 @@
           <label><input type="radio" name="sleep-timer-kind" value="minutes" checked />{{ localization::tr("Time") }}</label>
           <label><input type="radio" name="sleep-timer-kind" value="tracks" />{{ localization::tr("Tracks") }}</label>
         </div>
-        <div id="sleep-timer-presets"></div>
+        <div id="sleep-timer-presets" class="chips"></div>
         <div class="sleep-timer-custom">
           <label for="sleep-timer-value" id="sleep-timer-value-label">{{ localization::tr("Minutes") }}</label>
           <input id="sleep-timer-value" type="number" min="1" max="240" value="25" inputmode="numeric" />
@@ -447,41 +441,44 @@
       role="dialog"
       aria-labelledby="random-title"
     >
-      <button id="random-close" class="icon-button" type="button" data-close="random-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button>
       <form id="random-form">
-        <h2 id="random-title">{{ localization::tr("Play random") }}</h2>
-        <div class="random-row">
-          <label id="random-count-label" for="random-count">{{ localization::tr("Number of songs") }}</label
-          >{% call m::spin("random-count", 1, 500, 100, false) %}{% endcall %}
+        <h2 id="random-title">{{ localization::tr("Mix") }}</h2>
+        <div class="segmented" role="radiogroup" aria-labelledby="random-title">
+          <label><input type="radio" name="random-unit" value="0" checked />{{ localization::tr("Tracks") }}</label>
+          <label><input type="radio" name="random-unit" value="1" />{{ localization::tr("Albums") }}</label>
         </div>
-        <div class="random-row">
-          <label id="random-min-year-label" for="random-min-year">{{ localization::tr("Minimum year") }}</label>
-          <div class="year-value">
-            <input
-              id="use-min-year"
-              type="checkbox"
-              aria-label="{{ localization::tr("Use minimum year") }}"
-            />{% call m::spin("random-min-year", 1850, 2050, 1850, true) %}{% endcall %}
+        <div id="random-played" class="chips" role="group" aria-labelledby="random-title">
+          <button type="button" class="wide" value="NotPlayedRecently" aria-pressed="false">{{ localization::tr("Not played recently") }}</button>
+          <button type="button" value="All" aria-pressed="true">{{ localization::tr("Random") }}</button>
+          <button type="button" value="Unplayed" aria-pressed="false">{{ localization::tr("Unplayed") }}</button>
+          <button type="button" value="Played" aria-pressed="false">{{ localization::tr("Played") }}</button>
+          <button type="button" value="RecentlyAdded" aria-pressed="false">{{ localization::tr("Recently added") }}</button>
+        </div>
+        <div class="pref-group">
+          <div class="pref-row">
+            <span class="pref-label"><span id="random-genre-label">{{ localization::tr("Genre") }}</span></span>
+            <button
+              id="random-genre"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-labelledby="random-genre-label random-genre"
+            ><span>{{ localization::tr("Any") }}</span></button>
           </div>
-        </div>
-        <div class="random-row">
-          <label id="random-max-year-label" for="random-max-year">{{ localization::tr("Maximum year") }}</label>
-          <div class="year-value">
-            <input
-              id="use-max-year"
-              type="checkbox"
-              aria-label="{{ localization::tr("Use maximum year") }}"
-            />{% call m::spin("random-max-year", 1850, 2050, 2050, true) %}{% endcall %}
+          <div class="pref-row">
+            <span class="pref-label"><span>{{ localization::tr("Years") }}</span></span>
+            <span class="pref-unit">
+              <input id="random-min-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Minimum year") }}" />–<input id="random-max-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Maximum year") }}" />
+            </span>
           </div>
-        </div>
-        <div class="random-row">
-          <label for="random-genre">{{ localization::tr("Genre") }}</label
-          ><button
-            id="random-genre"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded="false"
-          >{{ localization::tr("Any genre") }}</button>
+          <div class="pref-row">
+            <span class="pref-label" id="random-count-label"><span>{{ localization::tr("Tracks") }}</span><span hidden>{{ localization::tr("Albums") }}</span><small hidden>{{ localization::tr("Each plays whole") }}</small></span>
+            <div class="spin" role="group" aria-labelledby="random-count-label">
+              <button type="button" data-step="-1" aria-label="{{ localization::tr("Decrease") }}">{% call m::icon("rufin-list-remove-symbolic") %}{% endcall %}</button>
+              <input id="random-count" type="number" min="1" max="500" value="100" required aria-labelledby="random-count-label" />
+              <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}</button>
+            </div>
+          </div>
         </div>
         <div id="genre-menu" popover="auto">
           <input
@@ -490,18 +487,10 @@
             aria-label="{{ localization::tr("Search genres") }}"
             placeholder="{{ localization::tr("Search...") }}"
           />
-          <button id="any-genre" type="button" role="option">{{ localization::tr("Any genre") }}</button>
+          <button id="any-genre" type="button" role="option">{{ localization::tr("Any") }}</button>
           <div id="genre-options" role="listbox" aria-label="{{ localization::tr("Genres") }}">
             <div id="genre-window"></div>
           </div>
-        </div>
-        <div class="random-row">
-          <label for="random-played">{{ localization::tr("Play filter") }}</label
-          ><select id="random-played">
-            <option value="All">{{ localization::tr("All tracks") }}</option>
-            <option value="Unplayed">{{ localization::tr("Only unplayed tracks") }}</option>
-            <option value="Played">{{ localization::tr("Only played tracks") }}</option>
-          </select>
         </div>
         <div class="dialog-actions">
           <button type="submit" value="next">

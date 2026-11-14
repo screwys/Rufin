@@ -1,9 +1,9 @@
 use crate::shell::shell::Shell;
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
 use localization::tr;
 use localization::track_count_text;
+use rufin_core::artwork::ArtworkBinding;
 use rufin_core::downloads::{DownloadEvent, DownloadFeedbackKind};
 use sources::SourceId;
 use std::time::Duration;

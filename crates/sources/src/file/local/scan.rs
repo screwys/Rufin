@@ -12,7 +12,7 @@ use crate::source::SourceProgress;
 use crate::{SourceError, SourceResult};
 
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-pub(crate) const LOCAL_PARSER_VERSION: i64 = 20;
+pub(crate) const LOCAL_PARSER_VERSION: i64 = 21;
 
 pub(crate) async fn read_saved_file(
     observation: &library::Observation<'_>,

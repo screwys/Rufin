@@ -2015,8 +2015,12 @@ impl SourceOwner {
                         stored.ui.lastfm_api_key.clear();
                         stored.scrobbling.lastfm.username.clear();
                         stored.scrobbling.librefm.username.clear();
-                        for descriptor in crate::scrobbling::secret_descriptors() {
-                            descriptor.value_mut(&mut stored.scrobbling).clear();
+                        for server in &mut stored.scrobbling.servers {
+                            server.username.clear();
+                        }
+                        for descriptor in crate::scrobbling::secret_descriptors(&stored.scrobbling)
+                        {
+                            descriptor.set(&mut stored.scrobbling, String::new());
                         }
                         stored.scrobbling_secrets_present = false;
                         stored.scrobbling_credentials.clear();

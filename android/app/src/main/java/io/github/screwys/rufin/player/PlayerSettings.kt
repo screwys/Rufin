@@ -12,12 +12,10 @@ import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 import io.github.screwys.rufin.settings.SettingsSwitch
-import io.github.screwys.rufin.settings.SettingsReorderRows
-import io.github.screwys.rufin.settings.SettingsReorderItem
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.SettingsSliderNumber
-import io.github.screwys.rufin.settings.settingsTextFieldColors
+import io.github.screwys.rufin.settings.SettingsText
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -45,7 +43,6 @@ import io.github.screwys.rufin.shared.playback.LoudnessNormalization
 import io.github.screwys.rufin.shared.playback.LoudnessNormalizationScope
 import io.github.screwys.rufin.shared.playback.VolumeScale
 import io.github.screwys.rufin.shared.playback.StreamQuality
-import io.github.screwys.rufin.shared.lyrics.ExternalLyricsProvider
 import io.github.screwys.rufin.shared.rufin_core.VisualizerStyle
 import io.github.screwys.rufin.shared.rufin_core.VisualizerFrequencyScale
 import io.github.screwys.rufin.shared.rufin_core.VisualizerWeighting
@@ -111,15 +108,10 @@ internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSetting
     }
 }
 
-/** As GTK's player settings popover and fullscreen display settings. */
+/** As GTK's player settings popover. */
 @Composable
 private fun PlayerPlaybackSettings(player: PlayerConnection) {
-    val state = player.settings ?: return
-    SettingsGroup {
-        TransitionAndSpeed(player)
-        PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { player.editPreferences { setSeekbarWaveformEnabled(it) } }
-    }
-    PlayerLayoutPreferences(player)
+    SettingsGroup { TransitionAndSpeed(player) }
 }
 
 /** Transition, crossfade, speed and pitch: the first rows of both GTK's playback page and its player settings. */
@@ -196,20 +188,6 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
         dismissButton = { TextButton({ confirmEbu = false }) { Text(translate("Cancel")) } })
 }
 
-@Composable
-internal fun PlayerLayoutPreferences(player: PlayerConnection) {
-    val state = player.settings ?: return
-    fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
-    SettingsGroup(translate("Layout")) {
-        PreferenceSwitch("Show lyrics", state.display.fullscreenLyricsVisible) { change { setFullscreenLyricsVisible(it) } }
-        PreferenceSwitch("Show visualizer", state.display.fullscreenVisualizerVisible) { change { setFullscreenVisualizerVisible(it) } }
-        PreferenceSwitch("Show current lyrics line", state.display.fullscreenCurrentLyricsLineVisible) { change { setFullscreenCurrentLyricsLineVisible(it) } }
-        PreferenceSwitch("Combine lyrics and visualizer", state.rightPanel.combined) { change { setRightPanelCombined(it) } }
-        PreferenceSwitch("Dynamic background", state.display.fullscreenDynamicBackground) { change { setFullscreenDynamicBackground(it) } }
-        PreferenceSwitch("Enable background image", state.display.fullscreenBackgroundImage) { change { setFullscreenBackgroundImage(it) } }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LyricsSettings(player: PlayerConnection) {
@@ -218,30 +196,16 @@ private fun LyricsSettings(player: PlayerConnection) {
     var highlightEdit by remember { mutableStateOf(false) }
     val accent = MaterialTheme.colorScheme.primary
     fun change(edit: SettingsOwner.() -> Unit) { player.lyricsPreference(edit) }
-    SettingsGroup(translate("Sources")) {
-    PreferenceSwitch("External lyrics lookup", lyrics.externalLyricsEnabled) { change { setExternalLyricsEnabled(it) } }
-    PreferenceSwitch("Prefer server lyrics", lyrics.preferServerLyrics) { change { setPreferServerLyrics(it) } }
-    }
     SettingsGroup(translate("Lyrics storage")) {
     PreferenceSwitch("Saves lyrics to your source", lyrics.saveLyricsToSource) { change { setSaveLyricsToSource(it) } }
     PreferenceSwitch("Save lyrics automatically", lyrics.saveLyricsAutomatically) { change { setSaveLyricsAutomatically(it) } }
-    val order = lyrics.externalLyricsProviders
-    SettingsReorderRows(ExternalLyricsProvider.entries.sortedBy { order.indexOf(it).let { index -> if (index < 0) Int.MAX_VALUE else index } }
-        .map { SettingsReorderItem(it.name, when (it) {
-            ExternalLyricsProvider.LRCLIB -> "LRCLIB"
-            ExternalLyricsProvider.NETEASE -> "NetEase"
-            ExternalLyricsProvider.GENIUS -> "Genius"
-            ExternalLyricsProvider.SIMP_MUSIC -> "SimpMusic"
-        }, it in order, it in order) },
-        onReorder = { next, _, _, _ -> change { setExternalLyricsProviders(next.map(ExternalLyricsProvider::valueOf).filter { it in order }) } },
-        onToggle = { id, enabled -> val provider = ExternalLyricsProvider.valueOf(id); change { setExternalLyricsProviders(if (enabled) order + provider else order - provider) } })
     PreferenceChoice(translate("Lyrics storage"), if (lyrics.saveLyricsAsSidecar) "sidecar" else "embedded",
         listOf("sidecar" to translate("Save in folder"), "embedded" to translate("Embed in track")),
         select = { change { setSaveLyricsAsSidecar(it == "sidecar") } })
     }
     SettingsGroup(translate("Language and readings")) {
     PreferenceSwitch("Prefer translations", lyrics.preferTranslations) { change { setPreferTranslations(it) } }
-    PreferenceText("Translation language", lyrics.preferredTranslationLanguage) { change { setPreferredTranslationLanguage(it) } }
+    SettingsText(translate("Translation language"), lyrics.preferredTranslationLanguage, lyrics.preferredTranslationLanguage.ifBlank { translate("System default") }) { change { setPreferredTranslationLanguage(it) } }
     PreferenceSwitch("Furigana", lyrics.showFurigana) { change { setShowFurigana(it) } }
     PreferenceSwitch("Romaji", lyrics.showRomanization) { change { setShowRomanization(it) } }
     }
@@ -258,7 +222,7 @@ private fun LyricsSettings(player: PlayerConnection) {
     ColorSetting("Karaoke highlight color", highlightColor) { highlightEdit = true }
     }
     SettingsGroup(translate("Typography")) {
-    PreferenceText("Font family", lyrics.fullscreenLyricsFontFamily.orEmpty()) {
+    SettingsText(translate("Font family"), lyrics.fullscreenLyricsFontFamily.orEmpty(), lyrics.fullscreenLyricsFontFamily.orEmpty().ifBlank { translate("System default") }) {
         change { setFullscreenLyricsFontFamily(it.ifBlank { null }) }
     }
     PreferenceSlider("Font size (px)", (lyrics.fullscreenLyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) {
@@ -266,7 +230,7 @@ private fun LyricsSettings(player: PlayerConnection) {
     }
     }
     SettingsGroup(translate("Sidebar")) {
-    PreferenceText("Font family", lyrics.lyricsFontFamily.orEmpty()) { change { setLyricsFontFamily(it.ifBlank { null }) } }
+    SettingsText(translate("Font family"), lyrics.lyricsFontFamily.orEmpty(), lyrics.lyricsFontFamily.orEmpty().ifBlank { translate("System default") }) { change { setLyricsFontFamily(it.ifBlank { null }) } }
     PreferenceSlider("Font size (px)", (lyrics.lyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) { change { setLyricsFontSize(it.toInt().toUShort()) } }
     }
     if (highlightEdit) PlayerColorDialog("Karaoke highlight color",
@@ -492,19 +456,6 @@ private fun PreferenceSlider(label: String, value: Float, range: ClosedFloatingP
         if (range.endInclusive == range.start) 1.0 else (range.endInclusive - range.start).toDouble() / (steps + 1),
         enabled = range.endInclusive > range.start, continuous = continuous,
         marks = marks?.takeIf { range.endInclusive > range.start }?.let { values -> { SliderMarks(range, values) } }) { change((it as Number).toFloat()) }
-}
-
-@Composable
-private fun PreferenceText(label: String, value: String, change: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    var draft by remember(value) { mutableStateOf(value) }
-    SettingsRow(translate(label),
-        summary = value.ifBlank { translate("System default") },
-        modifier = Modifier.clickable { draft = value; open = true })
-    if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(translate(label)) },
-        text = { OutlinedTextField(draft, { draft = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, colors = settingsTextFieldColors()) },
-        confirmButton = { TextButton({ change(draft); open = false }) { Text(translate("Save")) } },
-        dismissButton = { TextButton({ open = false }) { Text(translate("Cancel")) } })
 }
 
 @Composable

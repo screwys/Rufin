@@ -407,6 +407,7 @@ async fn resolve_album(
                 genres
             },
             release_types: Vec::new(),
+            version: filled(|member| member.album_tags.as_ref()?.version.as_deref()),
         })?,
     };
     // Kept to the second: the album's date added orders albums, and readers show its date.

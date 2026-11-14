@@ -2446,6 +2446,7 @@ mod tests {
                         sort_text: "second".into(),
                         is_compilation: None,
                         release_types: vec!["EP".into(), "ep".into()],
+                        version: None,
                     });
                     third
                 },

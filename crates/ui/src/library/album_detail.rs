@@ -1193,7 +1193,7 @@ impl AlbumSidePanel {
                     album,
                 ));
             self.release
-                .set_text(&album.year.map(|year| year.to_string()).unwrap_or_default());
+                .set_text(&rufin_core::settings::presentation::album_year(album));
             let facts = [
                 track_count_text(album.summary.track_count.max(0) as u64),
                 rufin_core::settings::presentation::format_duration_units(

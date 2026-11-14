@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use ::library::{PlaylistRow, QueueRow, TrackRow};
 use adw::prelude::*;
-use artwork::ArtworkBinding;
+use rufin_core::artwork::ArtworkBinding;
 
 use localization::{msgid, tr};
 use rufin_core::settings::layout::{LibraryField, LibraryLayout, LibraryListKey};
@@ -181,11 +181,14 @@ pub fn sync_layout_buttons(
     }
 }
 pub fn supported_layouts(key: LibraryListKey) -> Vec<LibraryLayout> {
-    let mut layouts = vec![LibraryLayout::Row, LibraryLayout::Grid];
-    if key.supports_layout(LibraryLayout::Detail) {
-        layouts.push(LibraryLayout::Detail);
-    }
-    layouts
+    [
+        LibraryLayout::Row,
+        LibraryLayout::Grid,
+        LibraryLayout::Detail,
+    ]
+    .into_iter()
+    .filter(|layout| key.supports_layout(*layout))
+    .collect()
 }
 pub fn next_layout(key: LibraryListKey, layout: LibraryLayout) -> LibraryLayout {
     if key.supports_layout(LibraryLayout::Detail) {
