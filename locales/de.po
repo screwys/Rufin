@@ -5137,11 +5137,6 @@ msgstr "kbps"
 msgid "not in the last"
 msgstr ""
 
-#, fuzzy
-#| msgid "Window"
-msgid "now"
-msgstr "Fenster"
-
 msgid "of these rules"
 msgstr ""
 
@@ -5358,6 +5353,11 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Fenster"
 
 #~ msgid "All tracks"
 #~ msgstr "Alle Titel"

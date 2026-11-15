@@ -5626,11 +5626,6 @@ msgstr "kbps"
 msgid "not in the last"
 msgstr ""
 
-#, fuzzy
-#| msgid "Window"
-msgid "now"
-msgstr "Ikkuna"
-
 msgid "of these rules"
 msgstr ""
 
@@ -5849,6 +5844,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Ikkuna"
 
 #~ msgid "All tracks"
 #~ msgstr "Kaikki kappaleet"

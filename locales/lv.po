@@ -5639,11 +5639,6 @@ msgstr "kbit/s"
 msgid "not in the last"
 msgstr ""
 
-#, fuzzy
-#| msgid "Window"
-msgid "now"
-msgstr "Logs"
-
 msgid "of these rules"
 msgstr ""
 
@@ -5889,6 +5884,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Logs"
 
 #~ msgid "All tracks"
 #~ msgstr "Visas dziesmas"

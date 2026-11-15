@@ -5063,11 +5063,6 @@ msgstr "кбит/с"
 msgid "not in the last"
 msgstr "Завершить последний трек"
 
-#, fuzzy
-#| msgid "Window"
-msgid "now"
-msgstr "Окно"
-
 msgid "of these rules"
 msgstr ""
 
@@ -5295,6 +5290,11 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Окно"
 
 #~ msgid "All tracks"
 #~ msgstr "Все треки"

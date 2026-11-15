@@ -5248,9 +5248,6 @@ msgstr ""
 msgid "not in the last"
 msgstr ""
 
-msgid "now"
-msgstr ""
-
 msgid "of these rules"
 msgstr ""
 
