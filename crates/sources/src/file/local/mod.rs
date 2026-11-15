@@ -2,8 +2,12 @@
 //!
 //! Owns native paths, traversal and changes, and writes observations to Library.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -17,10 +21,15 @@ pub(crate) mod artwork;
 pub(crate) mod media;
 pub(crate) mod scan;
 mod watch;
+#[cfg(windows)]
+mod windows;
 
 pub const LOCAL_SOURCE_ID: &str = "local";
 pub const LOCAL_LIBRARY_SOURCE_ID: &str = "local:server:library";
 const SOURCE_CONFIG_VERSION: u32 = 1;
+/// How long the folders go without a whole walk. A watcher misses what a network mount or a
+/// lost event does not report.
+const RESCAN_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 pub fn read_local_image(reference: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
     let reference = match reference {
@@ -112,6 +121,137 @@ pub struct LocalSource {
     excluded_folders: Vec<PathBuf>,
     pub(crate) documents: Vec<crate::file::remote::FileSource>,
     pub(crate) artwork: walk::ArtworkState,
+    links: Arc<Links>,
+    /// When the last whole walk started.
+    walked: Mutex<Option<Instant>>,
+}
+
+/// The links the walks follow, and the real place each leads to. One link leads to a place:
+/// a second link to it, around it or into it is not followed, so no file is listed twice.
+#[derive(Default)]
+pub(crate) struct Links {
+    state: Mutex<LinkState>,
+    /// Counts the changes to the followed folders, which the watcher watches.
+    generation: AtomicU64,
+}
+
+#[derive(Default)]
+struct LinkState {
+    /// The place of each followed link.
+    places: BTreeMap<PathBuf, PathBuf>,
+    /// The link that leads to each place, and whether the place is a folder.
+    links: BTreeMap<PathBuf, (PathBuf, bool)>,
+}
+
+impl LinkState {
+    /// Whether the forgotten link led to a folder.
+    fn forget(&mut self, link: &Path) -> bool {
+        self.places
+            .remove(link)
+            .and_then(|place| self.links.remove(&place))
+            .is_some_and(|(_, folder)| folder)
+    }
+
+    /// A followed link whose place is this one, around it or inside it.
+    fn rival(&self, place: &Path) -> Option<PathBuf> {
+        place
+            .ancestors()
+            .find_map(|ancestor| self.links.get(ancestor))
+            .or_else(|| {
+                self.links
+                    .range::<Path, _>((
+                        std::ops::Bound::Included(place),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .next()
+                    .filter(|(inside, _)| inside.starts_with(place))
+                    .map(|(_, link)| link)
+            })
+            .map(|(link, _)| link.clone())
+    }
+}
+
+impl Links {
+    fn state(&self) -> std::sync::MutexGuard<'_, LinkState> {
+        self.state.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Whether a walk of `roots` follows this link. It does not follow a broken link, one that
+    /// leads into or around a root (a loop, or files the walk lists already), or one that
+    /// leads where another followed link does.
+    pub(crate) fn follow(&self, link: &Path, roots: &[PathBuf]) -> bool {
+        let place = fs::canonicalize(link).ok().filter(|place| {
+            !roots
+                .iter()
+                .any(|root| place.starts_with(root) || root.starts_with(place))
+        });
+        let mut state = self.state();
+        let Some(place) = place else {
+            if state.forget(link) {
+                self.generation.fetch_add(1, Ordering::Release);
+            }
+            return false;
+        };
+        if state.places.get(link) == Some(&place) {
+            return true;
+        }
+        let mut changed = state.forget(link);
+        let followed = loop {
+            let Some(rival) = state.rival(&place) else {
+                break true;
+            };
+            // A rival that was removed or leads elsewhere now gives its place up.
+            if fs::canonicalize(&rival).is_ok_and(|now| state.places.get(&rival) == Some(&now)) {
+                break false;
+            }
+            changed |= state.forget(&rival);
+        };
+        if followed {
+            let folder = place.is_dir();
+            changed |= folder;
+            state.places.insert(link.to_owned(), place.clone());
+            state.links.insert(place, (link.to_owned(), folder));
+        }
+        if changed {
+            self.generation.fetch_add(1, Ordering::Release);
+        }
+        followed
+    }
+
+    /// The real path of a path under a followed link.
+    fn real(&self, path: &Path) -> Option<PathBuf> {
+        let state = self.state();
+        if state.places.is_empty() {
+            return None;
+        }
+        path.ancestors().find_map(|link| {
+            let place = state.places.get(link)?;
+            Some(place.join(path.strip_prefix(link).ok()?))
+        })
+    }
+
+    /// A real path inside a followed folder, as the walk lists it through the link.
+    pub(crate) fn listed(&self, real: &Path) -> Option<PathBuf> {
+        let state = self.state();
+        real.ancestors().find_map(|place| {
+            let (link, _) = state.links.get(place).filter(|(_, folder)| *folder)?;
+            Some(link.join(real.strip_prefix(place).ok()?))
+        })
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// The followed folders. A watch on a root does not reach them on every system.
+    pub(crate) fn folders(&self) -> BTreeSet<PathBuf> {
+        self.state()
+            .links
+            .iter()
+            .filter(|(_, (_, folder))| *folder)
+            .map(|(place, _)| place.clone())
+            .collect()
+    }
 }
 
 impl LocalSource {
@@ -128,6 +268,8 @@ impl LocalSource {
                 .map(|root| crate::file::remote::FileSource::documents(configuration, root))
                 .collect(),
             artwork: walk::ArtworkState::default(),
+            links: Arc::default(),
+            walked: Mutex::default(),
         })
     }
 
@@ -138,7 +280,17 @@ impl LocalSource {
             excluded_folders: Vec::new(),
             documents: Vec::new(),
             artwork: walk::ArtworkState::default(),
+            links: Arc::default(),
+            walked: Mutex::default(),
         })
+    }
+
+    /// Whether the folders have gone an hour without a whole walk.
+    pub(crate) fn rescan_due(&self) -> bool {
+        self.walked
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_none_or(|walked| walked.elapsed() >= RESCAN_INTERVAL)
     }
 
     pub fn roots(&self) -> &[PathBuf] {
@@ -211,7 +363,13 @@ impl LocalSource {
         let configured = self.configured_file_roots()?;
         let (paths, renames) = match scope {
             WalkScope::Paths { paths, renames } => (Some(paths), renames),
-            WalkScope::All { .. } => (None, &[][..]),
+            WalkScope::All { .. } => {
+                *self
+                    .walked
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(Instant::now());
+                (None, &[][..])
+            }
         };
         let native = paths.map(|paths| {
             paths
@@ -372,7 +530,7 @@ impl LocalSource {
         on_change: &mut dyn FnMut(crate::LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
-        watch::LocalChangeFeed::new(self.roots.clone()).listen_forever(
+        watch::LocalChangeFeed::new(self.roots.clone(), Arc::clone(&self.links)).listen_forever(
             on_ready,
             on_change,
             should_stop,
@@ -521,8 +679,78 @@ fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
     Ok(normalized)
 }
 
+/// Whether the file's data is kept in the cloud (OneDrive, iCloud Drive), where a read
+/// downloads it.
+pub(crate) fn online_only(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, and FILE_ATTRIBUTE_OFFLINE of older storage.
+        fs::metadata(path).is_ok_and(|metadata| metadata.file_attributes() & 0x0040_1000 != 0)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        // SF_DATALESS
+        fs::metadata(path).is_ok_and(|metadata| metadata.st_flags() & 0x4000_0000 != 0)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// The facts of one path, a link's being those of what it leads to.
+#[cfg(windows)]
+pub(crate) use self::windows::stat as stat_path;
+
+#[cfg(not(windows))]
+pub(crate) fn stat_path(path: &Path) -> std::io::Result<Entry> {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(entry(name, &fs::metadata(path)?))
+}
+
+/// The entries of a folder, with the links `follow` accepts as what they lead to.
+#[cfg(windows)]
+use self::windows::list as list_folder;
+
+#[cfg(not(windows))]
+fn list_folder(folder: &Path, follow: &dyn Fn(&Path) -> bool) -> std::io::Result<Vec<Entry>> {
+    let mut entries = Vec::new();
+    // In name order, so of two links to one place the same one is followed every time.
+    let mut listing = fs::read_dir(folder)?.collect::<std::io::Result<Vec<_>>>()?;
+    listing.sort_by_key(fs::DirEntry::file_name);
+    for listed in listing {
+        // A name that is not UTF-8 cannot be stored as a path the source opens.
+        let Ok(name) = listed.file_name().into_string() else {
+            continue;
+        };
+        let link = listed.file_type()?.is_symlink();
+        let path = listed.path();
+        if link && !follow(&path) {
+            continue;
+        }
+        // An entry removed since the listing is gone, as is a link that leads nowhere; any
+        // other that cannot be read fails the listing.
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if link || error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.is_file() || metadata.is_dir() {
+            entries.push(entry(name, &metadata));
+        }
+    }
+    Ok(entries)
+}
+
 /// The facts of a listed or opened file.
-pub(crate) fn entry(name: String, metadata: &fs::Metadata) -> Entry {
+#[cfg(not(windows))]
+fn entry(name: String, metadata: &fs::Metadata) -> Entry {
     #[cfg(unix)]
     let (device_id, inode) = {
         use std::os::unix::fs::MetadataExt;
@@ -603,6 +831,10 @@ pub(crate) struct LocalFiles<'a> {
     pub(crate) imports: Vec<String>,
 }
 
+fn is_link(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+}
+
 impl<'a> LocalFiles<'a> {
     pub(crate) fn importing(local: &'a LocalSource, paths: &[String]) -> Self {
         // Canonical, as roots and the paths `place` matches against them are.
@@ -634,6 +866,10 @@ impl<'a> LocalFiles<'a> {
             .map(|root| root.to_string_lossy().into_owned())
             .chain(self.imports.iter().cloned())
     }
+
+    fn walked_paths(&self) -> Vec<PathBuf> {
+        self.walked().map(PathBuf::from).collect()
+    }
 }
 
 impl walk::FileSource for LocalFiles<'_> {
@@ -648,7 +884,17 @@ impl walk::FileSource for LocalFiles<'_> {
     }
 
     fn excluded(&self, root: &str, relative: &str) -> bool {
-        !relative.is_empty() && self.local.excludes(&local_path(root, relative))
+        if relative.is_empty() {
+            return false;
+        }
+        // Excluded folders are real paths, which a path under a followed link is not.
+        let path = local_path(root, relative);
+        self.local.excludes(&path)
+            || self
+                .local
+                .links
+                .real(&path)
+                .is_some_and(|real| self.local.excludes(&real))
     }
 
     fn artwork(&self) -> crate::file::artwork::ArtworkFiles<'_> {
@@ -672,50 +918,60 @@ impl walk::FileSource for LocalFiles<'_> {
                 .contains(&path.to_owned())
                 .then(|| (path.to_owned(), String::new(), String::new()));
         }
-        // Roots are canonical, so a path given through a symlink (macOS /var) is too.
-        let path = scan::normalize_observed_path(std::path::Path::new(path));
-        let path = path.as_path();
-        let root = self
-            .walked()
-            .filter(|root| path.starts_with(root))
-            .max_by_key(String::len)?;
-        let relative = path
-            .strip_prefix(&root)
-            .ok()?
-            .to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        Some((root, relative.clone(), relative))
+        let roots = self.walked_paths();
+        let mut path = PathBuf::from(path);
+        // A path under a followed link stays as the walk lists it. Any other is made real, as
+        // roots are: one given another way (macOS /var), through a link the walk does not
+        // follow, or as the watcher of a followed folder reports it.
+        for _ in 0..8 {
+            let Some(root) = roots
+                .iter()
+                .filter(|root| path.starts_with(root))
+                .max_by_key(|root| root.as_os_str().len())
+            else {
+                let real = scan::normalize_observed_path(&path);
+                path = if real == path {
+                    self.local.links.listed(&real)?
+                } else {
+                    real
+                };
+                continue;
+            };
+            let relative = path.strip_prefix(root).ok()?;
+            let mut link = root.clone();
+            let unfollowed = relative.components().any(|part| {
+                link.push(part);
+                is_link(&link) && !self.local.links.follow(&link, &roots)
+            });
+            if let Some(place) = unfollowed.then(|| fs::canonicalize(&link).ok()).flatten() {
+                path = place.join(path.strip_prefix(&link).ok()?);
+                continue;
+            }
+            // What is under a link that leads nowhere is gone, which a stat of it finds.
+            let relative = relative
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            return Some((
+                root.to_string_lossy().into_owned(),
+                relative.clone(),
+                relative,
+            ));
+        }
+        None
     }
 
     async fn list(&self, root: &str, native: &str) -> SourceResult<Vec<Entry>> {
-        let directory = local_path(root, native);
+        let folder = local_path(root, native);
+        let links = Arc::clone(&self.local.links);
+        let roots = self.walked_paths();
         tokio::task::spawn_blocking(move || {
-            let mut entries = Vec::new();
-            for entry in
-                fs::read_dir(&directory).map_err(|error| SourceError::Other(error.to_string()))?
-            {
-                let entry = entry.map_err(|error| SourceError::Other(error.to_string()))?;
-                // A name that is not UTF-8 cannot be stored as a path the source opens.
-                let Ok(name) = entry.file_name().into_string() else {
-                    continue;
-                };
-                let kind = entry
-                    .file_type()
-                    .map_err(|error| SourceError::Other(error.to_string()))?;
-                // Symbolic links are not followed.
-                if !kind.is_file() && !kind.is_dir() {
-                    continue;
+            list_folder(&folder, &|link| links.follow(link, &roots)).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    SourceError::Denied(error.to_string())
+                } else {
+                    SourceError::Other(error.to_string())
                 }
-                // An entry removed since the listing is gone; one that cannot be read fails it.
-                // The file's own metadata: Windows listings carry folder times NTFS updates late.
-                let metadata = match fs::metadata(entry.path()) {
-                    Ok(metadata) => metadata,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(error) => return Err(SourceError::Other(error.to_string())),
-                };
-                entries.push(self::entry(name, &metadata));
-            }
-            Ok(entries)
+            })
         })
         .await
         .map_err(|error| SourceError::Other(error.to_string()))?
@@ -738,13 +994,8 @@ impl walk::FileSource for LocalFiles<'_> {
             });
         }
         let path = local_path(root, native);
-        tokio::task::spawn_blocking(move || match fs::metadata(&path) {
-            Ok(metadata) => Ok(entry(
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                &metadata,
-            )),
+        tokio::task::spawn_blocking(move || match stat_path(&path) {
+            Ok(entry) => Ok(entry),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Err(SourceError::NotFound)
             }

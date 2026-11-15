@@ -619,7 +619,8 @@ impl<'a> ArtworkFiles<'a> {
                 None,
             ));
         }
-        if !matches!(owner, Self::Local) {
+        // An online-only file is not downloaded for its pictures.
+        if !matches!(owner, Self::Local) || local::online_only(Path::new(&track.path)) {
             return Ok((
                 track.picture_index.and_then(|i| u32::try_from(i).ok()),
                 Vec::new(),

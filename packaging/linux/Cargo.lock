@@ -8022,6 +8022,7 @@ dependencies = [
  "uniffi",
  "url",
  "walkdir",
+ "windows",
  "winsafe",
  "wiremock",
 ]
