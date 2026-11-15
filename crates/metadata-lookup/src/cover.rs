@@ -79,6 +79,48 @@ pub fn lookup_album_cover(
     missing_or_errors(failures)
 }
 
+/// How many ways one provider is asked for one song's cover.
+const SONG_SEARCHES: usize = 3;
+
+/// What each provider is asked for a song's cover, in the providers' order: the credit and
+/// title as they are given first, then each artist the credit names and the title without
+/// its version. A stream credits a song to all its artists at once, or to a character and
+/// its voice, where a provider lists it under one of them.
+fn song_searches(
+    providers: &[CoverProvider],
+    artist: &str,
+    title: &str,
+) -> Vec<(CoverProvider, (String, String))> {
+    let mut artists = vec![artist.trim().to_owned()];
+    artists.extend(names::credit_artists(artist));
+    let mut titles = vec![title.trim().to_owned(), names::base_title(title).to_owned()];
+    for alternates in [&mut artists, &mut titles] {
+        let mut keys = Vec::new();
+        alternates.retain(|name| {
+            let key = names::name_key(name);
+            !keys.contains(&key) && {
+                keys.push(key);
+                true
+            }
+        });
+    }
+    let mut pairs = (0..artists.len())
+        .flat_map(|artist| (0..titles.len()).map(move |title| (artist, title)))
+        .collect::<Vec<_>>();
+    pairs.sort_by_key(|(artist, title)| (artist + title, *title));
+    providers
+        .iter()
+        .flat_map(|provider| {
+            pairs.iter().take(SONG_SEARCHES).map(|(artist, title)| {
+                (
+                    *provider,
+                    (artists[*artist].clone(), titles[*title].clone()),
+                )
+            })
+        })
+        .collect()
+}
+
 /// Finds the cover of a song by its artist and title, for a song a radio stream announced:
 /// the providers in the policy's order, until one has a cover. MusicBrainz names the releases
 /// the recording is on and the Cover Art Archive has their fronts; Last.fm names the album.
@@ -90,7 +132,8 @@ pub fn lookup_song_cover(
 ) -> Result<Option<Vec<u8>>, String> {
     let client = client()?;
     let mut failures = Vec::new();
-    for provider in &policy.covers {
+    for (provider, (artist, title)) in song_searches(&policy.covers, artist, title) {
+        let (artist, title) = (artist.as_str(), title.as_str());
         match provider {
             CoverProvider::MusicBrainz => {
                 match crate::musicbrainz::search_song_release_ids(artist, title) {
@@ -204,7 +247,8 @@ pub fn public_song_cover_url(
     policy: &LookupPolicy,
 ) -> Result<Option<String>, String> {
     let mut failures = Vec::new();
-    for provider in &policy.covers {
+    for (provider, (artist, title)) in song_searches(&policy.covers, artist, title) {
+        let (artist, title) = (artist.as_str(), title.as_str());
         match provider {
             CoverProvider::MusicBrainz => {
                 match crate::musicbrainz::search_song_release_ids(artist, title) {

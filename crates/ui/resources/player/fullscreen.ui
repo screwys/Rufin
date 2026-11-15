@@ -408,6 +408,7 @@
     </style>
     <child>
       <object class="GtkOverlay">
+        <property name="hexpand">true</property>
         <property name="vexpand">true</property>
         <property name="child">
           <object class="GtkScrolledWindow" id="queue_scroller">

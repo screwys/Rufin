@@ -29,7 +29,7 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
             source_rank: *source_rank,
         }),
         playback::QueueProvenance::Manual
-        | playback::QueueProvenance::Random
+        | playback::QueueProvenance::Mix
         | playback::QueueProvenance::Radio
         | playback::QueueProvenance::AutoDj
         | playback::QueueProvenance::Legacy => None,

@@ -8,7 +8,8 @@ use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 pub use metadata_lookup::{ArtistImageProvider, CoverProvider};
 use playback::{
-    DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
+    DEFAULT_AUTO_DJ_REFILL_COUNT, DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_COUNT,
+    MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_COUNT, MIN_AUTO_DJ_REFILL_THRESHOLD,
     PlaybackSettings, QueueRepeatMode,
 };
 use serde::{Deserialize, Serialize};
@@ -93,16 +94,16 @@ impl Default for ExternalSiteLinkSettings {
     }
 }
 
-const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
-const DEFAULT_RANDOM_PLAY_ALBUM_LIMIT: usize = 10;
-const MIN_RANDOM_PLAY_LIMIT: usize = 1;
-const MAX_RANDOM_PLAY_LIMIT: usize = 500;
-const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
-const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
+const DEFAULT_MIX_LIMIT: usize = 100;
+const DEFAULT_MIX_ALBUM_LIMIT: usize = 10;
+const MIN_MIX_LIMIT: usize = 1;
+const MAX_MIX_LIMIT: usize = 500;
+const MIN_MIX_YEAR: u16 = 1850;
+const MAX_MIX_YEAR: u16 = 2050;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct RandomPlayGenreSelection {
+pub struct MixGenreSelection {
     pub source_id: SourceId,
     #[serde(default)]
     pub music_folder_id: Option<String>,
@@ -112,7 +113,7 @@ pub struct RandomPlayGenreSelection {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct RandomPlaySettings {
+pub struct MixSettings {
     /// Whole albums in place of tracks.
     pub albums: bool,
     pub limit: super::visualizer::PreferenceIndex,
@@ -120,16 +121,16 @@ pub struct RandomPlaySettings {
     pub album_limit: super::visualizer::PreferenceIndex,
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
-    pub genre: Option<RandomPlayGenreSelection>,
+    pub genre: Option<MixGenreSelection>,
     pub played_filter: PlayedFilter,
 }
 
-impl Default for RandomPlaySettings {
+impl Default for MixSettings {
     fn default() -> Self {
         Self {
             albums: false,
-            limit: DEFAULT_RANDOM_PLAY_LIMIT,
-            album_limit: DEFAULT_RANDOM_PLAY_ALBUM_LIMIT,
+            limit: DEFAULT_MIX_LIMIT,
+            album_limit: DEFAULT_MIX_ALBUM_LIMIT,
             min_year: None,
             max_year: None,
             genre: None,
@@ -138,7 +139,7 @@ impl Default for RandomPlaySettings {
     }
 }
 
-impl RandomPlaySettings {
+impl MixSettings {
     pub fn selected_genre_id(
         &self,
         source_id: &SourceId,
@@ -151,18 +152,14 @@ impl RandomPlaySettings {
     }
 
     fn sanitize(&mut self) {
-        self.limit = self
-            .limit
-            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
-        self.album_limit = self
-            .album_limit
-            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
+        self.limit = self.limit.clamp(MIN_MIX_LIMIT, MAX_MIX_LIMIT);
+        self.album_limit = self.album_limit.clamp(MIN_MIX_LIMIT, MAX_MIX_LIMIT);
         self.min_year = self
             .min_year
-            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+            .map(|year| year.clamp(MIN_MIX_YEAR, MAX_MIX_YEAR));
         self.max_year = self
             .max_year
-            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+            .map(|year| year.clamp(MIN_MIX_YEAR, MAX_MIX_YEAR));
     }
 }
 
@@ -253,6 +250,22 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     download_on_mobile_data: bool = false => set_download_on_mobile_data;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
+    /// How many tracks one Auto DJ refill adds.
+    #[serde(default = "default_auto_dj_refill_count")]
+    auto_dj_refill_count: u8 = DEFAULT_AUTO_DJ_REFILL_COUNT => set_auto_dj_refill_count;
+    /// Whether radio and Auto DJ play the server's own recommendations, Rufin's filling what
+    /// they leave short. Unset until a server that recommends well is configured or the user
+    /// chooses; unset reads as off.
+    #[serde(default)]
+    server_recommendations: Option<bool> = None => set_server_recommendations;
+    /// Whether Rufin's picks ask ListenBrainz for artists similar to the seed's.
+    #[serde(default = "default_true")]
+    auto_dj_similar_artists: bool = true => set_auto_dj_similar_artists;
+    #[serde(default)]
+    auto_dj_same_artist: library::SameArtist = library::SameArtist::default() => set_auto_dj_same_artist;
+    /// Leaves tracks rated two stars or lower out of radio and Auto DJ.
+    #[serde(default)]
+    auto_dj_skip_low_rated: bool = false => set_auto_dj_skip_low_rated;
     #[serde(default)]
     external_site_links: ExternalSiteLinkSettings = ExternalSiteLinkSettings::default() => set_external_site_links;
     #[serde(default)]
@@ -345,7 +358,7 @@ pub struct Settings {
     #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default)]
-    pub random_play: RandomPlaySettings,
+    pub mix: MixSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_width: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -391,7 +404,7 @@ impl Default for Settings {
             shuffle_enabled: false,
             repeat_mode: QueueRepeatMode::Off,
             playback: PlaybackSettings::default(),
-            random_play: RandomPlaySettings::default(),
+            mix: MixSettings::default(),
             window_width: None,
             window_height: None,
             lyrics_panel_visible: true,
@@ -419,6 +432,11 @@ impl Settings {
 
     pub fn allows_notifications(&self) -> bool {
         self.application.notifications_enabled
+    }
+
+    /// Whether radio and Auto DJ ask the seed's server for its recommendations.
+    pub fn uses_server_recommendations(&self) -> bool {
+        self.application.server_recommendations == Some(true)
     }
 
     pub fn allows_external_metadata_lookup(&self) -> bool {
@@ -454,12 +472,16 @@ impl Settings {
         }
         self.rich_presence.sanitize();
         self.playback.sanitize();
-        self.random_play.sanitize();
+        self.mix.sanitize();
         self.lyrics.sanitize();
         self.application.auto_dj_refill_threshold = self
             .application
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
+        self.application.auto_dj_refill_count = self
+            .application
+            .auto_dj_refill_count
+            .clamp(MIN_AUTO_DJ_REFILL_COUNT, MAX_AUTO_DJ_REFILL_COUNT);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
         self.application.fanart_api_key = self.application.fanart_api_key.trim().to_string();
         dedupe(&mut self.application.cover_providers);
@@ -619,6 +641,10 @@ fn default_lyrics_panel_visible() -> bool {
 
 fn default_auto_dj_refill_threshold() -> u8 {
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD
+}
+
+fn default_auto_dj_refill_count() -> u8 {
+    DEFAULT_AUTO_DJ_REFILL_COUNT
 }
 
 fn sanitize_home_blocks(blocks: &mut Vec<HomeBlockKind>) {

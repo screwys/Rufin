@@ -2244,7 +2244,7 @@ button.download-queue-pause image {
   color: rgba(255, 255, 255, 0.92);
 }
 
-/* The facts sit in a pill, divided by |: on the page a light tint of its text, on Home's band a dark
+/* The facts sit in a pill, divided by |: on the page a light tint of its text, on the band a dark
    one so they read on any cover. */
 .detail-summary-row.detail-facts-boxed {
   padding: 3px 12px;
@@ -2258,9 +2258,22 @@ button.download-queue-pause image {
   border-left: 1px solid color-mix(in srgb, currentColor 40%, transparent);
 }
 
-.detail-summary-row.detail-facts-boxed.detail-facts-pill {
+.detail-meta-on-band .detail-summary-row.detail-facts-boxed,
+.detail-meta-on-band .detail-genre-chip.detail-genre-static {
   background: rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.92);
+}
+
+/* What opens something from the band takes a light fill: a genre, an artist's counts. */
+.detail-meta-on-band button.detail-genre-chip,
+.detail-meta-on-band .detail-pill {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.detail-meta-on-band button.detail-genre-chip:hover,
+.detail-meta-on-band .detail-pill:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .detail-showcase-cover,
@@ -2385,6 +2398,28 @@ menubutton.detail-genre-chip > button:hover {
 
 .detail-external-link-row {
   padding: 2px;
+}
+
+/* The links in the band's corner share one dark group. */
+.detail-band-links {
+  padding: 0 2px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.detail-band-links .detail-external-link-row {
+  border-spacing: 2px;
+}
+
+.detail-band-links .detail-external-link-button {
+  min-width: 26px;
+  min-height: 26px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.detail-band-links .detail-external-link-button:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .detail-external-link-button {
@@ -3096,48 +3131,85 @@ button.menu-preview-entry:not(.menu-preview-shown) label {
   background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
+/* The card of the station on air is drawn in its picture's colours, which are always dark. */
+.radio-on-air .detail-title {
+  font-size: 22px;
+}
+
+.radio-on-air.radio-on-air-wide .detail-title {
+  font-size: 32px;
+}
+
+.radio-on-air-song {
+  font-size: 16px;
+  font-weight: 650;
+}
+
 .radio-on-air-artist {
   font-size: 14px;
   opacity: 0.84;
 }
 
-/* Beside the names Heard sits on the band, in its white; under the buttons, in the page's
-   own text colours. */
-.radio-heard-side {
-  padding-left: 18px;
-  border-left: 1px solid rgba(255, 255, 255, 0.14);
+.radio-on-air-wide .radio-on-air-song {
+  font-size: 18px;
+}
+
+.radio-on-air-wide .radio-on-air-artist {
+  font-size: 15px;
+}
+
+.radio-on-air .detail-round {
   color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.radio-on-air .detail-round:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* A saved station's bookmark is filled; its button keeps the others' fill. */
+.radio-on-air .detail-round.active-toggle {
+  color: white;
+}
+
+/* Heard: at the text's side when the card is wide, else under it. */
+.radio-heard-side {
+  padding-left: 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .radio-heard-side:dir(rtl) {
   padding-left: 0;
-  padding-right: 18px;
+  padding-right: 24px;
   border-left: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.14);
-}
-
-.radio-heard-side .radio-heard-caption,
-.radio-heard-side .radio-heard-time,
-.radio-heard-side .radio-heard-artist {
-  color: rgba(255, 255, 255, 0.84);
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .radio-heard-below {
   margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--window-fg-color) 12%, transparent);
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
 }
 
-.radio-heard-caption,
-.radio-heard-time,
-.radio-heard-artist {
-  font-size: 13px;
-  color: color-mix(in srgb, var(--window-fg-color) 78%, transparent);
+.radio-heard-caption {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.radio-heard-time {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .radio-heard-title {
   font-size: 14px;
   font-weight: 500;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.radio-heard-artist {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.62);
 }
 
 /* A station's card: a click plays it, so it answers the pointer as a button does. */

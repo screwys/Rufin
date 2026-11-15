@@ -7,7 +7,6 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use serde::Deserialize;
-use unicode_normalization::UnicodeNormalization;
 
 use crate::catalog::views::Context;
 use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey};
@@ -205,8 +204,8 @@ fn import_id(track: &Named, started_at: i64) -> String {
     let hash = blake3::hash(
         format!(
             "{}\0{}\0{started_at}",
-            name_key(&track.artist),
-            name_key(&track.title)
+            names::name_key(&track.artist),
+            names::name_key(&track.title)
         )
         .as_bytes(),
     );
@@ -219,21 +218,6 @@ fn local_period(started_at: i64) -> String {
         .with_timezone(&chrono::Local)
         .format("%Y-%m")
         .to_string()
-}
-
-/// Names compare by their letters and digits, whatever their case, width or punctuation; a
-/// name of punctuation only, such as "&", by its characters.
-fn name_key(name: &str) -> String {
-    let lower = name.nfkc().flat_map(char::to_lowercase).collect::<String>();
-    let key = lower
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect::<String>();
-    if key.is_empty() {
-        lower.split_whitespace().collect()
-    } else {
-        key
-    }
 }
 
 #[derive(Clone)]
@@ -262,7 +246,7 @@ impl Matcher {
             if context.visible(slot).is_none() {
                 continue;
             }
-            let title = name_key(snapshot.text(record.title));
+            let title = names::name_key(snapshot.text(record.title));
             if title.is_empty() {
                 continue;
             }
@@ -270,14 +254,14 @@ impl Matcher {
             durations.insert(key, record.duration_ms);
             let candidate = Candidate {
                 key,
-                album: name_key(snapshot.text(record.album_title)),
+                album: names::name_key(snapshot.text(record.album_title)),
                 duration_ms: record.duration_ms,
                 listens: context.counts_listens(record),
             };
-            let mut artists = vec![name_key(snapshot.text(record.artist))];
+            let mut artists = vec![names::name_key(snapshot.text(record.artist))];
             for artist in snapshot.track_runs(record)[0] {
                 if let Some(artist) = snapshot.artists.live(*artist) {
-                    artists.push(name_key(snapshot.text(artist.name)));
+                    artists.push(names::name_key(snapshot.text(artist.name)));
                 }
             }
             artists.sort_unstable();
@@ -307,10 +291,11 @@ impl Matcher {
                 listens: true,
             });
         }
-        let candidates = self
-            .names
-            .get(&(name_key(&named.artist), name_key(&named.title)))?;
-        let album = name_key(&named.album);
+        let candidates = self.names.get(&(
+            names::name_key(&named.artist),
+            names::name_key(&named.title),
+        ))?;
+        let album = names::name_key(&named.album);
         candidates
             .iter()
             .min_by_key(|candidate| {

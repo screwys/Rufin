@@ -360,10 +360,10 @@ impl AndroidLibrary {
             .collect()
     }
 
-    pub async fn random_genre(
+    pub async fn mix_genre(
         &self,
         route: Option<Route>,
-    ) -> Result<Option<rufin_core::settings::RandomPlayGenreSelection>, AndroidError> {
+    ) -> Result<Option<rufin_core::settings::MixGenreSelection>, AndroidError> {
         let Some(route) = route else {
             return Ok(None);
         };
@@ -379,45 +379,45 @@ impl AndroidLibrary {
             .uri(library::Item::Genre(key))
             .and_then(|uri| library::source_entity_parts(&uri))
             .ok_or_else(|| error("Genre is no longer available"))?;
-        Ok(Some(rufin_core::settings::RandomPlayGenreSelection {
+        Ok(Some(rufin_core::settings::MixGenreSelection {
             source_id: selected.source_id,
             music_folder_id: selected.music_folder_object_id,
             genre_id,
         }))
     }
 
-    pub async fn random_genre_title(
+    pub async fn mix_genre_title(
         &self,
-        settings: rufin_core::settings::RandomPlaySettings,
+        settings: rufin_core::settings::MixSettings,
     ) -> Result<String, AndroidError> {
         let Some(selected) = self.source.selected_library() else {
             return Ok(localization::tr("Any"));
         };
         let catalog = self.catalog.clone();
-        let genre = self
-            .runtime
-            .spawn(async move {
-                rufin_core::radio::saved_random_genre(&catalog, &settings, &selected).await
-            })
-            .await
-            .map_err(error)?
-            .map_err(error)?;
+        let genre =
+            self.runtime
+                .spawn(async move {
+                    rufin_core::mix::saved_mix_genre(&catalog, &settings, &selected).await
+                })
+                .await
+                .map_err(error)?
+                .map_err(error)?;
         Ok(genre.map_or_else(|| localization::tr("Any"), |genre| genre.name))
     }
 
-    pub async fn random_play(
+    pub async fn mix(
         &self,
-        settings: rufin_core::settings::RandomPlaySettings,
+        settings: rufin_core::settings::MixSettings,
         placement: rufin_core::playback::QueuePlacement,
     ) -> Result<bool, AndroidError> {
         let owner = self.settings.clone();
         let settings = self
             .runtime
-            .spawn_blocking(move || owner.set_random_preferences(settings))
+            .spawn_blocking(move || owner.set_mix_preferences(settings))
             .await
             .map_err(error)?
             .map_err(error)?;
-        rufin_core::radio::play_saved_random(&self.playback, settings, placement)
+        rufin_core::mix::play_saved_mix(&self.playback, settings, placement)
             .await
             .map_err(error)
     }

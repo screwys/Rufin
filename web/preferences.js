@@ -38,6 +38,7 @@ function show(preferences) {
     else node.value = value;
     if (node.type === "range") node.nextElementSibling.textContent = node.value;
   }
+  $("pref-server-recommendations").hidden = !preferences.server_recommendations_shown;
   for (const node of document.querySelectorAll("[data-when]")) {
     const [, path, not, expected] = node.dataset.when.match(/^(.*?)(!?)=(.*)$/);
     node.hidden = (values[path] === expected) === !!not;
@@ -421,8 +422,8 @@ function init() {
       }
       set(path, value);
     }
-    if (event.target.name === "customization-tab")
-      for (const tab of document.querySelectorAll("[data-customization-tab]")) tab.hidden = tab.dataset.customizationTab !== event.target.value;
+    // A page's tabs: the radios named for them show the part each names.
+    for (const tab of document.querySelectorAll(`[data-tabs="${event.target.name}"]`)) tab.hidden = tab.dataset.tab !== event.target.value;
   });
   // Each item menu entry shows or hides itself, as GTK's preview.
   for (const entry of document.querySelectorAll("[data-menu-item]"))

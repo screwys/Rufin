@@ -29,7 +29,7 @@ impl PlexSource {
             reqwest::header::HeaderValue::from_static("application/xml"),
         );
         let response = match remote_http::media_response(
-            RequestBuilder::from_parts(self.client.clone(), request),
+            RequestBuilder::from_parts(self.client(&self.connection().await).clone(), request),
             &self.media_client,
             Duration::from_secs(60),
             HTTP,

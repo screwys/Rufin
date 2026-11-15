@@ -48,12 +48,10 @@ pub enum SourceAuthorizationEvent {
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum SourceAuthorizationInput {
     Jellyfin {
-        use_instant_mix: bool,
         local_server_url: Option<String>,
     },
     Emby {
         server_index: u32,
-        use_instant_mix: bool,
     },
     Plex {
         server_index: u32,
@@ -279,23 +277,19 @@ impl SourceAuthorization {
     ) -> Result<sources::SourceId, SourceAuthorizationError> {
         let authorized = self.state.lock().expect("Source authorization").clone();
         let mut local_server_url = None;
-        let (server_index, use_instant_mix, address_override, trust_invalid_cert) = match input {
+        let (server_index, address_override, trust_invalid_cert) = match input {
             SourceAuthorizationInput::Jellyfin {
-                use_instant_mix,
                 local_server_url: local,
             } => {
                 local_server_url = local;
-                (0, use_instant_mix, None, false)
+                (0, None, false)
             }
-            SourceAuthorizationInput::Emby {
-                server_index,
-                use_instant_mix,
-            } => (server_index, use_instant_mix, None, false),
+            SourceAuthorizationInput::Emby { server_index } => (server_index, None, false),
             SourceAuthorizationInput::Plex {
                 server_index,
                 address_override,
                 trust_invalid_cert,
-            } => (server_index, false, address_override, trust_invalid_cert),
+            } => (server_index, address_override, trust_invalid_cert),
             SourceAuthorizationInput::Files {
                 settings,
                 credentials: edits,
@@ -330,7 +324,6 @@ impl SourceAuthorization {
                     source_id,
                     login,
                     source_name: name,
-                    use_instant_mix,
                     local_server_url,
                 },
                 Authorization::Emby(servers) => SourceSettingsChange::EmbyConnect {
@@ -340,7 +333,6 @@ impl SourceAuthorization {
                         .cloned()
                         .ok_or_else(|| error("Choose a server"))?,
                     source_name: name,
-                    use_instant_mix,
                 },
                 Authorization::Plex { .. } => SourceSettingsChange::Plex {
                     source_id,
@@ -368,7 +360,6 @@ impl SourceAuthorization {
                 Authorization::Jellyfin(login) => SourceSetup::JellyfinQuickConnect {
                     login,
                     source_name: name,
-                    use_instant_mix,
                     local_server_url,
                 },
                 Authorization::Emby(servers) => SourceSetup::EmbyConnect {
@@ -377,7 +368,6 @@ impl SourceAuthorization {
                         .cloned()
                         .ok_or_else(|| error("Choose a server"))?,
                     source_name: name,
-                    use_instant_mix,
                 },
                 Authorization::Plex {
                     login,

@@ -540,6 +540,9 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          # No package cache: downloading the packages is as fast as restoring them, and each
+          # copy takes 530 MB of the repository's 10 GB.
+          cache: false
           install: >-
             base-devel
             git

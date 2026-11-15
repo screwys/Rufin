@@ -65,6 +65,7 @@ tokio-rustls.workspace = true
 wiremock.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 winsafe.workspace = true
 
 [lints]

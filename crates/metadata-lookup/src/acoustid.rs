@@ -18,7 +18,7 @@ pub fn lookup_fingerprint(
     duration: u64,
 ) -> Result<Option<FingerprintMatches>, String> {
     let key = crate::cache::cache_key("acoustid", &(fingerprint, duration));
-    let matches = cache.fetch(&key, || fetch_matches(fingerprint, duration))?;
+    let matches = cache.fetch(&key, 7, || fetch_matches(fingerprint, duration))?;
     if matches.is_some() && cache.mode != crate::CacheMode::Only {
         cache.link_fingerprint(uri, &key)?;
     }

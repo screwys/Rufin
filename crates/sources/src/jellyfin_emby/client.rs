@@ -247,33 +247,15 @@ impl JellyfinEmbySource {
             | crate::SourceRadioSeed::Playlist(id)
             | crate::SourceRadioSeed::Genre(id) => raw_item_id(id),
         };
-        let path = match seed {
-            crate::SourceRadioSeed::Track(_) if !self.use_instant_mix => {
-                format!("Items/{raw}/Similar")
-            }
-            _ => format!("Items/{raw}/InstantMix"),
-        };
-        let mut url = endpoint(&self.base_url(), &path)?;
+        // The instant mix is the server's recommendation, and the one its plugins replace.
+        let mut url = endpoint(&self.base_url(), &format!("Items/{raw}/InstantMix"))?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Limit", &limit.clamp(1, 500).to_string());
-        let mut items = self.get_json::<Value>(url).await?["Items"]
+        let items = self.get_json::<Value>(url).await?["Items"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        if items.is_empty()
-            && matches!(seed, crate::SourceRadioSeed::Track(_))
-            && !self.use_instant_mix
-        {
-            let mut url = endpoint(&self.base_url(), &format!("Items/{raw}/InstantMix"))?;
-            url.query_pairs_mut()
-                .append_pair("UserId", &self.user_id)
-                .append_pair("Limit", &limit.clamp(1, 500).to_string());
-            items = self.get_json::<Value>(url).await?["Items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-        }
         Ok(items
             .into_iter()
             .filter_map(|item| id(&item["Id"]).map(|raw| self.kind.object_id("track", &raw)))
@@ -1230,7 +1212,6 @@ mod tests {
                     secret: "password".into(),
                     trust_invalid_cert: false,
                 },
-                false,
                 "device".into(),
             )
             .await;
@@ -1282,7 +1263,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1430,7 +1410,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1538,7 +1517,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),
@@ -1552,74 +1530,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recommendation_policy_is_shared_and_preserves_similar_candidates() {
+    async fn recommendations_are_the_instant_mix() {
         for kind in [crate::ServerKind::Jellyfin, crate::ServerKind::Emby] {
-            for use_instant_mix in [false, true] {
-                for similar_is_empty in [false, true] {
-                    let server = MockServer::start().await;
-                    let prefix = if kind == crate::ServerKind::Emby {
-                        "/emby"
-                    } else {
-                        ""
-                    };
-                    let similar_items = if similar_is_empty {
-                        serde_json::json!([])
-                    } else {
-                        serde_json::json!([{"Id":"similar-track"}])
-                    };
-                    Mock::given(method("GET"))
-                        .and(path(format!("{prefix}/Items/track-one/Similar")))
-                        .respond_with(
-                            ResponseTemplate::new(200)
-                                .set_body_json(serde_json::json!({"Items":similar_items})),
-                        )
-                        .expect(u64::from(!use_instant_mix))
-                        .mount(&server)
-                        .await;
-                    Mock::given(method("GET"))
-                        .and(path(format!("{prefix}/Items/track-one/InstantMix")))
-                        .respond_with(
-                            ResponseTemplate::new(200)
-                                .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
-                        )
-                        .expect(u64::from(use_instant_mix || similar_is_empty))
-                        .mount(&server)
-                        .await;
-                    let source = JellyfinEmbySource::open(
-                        JellyfinEmbySourceConfig {
-                            kind,
-                            emby_connect: false,
-                            base_url: server.uri(),
-                            local_url: None,
-                            server_id: Some("server-one".into()),
-                            user_id: "user-one".into(),
-                            username: "listener".into(),
-                            trust_invalid_cert: false,
-                            use_instant_mix,
-                        },
-                        "secret-token".into(),
-                        "device-one".into(),
+            let server = MockServer::start().await;
+            let prefix = if kind == crate::ServerKind::Emby {
+                "/emby"
+            } else {
+                ""
+            };
+            Mock::given(method("GET"))
+                .and(path(format!("{prefix}/Items/track-one/InstantMix")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let source = JellyfinEmbySource::open(
+                JellyfinEmbySourceConfig {
+                    kind,
+                    emby_connect: false,
+                    base_url: server.uri(),
+                    local_url: None,
+                    server_id: Some("server-one".into()),
+                    user_id: "user-one".into(),
+                    username: "listener".into(),
+                    trust_invalid_cert: false,
+                },
+                "secret-token".into(),
+                "device-one".into(),
+            )
+            .unwrap();
+            assert_eq!(
+                source
+                    .generated_track_object_ids(
+                        &crate::SourceRadioSeed::Track(kind.object_id("track", "track-one")),
+                        20,
                     )
-                    .unwrap();
-                    let expected = if use_instant_mix || similar_is_empty {
-                        "mix-track"
-                    } else {
-                        "similar-track"
-                    };
-                    assert_eq!(
-                        source
-                            .generated_track_object_ids(
-                                &crate::SourceRadioSeed::Track(
-                                    kind.object_id("track", "track-one")
-                                ),
-                                20,
-                            )
-                            .await
-                            .unwrap(),
-                        [kind.object_id("track", expected)]
-                    );
-                }
-            }
+                    .await
+                    .unwrap(),
+                [kind.object_id("track", "mix-track")]
+            );
         }
     }
 
@@ -1653,7 +1605,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1745,7 +1696,6 @@ mod tests {
                     user_id: "user".into(),
                     username: "listener".into(),
                     trust_invalid_cert: false,
-                    use_instant_mix: false,
                 },
                 "token".into(),
                 "device".into(),
@@ -1977,7 +1927,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),

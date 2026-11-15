@@ -369,6 +369,11 @@ a.pref-row:hover {
 .segmented.pref-tabs {
   margin: 12px 0 0;
 }
+/* A tab that is one group has no title to set it off from the tabs. */
+.pref-tabs ~ .pref-group,
+.pref-tabs ~ [data-tabs] > p.pref-note:first-child {
+  margin-top: 12px;
+}
 /* Customization › Menus: the item menu, each entry showing or hiding itself. */
 .menu-preview {
   display: grid;

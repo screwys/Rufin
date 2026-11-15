@@ -40,7 +40,6 @@ import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
-import io.github.screwys.rufin.player.PlaybackPreferences
 import kotlin.math.round
 import kotlin.math.roundToInt
 
@@ -112,7 +111,7 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
 
 @Composable
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,
-    player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, navigate: (MoreDestination) -> Unit) {
+    player: PlayerConnection, browse: BrowseConnection, navigate: (MoreDestination) -> Unit) {
     var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
     LaunchedEffect(destination, model.ready, player.bridge) {
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
@@ -146,7 +145,6 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     SettingsSwitch(translate("Use sort tags"), state.useSortTags) { preferences.changePreference { setUseSortTags(it) } }
                 }
             }
-            MoreDestination.Playback -> PlaybackPreferences(player, preferences, output)
             MoreDestination.Privacy -> {
                 SettingsGroup {
                     SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference { setPrivateMode(it) } }

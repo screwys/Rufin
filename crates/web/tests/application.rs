@@ -464,17 +464,17 @@ async fn exercise_http_api(
     );
     let smart = api(reqwest::Method::GET, "smart-playlists", Value::Null).await;
     assert!(!smart["smart_playlists"].as_array().unwrap().is_empty());
-    let random = api(
+    let mix = api(
         reqwest::Method::GET,
-        &format!("random?source={}", sources[0]),
+        &format!("mix?source={}", sources[0]),
         Value::Null,
     )
     .await;
-    assert_eq!(random["genres"], json!([]));
+    assert_eq!(mix["genres"], json!([]));
     assert_eq!(
         api(
             reqwest::Method::POST,
-            "queue/random",
+            "queue/mix",
             json!({"source":sources[0],"count":1,"mode":"replace"})
         )
         .await["empty"],
@@ -823,7 +823,7 @@ async fn exercise_http_api(
     assert_eq!(
         api(
             reqwest::Method::POST,
-            "queue/random",
+            "queue/mix",
             json!({"source":sources[1],"count":500,"mode":"replace"})
         )
         .await["empty"],

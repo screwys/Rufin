@@ -265,14 +265,8 @@ impl ContextMenuSurface {
 
     /// A choice that is marked when `chosen`, as the choices of the other menus are. `label`
     /// is already translated.
-    pub fn append_fixed_choice(
-        &self,
-        label: &str,
-        icon_name: &str,
-        chosen: bool,
-        run: impl Fn() + 'static,
-    ) {
-        let item = menu_action_item(label, &self.add_action(Some(chosen), true, run), icon_name);
+    pub fn append_fixed_choice(&self, label: &str, chosen: bool, run: impl Fn() + 'static) {
+        let item = gio::MenuItem::new(Some(label), Some(&self.add_action(Some(chosen), true, run)));
         self.entries
             .borrow_mut()
             .push((ContextMenuSection::Fixed, item));

@@ -465,7 +465,7 @@ private fun PlayerContext(player: PlayerConnection, modifier: Modifier) {
     val context by remember(player) { derivedStateOf { player.currentContext } }
     val title = context?.first ?: when (context?.second) {
         "manual" -> translate("Queue")
-        "random" -> translate("Mix")
+        "mix" -> translate("Mix")
         "radio" -> translate("Radio")
         "auto_dj" -> translate("Auto DJ")
         else -> null

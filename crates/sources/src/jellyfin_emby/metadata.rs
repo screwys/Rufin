@@ -812,7 +812,6 @@ mod tests {
                 user_id: "user".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".to_string(),
             "device".to_string(),

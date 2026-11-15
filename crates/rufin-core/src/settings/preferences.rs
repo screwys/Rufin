@@ -65,19 +65,19 @@ impl SettingsOwner {
         .map_err(Into::into)
     }
 
-    pub fn random_preferences(&self) -> super::RandomPlaySettings {
-        self.load().random_play.clone()
+    pub fn mix_preferences(&self) -> super::MixSettings {
+        self.load().mix.clone()
     }
 
-    pub fn set_random_preferences(
+    pub fn set_mix_preferences(
         &self,
-        value: super::RandomPlaySettings,
-    ) -> Result<super::RandomPlaySettings, SettingsError> {
+        value: super::MixSettings,
+    ) -> Result<super::MixSettings, SettingsError> {
         self.update_preferences(move |ui| {
-            ui.random_play = value;
+            ui.mix = value;
             Ok(())
         })?;
-        Ok(self.random_preferences())
+        Ok(self.mix_preferences())
     }
 
     pub fn mark_activity_opened(

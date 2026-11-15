@@ -28,7 +28,9 @@ pub enum QueueProvenance {
         source_rank: usize,
     },
     Manual,
-    Random,
+    /// Added by Mix; saved as "Random", the name it had.
+    #[serde(rename = "Random")]
+    Mix,
     Radio,
     AutoDj,
     Legacy,
@@ -988,7 +990,7 @@ impl QueueRow {
         match self.provenance {
             QueueProvenance::Context { .. } => "context",
             QueueProvenance::Manual => "manual",
-            QueueProvenance::Random => "random",
+            QueueProvenance::Mix => "mix",
             QueueProvenance::Radio => "radio",
             QueueProvenance::AutoDj => "auto_dj",
             QueueProvenance::Legacy => "legacy",

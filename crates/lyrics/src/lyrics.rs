@@ -516,106 +516,163 @@ pub(crate) async fn lrclib_automatic_search(
     )
     .await
 }
+/// What lyrics without timing count as farther than timed ones of a near match.
+const UNTIMED_PENALTY: u16 = 8;
+/// How many searches one provider is asked for one song.
+const LOOKUP_QUERIES: usize = 4;
+/// How far apart, in seconds, two versions of one song can be for one's lyrics to fit the
+/// other.
+const SAME_VERSION_SECONDS: u32 = 10;
+/// How far apart, in seconds, two recordings of one song can be in length.
+const SAME_LENGTH_SECONDS: u32 = 2;
+
+/// What a song is looked up by: every name its title and its artists go by, the first the one
+/// its tags give, and its length.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LyricsLookup {
-    artist_names: Vec<String>,
-    track_name: String,
+    titles: Vec<String>,
+    /// The titles without what marks their version: another version's name.
+    plain_titles: Vec<String>,
+    artists: Vec<String>,
     duration_seconds: u32,
 }
 impl LyricsLookup {
+    /// A lookup by a title and an artist credit. The title also goes by its name without a
+    /// version, and the credit by each artist it names: a provider that lists a song under one
+    /// of its artists, or its plain title, finds it too.
     pub fn from_search(artist_name: &str, track_name: &str, duration_seconds: u32) -> Self {
         let mut lookup = Self {
-            artist_names: Vec::new(),
-            track_name: track_name.trim().to_string(),
+            titles: Vec::new(),
+            plain_titles: Vec::new(),
+            artists: Vec::new(),
             duration_seconds,
         };
-        lookup.push_artist_name(artist_name);
-        lookup.push_primary_artist_variants();
+        lookup.add_names([track_name], [artist_name]);
         lookup
     }
 
-    fn queries(&self) -> Vec<(String, String)> {
-        let artists = if self.artist_names.is_empty() {
-            vec![String::new()]
-        } else {
-            self.artist_names.clone()
+    /// Adds further names the song goes by, such as its title in another script, and further
+    /// names of its artists.
+    pub fn with_names<'a>(
+        mut self,
+        titles: impl IntoIterator<Item = &'a str>,
+        artists: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        self.add_names(titles, artists);
+        self
+    }
+
+    fn add_names<'a>(
+        &mut self,
+        titles: impl IntoIterator<Item = &'a str>,
+        artists: impl IntoIterator<Item = &'a str>,
+    ) {
+        let add = |names: &mut Vec<String>, name: &str| {
+            let name = name.trim();
+            let key = names::name_key(name);
+            if !key.is_empty() && !names.iter().any(|known| names::name_key(known) == key) {
+                names.push(name.to_owned());
+            }
         };
-        let mut queries = Vec::new();
-        let mut seen = HashSet::new();
-        for artist_name in artists {
-            if self.track_name.is_empty() && artist_name.is_empty() {
-                continue;
-            }
-            let key = (
-                normalize_search_text(&artist_name),
-                normalize_search_text(&self.track_name),
-            );
-            if seen.insert(key) {
-                queries.push((artist_name, self.track_name.clone()));
+        for title in titles {
+            add(&mut self.titles, title);
+        }
+        for title in self.titles.clone() {
+            let plain = names::base_title(&title);
+            if names::name_key(plain) != names::name_key(&title) {
+                add(&mut self.plain_titles, plain);
             }
         }
-        queries
+        for artist in artists {
+            add(&mut self.artists, artist);
+            for credited in names::credit_artists(artist) {
+                add(&mut self.artists, &credited);
+            }
+        }
     }
 
-    fn push_artist_name(&mut self, artist_name: &str) {
-        let artist_name = artist_name.trim();
-        let normalized = normalize_search_text(artist_name);
-        if artist_name.is_empty()
-            || normalized.is_empty()
-            || self
-                .artist_names
+    /// The searches to make, the likeliest first: the names the tags give, then each other
+    /// name of the artist and of the title in turn.
+    fn queries(&self) -> Vec<(String, String)> {
+        let none = [String::new()];
+        let artists = if self.artists.is_empty() {
+            &none[..]
+        } else {
+            &self.artists
+        };
+        let titles = self
+            .titles
+            .iter()
+            .chain(&self.plain_titles)
+            .cloned()
+            .collect::<Vec<_>>();
+        let titles = if titles.is_empty() {
+            &none[..]
+        } else {
+            &titles
+        };
+        let mut pairs = (0..artists.len())
+            .flat_map(|artist| (0..titles.len()).map(move |title| (artist, title)))
+            .collect::<Vec<_>>();
+        pairs.sort_by_key(|(artist, title)| (artist + title, *title));
+        pairs
+            .into_iter()
+            .map(|(artist, title)| (artists[artist].clone(), titles[title].clone()))
+            .filter(|(artist, title)| !artist.is_empty() || !title.is_empty())
+            .take(LOOKUP_QUERIES)
+            .collect()
+    }
+
+    /// How far `title` is from the closest name the song's title goes by, its name without
+    /// a version among them.
+    fn title_score(&self, title: &str) -> u16 {
+        self.titles
+            .iter()
+            .chain(&self.plain_titles)
+            .map(|name| text_match_score(name, title))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Whether a result is of another version of the song that is not about as long: one
+    /// closer to the title without its version, such as the song a long remix was made of.
+    /// Its lyrics would be timed for another arrangement, or marked as having none.
+    fn another_arrangement(&self, result: &LyricsSearchResult) -> bool {
+        self.duration_seconds > 0
+            && result.duration_seconds > 0
+            && self.duration_seconds.abs_diff(result.duration_seconds) > SAME_VERSION_SECONDS
+            && {
+                let closest = |names: &[String]| {
+                    names
+                        .iter()
+                        .map(|name| text_match_score(name, &result.track_name))
+                        .min()
+                };
+                closest(&self.plain_titles)
+                    .is_some_and(|plain| closest(&self.titles).is_none_or(|given| plain < given))
+            }
+    }
+
+    /// How far `artist` is from the closest name the song's artists go by.
+    fn artist_score(&self, artist: &str) -> u16 {
+        self.artists
+            .iter()
+            .map(|name| text_match_score(name, artist))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Whether a result of the same title is as long as the song: the same recording, whoever
+    /// the provider credits it to.
+    fn same_recording(&self, result: &LyricsSearchResult) -> bool {
+        self.duration_seconds > 0
+            && result.duration_seconds > 0
+            && self.duration_seconds.abs_diff(result.duration_seconds) <= SAME_LENGTH_SECONDS
+            && self
+                .titles
                 .iter()
-                .any(|existing| normalize_search_text(existing) == normalized)
-        {
-            return;
-        }
-        self.artist_names.push(artist_name.to_string());
-    }
-
-    fn push_primary_artist_variants(&mut self) {
-        let artists = self.artist_names.clone();
-        for artist_name in artists {
-            if let Some(primary) = primary_artist_name(&artist_name) {
-                self.push_artist_name(&primary);
-            }
-        }
-    }
-}
-fn primary_artist_name(artist_name: &str) -> Option<String> {
-    const SEPARATORS: &[&str] = &[
-        " • ",
-        "•",
-        " · ",
-        "·",
-        " / ",
-        " | ",
-        "; ",
-        ";",
-        " feat. ",
-        " feat ",
-        " featuring ",
-        " ft. ",
-        " ft ",
-        " with ",
-        " x ",
-        " vs. ",
-    ];
-    let artist_name = artist_name.trim();
-    let lower = artist_name.to_ascii_lowercase();
-    let index = SEPARATORS
-        .iter()
-        .filter_map(|separator| {
-            lower
-                .find(&separator.to_ascii_lowercase())
-                .map(|index| (index, separator.len()))
-        })
-        .min_by_key(|(index, _)| *index)
-        .map(|(index, _)| index)?;
-    let primary = artist_name.get(..index)?.trim();
-    if primary.is_empty() || normalize_search_text(primary) == normalize_search_text(artist_name) {
-        None
-    } else {
-        Some(primary.to_string())
+                .chain(&self.plain_titles)
+                .any(|title| names::name_key(title) == names::name_key(&result.track_name))
     }
 }
 pub async fn search_lyrics(
@@ -760,24 +817,14 @@ fn filter_external_results_for_lookup(
 ) {
     results.retain(|result| external_result_matches_lookup(result, lookup));
 }
+/// Whether a result is the song: its title is one the song goes by, and so is its artist, or
+/// it is the same recording by its length.
 fn external_result_matches_lookup(result: &LyricsSearchResult, lookup: &LyricsLookup) -> bool {
-    if !lookup.track_name.is_empty()
-        && text_match_score(&lookup.track_name, &result.track_name) > 70
-    {
-        return false;
-    }
-    if !lookup.artist_names.is_empty()
-        && lookup
-            .artist_names
-            .iter()
-            .map(|artist_name| text_match_score(artist_name, &result.artist_name))
-            .min()
-            .unwrap_or(0)
-            > 80
-    {
-        return false;
-    }
-    true
+    lookup.title_score(&result.track_name) <= 70
+        && !lookup.another_arrangement(result)
+        && (lookup.artists.is_empty()
+            || lookup.artist_score(&result.artist_name) <= 80
+            || lookup.same_recording(result))
 }
 async fn lrclib_exact_result(lookup: &LyricsLookup) -> Result<Option<LyricsSearchResult>, String> {
     let Some((artist_name, track_name)) = lookup.queries().into_iter().next() else {
@@ -788,22 +835,23 @@ async fn lrclib_exact_result(lookup: &LyricsLookup) -> Result<Option<LyricsSearc
     };
     lrclib_fetch_get(external_lyrics_client()?, url).await
 }
+/// A provider's results for a song: its searches in turn until one finds the song, and where
+/// none does, one by its title alone, for a provider that credits it to someone else.
 async fn external_provider_search_for_lookup(
     provider: ExternalLyricsProvider,
     lookup: &LyricsLookup,
     automatic: bool,
 ) -> Result<Vec<LyricsSearchResult>, String> {
-    let queries = lookup.queries();
-    if queries.is_empty() {
-        return Ok(Vec::new());
-    }
-    if queries.len() == 1 {
-        let (artist_name, track_name) = &queries[0];
-        return external_provider_search(provider, artist_name, track_name, automatic).await;
+    let mut queries = lookup.queries();
+    if automatic
+        && lookup.duration_seconds > 0
+        && let Some(title) = lookup.titles.first()
+    {
+        queries.push((String::new(), title.clone()));
     }
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    let mut had_success = false;
+    let mut had_success = queries.is_empty();
     for (artist_name, track_name) in queries {
         match external_provider_search(provider, &artist_name, &track_name, automatic).await {
             Ok(batch) => {
@@ -811,6 +859,15 @@ async fn external_provider_search_for_lookup(
                 results.extend(batch);
             }
             Err(error) => errors.push(error),
+        }
+        // An automatic lookup takes the first search that finds the song; a search the user
+        // makes shows what every one finds.
+        if automatic
+            && results
+                .iter()
+                .any(|result| external_result_matches_lookup(result, lookup))
+        {
+            break;
         }
     }
     if !had_success && !errors.is_empty() {
@@ -1365,7 +1422,7 @@ pub(crate) fn lrclib_search_urls(
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let combined_query = normalize_search_text(&combined_query);
+    let combined_query = names::name_words(&combined_query);
     let mut urls = Vec::new();
     if !artist_name.is_empty() && !track_name.is_empty() {
         let mut field_url = lrclib_search_base_url()?;
@@ -1384,7 +1441,7 @@ pub(crate) fn lrclib_search_urls(
     if !track_name.is_empty()
         && let Some(short_artist_query) = shortened_artist_query(artist_name)
     {
-        let short_query = normalize_search_text(&format!("{track_name} {short_artist_query}"));
+        let short_query = names::name_words(&format!("{track_name} {short_artist_query}"));
         if !short_query.is_empty() {
             let mut url = lrclib_search_base_url()?;
             url.query_pairs_mut().append_pair("q", &short_query);
@@ -1394,7 +1451,7 @@ pub(crate) fn lrclib_search_urls(
     Ok(urls)
 }
 fn shortened_artist_query(artist_name: &str) -> Option<String> {
-    let normalized = normalize_search_text(artist_name);
+    let normalized = names::name_words(artist_name);
     let mut tokens = normalized.split_whitespace().collect::<Vec<_>>();
     if tokens.len() < 2 {
         return None;
@@ -1476,22 +1533,27 @@ fn provider_rank(provider: ExternalLyricsProvider, providers: &[ExternalLyricsPr
         .position(|candidate| *candidate == provider)
         .unwrap_or(usize::MAX)
 }
+/// How far a result is from the song, the closest lowest. Lyrics without timing count as a
+/// little farther, so a timed result of the same song by another of its names comes first.
 fn lyrics_match_score(result: &LyricsSearchResult, lookup: &LyricsLookup) -> u16 {
-    text_match_score(&lookup.track_name, &result.track_name)
+    lookup
+        .title_score(&result.track_name)
         .saturating_mul(2)
-        .saturating_add(artist_match_score(lookup, &result.artist_name))
+        .saturating_add(lookup.artist_score(&result.artist_name))
         .saturating_add(duration_match_penalty(
             lookup.duration_seconds,
             result.duration_seconds,
         ))
-}
-fn artist_match_score(lookup: &LyricsLookup, artist_name: &str) -> u16 {
-    lookup
-        .artist_names
-        .iter()
-        .map(|query| text_match_score(query, artist_name))
-        .min()
-        .unwrap_or(0)
+        // A result whose lyrics are still to be fetched may well be timed.
+        .saturating_add(
+            if matches!(result.content, LyricsSearchContent::Inline { .. })
+                && !result_has_synced_lyrics(result)
+            {
+                UNTIMED_PENALTY
+            } else {
+                0
+            },
+        )
 }
 fn duration_match_penalty(target_seconds: u32, candidate_seconds: u32) -> u16 {
     if target_seconds == 0 || candidate_seconds == 0 {
@@ -1507,11 +1569,11 @@ fn duration_match_penalty(target_seconds: u32, candidate_seconds: u32) -> u16 {
     }
 }
 pub(crate) fn text_match_score(query: &str, candidate: &str) -> u16 {
-    let query = normalize_search_text(query);
+    let query = names::name_words(query);
     if query.is_empty() {
         return 0;
     }
-    let candidate = normalize_search_text(candidate);
+    let candidate = names::name_words(candidate);
     if candidate == query {
         return 0;
     }
@@ -1530,17 +1592,6 @@ pub(crate) fn text_match_score(query: &str, candidate: &str) -> u16 {
         return 100 + query_tokens.len() as u16 * 10;
     }
     (missing as u16 * 30) + (extra.min(6) as u16 * 4)
-}
-pub(crate) fn normalize_search_text(value: &str) -> String {
-    let mut normalized = String::new();
-    for character in value.chars() {
-        if character.is_alphanumeric() {
-            normalized.extend(character.to_lowercase());
-        } else {
-            normalized.push(' ');
-        }
-    }
-    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 pub(crate) fn extract_genius_lyrics(body: &str) -> Option<String> {
     let mut sections = Vec::new();
@@ -1963,6 +2014,82 @@ mod tests {
             .await
             .unwrap();
         assert!(lyrics.documents()[0].has_word_timing());
+    }
+
+    #[test]
+    fn a_song_is_found_by_any_name_it_goes_by() {
+        let result = |title: &str, artist: &str, seconds: u32, synced: bool| LyricsSearchResult {
+            provider: ExternalLyricsProvider::Lrclib,
+            id: format!("{title}/{artist}/{seconds}"),
+            track_name: title.into(),
+            artist_name: artist.into(),
+            album_name: String::new(),
+            duration_seconds: seconds,
+            content: LyricsSearchContent::Inline {
+                synced_lyrics: synced.then(|| "[00:01.00]line".to_owned()),
+                plain_lyrics: Some("line".into()),
+            },
+        };
+        // A stream's credit of two artists, and of a character with its voice.
+        let two = LyricsLookup::from_search("Chihara Minori, Kitamura Eri Makino", "Song", 200);
+        assert_eq!(
+            two.queries()[..2],
+            [
+                ("Chihara Minori, Kitamura Eri Makino".into(), "Song".into()),
+                ("Chihara Minori".into(), "Song".into())
+            ]
+        );
+        assert!(external_result_matches_lookup(
+            &result("Song", "Chihara Minori", 200, true),
+            &two
+        ));
+        let voiced = LyricsLookup::from_search("レレイ(CV.東山奈央)", "ＧＯ☆Summer Girl", 200);
+        assert!(external_result_matches_lookup(
+            &result("GO☆Summer Girl", "東山奈央", 200, true),
+            &voiced
+        ));
+        // A name the feed adds, in another script.
+        let named = LyricsLookup::from_search("椎名林檎", "丸の内サディスティック", 200)
+            .with_names(["Marunouchi Sadistic"], ["Shiina Ringo"]);
+        assert!(external_result_matches_lookup(
+            &result("Marunouchi Sadistic", "Shiina Ringo", 230, true),
+            &named
+        ));
+        // Another credit is the song where its title and length are the song's, and not otherwise.
+        assert!(external_result_matches_lookup(
+            &result("Song", "Someone Else", 201, true),
+            &two
+        ));
+        assert!(!external_result_matches_lookup(
+            &result("Song", "Someone Else", 230, true),
+            &two
+        ));
+        assert!(!external_result_matches_lookup(
+            &result("Song Two", "Someone Else", 200, true),
+            &two
+        ));
+        // Timed lyrics of the plain title come before untimed ones of the exact version.
+        let version = LyricsLookup::from_search("Artist", "ショートショート (踊る様にver.)", 200);
+        let mut results = vec![
+            result("ショートショート (踊る様にver.)", "Artist", 200, false),
+            result("ショートショート", "Artist", 203, true),
+        ];
+        order_external_results(&mut results, &version, &[ExternalLyricsProvider::Lrclib]);
+        assert_eq!(results[0].track_name, "ショートショート");
+        // The song a long remix was made of is another arrangement; a version as long is not.
+        let remix = LyricsLookup::from_search("King & Queen", "King and Queen (Maharaja Mix)", 391);
+        assert!(!external_result_matches_lookup(
+            &result("King And Queen", "King & Queen", 238, true),
+            &remix
+        ));
+        assert!(external_result_matches_lookup(
+            &result("King And Queen", "King & Queen", 395, true),
+            &remix
+        ));
+        assert!(external_result_matches_lookup(
+            &result("King and Queen (Maharaja Mix)", "King & Queen", 238, true),
+            &remix
+        ));
     }
 
     #[test]

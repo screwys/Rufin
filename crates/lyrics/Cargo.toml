@@ -17,6 +17,7 @@ bindings = ["dep:uniffi"]
 uniffi = { workspace = true, optional = true }
 futures-util.workspace = true
 localization.workspace = true
+names.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true

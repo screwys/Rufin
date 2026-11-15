@@ -122,7 +122,7 @@ function showPlayback(value) {
   // A radio station has nowhere to skip to, nothing to order and no library track to favorite.
   const live = !!value?.current?.live;
   $("app").toggleAttribute("data-live", live);
-  for (const id of ["auto-dj", "shuffle", "previous", "next", "repeat", "random"]) $(id).disabled = live;
+  for (const id of ["auto-dj", "shuffle", "previous", "next", "repeat", "mix"]) $(id).disabled = live;
   $("current-favorite").disabled = !track || live;
   $("seek").max = Math.max(1, value?.duration_ms || 0);
   $("seek").disabled = !track || !value.can_seek;

@@ -4320,6 +4320,7 @@ dependencies = [
  "futures-util",
  "libsqlite3-sys",
  "md-5 0.11.0",
+ "names",
  "percent-encoding",
  "process-memory",
  "proptest",
@@ -4584,6 +4585,7 @@ dependencies = [
  "futures-util",
  "lindera",
  "localization",
+ "names",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -4731,6 +4733,7 @@ version = "0.17.1"
 dependencies = [
  "blake3",
  "library",
+ "names",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -4999,6 +5002,13 @@ dependencies = [
  "derive_more",
  "n0-error",
  "n0-future",
+]
+
+[[package]]
+name = "names"
+version = "0.17.1"
+dependencies = [
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -7163,6 +7173,7 @@ dependencies = [
  "lyrics",
  "md-5 0.11.0",
  "metadata-lookup",
+ "names",
  "notify",
  "playback",
  "playback-cast",
@@ -7180,6 +7191,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "toml_edit",
  "tracing",
  "tracing-subscriber",
  "uniffi",
@@ -8083,6 +8095,7 @@ dependencies = [
  "uniffi",
  "url",
  "walkdir",
+ "windows",
  "winsafe",
  "wiremock",
 ]
@@ -8919,6 +8932,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

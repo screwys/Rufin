@@ -60,6 +60,8 @@ pub struct PlayerPreferenceOptions {
     pub max_ebu_r128_target_lufs: f64,
     pub min_auto_dj_refill_threshold: u8,
     pub max_auto_dj_refill_threshold: u8,
+    pub min_auto_dj_refill_count: u8,
+    pub max_auto_dj_refill_count: u8,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -84,6 +86,8 @@ impl SettingsOwner {
             max_ebu_r128_target_lufs: playback::MAX_EBU_R128_TARGET_LUFS,
             min_auto_dj_refill_threshold: playback::MIN_AUTO_DJ_REFILL_THRESHOLD,
             max_auto_dj_refill_threshold: playback::MAX_AUTO_DJ_REFILL_THRESHOLD,
+            min_auto_dj_refill_count: playback::MIN_AUTO_DJ_REFILL_COUNT,
+            max_auto_dj_refill_count: playback::MAX_AUTO_DJ_REFILL_COUNT,
         }
     }
 
