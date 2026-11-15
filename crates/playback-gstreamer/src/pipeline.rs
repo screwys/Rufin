@@ -1,4 +1,6 @@
-use super::audio::{AudioGraph, SharedQueuedLoudness, make_audio_output, passthrough_allowed};
+use super::audio::{
+    AudioGraph, SharedQueuedLoudness, hold_pulse_loop, make_audio_output, passthrough_allowed,
+};
 use super::engine::{
     GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, WorkerInput,
     handle_about_to_finish,
@@ -492,6 +494,12 @@ impl PlayerPipeline {
             let element = values[1]
                 .get::<gst::Element>()
                 .expect("playbin element-setup element");
+            if element
+                .factory()
+                .is_some_and(|factory| factory.name() == "pulsesink")
+            {
+                hold_pulse_loop();
+            }
             if element
                 .factory()
                 .is_some_and(|factory| factory.name() == "qtdemux")
