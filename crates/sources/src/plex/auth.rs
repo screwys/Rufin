@@ -36,6 +36,10 @@ pub struct PlexLogin {
     resources: HashMap<String, HashMap<String, String>>,
     home_admin_subscription: bool,
     download_subscriptions: HashMap<String, bool>,
+    /// Each server as plex.tv last listed it, for its connections while plex.tv is away.
+    /// Relays are left out: plex.tv names another one in each listing.
+    #[serde(default)]
+    servers: HashMap<String, PlexServer>,
     #[serde(skip)]
     save: Option<Arc<dyn Fn(String) -> SourceResult<()> + Send + Sync>>,
 }
@@ -56,6 +60,7 @@ impl PlexLogin {
             resources: HashMap::new(),
             home_admin_subscription: false,
             download_subscriptions: HashMap::new(),
+            servers: HashMap::new(),
             save: None,
         }
     }
@@ -103,6 +108,7 @@ impl PlexLogin {
                 .or_default()
                 .extend(resources.clone());
         }
+        self.servers.extend(incoming.servers.clone());
         self.persist()
     }
 
@@ -277,6 +283,17 @@ impl PlexLogin {
         profile_id: &str,
         lan: &[crate::DiscoveredServer],
     ) -> SourceResult<Vec<PlexServer>> {
+        let (servers, tokens) = self.listed_servers(profile_id, lan).await?;
+        self.remember_servers(profile_id, &servers, tokens)?;
+        Ok(servers)
+    }
+
+    /// The servers plex.tv lists for a profile, and each one's access token.
+    pub(crate) async fn listed_servers(
+        &self,
+        profile_id: &str,
+        lan: &[crate::DiscoveredServer],
+    ) -> SourceResult<(Vec<PlexServer>, HashMap<String, String>)> {
         let token = self.profile_token(profile_id)?;
         let client = client()?;
         let response = json_response(
@@ -319,9 +336,42 @@ impl PlexLogin {
             tokens.insert(id, token.to_owned());
             servers.push(server);
         }
+        Ok((servers, tokens))
+    }
+
+    /// Keeps what plex.tv listed, and saves the login when that changed it.
+    pub(crate) fn remember_servers(
+        &mut self,
+        profile_id: &str,
+        servers: &[PlexServer],
+        tokens: HashMap<String, String>,
+    ) -> SourceResult<()> {
+        let mut changed = self.resources.get(profile_id) != Some(&tokens);
         self.resources.insert(profile_id.to_owned(), tokens);
-        self.persist()?;
-        Ok(servers)
+        for server in servers {
+            let server = PlexServer {
+                connections: server
+                    .connections
+                    .iter()
+                    .filter(|connection| !connection.relay)
+                    .cloned()
+                    .collect(),
+                ..server.clone()
+            };
+            if self.servers.get(&server.id) != Some(&server) {
+                self.servers.insert(server.id.clone(), server);
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist()?;
+        }
+        Ok(())
+    }
+
+    /// The server as plex.tv last listed it.
+    pub(crate) fn server(&self, server_id: &str) -> Option<PlexServer> {
+        self.servers.get(server_id).cloned()
     }
 
     fn profile_token(&self, profile_id: &str) -> SourceResult<&str> {
@@ -373,28 +423,39 @@ impl PlexLogin {
         let connections = server.candidates(address_override)?;
         let mut failure =
             SourceError::Network("No connection is available for this Plex server".into());
-        for connection in connections {
-            let client = if connection.require_valid_certificate {
-                &strict_client
-            } else {
-                &client
-            };
-            let request = self
-                .request(client, Method::GET, connection.address.as_str())
-                .header("X-Plex-Token", token);
-            match json_response(request).await {
-                Ok(response)
-                    if response["MediaContainer"]["machineIdentifier"].as_str()
-                        == Some(server.id.as_str()) =>
-                {
-                    return Ok(connection);
+        // The connections of one rank are asked together, and the token reaches the next rank
+        // only when none of them answered.
+        for rank in connections.chunk_by(|a, b| a.rank() == b.rank()) {
+            let answers = futures_util::future::join_all(rank.iter().map(|connection| {
+                let client = if connection.require_valid_certificate {
+                    &strict_client
+                } else {
+                    &client
+                };
+                let mut request = self
+                    .request(client, Method::GET, connection.address.as_str())
+                    .header("X-Plex-Token", token);
+                if connection.local {
+                    request = request.timeout(crate::address::LOCAL_PROBE_TIMEOUT);
                 }
-                Ok(_) => {
-                    failure = SourceError::Other(
-                        "Plex connection returned a different server identity".into(),
-                    )
+                json_response(request)
+            }))
+            .await;
+            for (connection, answer) in rank.iter().zip(answers) {
+                match answer {
+                    Ok(response)
+                        if response["MediaContainer"]["machineIdentifier"].as_str()
+                            == Some(server.id.as_str()) =>
+                    {
+                        return Ok(connection.clone());
+                    }
+                    Ok(_) => {
+                        failure = SourceError::Other(
+                            "Plex connection returned a different server identity".into(),
+                        )
+                    }
+                    Err(error) => failure = error,
                 }
-                Err(error) => failure = error,
             }
         }
         Err(failure)
@@ -430,6 +491,7 @@ impl PartialEq for PlexLogin {
             && self.resources == other.resources
             && self.home_admin_subscription == other.home_admin_subscription
             && self.download_subscriptions == other.download_subscriptions
+            && self.servers == other.servers
     }
 }
 impl Eq for PlexLogin {}
@@ -449,6 +511,21 @@ pub struct PlexConnection {
     pub relay: bool,
     #[serde(default)]
     pub(crate) require_valid_certificate: bool,
+}
+
+impl PlexConnection {
+    /// Its place among a server's connections: a secure local one first, a relay last.
+    fn rank(&self) -> u8 {
+        if self.relay {
+            3
+        } else if self.local && self.address.scheme() == "https" {
+            0
+        } else if self.local {
+            1
+        } else {
+            2
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -556,22 +633,13 @@ impl PlexServer {
             .cloned()
             .collect();
         connections.sort_by_key(|connection| {
-            let rank = if connection.relay {
-                3
-            } else if connection.local && connection.address.scheme() == "https" {
-                0
-            } else if connection.local {
-                1
-            } else {
-                2
-            };
             let loopback = match connection.address.host() {
                 Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
                 Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
                 Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
                 None => false,
             };
-            (rank, !loopback)
+            (connection.rank(), !loopback)
         });
         Ok(connections)
     }

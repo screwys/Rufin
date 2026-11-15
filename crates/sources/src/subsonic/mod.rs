@@ -247,11 +247,12 @@ impl SubsonicSource {
         self.address.current()
     }
 
-    /// Uses the local address while an OpenSubsonic server answers there.
-    /// Chooses the address that answers, and learns from getUser's shareRole whether the user
-    /// may make share links; Navidrome reports its sharing setting there.
-    pub(crate) async fn select_address(&self) {
-        self.address
+    /// Uses the local address while an OpenSubsonic server answers there, and returns whether
+    /// the address changed. Learns from getUser's shareRole whether the user may make share
+    /// links; Navidrome reports its sharing setting there.
+    pub(crate) async fn select_address(&self) -> bool {
+        let moved = self
+            .address
             .select(async |local| client::answers_subsonic(&self.client, local).await)
             .await;
         if self.share_role.get().is_none()
@@ -263,6 +264,7 @@ impl SubsonicSource {
                 .share_role
                 .set(json::boolean(&body["user"]["shareRole"]).unwrap_or(false));
         }
+        moved
     }
 
     /// Whether the server makes share links for this user.

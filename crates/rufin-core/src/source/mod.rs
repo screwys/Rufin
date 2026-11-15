@@ -2955,6 +2955,18 @@ impl SourceOwner {
                 if let Some(login) = logins.remove(previous.as_str()) {
                     logins.insert(next.as_str().to_owned(), login);
                 }
+                drop(logins);
+                // The open clients hold this login already: they keep running under its new
+                // reference.
+                for cached in shared
+                    .clients
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .values_mut()
+                    .filter(|cached| cached.credential.as_ref() == Some(&previous))
+                {
+                    cached.credential = Some(next.clone());
+                }
                 *previous = next;
                 Ok(())
             }));
@@ -3249,7 +3261,7 @@ mod source_tests {
         let secret = serde_json::json!({"client_id":"test-device","token":"test-token","account_id":"profile","profiles":{},"resources":{"profile":{"one":"one-token","two":"two-token"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
         let reference = seal_credential(secrets.as_ref(), &secret).unwrap();
         let configured:Vec<_> = ["one","two"].into_iter().map(|server|ConfiguredSource {
-            configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
+            configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":"http://127.0.0.1:9","local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
             credential:Some(reference.clone()),music_folder_id:None,local_access:None,enable_half_stars:false,
         }).collect();
         settings
