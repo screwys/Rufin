@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-15 19:37+0000\n"
+"PO-Revision-Date: 2026-11-15 20:07+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -104,8 +104,8 @@ msgid ""
 "to review the logs before sharing them"
 msgstr ""
 "Les informations confidentielles et les chemins absolus des dossiers sont "
-"masqués dans les journaux, mais vous souhaitez peut-être les vérifier avant "
-"de les partager"
+"masqués dans les journaux, mais vous devriez peut-être les vérifier avant de "
+"les partager"
 
 msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Pas de résultat ¯\\_(°╭╮°)_/¯"
@@ -664,7 +664,7 @@ msgid "Audio effects"
 msgstr "Effets audio"
 
 msgid "Audio fade on play/pause"
-msgstr "Fondu audio lors de lecture/pause"
+msgstr "Fondu audio lors de lecture / pause"
 
 msgid "Audio fingerprints"
 msgstr "Empreintes audio"
@@ -1474,9 +1474,9 @@ msgstr "Ne pas chiffrer"
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
 msgstr[0] ""
-"Voulez-vous appliquer les modifications de métadonnées sur {count} piste ?"
+"Voulez-vous appliquer les modifications de métadonnées sur {count} morceau ?"
 msgstr[1] ""
-"Voulez-vous appliquer les modifications de métadonnées sur {count} pistes ?"
+"Voulez-vous appliquer les modifications de métadonnées sur {count} morceaux ?"
 
 msgid "Do you want to use the existing configuration?"
 msgstr "Voulez-vous utiliser la configuration existante ?"
@@ -2478,7 +2478,7 @@ msgid "Matched"
 msgstr "Correspondance"
 
 msgid "Matching tracks..."
-msgstr "Pistes correspondantes..."
+msgstr "Morceaux correspondants..."
 
 msgid "Maximum frequency (Hz)"
 msgstr "Fréquence maximale (Hz)"
@@ -2647,7 +2647,7 @@ msgid "MusicBrainz release group ID"
 msgstr "ID de groupe de publication MusicBrainz"
 
 msgid "MusicBrainz release track ID"
-msgstr "ID de piste de publication MusicBrainz"
+msgstr "ID de publication du morceau MusicBrainz"
 
 msgid "MusicBrainz"
 msgstr "MusicBrainz"
@@ -2811,13 +2811,13 @@ msgid "No lyrics"
 msgstr "Pas de paroles"
 
 msgid "No matching track in this release"
-msgstr "Aucune piste correspondante"
+msgstr "Aucun morceau correspondant dans cette publication"
 
 msgid "No matching tracks found"
 msgstr "Aucun morceau correspondant trouvé"
 
 msgid "No matching tracks"
-msgstr "Aucune piste correspondante"
+msgstr "Aucun morceau correspondant"
 
 msgid "No music from this artist yet"
 msgstr "Pas de musique de cet artiste pour l’instant"
@@ -2856,7 +2856,7 @@ msgid "No sources configured"
 msgstr "Aucune source configurée"
 
 msgid "No tracks here yet"
-msgstr "Pas de piste ici pour l'instant"
+msgstr "Pas de morceau ici pour l'instant"
 
 msgid "No"
 msgstr "Non"
@@ -3808,7 +3808,7 @@ msgid "Saving..."
 msgstr "Enregistrement…"
 
 msgid "Scanning tracks"
-msgstr "Analyse des pistes"
+msgstr "Analyse des morceaux"
 
 msgid "Schedule"
 msgstr "Planifier"
@@ -3907,7 +3907,7 @@ msgid "Secondary release types"
 msgstr "Types de publication secondaires"
 
 msgid "Secret storage"
-msgstr "Stockage des secrets"
+msgstr "Stockage des identifiants"
 
 msgid "Seek Backward"
 msgstr "Reculer dans la lecture"
@@ -4534,22 +4534,22 @@ msgid "Track details"
 msgstr "Détails du morceau"
 
 msgid "Track gain"
-msgstr "Gain de la piste"
+msgstr "Gain du morceau"
 
 msgid "Track number"
-msgstr "Numéro de piste"
+msgstr "Numéro du morceau"
 
 msgid "Track peak"
-msgstr "Pic de la piste"
+msgstr "Pic du morceau"
 
 msgid "Track radio"
-msgstr "Radio de la piste"
+msgstr "Radio du morceau"
 
 msgid "Track unavailable"
 msgstr "Morceau indisponible"
 
 msgid "Track"
-msgstr "Piste"
+msgstr "Morceau"
 
 msgid "Tracks from every playlist"
 msgstr "Morceaux de chaque playlist"
@@ -4695,7 +4695,7 @@ msgid "Use different layout below a threshold width"
 msgstr "Utiliser une disposition différente sous une largeur seuil"
 
 msgid "Use each track's own cover when available"
-msgstr "Utiliser la pochette propre à chaque piste lorsqu’elle est disponible"
+msgstr "Utiliser la pochette propre à chaque morceau lorsqu’elle est disponible"
 
 msgid "Use existing"
 msgstr "Utiliser les éléments existants"
