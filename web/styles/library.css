@@ -535,8 +535,9 @@
   margin-left: auto;
 }
 
-/* The showcase of Home and the detail pages: a gradient band with the cover over its
-   edge. Under 560 px a detail page's cover takes its own row. */
+/* The showcase of Home and the detail pages: a gradient band that holds the names, the facts,
+   the genres and the links, with the buttons under it beside the cover, which hangs over its
+   lower edge. Under 560 px the cover, the band and the insets are smaller. */
 .detail-showcase {
   position: relative;
   container-type: inline-size;
@@ -547,14 +548,17 @@
   margin-bottom: 4px;
 }
 
-/* The sizes live under the container, where its width can be queried. */
+/* The sizes live under the container, where its width can be queried. The cover hangs over
+   the band's edge without making the band taller, so the room it needs is kept here. */
 .detail-showcase > form {
   --band: 196px;
   --cover: clamp(164px, calc(164px + (100cqw - 560px) * 0.3), 224px);
   --cover-top: 68px;
   --inset: 24px;
   --gap: 28px;
-  display: contents;
+  position: relative;
+  display: block;
+  min-height: calc(var(--cover-top) + var(--cover));
 }
 
 .home-showcase > form {
@@ -563,33 +567,36 @@
   --inset: 48px;
 }
 
+/* The names, the facts and the buttons are rows beside the cover. The band lies behind the
+   first two and grows with them: genres opened onto further lines make it taller. */
+.detail-body {
+  display: grid;
+  grid-template-columns: var(--cover) minmax(0, 1fr);
+  grid-template-rows: 1fr auto auto;
+  column-gap: var(--gap);
+  padding: 0 var(--inset);
+}
+
+.detail-text {
+  display: contents;
+}
+
 .detail-band {
-  position: absolute;
-  inset: 0 0 auto;
-  height: var(--band);
+  grid-area: 1 / 1 / 3 / -1;
+  min-height: var(--band);
+  margin: 0 calc(-1 * var(--inset));
   border-radius: 8px;
   background-image:
     linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.3)),
     linear-gradient(135deg, var(--band-start), var(--band-middle) 58%, var(--band-end));
 }
 
-/* The band is always dark (the cover's colours over near-black), so text on it is white. */
-.detail-heading {
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.detail-body {
-  position: relative;
-  display: grid;
-  grid-template-columns: var(--cover) minmax(0, 1fr);
-  column-gap: var(--gap);
-  padding: 0 var(--inset);
-}
-
 .detail-cover {
+  position: absolute;
+  top: var(--cover-top);
+  inset-inline-start: var(--inset);
   width: var(--cover);
   aspect-ratio: 1;
-  margin-top: var(--cover-top);
 }
 
 .detail-cover > button {
@@ -605,17 +612,48 @@
   box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
 }
 
-.detail-text {
-  min-width: 0;
+/* The external sites, or a playlist's source, share one dark group in the band's corner. */
+.detail-links {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 10px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
 }
 
-/* Beside the cover the title ends just above the band's edge, and the rest starts under it. */
+.detail-links > * {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: none;
+}
+
+.detail-links > a:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.detail-links img {
+  width: 18px;
+  height: 18px;
+}
+
+/* The band is always dark (the cover's colours over near-black), so text on it is white. */
 .detail-heading {
+  grid-area: 1 / 2;
+  align-self: end;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 4px;
-  min-height: calc(var(--band) - 12px);
+  min-width: 0;
+  padding-top: 16px;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .detail-title {
@@ -638,54 +676,48 @@
   text-overflow: ellipsis;
 }
 
-.detail-heading > .detail-facts {
-  margin-top: 4px;
-}
-
-/* The facts sit in a pill, divided by |: on Home's band a dark one so they read on any cover, on the
-   page a light tint of its text. */
-.home-showcase .detail-heading > .detail-facts,
-.detail-below > .detail-facts {
-  align-self: flex-start;
-  max-width: 100%;
+/* The facts, then the genres, on one line that ends above the band's edge. The genres that
+   do not fit it go under +n (ui.js), which opens them onto further lines. */
+.detail-meta {
+  grid-area: 2 / 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  flex-wrap: nowrap;
-  gap: 8px;
-  padding: 3px 12px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.28);
-  color: rgba(255, 255, 255, 0.92);
+  margin-top: 6px;
+  padding-bottom: 12px;
+  overflow: hidden;
 }
 
-.home-showcase .detail-heading > .detail-facts {
-  margin-top: 8px;
-}
-
-.detail-below > .detail-facts {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
-  color: var(--text);
-}
-
-.home-showcase .detail-heading > .detail-facts > span + span::before,
-.detail-below > .detail-facts > span + span::before {
-  content: "|";
-  margin-right: 3px;
-  opacity: 0.45;
-}
-
-.detail-below {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 24px;
-}
-
-.detail-facts {
-  display: flex;
+.detail-meta.open {
   flex-wrap: wrap;
-  gap: 4px 12px;
+}
+
+/* The facts keep their width while the genres are counted (ui.js), then give way to +n. */
+.detail-meta.fitting > .detail-facts {
+  flex: none;
+}
+
+/* The facts sit in a pill, divided by |: on the band a dark one so they read on any cover,
+   on the page a light tint of its text. */
+.detail-facts {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
   font-size: 13px;
-  color: color-mix(in srgb, var(--text) 78%, transparent);
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.detail-facts:empty {
+  display: none;
 }
 
 .detail-facts > span {
@@ -695,42 +727,52 @@
   gap: 5px;
 }
 
+.detail-facts > span + span::before {
+  content: "|";
+  margin-right: 3px;
+  opacity: 0.45;
+}
+
 .detail-facts .icon {
   width: 14px;
   height: 14px;
 }
 
-.detail-genres {
-  display: flex;
-  gap: 6px;
-  overflow: hidden;
-}
-
+/* On the band a genre that opens its page takes a light fill; one that opens nothing is a
+   fact, in the facts' dark one. */
 .detail-genre-chip {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   height: 26px;
   padding: 0 11px;
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 600;
-  color: color-mix(in srgb, var(--text) 88%, transparent);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 20%, transparent);
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.28);
 }
 
-.detail-genre-chip:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+button.detail-genre-chip {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.detail-genre-chip .icon {
+  width: 14px;
+  height: 14px;
+}
+
+button.detail-genre-chip:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 /* One row at every width: Play gives up its label when the row does not fit (library.js). */
 .detail-actions {
+  grid-area: 3 / 2;
   display: flex;
   flex-wrap: nowrap;
   gap: 8px;
-  margin-top: 18px;
-}
-
-.home-showcase .detail-actions {
   margin-top: 24px;
 }
 
@@ -856,58 +898,21 @@
 }
 
 @container (max-width: 559px) {
-  .detail-showcase > form {
-    --band: 136px;
-    --cover: min(196px, 100cqw - 32px);
-    --cover-top: 24px;
-    --inset: 16px;
-  }
-
-  .detail-showcase:not(.home-showcase) .detail-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .detail-showcase:not(.home-showcase) .detail-cover {
-    justify-self: center;
-  }
-
-  /* Under the cover, the title and its line are centred on it. */
-  .detail-showcase:not(.home-showcase) .detail-heading {
-    min-height: 0;
-    margin-top: 22px;
-    color: inherit;
-    align-items: center;
-    text-align: center;
-  }
-
-  .detail-showcase:not(.home-showcase) .detail-below {
-    margin-top: 10px;
-  }
-
-  /* And so are the facts, genres and buttons under it. */
-  .detail-showcase:not(.home-showcase) .detail-below > .detail-facts {
-    align-self: center;
-  }
-
-  .detail-showcase:not(.home-showcase) .detail-genres,
-  .detail-showcase:not(.home-showcase) .detail-actions {
-    justify-content: center;
-  }
-
-  /* Never narrower than its hover controls, so it always reaches below the band. */
-  .home-showcase > form {
-    --band: 150px;
-    --cover: clamp(136px, (100cqw - 32px) * 0.3, 150px);
-    --cover-top: 38px;
-    --gap: 16px;
-  }
-
   .detail-title {
     font-size: 26px;
   }
 
   .detail-heading > .detail-artist {
     font-size: 15px;
+  }
+
+  /* Never narrower than its hover controls, so it always reaches below the band. */
+  .detail-showcase > form {
+    --band: 150px;
+    --cover: clamp(136px, (100cqw - 32px) * 0.3, 150px);
+    --cover-top: 38px;
+    --inset: 16px;
+    --gap: 16px;
   }
 }
 

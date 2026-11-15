@@ -16,12 +16,9 @@ use tracing::warn;
 
 use crate::library::CatalogUi;
 use crate::library::collections::library_route_inset;
-use crate::library::detail_showcase::{
-    ShowcaseLayout, ShowcaseShape, band_stops, open_web_link, paint_band,
-};
+use crate::library::detail_showcase::{MetaLine, band_stops, open_web_link, paint_band};
 use crate::library::route_layout::{
-    DETAIL_SHOWCASE_STACKED_WIDTH, PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN,
-    route_scroller_widget,
+    PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, route_scroller_widget,
 };
 use crate::shell::shell::Shell;
 use crate::widgets::artwork::ArtworkTile;
@@ -37,14 +34,10 @@ const CARD_GAP: i32 = 10;
 const CARD_COVER_SIZE: i32 = 72;
 /// The size the header's picture is rendered at, for any size it is shown at.
 const HEADER_COVER_SIZE: i32 = 224;
-const NARROW_COVER_MIN: i32 = 112;
-const NARROW_COVER_MAX: i32 = 164;
-const NARROW_INSET: i32 = 16;
-/// From this width Heard sits beside the header's text, with one more row.
-const HEARD_SIDE_WIDTH: i32 = 700;
-const HEARD_WIDTH: i32 = 250;
+/// From this width the header takes its large picture and Heard sits beside its text.
+const WIDE_WIDTH: i32 = 700;
+const HEARD_WIDTH: i32 = 340;
 const HEARD_ROWS: usize = 3;
-const HEARD_ROW_HEIGHT: i32 = 46;
 const RESULT_COVER_SIZE: i32 = 36;
 const CHECK_ICON: &str = "rufin-object-select-symbolic";
 
@@ -114,6 +107,49 @@ fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
     }
 }
 
+/// Marks `button` as `station`'s pin: whether the station or a channel of it is in Saved.
+fn show_pin(button: &gtk::Button, station: &Station) {
+    // The button of a station with channels opens their list, which removes one.
+    let pin = tr(if station.pinned && station.channels.is_empty() {
+        msgid("Remove from Saved")
+    } else {
+        msgid("Add to Saved")
+    });
+    button.set_tooltip_text(Some(&pin));
+    button.update_property(&[gtk::accessible::Property::Label(&pin)]);
+    let saved = station.pinned || station.channels.iter().any(|channel| channel.pinned);
+    button.set_icon_name(if saved {
+        "rufin-bookmark-filled-symbolic"
+    } else {
+        "rufin-bookmark-symbolic"
+    });
+    crate::widgets::controls::set_active_class(button, saved);
+}
+
+/// Adds `station` to Saved or takes it out; one with channels opens their list from `button`.
+fn pin_station(shell: &Rc<Shell>, button: &gtk::Button, station: Station) {
+    if station.channels.is_empty() {
+        if let Some(pin) = station.pin {
+            shell.set_sidebar_pin(pin, !station.pinned);
+        }
+        return;
+    }
+    // Each channel is saved by itself.
+    let surface = ContextMenuSurface::new(button.upcast_ref(), "station-channels", None);
+    for channel in station.channels {
+        let Some(pin) = channel.pin else {
+            continue;
+        };
+        let shell = Rc::downgrade(shell);
+        surface.append_fixed_choice(&channel.name, channel.pinned, move || {
+            if let Some(shell) = shell.upgrade() {
+                shell.set_sidebar_pin(pin.clone(), !channel.pinned);
+            }
+        });
+    }
+    surface.popup();
+}
+
 /// Plays a station, alone in the queue: an added one by its key, a suggested one by its id
 /// in Rufin's list, and its channel `channel` when one is named.
 pub(crate) fn play_station(
@@ -152,8 +188,7 @@ fn same_card(shown: &Station, read: &Station) -> bool {
     still(shown) == still(read)
 }
 
-/// A row of Heard: when a song was announced, then its title over its artist. It keeps its
-/// height without a song.
+/// A row of Heard: when a song was announced, its title and its artist, on one line.
 struct HeardSlot {
     row: gtk::Box,
     time: gtk::Label,
@@ -163,32 +198,26 @@ struct HeardSlot {
 
 impl HeardSlot {
     fn new() -> Self {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        // Taller than two lines in any script, so a row is as high empty as filled.
-        row.set_height_request(HEARD_ROW_HEIGHT);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.set_visible(false);
         let time = gtk::Label::new(None);
         time.add_css_class("radio-heard-time");
         time.add_css_class("numeric");
         time.set_xalign(0.0);
-        time.set_valign(gtk::Align::Start);
-        time.set_margin_top(1);
         time.set_width_request(40);
         row.append(&time);
-        let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        text.set_hexpand(true);
-        text.set_width_request(1);
-        text.set_valign(gtk::Align::Start);
         let line = |class: &str| {
             let label = gtk::Label::new(None);
             label.add_css_class(class);
             label.set_xalign(0.0);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
             label.set_width_chars(1);
-            text.append(&label);
+            row.append(&label);
             label
         };
         let (title, artist) = (line("radio-heard-title"), line("radio-heard-artist"));
-        row.append(&text);
+        // The artist gives way first; what is left of the row is its.
+        artist.set_hexpand(true);
         Self {
             row,
             time,
@@ -197,27 +226,31 @@ impl HeardSlot {
         }
     }
 
-    fn show(&self, time: &str, title: &str, artist: &str) {
-        self.time.set_text(time);
-        self.title.set_text(title);
-        self.artist.set_text(artist);
+    /// Shows `song`, or hides the row without one.
+    fn show(&self, song: Option<&stations::HeardSong>) {
+        self.row.set_visible(song.is_some());
+        let Some(song) = song else {
+            return;
+        };
+        let at = glib::DateTime::from_unix_local(song.at_unix_seconds)
+            .and_then(|at| at.format("%H:%M"))
+            .map(String::from)
+            .unwrap_or_default();
+        self.time.set_text(&at);
+        self.title.set_text(&song.title);
+        self.artist.set_text(&song.artist);
     }
 }
 
-/// The station on air, shaped as the detail showcase: its picture over the lower edge of a
-/// band of its colours, its name with the playing channel and the announced song on the band,
-/// and the facts, genres, Pause and the songs heard under it.
+/// The station on air, as one card in its picture's colours: the picture, with its name and
+/// the playing channel, the announced song, the facts, the genres and the buttons beside it,
+/// and the songs heard before under them, or at their side when the card is wide.
 struct OnAirHeader {
     root: gtk::Overlay,
     band: gtk::DrawingArea,
     stops: Rc<Cell<[[u8; 3]; 3]>>,
     body: gtk::Box,
     top: gtk::Box,
-    cover_host: gtk::Box,
-    text: gtk::Box,
-    heading: gtk::Box,
-    names: gtk::Box,
-    lower: gtk::Box,
     cover: ArtworkTile,
     /// The picture the cover shows; None before the first station.
     picture: RefCell<Option<Option<Vec<u8>>>>,
@@ -227,19 +260,24 @@ struct OnAirHeader {
     artist: gtk::Label,
     format_fact: gtk::Box,
     format: gtk::Label,
-    genres: gtk::Box,
+    /// The facts and the genres as one line.
+    meta: gtk::Widget,
+    genres: Rc<MetaLine>,
     genre_names: RefCell<Vec<String>>,
     toggle_icon: gtk::Image,
     toggle_text: gtk::Label,
+    pin: gtk::Button,
+    edit: gtk::Button,
     homepage: gtk::Button,
     homepage_url: Rc<RefCell<String>>,
+    /// The station the header shows, which its pin and Edit act on.
+    station: Rc<RefCell<Option<Station>>>,
     /// The station Play plays, when the header shows one that is not in the queue.
     tuned: Rc<RefCell<Option<Station>>>,
     heard: gtk::Box,
     slots: Vec<HeardSlot>,
-    /// The width last laid out, and whether Heard sits beside the facts there.
+    /// The width last laid out.
     width: Cell<i32>,
-    side: Cell<bool>,
 }
 
 impl OnAirHeader {
@@ -247,93 +285,41 @@ impl OnAirHeader {
         rufin_core::artwork::showcase_band(&[], 0, 0, 0)
     }
 
-    /// The header's shape at `width`. Wide, it is the detail showcase's: the picture hangs
-    /// over the band's lower edge and the facts sit beside it under the band, with Heard at
-    /// their side. Narrow, Heard needs the room under the band, so the picture stays on it.
+    /// The card's sizes at `width`. Wide, the picture is large and Heard is a column at the
+    /// text's side; narrow, Heard takes the card's width under the picture and the text.
     fn lay_out(&self, width: i32) {
         if width <= 1 || self.width.replace(width) == width {
             return;
         }
-        let wide = width >= DETAIL_SHOWCASE_STACKED_WIDTH;
-        let showcase = ShowcaseLayout::of(ShowcaseShape::Detail, width);
-        let (band, cover, cover_top, inset, gap) = if wide {
-            (
-                showcase.band,
-                showcase.cover,
-                showcase.cover_top,
-                showcase.inset,
-                showcase.gap,
-            )
+        let wide = width >= WIDE_WIDTH;
+        let (inset, gap, cover) = if wide {
+            (20, 24, 164)
         } else {
-            let cover = (width * 3 / 10).clamp(NARROW_COVER_MIN, NARROW_COVER_MAX);
-            (
-                cover + 2 * NARROW_INSET,
-                cover,
-                NARROW_INSET,
-                NARROW_INSET,
-                16,
-            )
+            (16, 16, (width * 34 / 100).clamp(120, 150))
         };
-        for class in [
-            "detail-showcase-small",
-            "detail-showcase-medium",
-            "detail-showcase-large",
-        ] {
-            set_class(&self.root, class, class == showcase.size_class);
-        }
-        self.band.set_height_request(band);
+        set_class(&self.root, "radio-on-air-wide", wide);
         self.cover.set_square_size(cover);
-        self.cover_host.set_margin_top(cover_top);
         self.top.set_spacing(gap);
+        self.body.set_margin_top(inset);
+        self.body.set_margin_bottom(inset);
         self.body.set_margin_start(inset);
         self.body.set_margin_end(inset);
-        self.body.set_margin_bottom(if wide { 28 } else { 14 });
-        // The names end just above the band's edge, and the rest starts just under it.
-        self.heading
-            .set_height_request(if wide { band - 12 } else { band });
-        self.names.set_valign(if wide {
-            gtk::Align::End
+        self.body.set_orientation(if wide {
+            gtk::Orientation::Horizontal
         } else {
-            gtk::Align::Center
+            gtk::Orientation::Vertical
         });
-        // Beside the picture the facts are in the text's column; under it they take the
-        // header's width.
-        let host = if wide { &self.text } else { &self.body };
-        if self.lower.parent().as_ref() != Some(host.upcast_ref()) {
-            if let Some(parent) = self.lower.parent().and_downcast::<gtk::Box>() {
-                parent.remove(&self.lower);
-            }
-            host.append(&self.lower);
-        }
-        self.lower.set_margin_top(if wide { 24 } else { 14 });
-        // With room beside the names, Heard sits on the band; else under the buttons.
-        let side = width >= HEARD_SIDE_WIDTH;
-        let host = if side { &self.top } else { &self.lower };
-        if self.heard.parent().as_ref() != Some(host.upcast_ref()) {
-            if let Some(parent) = self.heard.parent().and_downcast::<gtk::Box>() {
-                parent.remove(&self.heard);
-            }
-            host.append(&self.heard);
-        }
-        self.heard.set_margin_top(if side { 14 } else { 0 });
-        self.heard
-            .set_width_request(if side { HEARD_WIDTH } else { -1 });
-        set_class(&self.heard, "radio-heard-side", side);
-        set_class(&self.heard, "radio-heard-below", !side);
-        self.side.set(side);
-        self.show_heard_rows();
-    }
-
-    /// Heard keeps three rows beside the text and two under it.
-    fn show_heard_rows(&self) {
-        let shown = if self.side.get() {
-            HEARD_ROWS
+        self.body.set_spacing(if wide { gap } else { 0 });
+        self.meta.set_margin_top(if wide { 12 } else { 8 });
+        self.heard.set_valign(if wide {
+            gtk::Align::Center
         } else {
-            HEARD_ROWS - 1
-        };
-        for (index, slot) in self.slots.iter().enumerate() {
-            slot.row.set_visible(index < shown);
-        }
+            gtk::Align::Fill
+        });
+        self.heard
+            .set_width_request(if wide { HEARD_WIDTH } else { -1 });
+        set_class(&self.heard, "radio-heard-side", wide);
+        set_class(&self.heard, "radio-heard-below", !wide);
     }
 
     fn show(&self, shell: &Shell, on_air: &OnAir) {
@@ -356,9 +342,10 @@ impl OnAirHeader {
         self.channel
             .set_text(on_air.channel.as_deref().unwrap_or_default());
         self.channel.set_visible(on_air.channel.is_some());
-        // The song's rows keep their room without a song, so the header keeps its height.
         for (label, text) in [(&self.song, &on_air.title), (&self.artist, &on_air.artist)] {
-            label.set_text(text.as_deref().unwrap_or_default());
+            let text = text.as_deref().unwrap_or_default();
+            label.set_text(text);
+            label.set_visible(!text.is_empty());
         }
         let format = on_air.format.as_deref().unwrap_or_default();
         self.format.set_text(format);
@@ -373,22 +360,23 @@ impl OnAirHeader {
         self.toggle_text.set_text(&label);
         self.homepage.set_visible(!station.homepage.is_empty());
         self.homepage_url.replace(station.homepage.clone());
-        for (index, slot) in self.slots.iter().enumerate() {
-            match on_air.heard.get(index) {
-                Some(song) => {
-                    let at = if index == 0 {
-                        tr(msgid("now"))
-                    } else {
-                        glib::DateTime::from_unix_local(song.at_unix_seconds)
-                            .and_then(|at| at.format("%H:%M"))
-                            .map(String::from)
-                            .unwrap_or_default()
-                    };
-                    slot.show(&at, &song.title, &song.artist);
-                }
-                None => slot.show("", "", ""),
-            }
+        // An added station has its card's pin and Edit; a suggested one has neither.
+        self.pin
+            .set_visible(station.key.is_some() && station.pin.is_some());
+        self.edit.set_visible(station.key.is_some());
+        show_pin(&self.pin, station);
+        self.station.replace(Some(station.clone()));
+        // The song that plays is beside the picture; Heard lists the ones before it.
+        let now = on_air
+            .heard
+            .first()
+            .is_some_and(|song| on_air.title.as_deref() == Some(song.title.as_str()));
+        let mut earlier = on_air.heard.iter().skip(usize::from(now));
+        for slot in &self.slots {
+            slot.show(earlier.next());
         }
+        self.heard
+            .set_visible(on_air.heard.len() > usize::from(now));
         self.tuned.replace((!on_air.tuned).then(|| station.clone()));
         self.root.set_visible(true);
     }
@@ -399,17 +387,16 @@ impl OnAirHeader {
             return;
         }
         self.genre_names.replace(genres.to_vec());
-        while let Some(chip) = self.genres.first_child() {
-            self.genres.remove(&chip);
-        }
-        for genre in genres {
+        self.genres.set_chips(genres.iter().map(|genre| {
             let chip = gtk::Button::with_label(genre);
             chip.add_css_class("flat");
             chip.add_css_class("detail-genre-chip");
+            chip.add_css_class("detail-genre-static");
+            chip.set_valign(gtk::Align::Center);
             chip.set_can_target(false);
             chip.set_focusable(false);
-            self.genres.append(&chip);
-        }
+            chip.upcast()
+        }));
     }
 }
 
@@ -428,19 +415,7 @@ impl StationCard {
     /// channel of it is pinned.
     fn show_playing(&self, station: &Station) {
         set_class(&self.name, "track-row-playing", station.playing);
-        // The button of a station with channels opens their list, which removes one.
-        let pin = tr(if station.pinned && station.channels.is_empty() {
-            msgid("Remove from Saved")
-        } else {
-            msgid("Add to Saved")
-        });
-        self.pin.set_tooltip_text(Some(&pin));
-        self.pin
-            .update_property(&[gtk::accessible::Property::Label(&pin)]);
-        crate::widgets::controls::set_active_class(
-            &self.pin,
-            station.pinned || station.channels.iter().any(|channel| channel.pinned),
-        );
+        show_pin(&self.pin, station);
         for (name, chip) in &self.chips {
             let playing = station
                 .channels
@@ -490,15 +465,16 @@ impl RadioRoute {
             on_air_artist: gtk::Label,
             on_air_format_fact: gtk::Box,
             on_air_format: gtk::Label,
-            on_air_genres: gtk::Box,
+            on_air_meta: crate::widgets::layout::AllocationOwner,
+            on_air_meta_line: adw::WrapBox,
+            on_air_facts: gtk::Box,
+            on_air_genre_more: gtk::Button,
             on_air_top: gtk::Box,
-            on_air_text: gtk::Box,
-            on_air_heading: gtk::Box,
-            on_air_names: gtk::Box,
-            on_air_lower: gtk::Box,
             on_air_toggle: gtk::Button,
             on_air_toggle_icon: gtk::Image,
             on_air_toggle_text: gtk::Label,
+            on_air_pin: gtk::Button,
+            on_air_edit: gtk::Button,
             on_air_homepage: gtk::Button,
             heard: gtk::Box,
             heard_rows: gtk::Box,
@@ -535,6 +511,23 @@ impl RadioRoute {
         on_air_homepage.connect_clicked(move |_| {
             if let Some(window) = window.upgrade() {
                 open_web_link(&window, &url.borrow());
+            }
+        });
+
+        on_air_edit.set_icon_name(EDIT_ICON);
+        let on_air_station = Rc::new(RefCell::new(None::<Station>));
+        let (pin_shell, pinned) = (Rc::downgrade(shell), Rc::clone(&on_air_station));
+        on_air_pin.connect_clicked(move |button| {
+            let station = pinned.borrow().clone();
+            if let (Some(shell), Some(station)) = (pin_shell.upgrade(), station) {
+                pin_station(&shell, button, station);
+            }
+        });
+        let (edit_shell, edited) = (Rc::downgrade(shell), Rc::clone(&on_air_station));
+        on_air_edit.connect_clicked(move |_| {
+            let station = edited.borrow().clone();
+            if let (Some(shell), Some(station)) = (edit_shell.upgrade(), station) {
+                present_edit_dialog(&shell, station);
             }
         });
 
@@ -580,23 +573,27 @@ impl RadioRoute {
                     artist: on_air_artist,
                     format_fact: on_air_format_fact,
                     format: on_air_format,
-                    genres: on_air_genres,
+                    genres: MetaLine::bind(
+                        &on_air_meta,
+                        &on_air_meta_line,
+                        &on_air_facts,
+                        &on_air_genre_more,
+                        || {},
+                    ),
+                    meta: on_air_meta.upcast(),
                     genre_names: RefCell::new(Vec::new()),
                     top: on_air_top,
-                    cover_host: on_air_cover.clone(),
-                    text: on_air_text,
-                    heading: on_air_heading,
-                    names: on_air_names,
-                    lower: on_air_lower,
                     toggle_icon: on_air_toggle_icon,
                     toggle_text: on_air_toggle_text,
+                    pin: on_air_pin,
+                    edit: on_air_edit,
                     homepage: on_air_homepage,
                     homepage_url,
+                    station: on_air_station,
                     tuned: Rc::new(RefCell::new(None)),
                     heard,
                     slots,
                     width: Cell::new(0),
-                    side: Cell::new(false),
                 },
                 stations,
                 suggested_heading,
@@ -970,36 +967,9 @@ impl RadioRoute {
             imp.pin.set_visible(station.pin.is_some());
             let (pin_shell, pinned) = (Rc::downgrade(shell), Rc::clone(&shown));
             imp.pin.connect_clicked(move |button| {
-                let station = pinned.borrow().clone();
-                let Some(shell) = pin_shell.upgrade() else {
-                    return;
-                };
-                if station.channels.is_empty() {
-                    if let Some(pin) = station.pin {
-                        shell.set_sidebar_pin(pin, !station.pinned);
-                    }
-                    return;
+                if let Some(shell) = pin_shell.upgrade() {
+                    pin_station(&shell, button, pinned.borrow().clone());
                 }
-                // Each channel is saved by itself.
-                let surface =
-                    ContextMenuSurface::new(button.upcast_ref(), "station-channels", None);
-                for channel in station.channels {
-                    let Some(pin) = channel.pin else {
-                        continue;
-                    };
-                    let shell = Rc::downgrade(&shell);
-                    surface.append_fixed_choice(
-                        &channel.name,
-                        "rufin-bookmark-symbolic",
-                        channel.pinned,
-                        move || {
-                            if let Some(shell) = shell.upgrade() {
-                                shell.set_sidebar_pin(pin.clone(), !channel.pinned);
-                            }
-                        },
-                    );
-                }
-                surface.popup();
             });
             let (edit_shell, edited) = (Rc::downgrade(shell), Rc::clone(&shown));
             imp.edit.connect_clicked(move |_| {
