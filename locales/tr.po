@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-15 12:40+0000\n"
+"PO-Revision-Date: 2026-11-15 13:14+0000\n"
 "Last-Translator: US <uma@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Turkish <https://hosted.weblate.org/projects/rufin/app/tr/>\n"
 "Language: tr\n"
@@ -21,68 +21,88 @@ msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
 "setting also increases resource usage."
 msgstr ""
-"Furigana ve romaji okuma işaretleri için bir Japonca sözlük indirilir. Bu "
-"ayar aynı zamanda kaynak kullanımını da artırır."
+"Furigana ve romaji okunuşları için bir Japonca sözlük indirilir. Bu ayar "
+"kaynak kullanımını da artırır."
 
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
-"Onayladığınızda, bu cihaza profilinize ve kaydedilmiş kaynak giriş "
-"bilgilerinize erişim izni vermiş olursunuz."
+"Onaylamak, bu cihaza profilinize ve kayıtlı kaynak oturumlarınıza erişim "
+"verir."
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
+"Yedek dosyası hassas bilgiler içerebilir. Parola belirlemek ister misiniz?"
 
 #, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
 msgstr ""
+"{entries} atlanan çalma listesi girişi ve {listens} atlanan dinlemeyle yedek "
+"geri yüklendi."
 
 msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
+"Mevcut bir profile bağlanmak bu cihazdaki tüm verileri kaldırır; devam etmek "
+"istediğinizden emin misiniz?"
 
 msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
+"Rufin Connect kullanan cihazlar artık uyumlu değil. Lütfen Rufin'i "
+"güncelleyin."
 
 msgid ""
 "Do you want to cache all lyrics automatically? You can also enable this from "
 "Preferences -> Storage"
 msgstr ""
+"Tüm şarkı sözlerini otomatik olarak önbelleğe almak ister misiniz? Bunu "
+"Tercihler -> Depolama bölümünden de etkinleştirebilirsiniz"
 
 msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
+"Bu kaynaktan yapılan indirmeler kaldırılacak ve otomatik kurallar kapatılacak"
 
 msgid ""
 "GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
 "an API key."
 msgstr ""
+"GNU FM, Maloja ve diğer Last.fm tarzı sunucular. Maloja'da parola bir API "
+"anahtarıdır."
 
 msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
 "Rufin. If it is installed as a flatpak, this is not needed."
 msgstr ""
+"Discord flatpak olarak kurulu değilse Rufin'e soket erişimi vermeniz "
+"gerekir. Flatpak olarak kuruluysa buna gerek yoktur."
 
 msgid ""
 "List shared folders on this server using the entered credentials or guest "
 "access"
 msgstr ""
+"Girilen kimlik bilgilerini veya misafir erişimini kullanarak bu sunucudaki "
+"paylaşılan klasörleri listele"
 
 msgid ""
 "Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
 "players"
 msgstr ""
+"Rufin, ListenBrainz veya Last.fm dinlemeleri ya da diğer oynatıcılardan "
+"çalma sayıları"
 
 msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
+"Günlüklerde gizli bilgiler ve mutlak klasör yolları gizlenir, ancak "
+"paylaşmadan önce yine de günlükleri gözden geçirmek isteyebilirsiniz"
 
 msgid ""
 "No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
@@ -92,6 +112,8 @@ msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
 msgstr ""
+"Gizli servis bulunamadı. Rufin kimlik bilgilerini depolamak için bir dosya "
+"kullanacak. İptal etmek kimlik bilgilerini hiç kaydetmez."
 
 #, python-brace-format
 msgid ""
@@ -100,46 +122,66 @@ msgid ""
 "otherwise Rufin will use a file to store its credentials. Cancelling will "
 "not save credentials at all."
 msgstr ""
+"Gizli servis bulunamadı. Bir gizli servisiniz olabilir ancak portal bozuk "
+"olabilir; düzeltmek için {link_start}bu sorunu{link_end} inceleyebilirsiniz, "
+"aksi halde Rufin kimlik bilgilerini depolamak için bir dosya kullanacak. "
+"İptal etmek kimlik bilgilerini hiç kaydetmez."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
+"Yalnızca bu kuraldan yapılan indirmeler silinecek. Paylaşılan ve elle "
+"yapılan indirmeler kalır"
 
 msgid ""
 "Only imports the tracks as a playlist, does not watch the folder for changes."
 msgstr ""
+"Parçaları yalnızca çalma listesi olarak içe aktarır; klasörü değişiklikler "
+"için izlemez."
 
 msgid ""
 "Open Rufin Connect on another device, connect via Join button or by copying "
 "invitation code"
 msgstr ""
+"Rufin Connect'i başka bir cihazda açın, Katıl düğmesiyle veya davet kodunu "
+"kopyalayarak bağlanın"
 
 msgid ""
 "Relative paths start at the music folder or source URL. Local paths can also "
 "be absolute."
 msgstr ""
+"Göreli yollar müzik klasöründe veya kaynak URL'sinde başlar. Yerel yollar "
+"mutlak da olabilir."
 
 msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
+"Kayıtlı bağlantılar ve kimlik bilgileri hariç tüm Rufin verileri ve ayarları "
+"kaldırılsın mı? Veriler temizlendikten sonra Rufin yeniden başlayacak."
 
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
 msgstr ""
+"Tüm Rufin verileri, ayarları ve kayıtlı oturumları kaldırılsın mı? Veriler "
+"temizlendikten sonra Rufin yeniden başlayacak."
 
 msgid ""
 "Remove everything Rufin keeps about Local, including its favorites, ratings "
 "and lyrics? Your music files will not be deleted."
 msgstr ""
+"Rufin'in Yerel hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
+"sözleri dahil kaldırılsın mı? Müzik dosyalarınız silinmeyecek."
 
 #, rust-format
 msgid ""
 "Remove everything Rufin keeps about {name}, including its favorites, ratings "
 "and lyrics?"
 msgstr ""
+"Rufin'in {name} hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
+"sözleri dahil kaldırılsın mı?"
 
 #, rust-format
 msgid ""
@@ -147,4780 +189,4851 @@ msgid ""
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
 msgstr ""
+"Seçili içerikler değiştirilsin ve bu yapılandırılmış kaynaklar kaldırılsın "
+"mı?\n"
+"{sources}\n"
+"Seçilmediği sürece korunan kullanıcı durumları ve kayıtlı oturumları "
+"kalacaktır."
 
 msgid ""
 "Replace the selected contents with this backup? Local folder permissions may "
 "need to be selected again."
 msgstr ""
+"Seçili içerikler bu yedekle değiştirilsin mi? Yerel klasör izinlerinin "
+"yeniden seçilmesi gerekebilir."
 
 msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
+"Sağlayıcı URL'lerini oynatıcıyla paylaşmak yerine sunucu medyasını bu cihaz "
+"üzerinden yönlendir"
 
 msgid ""
 "Rufin asks these services about the music you play. All of this can be "
 "changed later in Preferences."
 msgstr ""
+"Rufin, çaldığınız müzikle ilgili olarak bu hizmetlere danışır. Bunların tümü "
+"daha sonra Tercihler'den değiştirilebilir."
 
 msgid ""
 "Rufin asks these services about the music you play. All of this can be "
 "changed later in Settings."
 msgstr ""
+"Rufin, çaldığınız müzikle ilgili olarak bu hizmetlere danışır. Bunların tümü "
+"daha sonra Ayarlar'dan değiştirilebilir."
 
 msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
+"Rufin tüm kitaplık için eksik EBU R128 meta verilerini hesaplayacak. Bu, "
+"uzun süre önemli miktarda CPU, pil ve ağ bant genişliği kullanabilir."
 
 msgid ""
 "Some changes were saved. Close this editor and reopen it to review the "
 "result."
 msgstr ""
+"Bazı değişiklikler kaydedildi. Sonucu incelemek için bu düzenleyiciyi "
+"kapatıp yeniden açın."
 
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
+"Geçici kitaplık depolaması kullanımda. Rufin kapanınca değişiklikler "
+"kaybolabilir."
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
+"Rufin'i denediğiniz için teşekkürler! Sorun yaşarsanız veya öneriniz olursa "
+"lütfen Github'da bir sorun açın."
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
+"Bu, Rufin'in kullandığı yedek kapak görseli; bunu öğe kapak görseli olarak "
+"ayarlamak ister misiniz?"
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
 "stars and then round them up for the source"
 msgstr ""
+"Bu, kaynak tarafından yerel olarak desteklenmiyor, ancak Rufin kısmi "
+"yıldızları gösterebilir ve ardından kaynak için yukarı yuvarlayabilir"
 
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
 msgstr ""
+"Bu Rufin'e aittir. Yapılandırılmış tüm kaynaklardan girişler içerebilir "
+"ancak uzaklarla eşitlenmez."
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
+"Bu, oturumunuzu kapatır ve API anahtarları dahil gizli bilgilerinizi "
+"temizler. Uygulama önbelleğinize dokunulmaz."
 
 msgid ""
 "This will overwrite your lyrics file with what Rufin fetched, it may be a "
 "better experience to use a dedicated program or plugin to fetch lyrics "
 "instead."
 msgstr ""
+"Bu, şarkı sözleri dosyanızın üzerine Rufin'in getirdiklerini yazacak; bunun "
+"yerine şarkı sözleri getirmek için özel bir program veya eklenti kullanmak "
+"daha iyi bir deneyim olabilir."
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
 msgstr ""
+"Parça her şarkıyı eşitler; Albüm ise her albüm içindeki amaçlanan "
+"farklılıkları korur"
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
+"Rufin'i tüm kitaplığınızı otomatik olarak indirecek şekilde ayarladınız. Bu "
+"çok fazla veri kullanabilir. Onaylıyor musunuz?"
 
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
+"Yeni API anahtarıyla kullandığınız istemciler üzerinden yeniden bağlanmanız "
+"gerekecek."
 
 msgid "(hold to shuffle)"
-msgstr ""
+msgstr "(karıştırmak için basılı tutun)"
 
 msgid "+1 track"
-msgstr ""
+msgstr "+1 parça"
 
 msgid "+5 min"
-msgstr ""
+msgstr "+5 dk"
 
 msgid "1 day"
-msgstr ""
+msgstr "1 gün"
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 saat"
 
 msgid "1 month"
-msgstr ""
+msgstr "1 ay"
 
 msgid "1 week"
-msgstr ""
+msgstr "1 hafta"
 
 msgid "1 year"
-msgstr ""
+msgstr "1 yıl"
 
 msgid "10 bands"
-msgstr ""
+msgstr "10 bant"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 saat"
 
 msgid "128 kbps"
-msgstr ""
+msgstr "128 kbps"
 
 msgid "18 bands"
-msgstr ""
+msgstr "18 bant"
 
 msgid "192 kbps"
-msgstr ""
+msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 saat"
 
 msgid "256 kbps"
-msgstr ""
+msgstr "256 kbps"
 
 msgid "31 bands"
-msgstr ""
+msgstr "31 bant"
 
 msgid "320 kbps"
-msgstr ""
+msgstr "320 kbps"
 
 msgid "5 Latest Albums"
-msgstr ""
+msgstr "En Son 5 Albüm"
 
 msgid "6 hours"
-msgstr ""
+msgstr "6 saat"
 
 msgid "A new update is available, restart to apply"
-msgstr ""
+msgstr "Yeni bir güncelleme mevcut, uygulamak için yeniden başlatın"
 
 msgid "A"
-msgstr ""
+msgstr "A"
 
 msgid "API key (Subsonic)"
-msgstr ""
+msgstr "API anahtarı (Subsonic)"
 
 msgid "API key"
-msgstr ""
+msgstr "API anahtarı"
 
 msgid "About Rufin"
-msgstr ""
+msgstr "Rufin Hakkında"
 
 msgid "Absolute"
-msgstr ""
+msgstr "Mutlak"
 
 msgid "Accent color"
-msgstr ""
+msgstr "Vurgu rengi"
 
 msgid "Access denied"
-msgstr ""
+msgstr "Erişim reddedildi"
 
 msgid "Access token"
-msgstr ""
+msgstr "Erişim token'ı"
 
 msgid "Accessibility"
-msgstr ""
+msgstr "Erişilebilirlik"
 
 msgid "Account"
-msgstr ""
+msgstr "Hesap"
 
 msgid "Actions"
-msgstr ""
+msgstr "Eylemler"
 
 msgid "Active"
-msgstr ""
+msgstr "Etkin"
 
 msgid "Activity"
-msgstr ""
+msgstr "Etkinlik"
 
 msgid "Add Manually"
-msgstr ""
+msgstr "Elle Ekle"
 
 msgid "Add SMB folder"
-msgstr ""
+msgstr "SMB klasörü ekle"
 
 msgid "Add Source"
-msgstr ""
+msgstr "Kaynak Ekle"
 
 msgid "Add Station"
-msgstr ""
+msgstr "İstasyon Ekle"
 
 msgid "Add WebDAV folder"
-msgstr ""
+msgstr "WebDAV klasörü ekle"
 
 msgid "Add a matching server prefix"
-msgstr ""
+msgstr "Eşleşen bir sunucu öneki ekle"
 
 msgid "Add a music folder"
-msgstr ""
+msgstr "Müzik klasörü ekle"
 
 msgid "Add a music source to start listening."
-msgstr ""
+msgstr "Dinlemeye başlamak için bir müzik kaynağı ekleyin."
 
 msgid "Add a new source"
-msgstr ""
+msgstr "Yeni kaynak ekle"
 
 msgid "Add a source to configure downloads."
-msgstr ""
+msgstr "İndirmeleri yapılandırmak için bir kaynak ekleyin."
 
 msgid "Add a title"
-msgstr ""
+msgstr "Başlık ekle"
 
 msgid "Add band"
-msgstr ""
+msgstr "Bant ekle"
 
 msgid "Add current"
-msgstr ""
+msgstr "Mevcut olanı ekle"
 
 msgid "Add folder"
-msgstr ""
+msgstr "Klasör ekle"
 
 msgid "Add group"
-msgstr ""
+msgstr "Grup ekle"
 
 msgid "Add image"
-msgstr ""
+msgstr "Görsel ekle"
 
 msgid "Add music"
-msgstr ""
+msgstr "Müzik ekle"
 
 msgid "Add rule"
-msgstr ""
+msgstr "Kural ekle"
 
 msgid "Add server"
-msgstr ""
+msgstr "Sunucu ekle"
 
 msgid "Add to Favorites"
-msgstr ""
+msgstr "Favorilere Ekle"
 
 msgid "Add to Playlist"
-msgstr ""
+msgstr "Çalma Listesine Ekle"
 
 msgid "Add to Saved"
-msgstr ""
+msgstr "Kaydedilenlere Ekle"
 
 msgid "Add to folder"
-msgstr ""
+msgstr "Klasöre ekle"
 
 msgid "Add to library"
-msgstr ""
+msgstr "Kitaplığa ekle"
 
 #, rust-format
 msgid "Add to {saved_on}"
-msgstr ""
+msgstr "{saved_on} öğesine ekle"
 
 msgid "Add tracks when fewer than this many remain"
-msgstr ""
+msgstr "Kalan parça bu sayıdan azaldığında parça ekle"
 
 msgid "Add"
-msgstr ""
+msgstr "Ekle"
 
 msgid "Added to"
-msgstr ""
+msgstr "Şuraya eklendi"
 
 msgid "Added"
-msgstr ""
+msgstr "Eklendi"
 
 msgid "Album Artists"
-msgstr ""
+msgstr "Albüm Sanatçıları"
 
 msgid "Album artist sort"
-msgstr ""
+msgstr "Albüm sanatçısı sıralaması"
 
 msgid "Album artist"
-msgstr ""
+msgstr "Albüm sanatçısı"
 
 msgid "Album artists"
-msgstr ""
+msgstr "Albüm sanatçıları"
 
 msgid "Album covers"
-msgstr ""
+msgstr "Albüm kapakları"
 
 msgid "Album details"
-msgstr ""
+msgstr "Albüm ayrıntıları"
 
 msgid "Album gain"
-msgstr ""
+msgstr "Albüm kazancı"
 
 msgid "Album peak"
-msgstr ""
+msgstr "Albüm tepe değeri"
 
 msgid "Album radio"
-msgstr ""
+msgstr "Albüm radyosu"
 
 msgid "Album sort"
-msgstr ""
+msgstr "Albüm sıralaması"
 
 msgid "Album title"
-msgstr ""
+msgstr "Albüm başlığı"
 
 msgid "Album tracks"
-msgstr ""
+msgstr "Albüm parçaları"
 
 msgid "Album unavailable"
-msgstr ""
+msgstr "Albüm kullanılamıyor"
 
 msgid "Album"
-msgstr ""
+msgstr "Albüm"
 
 msgid "Albums"
-msgstr ""
+msgstr "Albümler"
 
 msgid "All Music"
-msgstr ""
+msgstr "Tüm Müzik"
 
 msgid "All Playlists"
-msgstr ""
+msgstr "Tüm Çalma Listeleri"
 
 msgid "All time"
-msgstr ""
+msgstr "Tüm zamanlar"
 
 msgid "All"
-msgstr ""
+msgstr "Tümü"
 
 msgid "Allow downloading"
-msgstr ""
+msgstr "İndirmeye izin ver"
 
 msgid "Allow permanently deleting tracks"
-msgstr ""
+msgstr "Parçaların kalıcı olarak silinmesine izin ver"
 
 msgid "Allow remote connections"
-msgstr ""
+msgstr "Uzak bağlantılara izin ver"
 
 msgid "Also album types and tag suggestions"
-msgstr ""
+msgstr "Ayrıca albüm türleri ve etiket önerileri"
 
 msgid "Alternate addresses"
-msgstr ""
+msgstr "Alternatif adresler"
 
 msgid "Alternate row colors"
-msgstr ""
+msgstr "Alternatif satır renkleri"
 
 msgid "Anonymous (WebDAV / SMB)"
-msgstr ""
+msgstr "Anonim (WebDAV / SMB)"
 
 msgid "Anonymous"
-msgstr ""
+msgstr "Anonim"
 
 msgid "Any"
-msgstr ""
+msgstr "Herhangi"
 
 msgid "App icon"
-msgstr ""
+msgstr "Uygulama simgesi"
 
 msgid "App settings"
-msgstr ""
+msgstr "Uygulama ayarları"
 
 msgid "Appearance"
-msgstr ""
+msgstr "Görünüm"
 
 msgid "Application name"
-msgstr ""
+msgstr "Uygulama adı"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr ""
+msgstr "Kenar çubuğu ve tam ekrana ayrı ayrı uygulanır"
 
 msgid "Apply"
-msgstr ""
+msgstr "Uygula"
 
 msgid "Approve sign-in in your browser"
-msgstr ""
+msgstr "Tarayıcınızda oturum açmayı onaylayın"
 
 msgid "Approve"
-msgstr ""
+msgstr "Onayla"
 
 #, rust-format
 msgid "April {year}"
-msgstr ""
+msgstr "Nisan {year}"
 
 msgid "Artist albums"
-msgstr ""
+msgstr "Sanatçı albümleri"
 
 msgid "Artist details"
-msgstr ""
+msgstr "Sanatçı ayrıntıları"
 
 msgid "Artist images"
-msgstr ""
+msgstr "Sanatçı görselleri"
 
 msgid "Artist name"
-msgstr ""
+msgstr "Sanatçı adı"
 
 msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
 msgstr ""
+"MusicBrainz, Last.fm ve Wikidata'dan sanatçı resimleri, kapaklar ve etiketler"
 
 msgid "Artist radio"
-msgstr ""
+msgstr "Sanatçı radyosu"
 
 msgid "Artist sort"
-msgstr ""
+msgstr "Sanatçı sıralaması"
 
 msgid "Artist tracks"
-msgstr ""
+msgstr "Sanatçı parçaları"
 
 msgid "Artist unavailable"
-msgstr ""
+msgstr "Sanatçı kullanılamıyor"
 
 msgid "Artist"
-msgstr ""
+msgstr "Sanatçı"
 
 msgid "Artists"
-msgstr ""
+msgstr "Sanatçılar"
 
 msgid "Artwork editing is no longer available"
-msgstr ""
+msgstr "Kapak görseli düzenleme artık kullanılamıyor"
 
 msgid "Artwork selected"
-msgstr ""
+msgstr "Kapak görseli seçildi"
 
 msgid "Artwork storage"
-msgstr ""
+msgstr "Kapak görseli depolaması"
 
 msgid "Artwork"
-msgstr ""
+msgstr "Kapak görseli"
 
 msgid "Ascending"
-msgstr ""
+msgstr "Artan"
 
 msgid "Asked in this order."
-msgstr ""
+msgstr "Bu sırayla sorulur."
 
 msgid "Audio effects"
-msgstr ""
+msgstr "Ses efektleri"
 
 msgid "Audio fade on play/pause"
-msgstr ""
+msgstr "Oynat/duraklat sırasında ses geçişi"
 
 msgid "Audio fingerprints"
-msgstr ""
+msgstr "Ses parmak izleri"
 
 msgid "Audio output failed"
-msgstr ""
+msgstr "Ses çıkışı başarısız"
 
 msgid "Audio output"
-msgstr ""
+msgstr "Ses çıkışı"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Yayınlama sırasında ses işleme kullanılamaz"
 
 msgid "Audio"
-msgstr ""
+msgstr "Ses"
 
 msgid "Audioscrobbler API"
-msgstr ""
+msgstr "Audioscrobbler API"
 
 #, rust-format
 msgid "August {year}"
-msgstr ""
+msgstr "Ağustos {year}"
 
 msgid "Authentication"
-msgstr ""
+msgstr "Kimlik doğrulama"
 
 msgid "Auto DJ refill threshold"
-msgstr ""
+msgstr "Otomatik DJ yeniden doldurma eşiği"
 
 msgid "Auto DJ"
-msgstr ""
+msgstr "Otomatik DJ"
 
 msgid "Auto"
-msgstr ""
+msgstr "Otomatik"
 
 msgid "AutoEQ / APO"
-msgstr ""
+msgstr "AutoEQ / APO"
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Otomatik Yedekler"
 
 msgid "Automatic headroom"
-msgstr ""
+msgstr "Otomatik boşluk payı"
 
 msgid "Automatic preamp"
-msgstr ""
+msgstr "Otomatik ön yükseltici"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Otomatik güncellemeler"
 
 msgid "Automatic"
-msgstr ""
+msgstr "Otomatik"
 
 msgid "BPM"
-msgstr ""
+msgstr "BPM"
 
 msgid "Back"
-msgstr ""
+msgstr "Geri"
 
 msgid "Backup Folder"
-msgstr ""
+msgstr "Yedek Klasörü"
 
 msgid "Backup Password"
-msgstr ""
+msgstr "Yedek Parolası"
 
 msgid "Backup Settings"
-msgstr ""
+msgstr "Yedek Ayarları"
 
 msgid "Backup exported"
-msgstr ""
+msgstr "Yedek dışa aktarıldı"
 
 #, rust-format
 msgid "Backup failed: {error}"
-msgstr ""
+msgstr "Yedekleme başarısız: {error}"
 
 #, rust-format
 msgid "Backup restored with warnings: {warnings}"
-msgstr ""
+msgstr "Yedek uyarılarla geri yüklendi: {warnings}"
 
 msgid "Backup restored"
-msgstr ""
+msgstr "Yedek geri yüklendi"
 
 msgid "Backups"
-msgstr ""
+msgstr "Yedekler"
 
 msgid "Balance"
-msgstr ""
+msgstr "Denge"
 
 msgid "Band layout"
-msgstr ""
+msgstr "Bant düzeni"
 
 msgid "Band"
-msgstr ""
+msgstr "Bant"
 
 msgid "Bands"
-msgstr ""
+msgstr "Bantlar"
 
 msgid "Bandwidth"
-msgstr ""
+msgstr "Bant genişliği"
 
 msgid "Bar count"
-msgstr ""
+msgstr "Çubuk sayısı"
 
 msgid "Bar spacing (px)"
-msgstr ""
+msgstr "Çubuk aralığı (px)"
 
 msgid "Bass"
-msgstr ""
+msgstr "Bas"
 
 msgid "Bearer token (WebDAV)"
-msgstr ""
+msgstr "Bearer token (WebDAV)"
 
 msgid "Bearer token"
-msgstr ""
+msgstr "Bearer token"
 
 msgid "Bit depth"
-msgstr ""
+msgstr "Bit derinliği"
 
 msgid "Bitrate"
-msgstr ""
+msgstr "Bit hızı"
 
 msgid "Bitstream"
-msgstr ""
+msgstr "Bit akışı"
 
 msgid "Blue"
-msgstr ""
+msgstr "Mavi"
 
 msgid "Bottom bar"
-msgstr ""
+msgstr "Alt çubuk"
 
 msgid "Brightness (%)"
-msgstr ""
+msgstr "Parlaklık (%)"
 
 msgid "By Lyrics"
-msgstr ""
+msgstr "Şarkı Sözlerine Göre"
 
 msgid "By Title"
-msgstr ""
+msgstr "Başlığa Göre"
 
 msgid "C"
-msgstr ""
+msgstr "C"
 
 msgid "CUE file"
-msgstr ""
+msgstr "CUE dosyası"
 
 msgid "Cache"
-msgstr ""
+msgstr "Önbellek"
 
 msgid "Cached data"
-msgstr ""
+msgstr "Önbelleğe alınmış veriler"
 
 msgid "Cached"
-msgstr ""
+msgstr "Önbelleğe alındı"
 
 msgid "Caching Library"
-msgstr ""
+msgstr "Kitaplık Önbelleğe Alınıyor"
 
 msgid "Caching local library..."
-msgstr ""
+msgstr "Yerel kitaplık önbelleğe alınıyor..."
 
 msgid "Calculating fingerprint..."
-msgstr ""
+msgstr "Parmak izi hesaplanıyor..."
 
 msgid "Cancel download and clear downloaded items"
-msgstr ""
+msgstr "İndirmeyi iptal et ve indirilen öğeleri temizle"
 
 msgid "Cancel download"
-msgstr ""
+msgstr "İndirmeyi iptal et"
 
 msgid "Cancel"
-msgstr ""
+msgstr "İptal"
 
 msgid "Cast format"
-msgstr ""
+msgstr "Yayın formatı"
 
 msgid "Casting changes apply to the next stream"
-msgstr ""
+msgstr "Yayınlama değişiklikleri sonraki akışa uygulanır"
 
 msgid "Casting network"
-msgstr ""
+msgstr "Yayınlama ağı"
 
 msgid "Casting"
-msgstr ""
+msgstr "Yayınlama"
 
 msgid "Centered bars"
-msgstr ""
+msgstr "Ortalanmış çubuklar"
 
 msgid "Certificate authority (PEM)"
-msgstr ""
+msgstr "Sertifika yetkilisi (PEM)"
 
 msgid "Change Profile"
-msgstr ""
+msgstr "Profili Değiştir"
 
 msgid "Change Secret Storage"
-msgstr ""
+msgstr "Gizli Depolamayı Değiştir"
 
 msgid "Change Source"
-msgstr ""
+msgstr "Kaynağı Değiştir"
 
 msgid "Change sort order"
-msgstr ""
+msgstr "Sıralama düzenini değiştir"
 
 msgid "Change"
-msgstr ""
+msgstr "Değiştir"
 
 #, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Değişiklikler {count} parçaya uygulanır"
+msgstr[1] "Değişiklikler {count} parçaya uygulanır"
 
 #, rust-format
 msgid "Changes apply to {count} tracks"
-msgstr ""
+msgstr "Değişiklikler {count} parçaya uygulanır"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Değişiklikler Rufin yeniden başlatıldıktan sonra etkili olur"
 
 msgid "Channels"
-msgstr ""
+msgstr "Kanallar"
 
 msgid "Check for updates"
-msgstr ""
+msgstr "Güncellemeleri kontrol et"
 
 msgid "Checking the user token..."
-msgstr ""
+msgstr "Kullanıcı token'ı kontrol ediliyor..."
 
 msgid "Choose Folder"
-msgstr ""
+msgstr "Klasör Seç"
 
 msgid "Choose Server"
-msgstr ""
+msgstr "Sunucu Seç"
 
 msgid "Choose a local music folder"
-msgstr ""
+msgstr "Yerel bir müzik klasörü seçin"
 
 msgid "Choose an address"
-msgstr ""
+msgstr "Bir adres seçin"
 
 msgid "Choose at least one local music folder"
-msgstr ""
+msgstr "En az bir yerel müzik klasörü seçin"
 
 msgid "Choose connection"
-msgstr ""
+msgstr "Bağlantı seç"
 
 msgid "Choose folder"
-msgstr ""
+msgstr "Klasör seç"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
+"Bu bilgisayardan doğrudan taramak ve oynatmak için bir veya daha fazla "
+"klasör seçin"
 
 msgid "Choose playback output"
-msgstr ""
+msgstr "Oynatma çıkışını seç"
 
 msgid "Choose where your music is. Add more places later in Preferences."
 msgstr ""
+"Müziğinizin nerede olduğunu seçin. Daha sonra Tercihler'den daha fazla yer "
+"ekleyin."
 
 msgid "Choose where your music is. Add more places later in Settings."
 msgstr ""
+"Müziğinizin nerede olduğunu seçin. Daha sonra Ayarlar'dan daha fazla yer "
+"ekleyin."
 
 msgid "Choose whether to keep the completed downloads."
-msgstr ""
+msgstr "Tamamlanan indirmelerin tutulup tutulmayacağını seçin."
 
 msgid "Choose"
-msgstr ""
+msgstr "Seç"
 
 msgid "Choose..."
-msgstr ""
+msgstr "Seç..."
 
 msgid "Circular spectrum"
-msgstr ""
+msgstr "Dairesel spektrum"
 
 msgid "Classical"
-msgstr ""
+msgstr "Klasik"
 
 msgid "Clear EBU R128 cache"
-msgstr ""
+msgstr "EBU R128 önbelleğini temizle"
 
 msgid "Clear Japanese dictionary"
-msgstr ""
+msgstr "Japonca sözlüğü temizle"
 
 msgid "Clear Mapping"
-msgstr ""
+msgstr "Eşlemeyi Temizle"
 
 msgid "Clear album"
-msgstr ""
+msgstr "Albümü temizle"
 
 msgid "Clear all cache"
-msgstr ""
+msgstr "Tüm önbelleği temizle"
 
 msgid "Clear all cache?"
-msgstr ""
+msgstr "Tüm önbellek temizlensin mi?"
 
 msgid "Clear all data"
-msgstr ""
+msgstr "Tüm verileri temizle"
 
 msgid "Clear all data?"
-msgstr ""
+msgstr "Tüm veriler temizlensin mi?"
 
 msgid "Clear artist"
-msgstr ""
+msgstr "Sanatçıyı temizle"
 
 msgid "Clear artwork cache"
-msgstr ""
+msgstr "Kapak görseli önbelleğini temizle"
 
 msgid "Clear fetched lyrics for this track"
-msgstr ""
+msgstr "Bu parça için getirilen şarkı sözlerini temizle"
 
 msgid "Clear fingerprint cache"
-msgstr ""
+msgstr "Parmak izi önbelleğini temizle"
 
 msgid "Clear lookup cache"
-msgstr ""
+msgstr "Arama önbelleğini temizle"
 
 msgid "Clear lyrics cache"
-msgstr ""
+msgstr "Şarkı sözü önbelleğini temizle"
 
 msgid "Clear queue"
-msgstr ""
+msgstr "Kuyruğu temizle"
 
 msgid "Clear this cache?"
-msgstr ""
+msgstr "Bu önbellek temizlensin mi?"
 
 msgid "Clear title"
-msgstr ""
+msgstr "Başlığı temizle"
 
 msgid "Clear waveform cache"
-msgstr ""
+msgstr "Dalga biçimi önbelleğini temizle"
 
 msgid "Clear"
-msgstr ""
+msgstr "Temizle"
 
 msgid "Clearing queue also clears the current song"
-msgstr ""
+msgstr "Kuyruğu temizlemek mevcut şarkıyı da temizler"
 
 msgid "Clipping"
-msgstr ""
+msgstr "Kırpılma"
 
 msgid "Close Window"
-msgstr ""
+msgstr "Pencereyi Kapat"
 
 msgid "Close app window"
-msgstr ""
+msgstr "Uygulama penceresini kapat"
 
 msgid "Close fullscreen player"
-msgstr ""
+msgstr "Tam ekran oynatıcıyı kapat"
 
 msgid "Close"
-msgstr ""
+msgstr "Kapat"
 
 msgid "Club"
-msgstr ""
+msgstr "Kulüp"
 
 msgid "Collapse sidebar"
-msgstr ""
+msgstr "Kenar çubuğunu daralt"
 
 msgid "Collapse/expand sidebar"
-msgstr ""
+msgstr "Kenar çubuğunu daralt/genişlet"
 
 msgid "Collection"
-msgstr ""
+msgstr "Koleksiyon"
 
 msgid "Collections"
-msgstr ""
+msgstr "Koleksiyonlar"
 
 msgid "Color for the active word during playback"
-msgstr ""
+msgstr "Oynatma sırasında etkin kelimenin rengi"
 
 msgid "Colored"
-msgstr ""
+msgstr "Renkli"
 
 msgid "Column borders"
-msgstr ""
+msgstr "Sütun kenarlıkları"
 
 msgid "Columns"
-msgstr ""
+msgstr "Sütunlar"
 
 msgid "Combine lyrics and visualizer"
-msgstr ""
+msgstr "Şarkı sözleri ve görselleştiriciyi birleştir"
 
 msgid "Comment text"
-msgstr ""
+msgstr "Yorum metni"
 
 msgid "Comment"
-msgstr ""
+msgstr "Yorum"
 
 msgid "Compact"
-msgstr ""
+msgstr "Kompakt"
 
 msgid "Compare these emoji on both devices"
-msgstr ""
+msgstr "Bu emojileri iki cihazda karşılaştırın"
 
 msgid "Compilation"
-msgstr ""
+msgstr "Derleme"
 
 msgid "Complete sign-in in your browser"
-msgstr ""
+msgstr "Oturum açmayı tarayıcınızda tamamlayın"
 
 msgid "Completed downloads will stay on this device."
-msgstr ""
+msgstr "Tamamlanan indirmeler bu cihazda kalacak."
 
 msgid "Composer sort"
-msgstr ""
+msgstr "Besteci sıralaması"
 
 msgid "Composer"
-msgstr ""
+msgstr "Besteci"
 
 msgid "Condition"
-msgstr ""
+msgstr "Koşul"
 
 msgid "Configure another"
-msgstr ""
+msgstr "Başka bir tane yapılandır"
 
 #, rust-format
 msgid "Configured items: {count}"
-msgstr ""
+msgstr "Yapılandırılmış öğeler: {count}"
 
 msgid "Confirm"
-msgstr ""
+msgstr "Onayla"
 
 msgid "Connect a device"
-msgstr ""
+msgstr "Bir cihaz bağla"
 
 msgid "Connect is not enabled"
-msgstr ""
+msgstr "Connect etkin değil"
 
 msgid "Connect manually"
-msgstr ""
+msgstr "Elle bağlan"
 
 msgid "Connect to Rufin"
-msgstr ""
+msgstr "Rufin'e bağlan"
 
 msgid "Connect"
-msgstr ""
+msgstr "Bağlan"
 
 #, rust-format
 msgid "Connected as {username}"
-msgstr ""
+msgstr "{username} olarak bağlandı"
 
 msgid "Connected devices"
-msgstr ""
+msgstr "Bağlı cihazlar"
 
 msgid "Connected"
-msgstr ""
+msgstr "Bağlandı"
 
 msgid "Connecting devices"
-msgstr ""
+msgstr "Cihazlar bağlanıyor"
 
 msgid "Connecting to music server..."
-msgstr ""
+msgstr "Müzik sunucusuna bağlanılıyor..."
 
 #, rust-format
 msgid "Connecting to {device}..."
-msgstr ""
+msgstr "{device} cihazına bağlanılıyor..."
 
 msgid "Connecting..."
-msgstr ""
+msgstr "Bağlanılıyor..."
 
 msgid "Connection failed"
-msgstr ""
+msgstr "Bağlantı başarısız"
 
 msgid "Connection lost. Reconnecting..."
-msgstr ""
+msgstr "Bağlantı kesildi. Yeniden bağlanılıyor..."
 
 msgid "Connection name"
-msgstr ""
+msgstr "Bağlantı adı"
 
 msgid "Connection options"
-msgstr ""
+msgstr "Bağlantı seçenekleri"
 
 msgid "Connection settings"
-msgstr ""
+msgstr "Bağlantı ayarları"
 
 msgid "Connection test has failed"
-msgstr ""
+msgstr "Bağlantı testi başarısız oldu"
 
 msgid "Connection"
-msgstr ""
+msgstr "Bağlantı"
 
 msgid "Contents"
-msgstr ""
+msgstr "İçerik"
 
 #, rust-format
 msgid "Continue from {device}"
-msgstr ""
+msgstr "{device} cihazından devam et"
 
 msgid "Continue"
-msgstr ""
+msgstr "Devam"
 
 msgid "Control notifications"
-msgstr ""
+msgstr "Bildirimleri kontrol et"
 
 msgid "Controller status"
-msgstr ""
+msgstr "Denetleyici durumu"
 
 msgid "Controller"
-msgstr ""
+msgstr "Denetleyici"
 
 msgid "Copy access token"
-msgstr ""
+msgstr "Erişim token'ını kopyala"
 
 msgid "Copy invitation"
-msgstr ""
+msgstr "Daveti kopyala"
 
 msgid "Copy link"
-msgstr ""
+msgstr "Bağlantıyı kopyala"
 
 #, rust-format
 msgid "Copy of {name}"
-msgstr ""
+msgstr "{name} kopyası"
 
 msgid "Copy"
-msgstr ""
+msgstr "Kopyala"
 
 msgid "Copyright"
-msgstr ""
+msgstr "Telif hakkı"
 
 msgid "Could not load listening overview"
-msgstr ""
+msgstr "Dinleme özeti yüklenemedi"
 
 msgid "Could not load page"
-msgstr ""
+msgstr "Sayfa yüklenemedi"
 
 msgid "Could not load related tracks"
-msgstr ""
+msgstr "İlgili parçalar yüklenemedi"
 
 msgid "Could not load this page"
-msgstr ""
+msgstr "Bu sayfa yüklenemedi"
 
 msgid "Could not open browser"
-msgstr ""
+msgstr "Tarayıcı açılamadı"
 
 #, rust-format
 msgid "Could not open file: {error}"
-msgstr ""
+msgstr "Dosya açılamadı: {error}"
 
 #, rust-format
 msgid "Could not open folder: {error}"
-msgstr ""
+msgstr "Klasör açılamadı: {error}"
 
 msgid "Could not play this track"
-msgstr ""
+msgstr "Bu parça oynatılamadı"
 
 msgid "Could not read artwork"
-msgstr ""
+msgstr "Kapak görseli okunamadı"
 
 msgid "Could not receive live updates"
-msgstr ""
+msgstr "Canlı güncellemeler alınamadı"
 
 msgid "Could not save diagnostic log"
-msgstr ""
+msgstr "Tanılama günlüğü kaydedilemedi"
 
 #, rust-format
 msgid "Could not share: {error}"
-msgstr ""
+msgstr "Paylaşılamadı: {error}"
 
 #, rust-format
 msgid "Could not update Rufin to {version}"
-msgstr ""
+msgstr "Rufin {version} sürümüne güncellenemedi"
 
 msgid "Could not update favorites"
-msgstr ""
+msgstr "Favoriler güncellenemedi"
 
 msgid "Couldn't connect to the server"
-msgstr ""
+msgstr "Sunucuya bağlanılamadı"
 
 msgid "Couldn't connect"
-msgstr ""
+msgstr "Bağlanılamadı"
 
 msgid "Couldn't decode this track"
-msgstr ""
+msgstr "Bu parça çözülemedi"
 
 msgid "Couldn't load this folder"
-msgstr ""
+msgstr "Bu klasör yüklenemedi"
 
 #, rust-format
 msgid "Couldn't open the sign-in page: {error}"
-msgstr ""
+msgstr "Oturum açma sayfası açılamadı: {error}"
 
 msgid "Couldn't search for lyrics"
-msgstr ""
+msgstr "Şarkı sözleri aranamadı"
 
 msgid "Couldn\342\200\231t download Japanese dictionary"
 msgstr ""
 
 msgid "Country"
-msgstr ""
+msgstr "Ülke"
 
 msgid "Covers and artist images your library doesn't have"
-msgstr ""
+msgstr "Kitaplığınızda olmayan kapaklar ve sanatçı görselleri"
 
 msgid "Covers, artist images, tags"
-msgstr ""
+msgstr "Kapaklar, sanatçı görselleri, etiketler"
 
 msgid "Create API keys"
-msgstr ""
+msgstr "API anahtarları oluştur"
 
 msgid "Create a playlist from queue"
-msgstr ""
+msgstr "Kuyruktan çalma listesi oluştur"
 
 msgid "Create playlist"
-msgstr ""
+msgstr "Çalma listesi oluştur"
 
 msgid "Create"
-msgstr ""
+msgstr "Oluştur"
 
 msgid "Crossfade duration"
-msgstr ""
+msgstr "Çapraz geçiş süresi"
 
 msgid "Crossfade mode"
-msgstr ""
+msgstr "Çapraz geçiş modu"
 
 msgid "Crossfade"
-msgstr ""
+msgstr "Çapraz geçiş"
 
 msgid "Crossfeed"
-msgstr ""
+msgstr "Çapraz besleme"
 
 msgid "Current artwork"
-msgstr ""
+msgstr "Mevcut kapak görseli"
 
 msgid "Custom HTTP headers"
-msgstr ""
+msgstr "Özel HTTP başlıkları"
 
 msgid "Custom bands"
-msgstr ""
+msgstr "Özel bantlar"
 
 msgid "Custom"
-msgstr ""
+msgstr "Özel"
 
 msgid "Customization"
-msgstr ""
+msgstr "Özelleştirme"
 
 msgid "Customize display"
-msgstr ""
+msgstr "Görünümü özelleştir"
 
 msgid "Customize"
-msgstr ""
+msgstr "Özelleştir"
 
 msgid "Cut"
-msgstr ""
+msgstr "Kes"
 
 msgid "Daily"
-msgstr ""
+msgstr "Günlük"
 
 msgid "Dance"
-msgstr ""
+msgstr "Dans"
 
 msgid "Dark"
-msgstr ""
+msgstr "Koyu"
 
 msgid "Database sizes show stored data, excluding database overhead."
 msgstr ""
+"Veritabanı boyutları, veritabanı ek yükü hariç depolanan verileri gösterir."
 
 msgid "Date added"
-msgstr ""
+msgstr "Eklenme tarihi"
 
 msgid "Date"
-msgstr ""
+msgstr "Tarih"
 
 msgid "Days after month ends"
-msgstr ""
+msgstr "Ay bittikten sonraki günler"
 
 msgid "Days after year ends"
-msgstr ""
+msgstr "Yıl bittikten sonraki günler"
 
 msgid "Days before month ends"
-msgstr ""
+msgstr "Ay bitmeden önceki günler"
 
 msgid "Days before year ends"
-msgstr ""
+msgstr "Yıl bitmeden önceki günler"
 
 msgid "Debug logging"
-msgstr ""
+msgstr "Hata ayıklama günlüğü"
 
 #, rust-format
 msgid "December {year}"
-msgstr ""
+msgstr "Aralık {year}"
 
 msgid "Decrease"
-msgstr ""
+msgstr "Azalt"
 
 msgid "Default channel"
-msgstr ""
+msgstr "Varsayılan kanal"
 
 msgid "Default"
-msgstr ""
+msgstr "Varsayılan"
 
 msgid "Delete Permanently?"
-msgstr ""
+msgstr "Kalıcı Olarak Silinsin mi?"
 
 msgid "Delete Playlist"
-msgstr ""
+msgstr "Çalma Listesini Sil"
 
 msgid "Delete Station"
-msgstr ""
+msgstr "İstasyonu Sil"
 
 #, python-brace-format, rust-format
 msgid "Delete \"{name}\"?"
-msgstr ""
+msgstr "\"{name}\" silinsin mi?"
 
 msgid "Delete folder"
-msgstr ""
+msgstr "Klasörü sil"
 
 msgid "Delete permanently"
-msgstr ""
+msgstr "Kalıcı olarak sil"
 
 msgid "Delete playlist file"
-msgstr ""
+msgstr "Çalma listesi dosyasını sil"
 
 msgid "Delete preset"
-msgstr ""
+msgstr "Ön ayarı sil"
 
 msgid "Delete this station?"
-msgstr ""
+msgstr "Bu istasyon silinsin mi?"
 
 #, rust-format
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} çalma listesi silinsin mi?"
+msgstr[1] "{count} çalma listesi silinsin mi?"
 
 msgid "Delete"
-msgstr ""
+msgstr "Sil"
 
 msgid "Delivery"
-msgstr ""
+msgstr "Teslimat"
 
 msgid "Demo"
-msgstr ""
+msgstr "Demo"
 
 msgid "Demos"
-msgstr ""
+msgstr "Demolar"
 
 msgid "Descending"
-msgstr ""
+msgstr "Azalan"
 
 msgid "Description"
-msgstr ""
+msgstr "Açıklama"
 
 msgid "Detail track columns"
-msgstr ""
+msgstr "Ayrıntı parça sütunları"
 
 msgid "Detail"
-msgstr ""
+msgstr "Ayrıntı"
 
 msgid "Details"
-msgstr ""
+msgstr "Ayrıntılar"
 
 msgid "Device invitation"
-msgstr ""
+msgstr "Cihaz daveti"
 
 msgid "Device name"
-msgstr ""
+msgstr "Cihaz adı"
 
 msgid "Device"
-msgstr ""
+msgstr "Cihaz"
 
 msgid "Diagnostic log saved"
-msgstr ""
+msgstr "Tanılama günlüğü kaydedildi"
 
 msgid "Diagnostic log"
-msgstr ""
+msgstr "Tanılama günlüğü"
 
 msgid "Direct"
-msgstr ""
+msgstr "Doğrudan"
 
 msgid "Disable private mode"
-msgstr ""
+msgstr "Gizli modu devre dışı bırak"
 
 msgid "Disabled"
-msgstr ""
+msgstr "Devre dışı"
 
 msgid "Disc number"
-msgstr ""
+msgstr "Disk numarası"
 
 msgid "Disc subtitle"
-msgstr ""
+msgstr "Disk alt başlığı"
 
 #, rust-format
 msgid "Disc {number}"
-msgstr ""
+msgstr "Disk {number}"
 
 msgid "Disc"
-msgstr ""
+msgstr "Disk"
 
 msgid "Discard changes?"
-msgstr ""
+msgstr "Değişiklikler atılsın mı?"
 
 msgid "Discography"
-msgstr ""
+msgstr "Diskografi"
 
 msgid "Disconnect from Rufin?"
-msgstr ""
+msgstr "Rufin bağlantısı kesilsin mi?"
 
 msgid "Disconnect this device"
-msgstr ""
+msgstr "Bu cihazın bağlantısını kes"
 
 msgid "Disconnect this device?"
-msgstr ""
+msgstr "Bu cihazın bağlantısı kesilsin mi?"
 
 msgid "Disconnect"
-msgstr ""
+msgstr "Bağlantıyı kes"
 
 msgid "Discord Rich Presence"
-msgstr ""
+msgstr "Discord Rich Presence"
 
 msgid "Discord access in Flatpak"
-msgstr ""
+msgstr "Flatpak'te Discord erişimi"
 
 msgid "Display"
-msgstr ""
+msgstr "Görüntü"
 
 msgid "Do not encrypt"
-msgstr ""
+msgstr "Şifreleme"
 
 #, rust-format
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Meta veri değişiklikleri {count} parçaya uygulansın mı?"
+msgstr[1] "Meta veri değişiklikleri {count} parçaya uygulansın mı?"
 
 msgid "Do you want to use the existing configuration?"
-msgstr ""
+msgstr "Mevcut yapılandırmayı kullanmak ister misiniz?"
 
 msgid "Don't duplicate"
-msgstr ""
+msgstr "Çoğaltma"
 
 msgid "Donate"
-msgstr ""
+msgstr "Bağış yap"
 
 msgid "Done"
-msgstr ""
+msgstr "Tamam"
 
 msgid "Download Automatically"
-msgstr ""
+msgstr "Otomatik İndir"
 
 msgid "Download Folder"
-msgstr ""
+msgstr "İndirme Klasörü"
 
 msgid "Download Lazily"
-msgstr ""
+msgstr "Tembel İndir"
 
 msgid "Download Queue"
-msgstr ""
+msgstr "İndirme Kuyruğu"
 
 msgid "Download on Mobile Data"
-msgstr ""
+msgstr "Mobil Veride İndir"
 
 msgid "Download queued"
-msgstr ""
+msgstr "İndirme kuyruğa alındı"
 
 msgid "Download started"
-msgstr ""
+msgstr "İndirme başladı"
 
 msgid "Download"
-msgstr ""
+msgstr "İndir"
 
 msgid "Downloaded"
-msgstr ""
+msgstr "İndirildi"
 
 msgid "Downloading Japanese dictionary..."
-msgstr ""
+msgstr "Japonca sözlük indiriliyor..."
 
 msgid "Downloading artwork"
-msgstr ""
+msgstr "Kapak görseli indiriliyor"
 
 #, rust-format
 msgid "Downloading artwork... {count} checked"
-msgstr ""
+msgstr "Kapak görseli indiriliyor... {count} kontrol edildi"
 
 msgid "Downloading lyrics"
-msgstr ""
+msgstr "Şarkı sözleri indiriliyor"
 
 #, rust-format
 msgid "Downloading lyrics... {count} checked"
-msgstr ""
+msgstr "Şarkı sözleri indiriliyor... {count} kontrol edildi"
 
 msgid "Downloading"
-msgstr ""
+msgstr "İndiriliyor"
 
 msgid "Downloads"
-msgstr ""
+msgstr "İndirmeler"
 
 msgid "Drag to a folder"
-msgstr ""
+msgstr "Bir klasöre sürükleyin"
 
 msgid "Drag to reorder"
-msgstr ""
+msgstr "Yeniden sıralamak için sürükleyin"
 
 msgid "Drag to reorder."
-msgstr ""
+msgstr "Yeniden sıralamak için sürükleyin."
 
 msgid "Duplicate preset"
-msgstr ""
+msgstr "Ön ayarı çoğalt"
 
 msgid "Duplicate"
-msgstr ""
+msgstr "Çoğalt"
 
 msgid "Duration"
-msgstr ""
+msgstr "Süre"
 
 msgid "Dynamic background"
-msgstr ""
+msgstr "Dinamik arka plan"
 
 msgid "Dynamic"
-msgstr ""
+msgstr "Dinamik"
 
 msgid "EBU R128 analysis"
-msgstr ""
+msgstr "EBU R128 analizi"
 
 msgid "EBU R128 reference level"
-msgstr ""
+msgstr "EBU R128 referans düzeyi"
 
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
 msgid "EP"
-msgstr ""
+msgstr "EP"
 
 msgid "EPs"
-msgstr ""
+msgstr "EP'ler"
 
 msgid "ERB"
-msgstr ""
+msgstr "ERB"
 
 msgid "Each plays whole"
-msgstr ""
+msgstr "Her biri tamamını oynatır"
 
 msgid "Edit Lyrics"
-msgstr ""
+msgstr "Şarkı Sözlerini Düzenle"
 
 msgid "Edit Playlist"
-msgstr ""
+msgstr "Çalma Listesini Düzenle"
 
 msgid "Edit Smart Playlist"
-msgstr ""
+msgstr "Akıllı Çalma Listesini Düzenle"
 
 msgid "Edit Source"
-msgstr ""
+msgstr "Kaynağı Düzenle"
 
 msgid "Edit Station"
-msgstr ""
+msgstr "İstasyonu Düzenle"
 
 msgid "Edit lyrics"
-msgstr ""
+msgstr "Şarkı sözlerini düzenle"
 
 msgid "Edit metadata"
-msgstr ""
+msgstr "Meta verileri düzenle"
 
 msgid "Edit theme"
-msgstr ""
+msgstr "Temayı düzenle"
 
 msgid "Edit"
-msgstr ""
+msgstr "Düzenle"
 
 msgid "Embed in track"
-msgstr ""
+msgstr "Parçaya göm"
 
 msgid "Emby Connect"
-msgstr ""
+msgstr "Emby Connect"
 
 msgid "Emby"
-msgstr ""
+msgstr "Emby"
 
 msgid "Enable Controller"
-msgstr ""
+msgstr "Denetleyiciyi Etkinleştir"
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "EBU R128 Analizi etkinleştirilsin mi?"
 
 msgid "Enable Rufin Connect"
-msgstr ""
+msgstr "Rufin Connect'i Etkinleştir"
 
 msgid "Enable automatic backups"
-msgstr ""
+msgstr "Otomatik yedeklemeleri etkinleştir"
 
 msgid "Enable background image"
-msgstr ""
+msgstr "Arka plan görselini etkinleştir"
 
 msgid "Enable caching lyrics"
-msgstr ""
+msgstr "Şarkı sözlerini önbelleğe almayı etkinleştir"
 
 msgid "Enable partial star ratings"
-msgstr ""
+msgstr "Kısmi yıldız puanlamalarını etkinleştir"
 
 msgid "Enable private mode"
-msgstr ""
+msgstr "Gizli modu etkinleştir"
 
 msgid "Enable"
-msgstr ""
+msgstr "Etkinleştir"
 
 msgid "Enabled"
-msgstr ""
+msgstr "Etkin"
 
 msgid "Encoding peak"
-msgstr ""
+msgstr "Kodlama tepe değeri"
 
 msgid "Encoding"
-msgstr ""
+msgstr "Kodlama"
 
 msgid "Encrypt backups"
-msgstr ""
+msgstr "Yedekleri şifrele"
 
 msgid "End of this track"
-msgstr ""
+msgstr "Bu parçanın sonu"
 
 #, rust-format
 msgid "Ends around {time}"
-msgstr ""
+msgstr "Yaklaşık {time} civarında biter"
 
 msgid "Enter a name and URL."
-msgstr ""
+msgstr "Bir ad ve URL girin."
 
 msgid "Enter a name and the server's URL."
-msgstr ""
+msgstr "Bir ad ve sunucunun URL'sini girin."
 
 msgid "Enter a server address and API key"
-msgstr ""
+msgstr "Bir sunucu adresi ve API anahtarı girin"
 
 msgid "Enter a server address, username, and password"
-msgstr ""
+msgstr "Bir sunucu adresi, kullanıcı adı ve parola girin"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr ""
+"Tarayıcınız üzerinden oturum açmak için Nextcloud sunucu adresinizi girin"
 
 msgid "Enter your user token first"
-msgstr ""
+msgstr "Önce kullanıcı token'ınızı girin"
 
 msgid "Enter your username and password."
-msgstr ""
+msgstr "Kullanıcı adınızı ve parolanızı girin."
 
 msgid "Entire Library"
-msgstr ""
+msgstr "Tüm Kitaplık"
 
 msgid "Equalizer is controlled by the receiver"
-msgstr ""
+msgstr "Ekolayzer alıcı tarafından kontrol edilir"
 
 msgid "Equalizer"
-msgstr ""
+msgstr "Ekolayzer"
 
 msgid "Ever played"
-msgstr ""
+msgstr "Hiç çalındı"
 
 msgid "Everything, including new tracks"
-msgstr ""
+msgstr "Yeni parçalar dahil her şey"
 
 msgid "Excluded folders"
-msgstr ""
+msgstr "Hariç tutulan klasörler"
 
 msgid "Expand lyrics and visualizer"
-msgstr ""
+msgstr "Şarkı sözlerini ve görselleştiriciyi genişlet"
 
 msgid "Expand sidebar"
-msgstr ""
+msgstr "Kenar çubuğunu genişlet"
 
 msgid "Expires"
-msgstr ""
+msgstr "Sona erer"
 
 msgid "Explore"
-msgstr ""
+msgstr "Keşfet"
 
 msgid "Export Activity"
-msgstr ""
+msgstr "Etkinliği Dışa Aktar"
 
 msgid "Export Backup"
-msgstr ""
+msgstr "Yedeği Dışa Aktar"
 
 msgid "Export PNG"
-msgstr ""
+msgstr "PNG Dışa Aktar"
 
 msgid "Export Playlist"
-msgstr ""
+msgstr "Çalma Listesini Dışa Aktar"
 
 msgid "Export format"
-msgstr ""
+msgstr "Dışa aktarma formatı"
 
 msgid "Export playlist"
-msgstr ""
+msgstr "Çalma listesini dışa aktar"
 
 msgid "Export preset"
-msgstr ""
+msgstr "Ön ayarı dışa aktar"
 
 msgid "Export your listening history in Rufin"
-msgstr ""
+msgstr "Dinleme geçmişinizi Rufin'de dışa aktarın"
 
 msgid "Export"
-msgstr ""
+msgstr "Dışa Aktar"
 
 msgid "External lyric lookup is off"
-msgstr ""
+msgstr "Harici şarkı sözü araması kapalı"
 
 msgid "External lyrics lookup"
-msgstr ""
+msgstr "Harici şarkı sözü araması"
 
 msgid "External metadata lookup"
-msgstr ""
+msgstr "Harici meta veri araması"
 
 msgid "FFT size"
-msgstr ""
+msgstr "FFT boyutu"
 
 msgid "FLAC"
-msgstr ""
+msgstr "FLAC"
 
 msgid "Fade audio when playback is paused or resumed"
-msgstr ""
+msgstr "Oynatma duraklatıldığında veya devam ettiğinde sesi geçişle"
 
 msgid "Fall speed (%)"
-msgstr ""
+msgstr "Düşme hızı (%)"
 
 msgid "Favorite current track"
-msgstr ""
+msgstr "Mevcut parçayı favorile"
 
 msgid "Favorite tracks"
-msgstr ""
+msgstr "Favori parçalar"
 
 msgid "Favorite tracks, plus tracks from favorite albums and artists"
-msgstr ""
+msgstr "Favori parçalar ile favori albüm ve sanatçılardan parçalar"
 
 msgid "Favorite"
-msgstr ""
+msgstr "Favori"
 
 msgid "Favorites and ratings"
-msgstr ""
+msgstr "Favoriler ve puanlamalar"
 
 msgid "Favorites"
-msgstr ""
+msgstr "Favoriler"
 
 msgid "Featured genres"
-msgstr ""
+msgstr "Öne çıkan türler"
 
 #, rust-format
 msgid "February {year}"
-msgstr ""
+msgstr "Şubat {year}"
 
 msgid "Fetching Home"
-msgstr ""
+msgstr "Ana Sayfa getiriliyor"
 
 msgid "Fetching albums"
-msgstr ""
+msgstr "Albümler getiriliyor"
 
 msgid "Fetching artists"
-msgstr ""
+msgstr "Sanatçılar getiriliyor"
 
 msgid "Fetching artwork"
-msgstr ""
+msgstr "Kapak görseli getiriliyor"
 
 msgid "Fetching genres"
-msgstr ""
+msgstr "Türler getiriliyor"
 
 msgid "Fetching lyrics"
-msgstr ""
+msgstr "Şarkı sözleri getiriliyor"
 
 msgid "Fetching metadata..."
-msgstr ""
+msgstr "Meta veriler getiriliyor..."
 
 msgid "Fetching playlists"
-msgstr ""
+msgstr "Çalma listeleri getiriliyor"
 
 msgid "Field"
-msgstr ""
+msgstr "Alan"
 
 msgid "File connection"
-msgstr ""
+msgstr "Dosya bağlantısı"
 
 msgid "File format"
-msgstr ""
+msgstr "Dosya formatı"
 
 msgid "File path"
-msgstr ""
+msgstr "Dosya yolu"
 
 msgid "File size"
-msgstr ""
+msgstr "Dosya boyutu"
 
 msgid "Filename"
-msgstr ""
+msgstr "Dosya adı"
 
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
+"Dosyalarda Mood/BPM etiketlerinin yazılı olması gerekir. Jellyfin için "
+"desteklenmez"
 
 msgid "Filled spectrum"
-msgstr ""
+msgstr "Dolgulu spektrum"
 
 msgid "Filter type"
-msgstr ""
+msgstr "Filtre türü"
 
 #, rust-format
 msgid "Find in {name}"
-msgstr ""
+msgstr "{name} içinde bul"
 
 msgid "Find shares"
-msgstr ""
+msgstr "Paylaşımları bul"
 
 msgid "Find your token"
-msgstr ""
+msgstr "Token'ınızı bulun"
 
 msgid "Finding lyrics..."
-msgstr ""
+msgstr "Şarkı sözleri aranıyor..."
 
 msgid "Finish the last track"
-msgstr ""
+msgstr "Son parçayı bitir"
 
 #, rust-format
 msgid "Finishes the track playing at {time}"
-msgstr ""
+msgstr "{time} zamanında çalan parçayı bitirir"
 
 msgid "Fit to height"
-msgstr ""
+msgstr "Yüksekliğe sığdır"
 
 msgid "Fixed position"
-msgstr ""
+msgstr "Sabit konum"
 
 msgid "Flat"
-msgstr ""
+msgstr "Düz"
 
 msgid "Folder name"
-msgstr ""
+msgstr "Klasör adı"
 
 msgid "Folder path"
-msgstr ""
+msgstr "Klasör yolu"
 
 msgid "Folder"
-msgstr ""
+msgstr "Klasör"
 
 msgid "Folders"
-msgstr ""
+msgstr "Klasörler"
 
 msgid "Follow the app accent with lighter and darker tones"
-msgstr ""
+msgstr "Uygulama vurgusunu daha açık ve koyu tonlarla takip et"
 
 msgid "Font family"
-msgstr ""
+msgstr "Yazı tipi ailesi"
 
 msgid "Font size (px)"
-msgstr ""
+msgstr "Yazı tipi boyutu (px)"
 
 msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
+"Yalnızca bu içe veya dışa aktarma için. Şifrelenmemiş arşiv için boş bırakın."
 
 msgid "Forget Source"
-msgstr ""
+msgstr "Kaynağı Unut"
 
 msgid "Format not supported"
-msgstr ""
+msgstr "Format desteklenmiyor"
 
 msgid "Format"
-msgstr ""
+msgstr "Format"
 
 msgid "Forward"
-msgstr ""
+msgstr "İleri"
 
 msgid "Found Servers"
-msgstr ""
+msgstr "Bulunan Sunucular"
 
 msgid "Found"
-msgstr ""
+msgstr "Bulundu"
 
 msgid "Frame rate limit"
-msgstr ""
+msgstr "Kare hızı sınırı"
 
 msgid "Frames per second"
-msgstr ""
+msgstr "Saniyedeki kare sayısı"
 
 msgid "Frequency \302\267 Hz"
 msgstr ""
 
 msgid "Frequency scale"
-msgstr ""
+msgstr "Frekans ölçeği"
 
 msgid "Frequency"
-msgstr ""
+msgstr "Frekans"
 
 msgid "Friday"
-msgstr ""
+msgstr "Cuma"
 
 msgid "Full Bass & Treble"
-msgstr ""
+msgstr "Tam Bas ve Tiz"
 
 msgid "Full Bass"
-msgstr ""
+msgstr "Tam Bas"
 
 msgid "Full Treble"
-msgstr ""
+msgstr "Tam Tiz"
 
 msgid "Full"
-msgstr ""
+msgstr "Tam"
 
 msgid "Fullscreen player"
-msgstr ""
+msgstr "Tam ekran oynatıcı"
 
 msgid "Fullscreen"
-msgstr ""
+msgstr "Tam ekran"
 
 msgid "Furigana"
-msgstr ""
+msgstr "Furigana"
 
+#, fuzzy
 msgid "Gain \302\267 dB"
-msgstr ""
+msgstr "Kazanç \\\\302\\\\267 dB"
 
 msgid "Gain"
-msgstr ""
+msgstr "Kazanç"
 
 msgid "Gapless mode"
-msgstr ""
+msgstr "Boşluksuz mod"
 
 msgid "Gapless"
-msgstr ""
+msgstr "Boşluksuz"
 
 msgid "General"
-msgstr ""
+msgstr "Genel"
 
 msgid "Genius"
-msgstr ""
+msgstr "Genius"
 
 msgid "Genre radio"
-msgstr ""
+msgstr "Tür radyosu"
 
 msgid "Genre tracks"
-msgstr ""
+msgstr "Tür parçaları"
 
 msgid "Genre"
-msgstr ""
+msgstr "Tür"
 
 msgid "Genres"
-msgstr ""
+msgstr "Türler"
 
 msgid "Get a personal key"
-msgstr ""
+msgstr "Kişisel anahtar al"
 
 msgid "Go to Album"
-msgstr ""
+msgstr "Albüme Git"
 
 #, rust-format
 msgid "Go to {artist}"
-msgstr ""
+msgstr "{artist} sanatçısına git"
 
 msgid "Go to"
-msgstr ""
+msgstr "Git"
 
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Gradient end"
-msgstr ""
+msgstr "Gradyan bitişi"
 
 msgid "Gradient start"
-msgstr ""
+msgstr "Gradyan başlangıcı"
 
 msgid "Graphic"
-msgstr ""
+msgstr "Grafik"
 
 msgid "Green"
-msgstr ""
+msgstr "Yeşil"
 
 msgid "Grid labels"
-msgstr ""
+msgstr "Izgara etiketleri"
 
 msgid "Grid spacing"
-msgstr ""
+msgstr "Izgara aralığı"
 
 msgid "Grid"
-msgstr ""
+msgstr "Izgara"
 
 msgid "Grouping"
-msgstr ""
+msgstr "Gruplama"
 
 msgid "Guest / public access"
-msgstr ""
+msgstr "Misafir / herkese açık erişim"
 
 msgid "Halo"
-msgstr ""
+msgstr "Hale"
 
 msgid "Heard"
-msgstr ""
+msgstr "Dinlendi"
 
 msgid "Height (%)"
-msgstr ""
+msgstr "Yükseklik (%)"
 
 msgid "Help"
-msgstr ""
+msgstr "Yardım"
 
 msgid "Hidden"
-msgstr ""
+msgstr "Gizli"
 
 msgid "Hide sidebar"
-msgstr ""
+msgstr "Kenar çubuğunu gizle"
 
 msgid "High shelf"
-msgstr ""
+msgstr "Yüksek raf"
 
 msgid "Highlight hovered row"
-msgstr ""
+msgstr "Üzerine gelinen satırı vurgula"
 
 msgid "History"
-msgstr ""
+msgstr "Geçmiş"
 
 msgid "Hold and drag to resize"
-msgstr ""
+msgstr "Yeniden boyutlandırmak için basılı tutup sürükleyin"
 
 msgid "Hold to reorder"
-msgstr ""
+msgstr "Yeniden sıralamak için basılı tutun"
 
 msgid "Home Profile"
-msgstr ""
+msgstr "Ana Profil"
 
 msgid "Home blocks"
-msgstr ""
+msgstr "Ana sayfa blokları"
 
 msgid "Home"
-msgstr ""
+msgstr "Ana Sayfa"
 
 msgid "Homepage"
-msgstr ""
+msgstr "Ana sayfa"
 
 msgid "Hour"
-msgstr ""
+msgstr "Saat"
 
 msgid "Hours"
-msgstr ""
+msgstr "Saat"
 
 msgid "Hz"
-msgstr ""
+msgstr "Hz"
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
-msgstr ""
+msgstr "Sayfa yüklenmiyorsa Libre.fm IP aralığınızı/VPN'nizi engelliyordur"
 
 msgid "Ignore playback volume"
-msgstr ""
+msgstr "Oynatma ses düzeyini yoksay"
 
 msgid "Image files"
-msgstr ""
+msgstr "Görsel dosyaları"
 
 msgid "Image"
-msgstr ""
+msgstr "Görsel"
 
 msgid "Import Activity"
-msgstr ""
+msgstr "Etkinliği İçe Aktar"
 
 msgid "Import Backup"
-msgstr ""
+msgstr "Yedeği İçe Aktar"
 
 msgid "Import Playlist"
-msgstr ""
+msgstr "Çalma Listesini İçe Aktar"
 
 msgid "Import preset"
-msgstr ""
+msgstr "Ön ayarı içe aktar"
 
 msgid "Import theme"
-msgstr ""
+msgstr "Temayı içe aktar"
 
 msgid "Import"
-msgstr ""
+msgstr "İçe Aktar"
 
 #, rust-format
 msgid "Imported {count} listen."
 msgid_plural "Imported {count} listens."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} dinleme içe aktarıldı."
+msgstr[1] "{count} dinleme içe aktarıldı."
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
+"Dosyaları kitaplığa içe aktarır ve eklenen klasörleri değişiklikler için "
+"izler."
 
 msgid "In playlist"
-msgstr ""
+msgstr "Çalma listesinde"
 
 msgid "Inactive at this sample rate"
-msgstr ""
+msgstr "Bu örnekleme hızında etkin değil"
 
 msgid "Include detailed Rufin diagnostics in this session"
-msgstr ""
+msgstr "Bu oturuma ayrıntılı Rufin tanılaması ekle"
 
 msgid "Increase"
-msgstr ""
+msgstr "Artır"
 
 msgid "Install available updates when Rufin starts"
-msgstr ""
+msgstr "Rufin başladığında mevcut güncellemeleri yükle"
 
 msgid "Installed"
-msgstr ""
+msgstr "Kurulu"
 
 msgid "Instrumental"
-msgstr ""
+msgstr "Enstrümantal"
 
 msgid "Integrations"
-msgstr ""
+msgstr "Entegrasyonlar"
 
 msgid "Invite"
-msgstr ""
+msgstr "Davet et"
 
 msgid "Item ID"
-msgstr ""
+msgstr "Öğe kimliği"
 
 msgid "Item is no longer available"
-msgstr ""
+msgstr "Öğe artık kullanılamıyor"
 
 msgid "Item menus"
-msgstr ""
+msgstr "Öğe menüleri"
 
 #, rust-format
 msgid "January {year}"
-msgstr ""
+msgstr "Ocak {year}"
 
 msgid "Japanese dictionary"
-msgstr ""
+msgstr "Japonca sözlük"
 
 msgid "Jellyfin"
-msgstr ""
+msgstr "Jellyfin"
 
 msgid "Join profile"
-msgstr ""
+msgstr "Profile katıl"
 
 msgid "Join to copy its sources and sign-ins"
-msgstr ""
+msgstr "Kaynaklarını ve oturum açmalarını kopyalamak için katıl"
 
 msgid "Join"
-msgstr ""
+msgstr "Katıl"
 
 #, rust-format
 msgid "July {year}"
-msgstr ""
+msgstr "Temmuz {year}"
 
 #, rust-format
 msgid "June {year}"
-msgstr ""
+msgstr "Haziran {year}"
 
 msgid "Karaoke Playback"
-msgstr ""
+msgstr "Karaoke Oynatma"
 
 msgid "Karaoke highlight color"
-msgstr ""
+msgstr "Karaoke vurgu rengi"
 
 msgid "Karaoke mode"
-msgstr ""
+msgstr "Karaoke modu"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Pencereyi kapattıktan sonra Rufin'i çalışır durumda tut"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
+"Müziği çevrimdışı kullanılabilir tut. Klasör değişiklikleri yalnızca yeni "
+"indirmeleri etkiler"
 
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "Klavye Kısayolları"
 
 msgid "Koito, Maloja and other ListenBrainz servers."
-msgstr ""
+msgstr "Koito, Maloja ve diğer ListenBrainz sunucuları."
 
 msgid "LED spectrum"
-msgstr ""
+msgstr "LED spektrum"
 
 msgid "LIVE"
-msgstr ""
+msgstr "CANLI"
 
 msgid "LRCLIB"
-msgstr ""
+msgstr "LRCLIB"
 
 msgid "Labels"
-msgstr ""
+msgstr "Etiketler"
 
 msgid "Language and readings"
-msgstr ""
+msgstr "Dil ve okunuşlar"
 
 msgid "Language"
-msgstr ""
+msgstr "Dil"
 
 msgid "Laptop/Headphones"
-msgstr ""
+msgstr "Dizüstü/Kulaklık"
 
 msgid "Large"
-msgstr ""
+msgstr "Büyük"
 
 msgid "Last 30 days"
-msgstr ""
+msgstr "Son 30 gün"
 
 msgid "Last 365 days"
-msgstr ""
+msgstr "Son 365 gün"
 
 msgid "Last 7 days"
-msgstr ""
+msgstr "Son 7 gün"
 
 msgid "Last played"
-msgstr ""
+msgstr "Son çalınan"
 
 msgid "Last.fm"
-msgstr ""
+msgstr "Last.fm"
 
 msgid "Layout"
-msgstr ""
+msgstr "Düzen"
 
 msgid "Leave empty for an unencrypted archive."
-msgstr ""
+msgstr "Şifrelenmemiş arşiv için boş bırakın."
 
 msgid "Leave the password empty to keep the saved credential"
-msgstr ""
+msgstr "Kaydedilmiş kimlik bilgisini korumak için parolayı boş bırakın"
 
 msgid "Left sidebar"
-msgstr ""
+msgstr "Sol kenar çubuğu"
 
 msgid "Legacy authorization"
-msgstr ""
+msgstr "Eski yetkilendirme"
 
 msgid "Legacy password (Subsonic)"
-msgstr ""
+msgstr "Eski parola (Subsonic)"
 
 msgid "Legacy password"
-msgstr ""
+msgstr "Eski parola"
 
 msgid "Legacy"
-msgstr ""
+msgstr "Eski"
 
 msgid "Less"
-msgstr ""
+msgstr "Daha az"
 
 msgid "Library items"
-msgstr ""
+msgstr "Kitaplık öğeleri"
 
 msgid "Library"
-msgstr ""
+msgstr "Kitaplık"
 
 msgid "Light"
-msgstr ""
+msgstr "Açık"
 
 msgid "Limit"
-msgstr ""
+msgstr "Sınır"
 
 msgid "Linear"
-msgstr ""
+msgstr "Doğrusal"
 
 msgid "Link copied"
-msgstr ""
+msgstr "Bağlantı kopyalandı"
 
 msgid "Link exported file"
-msgstr ""
+msgstr "Dışa aktarılan dosyayı bağla"
 
 msgid "Link to file..."
-msgstr ""
+msgstr "Dosyaya bağlantı ver..."
 
 msgid "Link"
-msgstr ""
+msgstr "Bağlantı"
 
 msgid "Linked file"
-msgstr ""
+msgstr "Bağlı dosya"
 
 msgid "Links"
-msgstr ""
+msgstr "Bağlantılar"
 
 msgid "ListenBrainz API"
-msgstr ""
+msgstr "ListenBrainz API"
 
 msgid "ListenBrainz or Audioscrobbler API"
-msgstr ""
+msgstr "ListenBrainz veya Audioscrobbler API"
 
 msgid "Listening overview"
-msgstr ""
+msgstr "Dinleme özeti"
 
 msgid "Listening"
-msgstr ""
+msgstr "Dinleme"
 
 msgid "Live"
-msgstr ""
+msgstr "Canlı"
 
 msgid "Load file contents"
-msgstr ""
+msgstr "Dosya içeriğini yükle"
 
 msgid "Loading cached lookups..."
-msgstr ""
+msgstr "Önbelleğe alınmış aramalar yükleniyor..."
 
 msgid "Loading related tracks..."
-msgstr ""
+msgstr "İlgili parçalar yükleniyor..."
 
 msgid "Loading..."
-msgstr ""
+msgstr "Yükleniyor..."
 
 msgid "Local Address"
-msgstr ""
+msgstr "Yerel Adres"
 
 msgid "Local File Access"
-msgstr ""
+msgstr "Yerel Dosya Erişimi"
 
 msgid "Local File Mapping"
-msgstr ""
+msgstr "Yerel Dosya Eşlemesi"
 
 msgid "Local Folders"
-msgstr ""
+msgstr "Yerel Klasörler"
 
 msgid "Local Prefix"
-msgstr ""
+msgstr "Yerel Önek"
 
 msgid "Local file access configured"
-msgstr ""
+msgstr "Yerel dosya erişimi yapılandırıldı"
 
 msgid "Local file access is required before these tags can be saved."
-msgstr ""
+msgstr "Bu etiketler kaydedilmeden önce yerel dosya erişimi gerekir."
 
 #, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
+"Yerel dosya eşlemesi: {total} sunucu yolundan {matched} tanesi eşleşiyor"
 msgstr[1] ""
+"Yerel dosya eşlemesi: {total} sunucu yolundan {matched} tanesi eşleşiyor"
 
 msgid "Local files and folders"
-msgstr ""
+msgstr "Yerel dosyalar ve klasörler"
 
 msgid "Local imports and access"
-msgstr ""
+msgstr "Yerel içe aktarmalar ve erişim"
 
 msgid "Local library"
-msgstr ""
+msgstr "Yerel kitaplık"
 
 msgid "Local music folder is unavailable"
-msgstr ""
+msgstr "Yerel müzik klasörü kullanılamıyor"
 
 msgid "Local music folder"
-msgstr ""
+msgstr "Yerel müzik klasörü"
 
 msgid "Local network permission is required for remote connections"
-msgstr ""
+msgstr "Uzak bağlantılar için yerel ağ izni gerekir"
 
 msgid "Local network permission was denied"
-msgstr ""
+msgstr "Yerel ağ izni reddedildi"
 
 msgid "Local network"
-msgstr ""
+msgstr "Yerel ağ"
 
 msgid "Local playback saved"
-msgstr ""
+msgstr "Yerel oynatma kaydedildi"
 
 msgid "Local storage"
-msgstr ""
+msgstr "Yerel depolama"
 
 msgid "Local"
-msgstr ""
+msgstr "Yerel"
 
 msgid "Locate Folder"
-msgstr ""
+msgstr "Klasörü Bul"
 
 msgid "Lock metadata"
-msgstr ""
+msgstr "Meta verileri kilitle"
 
 msgid "Logarithmic"
-msgstr ""
+msgstr "Logaritmik"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Günlükler kopyalandı"
 
 msgid "Lookup"
-msgstr ""
+msgstr "Arama"
 
 msgid "Lookups"
-msgstr ""
+msgstr "Aramalar"
 
 msgid "Loudness normalization"
-msgstr ""
+msgstr "Ses yüksekliği normalleştirme"
 
 msgid "Low shelf"
-msgstr ""
+msgstr "Düşük raf"
 
 msgid "Lyrics background opacity"
-msgstr ""
+msgstr "Şarkı sözü arka planı opaklığı"
 
 msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
 msgstr ""
+"Bir parçada yoksa LRCLIB, NetEase, Genius ve SimpMusic'ten şarkı sözleri"
 
 msgid "Lyrics loaded"
-msgstr ""
+msgstr "Şarkı sözleri yüklendi"
 
 msgid "Lyrics offset (ms)"
-msgstr ""
+msgstr "Şarkı sözü kayması (ms)"
 
 msgid "Lyrics storage"
-msgstr ""
+msgstr "Şarkı sözü depolaması"
 
 msgid "Lyrics will appear here."
-msgstr ""
+msgstr "Şarkı sözleri burada görünecek."
 
 msgid "Lyrics your library doesn't have"
-msgstr ""
+msgstr "Kitaplığınızda olmayan şarkı sözleri"
 
 msgid "Lyrics"
-msgstr ""
+msgstr "Şarkı sözleri"
 
 msgid "MP3"
-msgstr ""
+msgstr "MP3"
 
 msgid "Manage"
-msgstr ""
+msgstr "Yönet"
 
 msgid "Mapped Local Path"
-msgstr ""
+msgstr "Eşlenen Yerel Yol"
 
 #, rust-format
 msgid "March {year}"
-msgstr ""
+msgstr "Mart {year}"
 
 msgid "Match"
-msgstr ""
+msgstr "Eşleşme"
 
 msgid "Matched"
-msgstr ""
+msgstr "Eşleşti"
 
 msgid "Matching tracks..."
-msgstr ""
+msgstr "Parçalar eşleştiriliyor..."
 
 msgid "Maximum frequency (Hz)"
-msgstr ""
+msgstr "Maksimum frekans (Hz)"
 
 msgid "Maximum level (dB)"
-msgstr ""
+msgstr "Maksimum düzey (dB)"
 
 msgid "Maximum year"
-msgstr ""
+msgstr "Maksimum yıl"
 
 msgid "Maximum"
-msgstr ""
+msgstr "Maksimum"
 
 #, rust-format
 msgid "May {year}"
-msgstr ""
+msgstr "Mayıs {year}"
 
 msgid "Menu"
-msgstr ""
+msgstr "Menü"
 
 msgid "Menus"
-msgstr ""
+msgstr "Menüler"
 
 msgid "Metadata changed before it was saved. Reload it before trying again."
 msgstr ""
+"Meta veriler kaydedilmeden önce değişti. Tekrar denemeden önce yeniden "
+"yükleyin."
 
 msgid "Metadata editing is no longer available"
-msgstr ""
+msgstr "Meta veri düzenleme artık kullanılamıyor"
 
 msgid "Metadata editing requires Local access"
-msgstr ""
+msgstr "Meta veri düzenleme Yerel erişim gerektirir"
 
 msgid "Metadata lookups"
-msgstr ""
+msgstr "Meta veri aramaları"
 
 msgid "Metadata saved"
-msgstr ""
+msgstr "Meta veriler kaydedildi"
 
 msgid "Metadata was saved, but refreshing the source failed."
-msgstr ""
+msgstr "Meta veriler kaydedildi ancak kaynak yenilenemedi."
 
 msgid "Metadata"
-msgstr ""
+msgstr "Meta veriler"
 
 msgid "Minimize overview"
-msgstr ""
+msgstr "Özeti küçült"
 
 msgid "Minimum frequency (Hz)"
-msgstr ""
+msgstr "Minimum frekans (Hz)"
 
 msgid "Minimum level (dB)"
-msgstr ""
+msgstr "Minimum düzey (dB)"
 
 msgid "Minimum year"
-msgstr ""
+msgstr "Minimum yıl"
 
 msgid "Minimum"
-msgstr ""
+msgstr "Minimum"
 
 msgid "Minutes"
-msgstr ""
+msgstr "Dakika"
 
 msgid "Mirrored bars"
-msgstr ""
+msgstr "Yansıtılmış çubuklar"
 
 msgid "Mirrored"
-msgstr ""
+msgstr "Yansıtılmış"
 
 msgid "Mix (play later)"
-msgstr ""
+msgstr "Karışım (sonra çal)"
 
 msgid "Mix (play next)"
-msgstr ""
+msgstr "Karışım (sıradaki çal)"
 
 msgid "Mix"
-msgstr ""
+msgstr "Karışım"
 
 msgid "Mode"
-msgstr ""
+msgstr "Mod"
 
 msgid "Monday"
-msgstr ""
+msgstr "Pazartesi"
 
 msgid "Mono"
-msgstr ""
+msgstr "Mono"
 
 msgid "Month"
-msgstr ""
+msgstr "Ay"
 
 msgid "Monthly"
-msgstr ""
+msgstr "Aylık"
 
 msgid "Mood tracks"
-msgstr ""
+msgstr "Ruh hali parçaları"
 
 msgid "Mood"
-msgstr ""
+msgstr "Ruh hali"
 
 msgid "Moods"
-msgstr ""
+msgstr "Ruh halleri"
 
 msgid "More actions"
-msgstr ""
+msgstr "Daha fazla eylem"
 
 msgid "More"
-msgstr ""
+msgstr "Daha fazla"
 
 msgid "Most Played"
-msgstr ""
+msgstr "En Çok Çalınan"
 
 msgid "Most Skipped"
-msgstr ""
+msgstr "En Çok Atlanan"
 
 msgid "Most played"
-msgstr ""
+msgstr "En çok çalınan"
 
 msgid "Motion"
-msgstr ""
+msgstr "Hareket"
 
 msgid "Move down"
-msgstr ""
+msgstr "Aşağı taşı"
 
 msgid "Move up"
-msgstr ""
+msgstr "Yukarı taşı"
 
 msgid "Multi-selection"
-msgstr ""
+msgstr "Çoklu seçim"
 
 msgid "Music Folder"
-msgstr ""
+msgstr "Müzik Klasörü"
 
 msgid "Music access permission was denied"
-msgstr ""
+msgstr "Müzik erişim izni reddedildi"
 
 msgid "Music folder"
-msgstr ""
+msgstr "Müzik klasörü"
 
 msgid "Music folders on the Rufin machine"
-msgstr ""
+msgstr "Rufin makinesindeki müzik klasörleri"
 
 msgid "Music on this phone"
-msgstr ""
+msgstr "Bu telefondaki müzik"
 
 msgid "Music"
-msgstr ""
+msgstr "Müzik"
 
 msgid "MusicBrainz album artist ID"
-msgstr ""
+msgstr "MusicBrainz albüm sanatçısı kimliği"
 
 msgid "MusicBrainz artist ID"
-msgstr ""
+msgstr "MusicBrainz sanatçı kimliği"
 
 msgid "MusicBrainz or Last.fm"
-msgstr ""
+msgstr "MusicBrainz veya Last.fm"
 
 msgid "MusicBrainz recording ID"
-msgstr ""
+msgstr "MusicBrainz kayıt kimliği"
 
 msgid "MusicBrainz release ID"
-msgstr ""
+msgstr "MusicBrainz sürüm kimliği"
 
 msgid "MusicBrainz release group ID"
-msgstr ""
+msgstr "MusicBrainz sürüm grubu kimliği"
 
 msgid "MusicBrainz release track ID"
-msgstr ""
+msgstr "MusicBrainz sürüm parça kimliği"
 
 msgid "MusicBrainz"
-msgstr ""
+msgstr "MusicBrainz"
 
 msgid "Musical key"
-msgstr ""
+msgstr "Müzikal anahtar"
 
 msgid "Mute"
-msgstr ""
+msgstr "Sessize al"
 
 msgid "Muted"
-msgstr ""
+msgstr "Sessiz"
 
 msgid "My music"
-msgstr ""
+msgstr "Müziğim"
 
 msgid "Name or stream address"
-msgstr ""
+msgstr "Ad veya akış adresi"
 
 msgid "Name"
-msgstr ""
+msgstr "Ad"
 
 msgid "Narrow layout threshold"
-msgstr ""
+msgstr "Dar düzen eşiği"
 
 msgid "Narrow window"
-msgstr ""
+msgstr "Dar pencere"
 
 msgid "Navidrome"
-msgstr ""
+msgstr "Navidrome"
 
 msgid "Navigate page items"
-msgstr ""
+msgstr "Sayfa öğelerinde gezin"
 
 msgid "Navigate to Search"
-msgstr ""
+msgstr "Aramaya git"
 
 msgid "Navigation"
-msgstr ""
+msgstr "Gezinme"
 
 msgid "Nearby devices"
-msgstr ""
+msgstr "Yakındaki cihazlar"
 
 msgid "Nearby discovery"
-msgstr ""
+msgstr "Yakındaki keşif"
 
 msgid "Needs attention"
-msgstr ""
+msgstr "Dikkat gerekiyor"
 
 msgid "Needs review"
-msgstr ""
+msgstr "İnceleme gerekiyor"
 
 msgid "NetEase"
-msgstr ""
+msgstr "NetEase"
 
 msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
+"Yerel ve vekil sunucu üzerinden gelen medyayı yayınlama cihazlarına "
+"göndermek için kullanılan ağ"
 
 msgid "Never Played"
-msgstr ""
+msgstr "Hiç Çalınmadı"
 
 msgid "Never played"
-msgstr ""
+msgstr "Hiç çalınmadı"
 
 msgid "New Playlist"
-msgstr ""
+msgstr "Yeni Çalma Listesi"
 
 msgid "New Smart Playlist"
-msgstr ""
+msgstr "Yeni Akıllı Çalma Listesi"
 
 msgid "New download rule"
-msgstr ""
+msgstr "Yeni indirme kuralı"
 
 msgid "New file"
-msgstr ""
+msgstr "Yeni dosya"
 
 msgid "New folder"
-msgstr ""
+msgstr "Yeni klasör"
 
 msgid "New playlist"
-msgstr ""
+msgstr "Yeni çalma listesi"
 
 msgid "New release is available"
-msgstr ""
+msgstr "Yeni sürüm mevcut"
 
 msgid "Newly added"
-msgstr ""
+msgstr "Yeni eklenen"
 
 msgid "Next Track"
-msgstr ""
+msgstr "Sonraki Parça"
 
 msgid "Next album"
-msgstr ""
+msgstr "Sonraki albüm"
 
 msgid "Next audio device"
-msgstr ""
+msgstr "Sonraki ses cihazı"
 
 msgid "Next page"
-msgstr ""
+msgstr "Sonraki sayfa"
 
 msgid "Next period"
-msgstr ""
+msgstr "Sonraki dönem"
 
 msgid "Next source"
-msgstr ""
+msgstr "Sonraki kaynak"
 
 msgid "Next"
-msgstr ""
+msgstr "Sonraki"
 
 msgid "No Servers Found"
-msgstr ""
+msgstr "Sunucu Bulunamadı"
 
 msgid "No albums from this artist yet"
-msgstr ""
+msgstr "Bu sanatçıdan henüz albüm yok"
 
 msgid "No artwork found"
-msgstr ""
+msgstr "Kapak görseli bulunamadı"
 
 msgid "No cached server path yet"
-msgstr ""
+msgstr "Henüz önbelleğe alınmış sunucu yolu yok"
 
 msgid "No downloads queued"
-msgstr ""
+msgstr "Kuyrukta indirme yok"
 
 msgid "No favorite albums yet"
-msgstr ""
+msgstr "Henüz favori albüm yok"
 
 msgid "No favorite artists yet"
-msgstr ""
+msgstr "Henüz favori sanatçı yok"
 
 msgid "No favorites yet"
-msgstr ""
+msgstr "Henüz favori yok"
 
 msgid "No file linked"
-msgstr ""
+msgstr "Bağlı dosya yok"
 
 msgid "No folders selected"
-msgstr ""
+msgstr "Klasör seçilmedi"
 
 msgid "No limit"
-msgstr ""
+msgstr "Sınır yok"
 
 msgid "No linked servers found"
-msgstr ""
+msgstr "Bağlı sunucu bulunamadı"
 
 msgid "No listening activity in this period"
-msgstr ""
+msgstr "Bu dönemde dinleme etkinliği yok"
 
 msgid "No local file mapping"
-msgstr ""
+msgstr "Yerel dosya eşlemesi yok"
 
 msgid "No local files or folders configured"
-msgstr ""
+msgstr "Yapılandırılmış yerel dosya veya klasör yok"
 
 msgid "No lyrics available."
-msgstr ""
+msgstr "Şarkı sözü yok."
 
 msgid "No lyrics"
-msgstr ""
+msgstr "Şarkı sözü yok"
 
 msgid "No matching track in this release"
-msgstr ""
+msgstr "Bu sürümde eşleşen parça yok"
 
 msgid "No matching tracks found"
-msgstr ""
+msgstr "Eşleşen parça bulunamadı"
 
 msgid "No matching tracks"
-msgstr ""
+msgstr "Eşleşen parça yok"
 
 msgid "No music from this artist yet"
-msgstr ""
+msgstr "Bu sanatçıdan henüz müzik yok"
 
 msgid "No network address available"
-msgstr ""
+msgstr "Kullanılabilir ağ adresi yok"
 
 msgid "No network devices found"
-msgstr ""
+msgstr "Ağ cihazı bulunamadı"
 
 msgid "No playable entries were found"
-msgstr ""
+msgstr "Oynatılabilir giriş bulunamadı"
 
 msgid "No playlists yet"
-msgstr ""
+msgstr "Henüz çalma listesi yok"
 
 msgid "No related tracks found"
-msgstr ""
+msgstr "İlgili parça bulunamadı"
 
 #, rust-format
 msgid "No results for \"{query}\""
-msgstr ""
+msgstr "\"{query}\" için sonuç yok"
 
 msgid "No results"
-msgstr ""
+msgstr "Sonuç yok"
 
 msgid "No servers found, add one manually or try again"
-msgstr ""
+msgstr "Sunucu bulunamadı; elle ekleyin veya tekrar deneyin"
 
 msgid "No smart playlists yet"
-msgstr ""
+msgstr "Henüz akıllı çalma listesi yok"
 
 msgid "No source"
-msgstr ""
+msgstr "Kaynak yok"
 
 msgid "No sources configured"
-msgstr ""
+msgstr "Yapılandırılmış kaynak yok"
 
 msgid "No tracks here yet"
-msgstr ""
+msgstr "Burada henüz parça yok"
 
 msgid "No"
-msgstr ""
+msgstr "Hayır"
 
 msgid "None"
-msgstr ""
+msgstr "Yok"
 
 msgid "Normalization scope"
-msgstr ""
+msgstr "Normalleştirme kapsamı"
 
 msgid "Not connected"
-msgstr ""
+msgstr "Bağlı değil"
 
 msgid "Not needed for most servers"
-msgstr ""
+msgstr "Çoğu sunucu için gerekli değil"
 
 msgid "Not played recently"
-msgstr ""
+msgstr "Son zamanlarda çalınmadı"
 
 msgid "Not set"
-msgstr ""
+msgstr "Ayarlanmadı"
 
 msgid "Not valid"
-msgstr ""
+msgstr "Geçerli değil"
 
 msgid "Nothing here yet"
-msgstr ""
+msgstr "Burada henüz bir şey yok"
 
 msgid "Nothing in this folder"
-msgstr ""
+msgstr "Bu klasörde hiçbir şey yok"
 
 msgid "Nothing played yet"
-msgstr ""
+msgstr "Henüz bir şey çalınmadı"
 
 msgid "Nothing playing"
-msgstr ""
+msgstr "Çalan bir şey yok"
 
 msgid "Nothing queued"
-msgstr ""
+msgstr "Kuyrukta bir şey yok"
 
 msgid "Nothing to play here"
-msgstr ""
+msgstr "Burada oynatılacak bir şey yok"
 
 msgid "Notifications"
-msgstr ""
+msgstr "Bildirimler"
 
 #, rust-format
 msgid "November {year}"
-msgstr ""
+msgstr "Kasım {year}"
 
 msgid "Now Playing"
-msgstr ""
+msgstr "Şimdi Çalıyor"
 
 msgid "Now playing notifications"
-msgstr ""
+msgstr "Şimdi çalıyor bildirimleri"
 
 msgid "Now playing updates"
-msgstr ""
+msgstr "Şimdi çalıyor güncellemeleri"
 
 msgid "Number of backups"
-msgstr ""
+msgstr "Yedek sayısı"
 
 msgid "Number of songs"
-msgstr ""
+msgstr "Şarkı sayısı"
 
 #, rust-format
 msgid "October {year}"
-msgstr ""
+msgstr "Ekim {year}"
 
 msgid "Off only for a server you control"
-msgstr ""
+msgstr "Yalnızca kontrol ettiğiniz bir sunucu için kapalı"
 
 msgid "Off"
-msgstr ""
+msgstr "Kapalı"
 
 msgid "Offline"
-msgstr ""
+msgstr "Çevrimdışı"
 
 msgid "On"
-msgstr ""
+msgstr "Açık"
 
 msgid "One Name: Value header per line"
-msgstr ""
+msgstr "Her satırda bir Ad: Değer başlığı"
 
 msgid "One address per line, pointing to the same collection"
-msgstr ""
+msgstr "Her satırda aynı koleksiyonu gösteren bir adres"
 
 msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
+"Her satırda bir klasör yolu; tüm koleksiyonu dahil etmek için boş bırakın"
 
 msgid "One path per line"
-msgstr ""
+msgstr "Her satırda bir yol"
 
 msgid "Online Lookups"
-msgstr ""
+msgstr "Çevrimiçi Aramalar"
 
 msgid "Only fill missing information"
-msgstr ""
+msgstr "Yalnızca eksik bilgileri doldur"
 
 msgid "Opacity (%)"
-msgstr ""
+msgstr "Opaklık (%)"
 
 msgid "Open Controller"
-msgstr ""
+msgstr "Denetleyiciyi Aç"
 
 msgid "Open Folder"
-msgstr ""
+msgstr "Klasörü Aç"
 
 msgid "Open Rufin Connect"
-msgstr ""
+msgstr "Rufin Connect'i Aç"
 
 msgid "Open approval page"
-msgstr ""
+msgstr "Onay sayfasını aç"
 
 msgid "Open automatically"
-msgstr ""
+msgstr "Otomatik aç"
 
 msgid "Open custom themes folder"
-msgstr ""
+msgstr "Özel temalar klasörünü aç"
 
 msgid "Open fullscreen player"
-msgstr ""
+msgstr "Tam ekran oynatıcıyı aç"
 
 msgid "Open homepage"
-msgstr ""
+msgstr "Ana sayfayı aç"
 
 msgid "Open on Emby"
-msgstr ""
+msgstr "Emby'de aç"
 
 msgid "Open on Jellyfin"
-msgstr ""
+msgstr "Jellyfin'de aç"
 
 msgid "Open on Last.fm"
-msgstr ""
+msgstr "Last.fm'de aç"
 
 msgid "Open on MusicBrainz"
-msgstr ""
+msgstr "MusicBrainz'de aç"
 
 msgid "Open on Navidrome"
-msgstr ""
+msgstr "Navidrome'da aç"
 
 msgid "Open on Plex"
-msgstr ""
+msgstr "Plex'te aç"
 
 msgid "Open on server"
-msgstr ""
+msgstr "Sunucuda aç"
 
 msgid "Open release notes"
-msgstr ""
+msgstr "Sürüm notlarını aç"
 
 msgid "Open settings"
-msgstr ""
+msgstr "Ayarları aç"
 
 msgid "Open"
-msgstr ""
+msgstr "Aç"
 
 msgid "OpenSubsonic"
-msgstr ""
+msgstr "OpenSubsonic"
 
 msgid "Opening Last.fm authorization..."
-msgstr ""
+msgstr "Last.fm yetkilendirmesi açılıyor..."
 
 msgid "Opening Libre.fm authorization..."
-msgstr ""
+msgstr "Libre.fm yetkilendirmesi açılıyor..."
 
 msgid "Optional. New images show up sooner with your own key."
-msgstr ""
+msgstr "İsteğe bağlı. Kendi anahtarınızla yeni görseller daha erken görünür."
 
 msgid "Optional. Rufin has its own."
-msgstr ""
+msgstr "İsteğe bağlı. Rufin'in kendi anahtarı var."
 
 msgid "Options"
-msgstr ""
+msgstr "Seçenekler"
 
 msgid "Orange"
-msgstr ""
+msgstr "Turuncu"
 
 msgid "Order"
-msgstr ""
+msgstr "Sıra"
 
 msgid "Original audio"
-msgstr ""
+msgstr "Özgün ses"
 
 msgid "Original release date"
-msgstr ""
+msgstr "Özgün sürüm tarihi"
 
 msgid "Original"
-msgstr ""
+msgstr "Özgün"
 
 #, rust-format
 msgid "Original: {value}"
-msgstr ""
+msgstr "Özgün: {value}"
 
 msgid "Other releases"
-msgstr ""
+msgstr "Diğer sürümler"
 
 msgid "Otherwise automatic downloads wait for Wi-Fi"
-msgstr ""
+msgstr "Aksi halde otomatik indirmeler Wi-Fi bekler"
 
 msgid "Outline bars"
-msgstr ""
+msgstr "Ana hat çubukları"
 
 msgid "Output gain"
-msgstr ""
+msgstr "Çıkış kazancı"
 
 msgid "Overview"
-msgstr ""
+msgstr "Özet"
 
 msgid "Page links"
-msgstr ""
+msgstr "Sayfa bağlantıları"
 
 msgid "Pages"
-msgstr ""
+msgstr "Sayfalar"
 
 msgid "Parametric"
-msgstr ""
+msgstr "Parametrik"
 
 msgid "Password or token"
-msgstr ""
+msgstr "Parola veya token"
 
 msgid "Password"
-msgstr ""
+msgstr "Parola"
 
 msgid "Paste"
-msgstr ""
+msgstr "Yapıştır"
 
 msgid "Path format"
-msgstr ""
+msgstr "Yol formatı"
 
 msgid "Path in Source"
-msgstr ""
+msgstr "Kaynaktaki yol"
 
 msgid "Path"
-msgstr ""
+msgstr "Yol"
 
 msgid "Pause"
-msgstr ""
+msgstr "Duraklat"
 
 #, rust-format
 msgid "Pauses at {time}"
-msgstr ""
+msgstr "{time} zamanında duraklatır"
 
 msgid "Pauses when that track ends"
-msgstr ""
+msgstr "O parça bitince duraklatır"
 
 msgid "Pauses when this track ends"
-msgstr ""
+msgstr "Bu parça bitince duraklatır"
 
 msgid "Peak fall speed (% per second)"
-msgstr ""
+msgstr "Tepe düşme hızı (saniyede %)"
 
 msgid "Peak hold (seconds)"
-msgstr ""
+msgstr "Tepe tutma (saniye)"
 
 msgid "Peak"
-msgstr ""
+msgstr "Tepe"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
+"Düşük seste daha ince kontrol için Algısal; doğrudan ölçek için Doğrusal"
 
 msgid "Perceptual"
-msgstr ""
+msgstr "Algısal"
 
 msgid "Performer"
-msgstr ""
+msgstr "İcracı"
 
 msgid "Personal API key"
-msgstr ""
+msgstr "Kişisel API anahtarı"
 
 msgid "Pink"
-msgstr ""
+msgstr "Pembe"
 
 msgid "Plain lyrics"
-msgstr ""
+msgstr "Düz şarkı sözleri"
 
 msgid "Play (shuffled)"
-msgstr ""
+msgstr "Çal (karışık)"
 
 msgid "Play Later (shuffled)"
-msgstr ""
+msgstr "Sonra Çal (karışık)"
 
 msgid "Play Later"
-msgstr ""
+msgstr "Sonra Çal"
 
 msgid "Play Next (shuffled)"
-msgstr ""
+msgstr "Sıradaki Çal (karışık)"
 
 msgid "Play Next"
-msgstr ""
+msgstr "Sıradaki Çal"
 
 msgid "Play album"
-msgstr ""
+msgstr "Albümü çal"
 
 msgid "Play artist"
-msgstr ""
+msgstr "Sanatçıyı çal"
 
 msgid "Play count"
-msgstr ""
+msgstr "Çalma sayısı"
 
 msgid "Play genre"
-msgstr ""
+msgstr "Türü çal"
 
 msgid "Play mood"
-msgstr ""
+msgstr "Ruh halini çal"
 
 msgid "Play playlist"
-msgstr ""
+msgstr "Çalma listesini çal"
 
 msgid "Play radio later"
-msgstr ""
+msgstr "Radyoyu sonra çal"
 
 msgid "Play radio next"
-msgstr ""
+msgstr "Radyoyu sıradaki çal"
 
 msgid "Play radio"
-msgstr ""
+msgstr "Radyoyu çal"
 
 msgid "Play track"
-msgstr ""
+msgstr "Parçayı çal"
 
 msgid "Play"
-msgstr ""
+msgstr "Çal"
 
 msgid "Play/Pause"
-msgstr ""
+msgstr "Çal/Duraklat"
 
 msgid "Playback controls"
-msgstr ""
+msgstr "Oynatma kontrolleri"
 
 msgid "Playback position"
-msgstr ""
+msgstr "Oynatma konumu"
 
 msgid "Playback speed"
-msgstr ""
+msgstr "Oynatma hızı"
 
 msgid "Playback"
-msgstr ""
+msgstr "Oynatma"
 
 msgid "Played"
-msgstr ""
+msgstr "Çalındı"
 
 msgid "Player"
-msgstr ""
+msgstr "Oynatıcı"
 
 #, rust-format
 msgid "Playing from {}"
-msgstr ""
+msgstr "Şuradan çalınıyor: {}"
 
 msgid "Playing from"
-msgstr ""
+msgstr "Şuradan çalınıyor"
 
 msgid "Playing on this device"
-msgstr ""
+msgstr "Bu cihazda çalınıyor"
 
 #, rust-format
 msgid "Playing on {device}"
-msgstr ""
+msgstr "{device} cihazında çalınıyor"
 
 msgid "Playing stream"
-msgstr ""
+msgstr "Akış çalınıyor"
 
 msgid "Playlist File"
-msgstr ""
+msgstr "Çalma Listesi Dosyası"
 
 msgid "Playlist file changed"
-msgstr ""
+msgstr "Çalma listesi dosyası değişti"
 
 msgid "Playlist files"
-msgstr ""
+msgstr "Çalma listesi dosyaları"
 
 msgid "Playlist name"
-msgstr ""
+msgstr "Çalma listesi adı"
 
 msgid "Playlist order"
-msgstr ""
+msgstr "Çalma listesi sırası"
 
 msgid "Playlist radio"
-msgstr ""
+msgstr "Çalma listesi radyosu"
 
 msgid "Playlist tracks"
-msgstr ""
+msgstr "Çalma listesi parçaları"
 
 msgid "Playlist"
-msgstr ""
+msgstr "Çalma listesi"
 
 msgid "Playlists"
-msgstr ""
+msgstr "Çalma listeleri"
 
 msgid "Plays from"
-msgstr ""
+msgstr "Şuradan çalmalar"
 
 msgid "Plays"
-msgstr ""
+msgstr "Çalmalar"
 
 msgid "Plex Account"
-msgstr ""
+msgstr "Plex Hesabı"
 
 msgid "Plex"
-msgstr ""
+msgstr "Plex"
 
 msgid "Pop"
-msgstr ""
+msgstr "Pop"
 
 msgid "Port"
-msgstr ""
+msgstr "Bağlantı noktası"
 
 msgid "Preamp"
-msgstr ""
+msgstr "Ön yükseltici"
 
 msgid "Prefer distinct track covers"
-msgstr ""
+msgstr "Farklı parça kapaklarını tercih et"
 
 msgid "Prefer server lyrics"
-msgstr ""
+msgstr "Sunucu şarkı sözlerini tercih et"
 
 msgid "Prefer translations"
-msgstr ""
+msgstr "Çevirileri tercih et"
 
 msgid "Preferences"
-msgstr ""
+msgstr "Tercihler"
 
 msgid "Preparing library..."
-msgstr ""
+msgstr "Kitaplık hazırlanıyor..."
 
 msgid "Presence and links"
-msgstr ""
+msgstr "Durum ve bağlantılar"
 
 msgid "Preserve channels"
-msgstr ""
+msgstr "Kanalları koru"
 
 msgid "Preserve pitch"
-msgstr ""
+msgstr "Perdeyi koru"
 
 msgid "Preset name"
-msgstr ""
+msgstr "Ön ayar adı"
 
 msgid "Preset text"
-msgstr ""
+msgstr "Ön ayar metni"
 
 msgid "Preset"
-msgstr ""
+msgstr "Ön ayar"
 
 msgid "Presets"
-msgstr ""
+msgstr "Ön ayarlar"
 
 msgid "Prevent automatic metadata refreshes from replacing these values"
-msgstr ""
+msgstr "Otomatik meta veri yenilemelerinin bu değerleri değiştirmesini önle"
 
 msgid "Previous Track"
-msgstr ""
+msgstr "Önceki Parça"
 
 msgid "Previous album"
-msgstr ""
+msgstr "Önceki albüm"
 
 msgid "Previous audio device"
-msgstr ""
+msgstr "Önceki ses cihazı"
 
 msgid "Previous page"
-msgstr ""
+msgstr "Önceki sayfa"
 
 msgid "Previous period"
-msgstr ""
+msgstr "Önceki dönem"
 
 msgid "Previous"
-msgstr ""
+msgstr "Önceki"
 
 msgid "Privacy & Security"
-msgstr ""
+msgstr "Gizlilik ve Güvenlik"
 
 msgid "Private mode is off"
-msgstr ""
+msgstr "Gizli mod kapalı"
 
 msgid "Private mode is on"
-msgstr ""
+msgstr "Gizli mod açık"
 
 msgid "Private mode"
-msgstr ""
+msgstr "Gizli mod"
 
 msgid "Profile PIN"
-msgstr ""
+msgstr "Profil PIN'i"
 
 msgid "Profile up to date"
-msgstr ""
+msgstr "Profil güncel"
 
 msgid "Pronunciation"
-msgstr ""
+msgstr "Telaffuz"
 
 msgid "Protocol"
-msgstr ""
+msgstr "Protokol"
 
 msgid "Providers"
-msgstr ""
+msgstr "Sağlayıcılar"
 
 msgid "Proxy casting through Rufin"
-msgstr ""
+msgstr "Rufin üzerinden vekil yayınlama"
 
 msgid "Public"
-msgstr ""
+msgstr "Herkese açık"
 
 msgid "Purple"
-msgstr ""
+msgstr "Mor"
 
 msgid "Q"
-msgstr ""
+msgstr "Q"
 
 msgid "Queue a track to begin"
-msgstr ""
+msgstr "Başlamak için bir parçayı kuyruğa alın"
 
 msgid "Queue and transitions"
-msgstr ""
+msgstr "Kuyruk ve geçişler"
 
 msgid "Queue tracks to show"
-msgstr ""
+msgstr "Gösterilecek parçaları kuyruğa al"
 
 msgid "Queue"
-msgstr ""
+msgstr "Kuyruk"
 
 msgid "Queued"
-msgstr ""
+msgstr "Kuyruğa alındı"
 
 msgid "Quick Connect"
-msgstr ""
+msgstr "Hızlı Bağlantı"
 
 msgid "Quit Rufin"
-msgstr ""
+msgstr "Rufin'den Çık"
 
 msgid "Quit"
-msgstr ""
+msgstr "Çık"
 
 msgid "Radio"
-msgstr ""
+msgstr "Radyo"
 
 msgid "Random"
-msgstr ""
+msgstr "Rastgele"
 
 msgid "Range selection"
-msgstr ""
+msgstr "Aralık seçimi"
 
 msgid "Rating"
-msgstr ""
+msgstr "Puanlama"
 
 msgid "Reading tags..."
-msgstr ""
+msgstr "Etiketler okunuyor..."
 
 msgid "Ready"
-msgstr ""
+msgstr "Hazır"
 
 msgid "Receiving profile"
-msgstr ""
+msgstr "Profil alınıyor"
 
 msgid "Recent searches"
-msgstr ""
+msgstr "Son aramalar"
 
 msgid "Recently added"
-msgstr ""
+msgstr "Son eklenenler"
 
 msgid "Recently played"
-msgstr ""
+msgstr "Son çalınanlar"
 
 msgid "Recently released"
-msgstr ""
+msgstr "Son çıkanlar"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Sunucunuz sağlıyorsa önerilir"
 
 msgid "Reconnect"
-msgstr ""
+msgstr "Yeniden bağlan"
 
 msgid "Record label"
-msgstr ""
+msgstr "Plak şirketi"
 
 msgid "Recording"
-msgstr ""
+msgstr "Kayıt"
 
 msgid "Red"
-msgstr ""
+msgstr "Kırmızı"
 
 msgid "Redo"
-msgstr ""
+msgstr "Yinele"
 
 msgid "Reduce motion"
-msgstr ""
+msgstr "Hareketi azalt"
 
 msgid "Refresh automatically"
-msgstr ""
+msgstr "Otomatik yenile"
 
 msgid "Refresh"
-msgstr ""
+msgstr "Yenile"
 
 msgid "Regenerate access token"
-msgstr ""
+msgstr "Erişim token'ını yeniden oluştur"
 
 msgid "Regenerate access token?"
-msgstr ""
+msgstr "Erişim token'ı yeniden oluşturulsun mu?"
 
 msgid "Regenerate"
-msgstr ""
+msgstr "Yeniden oluştur"
 
 msgid "Related"
-msgstr ""
+msgstr "İlgili"
 
 msgid "Relative"
-msgstr ""
+msgstr "Göreli"
 
 msgid "Relay address"
-msgstr ""
+msgstr "Aktarma adresi"
 
 msgid "Relay"
-msgstr ""
+msgstr "Aktarma"
 
 msgid "Release date"
-msgstr ""
+msgstr "Sürüm tarihi"
 
 msgid "Release group"
-msgstr ""
+msgstr "Sürüm grubu"
 
 msgid "Release notifications"
-msgstr ""
+msgstr "Sürüm bildirimleri"
 
 msgid "Release type"
-msgstr ""
+msgstr "Sürüm türü"
 
 msgid "Release"
-msgstr ""
+msgstr "Sürüm"
 
 msgid "Reload from file"
-msgstr ""
+msgstr "Dosyadan yeniden yükle"
 
 msgid "Reload metadata to review the current values."
-msgstr ""
+msgstr "Mevcut değerleri incelemek için meta verileri yeniden yükleyin."
 
 msgid "Reload themes"
-msgstr ""
+msgstr "Temaları yeniden yükle"
 
 msgid "Reload to apply changes"
-msgstr ""
+msgstr "Değişiklikleri uygulamak için yeniden yükle"
 
 msgid "Reload"
-msgstr ""
+msgstr "Yeniden yükle"
 
 msgid "Remix"
-msgstr ""
+msgstr "Remiks"
 
 msgid "Remixes"
-msgstr ""
+msgstr "Remiksler"
 
 msgid "Remote folders on a Windows share or NAS"
-msgstr ""
+msgstr "Windows paylaşımı veya NAS üzerindeki uzak klasörler"
 
 msgid "Remote folders over WebDAV"
-msgstr ""
+msgstr "WebDAV üzerinden uzak klasörler"
 
 msgid "Remote folders"
-msgstr ""
+msgstr "Uzak klasörler"
 
 msgid "Remote lyrics"
-msgstr ""
+msgstr "Uzak şarkı sözleri"
 
 msgid "Remove All Downloads"
-msgstr ""
+msgstr "Tüm İndirmeleri Kaldır"
 
 msgid "Remove Download"
-msgstr ""
+msgstr "İndirmeyi Kaldır"
 
 msgid "Remove Downloads"
-msgstr ""
+msgstr "İndirmeleri Kaldır"
 
 msgid "Remove Rule and Delete Downloads"
-msgstr ""
+msgstr "Kuralı Kaldır ve İndirmeleri Sil"
 
 msgid "Remove Rule and Downloads"
-msgstr ""
+msgstr "Kuralı ve İndirmeleri Kaldır"
 
 msgid "Remove Rule, Keep Downloads"
-msgstr ""
+msgstr "Kuralı Kaldır, İndirmeleri Koru"
 
 msgid "Remove all downloads"
-msgstr ""
+msgstr "Tüm indirmeleri kaldır"
 
 msgid "Remove and Delete"
-msgstr ""
+msgstr "Kaldır ve Sil"
 
 msgid "Remove band"
-msgstr ""
+msgstr "Bandı kaldır"
 
 msgid "Remove device"
-msgstr ""
+msgstr "Cihazı kaldır"
 
 msgid "Remove folder"
-msgstr ""
+msgstr "Klasörü kaldır"
 
 msgid "Remove from Favorites"
-msgstr ""
+msgstr "Favorilerden Kaldır"
 
 msgid "Remove from Playlist"
-msgstr ""
+msgstr "Çalma Listesinden Kaldır"
 
 msgid "Remove from Queue"
-msgstr ""
+msgstr "Kuyruktan Kaldır"
 
 msgid "Remove from Saved"
-msgstr ""
+msgstr "Kaydedilenlerden Kaldır"
 
 msgid "Remove from folder"
-msgstr ""
+msgstr "Klasörden kaldır"
 
 msgid "Remove group"
-msgstr ""
+msgstr "Grubu kaldır"
 
 msgid "Remove image"
-msgstr ""
+msgstr "Görseli kaldır"
 
 msgid "Remove rule"
-msgstr ""
+msgstr "Kuralı kaldır"
 
 msgid "Remove search"
-msgstr ""
+msgstr "Aramayı kaldır"
 
 msgid "Remove server"
-msgstr ""
+msgstr "Sunucuyu kaldır"
 
 msgid "Remove unavailable tracks"
-msgstr ""
+msgstr "Kullanılamayan parçaları kaldır"
 
 msgid "Remove"
-msgstr ""
+msgstr "Kaldır"
 
 msgid "Removed from"
-msgstr ""
+msgstr "Şuradan kaldırıldı"
 
 msgid "Rename file"
-msgstr ""
+msgstr "Dosyayı yeniden adlandır"
 
 msgid "Rename folder"
-msgstr ""
+msgstr "Klasörü yeniden adlandır"
 
 msgid "Rename preset"
-msgstr ""
+msgstr "Ön ayarı yeniden adlandır"
 
 msgid "Rename"
-msgstr ""
+msgstr "Yeniden adlandır"
 
 msgid "Repeat all"
-msgstr ""
+msgstr "Tümünü tekrarla"
 
 msgid "Repeat off"
-msgstr ""
+msgstr "Tekrar kapalı"
 
 msgid "Repeat one"
-msgstr ""
+msgstr "Birini tekrarla"
 
 msgid "Repeat"
-msgstr ""
+msgstr "Tekrarla"
 
 msgid "Replace file contents"
-msgstr ""
+msgstr "Dosya içeriğini değiştir"
 
 msgid "Replace saved custom headers"
-msgstr ""
+msgstr "Kaydedilmiş özel başlıkları değiştir"
 
 msgid "ReplayGain tags"
-msgstr ""
+msgstr "ReplayGain etiketleri"
 
 msgid "ReplayGain"
-msgstr ""
+msgstr "ReplayGain"
 
 #, rust-format
 msgid "Request failed ({status})"
-msgstr ""
+msgstr "İstek başarısız ({status})"
 
 msgid "Require SMB encryption"
-msgstr ""
+msgstr "SMB şifrelemesi gerektir"
 
 msgid "Reset appearance"
-msgstr ""
+msgstr "Görünümü sıfırla"
 
 msgid "Reset to defaults"
-msgstr ""
+msgstr "Varsayılanlara sıfırla"
 
 msgid "Reset"
-msgstr ""
+msgstr "Sıfırla"
 
 msgid "Response"
-msgstr ""
+msgstr "Yanıt"
 
 msgid "Restart now"
-msgstr ""
+msgstr "Şimdi yeniden başlat"
 
 msgid "Restore User State"
-msgstr ""
+msgstr "Kullanıcı Durumunu Geri Yükle"
 
 msgid "Restore defaults without deleting saved presets"
-msgstr ""
+msgstr "Kaydedilmiş ön ayarları silmeden varsayılanları geri yükle"
 
 msgid "Restore player layout"
-msgstr ""
+msgstr "Oynatıcı düzenini geri yükle"
 
 msgid "Restore"
-msgstr ""
+msgstr "Geri yükle"
 
 msgid "Results from radio-browser.info."
-msgstr ""
+msgstr "Radio-browser.info sonuçları."
 
 msgid "Results per section"
-msgstr ""
+msgstr "Bölüm başına sonuç"
 
 msgid "Resume"
-msgstr ""
+msgstr "Devam et"
 
 msgid "Resync Library"
-msgstr ""
+msgstr "Kitaplığı Yeniden Eşitle"
 
 msgid "Retry"
-msgstr ""
+msgstr "Yeniden dene"
 
 msgid "Reverse order"
-msgstr ""
+msgstr "Sırayı tersine çevir"
 
 msgid "Ribbon"
-msgstr ""
+msgstr "Şerit"
 
 msgid "Rich Presence on"
-msgstr ""
+msgstr "Rich Presence açık"
 
 msgid "Right sidebar"
-msgstr ""
+msgstr "Sağ kenar çubuğu"
 
 msgid "Rise speed (%)"
-msgstr ""
+msgstr "Yükselme hızı (%)"
 
 msgid "Rock"
-msgstr ""
+msgstr "Rock"
 
 msgid "Romaji"
-msgstr ""
+msgstr "Romaji"
 
 msgid "Rounded bars"
-msgstr ""
+msgstr "Yuvarlatılmış çubuklar"
 
 msgid "Rounded spectrum"
-msgstr ""
+msgstr "Yuvarlatılmış spektrum"
 
 msgid "Row borders"
-msgstr ""
+msgstr "Satır kenarlıkları"
 
 msgid "Rows"
-msgstr ""
+msgstr "Satırlar"
 
 msgid "Rufin Connect"
-msgstr ""
+msgstr "Rufin Connect"
 
 msgid "Rufin JSON"
-msgstr ""
+msgstr "Rufin JSON"
 
 msgid "Rufin data folder"
-msgstr ""
+msgstr "Rufin veri klasörü"
 
 msgid "Rufin host"
-msgstr ""
+msgstr "Rufin ana bilgisayarı"
 
 #, rust-format
 msgid "Rufin needs local access to {path}"
-msgstr ""
+msgstr "Rufin'in {path} için yerel erişime ihtiyacı var"
 
 msgid "Rule actions"
-msgstr ""
+msgstr "Kural eylemleri"
 
 msgid "SMB / Samba"
-msgstr ""
+msgstr "SMB / Samba"
 
 msgid "SMB Domain"
-msgstr ""
+msgstr "SMB Etki Alanı"
 
 msgid "Sample peak"
-msgstr ""
+msgstr "Örnek tepe değeri"
 
 msgid "Sample rate"
-msgstr ""
+msgstr "Örnekleme hızı"
 
 msgid "Saturday"
-msgstr ""
+msgstr "Cumartesi"
 
 msgid "Save Diagnostic Log"
-msgstr ""
+msgstr "Tanılama Günlüğünü Kaydet"
 
 msgid "Save Lyrics"
-msgstr ""
+msgstr "Şarkı Sözlerini Kaydet"
 
 msgid "Save Server Settings"
-msgstr ""
+msgstr "Sunucu Ayarlarını Kaydet"
 
 msgid "Save action saves the lyrics directly to your source"
-msgstr ""
+msgstr "Kaydet eylemi şarkı sözlerini doğrudan kaynağınıza kaydeder"
 
 msgid "Save changes automatically"
-msgstr ""
+msgstr "Değişiklikleri otomatik kaydet"
 
 msgid "Save in folder"
-msgstr ""
+msgstr "Klasöre kaydet"
 
 msgid "Save lyrics automatically"
-msgstr ""
+msgstr "Şarkı sözlerini otomatik kaydet"
 
 msgid "Save playlist changes automatically"
-msgstr ""
+msgstr "Çalma listesi değişikliklerini otomatik kaydet"
 
 msgid "Save preset"
-msgstr ""
+msgstr "Ön ayarı kaydet"
 
 msgid "Save"
-msgstr ""
+msgstr "Kaydet"
 
 msgid "Saved Plex Login"
-msgstr ""
+msgstr "Kaydedilmiş Plex Oturumu"
 
 msgid "Saved logins"
-msgstr ""
+msgstr "Kaydedilmiş oturumlar"
 
 #, rust-format
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[1] "Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
 
 msgid "Saved preset"
-msgstr ""
+msgstr "Ön ayar kaydedildi"
 
 msgid "Saved to"
-msgstr ""
+msgstr "Şuraya kaydedildi"
 
 msgid "Saved"
-msgstr ""
+msgstr "Kaydedildi"
 
 msgid "Saved..."
-msgstr ""
+msgstr "Kaydedildi..."
 
 msgid "Saves lyrics to your source"
-msgstr ""
+msgstr "Şarkı sözlerini kaynağınıza kaydeder"
 
 msgid "Saving..."
-msgstr ""
+msgstr "Kaydediliyor..."
 
 msgid "Scanning tracks"
-msgstr ""
+msgstr "Parçalar taranıyor"
 
 msgid "Schedule"
-msgstr ""
+msgstr "Zamanlama"
 
 msgid "Scheduled Backup Failed"
-msgstr ""
+msgstr "Zamanlanmış Yedekleme Başarısız"
 
 msgid "Scheduled Backup Password"
-msgstr ""
+msgstr "Zamanlanmış Yedek Parolası"
 
 msgid "Scheduled backup password saved"
-msgstr ""
+msgstr "Zamanlanmış yedek parolası kaydedildi"
 
 msgid "Scrobble plays"
-msgstr ""
+msgstr "Çalmaları scrobble et"
 
 msgid "Scrobbling"
-msgstr ""
+msgstr "Scrobbling"
 
 msgid "Search Again"
-msgstr ""
+msgstr "Tekrar Ara"
 
 msgid "Search Lyrics"
-msgstr ""
+msgstr "Şarkı Sözlerini Ara"
 
 msgid "Search MusicBrainz"
-msgstr ""
+msgstr "MusicBrainz'de Ara"
 
 msgid "Search artwork"
-msgstr ""
+msgstr "Kapak görseli ara"
 
 msgid "Search by AcoustID"
-msgstr ""
+msgstr "AcoustID ile ara"
 
 msgid "Search current folder"
-msgstr ""
+msgstr "Geçerli klasörde ara"
 
 msgid "Search genres"
-msgstr ""
+msgstr "Türleri ara"
 
 msgid "Search in page"
-msgstr ""
+msgstr "Sayfada ara"
 
 msgid "Search is unavailable"
-msgstr ""
+msgstr "Arama kullanılamıyor"
 
 msgid "Search lyrics"
-msgstr ""
+msgstr "Şarkı sözleri ara"
 
 msgid "Search playlists"
-msgstr ""
+msgstr "Çalma listelerinde ara"
 
 msgid "Search preferences"
-msgstr ""
+msgstr "Tercihlerde ara"
 
 msgid "Search queue"
-msgstr ""
+msgstr "Kuyrukta ara"
 
 msgid "Search stations"
-msgstr ""
+msgstr "İstasyonlarda ara"
 
 msgid "Search this network"
-msgstr ""
+msgstr "Bu ağda ara"
 
 msgid "Search unavailable"
-msgstr ""
+msgstr "Arama kullanılamıyor"
 
 msgid "Search"
-msgstr ""
+msgstr "Ara"
 
 msgid "Search..."
-msgstr ""
+msgstr "Ara..."
 
 msgid "Searching AcoustID..."
-msgstr ""
+msgstr "AcoustID aranıyor..."
 
 msgid "Searching Local Network"
-msgstr ""
+msgstr "Yerel Ağ Aranıyor"
 
 msgid "Searching MusicBrainz..."
-msgstr ""
+msgstr "MusicBrainz aranıyor..."
 
 msgid "Searching for devices..."
-msgstr ""
+msgstr "Cihazlar aranıyor..."
 
 #, rust-format
 msgid "Searching for {provider} servers on the local network..."
-msgstr ""
+msgstr "Yerel ağda {provider} sunucuları aranıyor..."
 
 msgid "Searching will start automatically"
-msgstr ""
+msgstr "Arama otomatik olarak başlayacak"
 
 msgid "Searching..."
-msgstr ""
+msgstr "Aranıyor..."
 
 msgid "Secondary release types"
-msgstr ""
+msgstr "İkincil sürüm türleri"
 
 msgid "Secret storage"
-msgstr ""
+msgstr "Gizli depolama"
 
 msgid "Seek Backward"
-msgstr ""
+msgstr "Geri Sar"
 
 msgid "Seek Forward"
-msgstr ""
+msgstr "İleri Sar"
 
 msgid "Seek playback"
-msgstr ""
+msgstr "Oynatma konumuna git"
 
 #, rust-format
 msgid "Seek to {time}"
-msgstr ""
+msgstr "{time} konumuna git"
 
 msgid "Seekbar"
-msgstr ""
+msgstr "Arama çubuğu"
 
 msgid "Segment end"
-msgstr ""
+msgstr "Bölüm sonu"
 
 msgid "Segment start"
-msgstr ""
+msgstr "Bölüm başlangıcı"
 
 msgid "Segmented bars"
-msgstr ""
+msgstr "Bölümlenmiş çubuklar"
 
 msgid "Select All"
-msgstr ""
+msgstr "Tümünü Seç"
 
 msgid "Select Download Folder"
-msgstr ""
+msgstr "İndirme Klasörünü Seç"
 
 msgid "Select Music Folder"
-msgstr ""
+msgstr "Müzik Klasörünü Seç"
 
 msgid "Select Source"
-msgstr ""
+msgstr "Kaynak Seç"
 
 msgid "Select all"
-msgstr ""
+msgstr "Tümünü seç"
 
 msgid "Select an entry to show or hide it."
-msgstr ""
+msgstr "Göstermek veya gizlemek için bir giriş seçin."
 
 #, rust-format
 msgid "Select {title}"
-msgstr ""
+msgstr "{title} seç"
 
 msgid "Selected folders"
-msgstr ""
+msgstr "Seçili klasörler"
 
 #, rust-format
 msgid "Selected items: {count}"
-msgstr ""
+msgstr "Seçili öğeler: {count}"
 
 msgid "Selected"
-msgstr ""
+msgstr "Seçildi"
 
 msgid "Selection"
-msgstr ""
+msgstr "Seçim"
 
 msgid "Self-host an Iroh Relay"
-msgstr ""
+msgstr "Iroh Relay'i kendi sunucunuzda barındırın"
 
 msgid "Self-hosted scrobbling"
-msgstr ""
+msgstr "Kendi sunucunuzda barındırılan scrobbling"
 
 #, rust-format
 msgid "September {year}"
-msgstr ""
+msgstr "Eylül {year}"
 
 msgid "Server Actions"
-msgstr ""
+msgstr "Sunucu Eylemleri"
 
 msgid "Server Address Override"
-msgstr ""
+msgstr "Sunucu Adresi Geçersiz Kılma"
 
 msgid "Server Address"
-msgstr ""
+msgstr "Sunucu Adresi"
 
 msgid "Server Library"
-msgstr ""
+msgstr "Sunucu Kitaplığı"
 
 msgid "Server Prefix"
-msgstr ""
+msgstr "Sunucu Öneki"
 
 msgid "Server Sample"
-msgstr ""
+msgstr "Sunucu Örneği"
 
 msgid "Server Settings"
-msgstr ""
+msgstr "Sunucu Ayarları"
 
 msgid "Server URL"
-msgstr ""
+msgstr "Sunucu URL'si"
 
 msgid "Server default"
-msgstr ""
+msgstr "Sunucu varsayılanı"
 
 #, rust-format
 msgid "Server discovery failed: {error}"
-msgstr ""
+msgstr "Sunucu keşfi başarısız: {error}"
 
 msgid "Server is unreachable"
-msgstr ""
+msgstr "Sunucuya ulaşılamıyor"
 
 msgid "Server prefix doesn't match"
-msgstr ""
+msgstr "Sunucu öneki eşleşmiyor"
 
 msgid "Server"
-msgstr ""
+msgstr "Sunucu"
 
 msgid "Service icons on album and artist pages"
-msgstr ""
+msgstr "Albüm ve sanatçı sayfalarındaki hizmet simgeleri"
 
 msgid "Services"
-msgstr ""
+msgstr "Hizmetler"
 
 msgid "Set the Discord activity type to Listening"
-msgstr ""
+msgstr "Discord etkinlik türünü Dinliyor olarak ayarla"
 
 #, rust-format
 msgid "Set {count} play count."
 msgid_plural "Set {count} play counts."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} çalma sayısı ayarla."
+msgstr[1] "{count} çalma sayısı ayarla."
 
 msgid "Settings and sources"
-msgstr ""
+msgstr "Ayarlar ve kaynaklar"
 
 msgid "Settings"
-msgstr ""
+msgstr "Ayarlar"
 
 msgid "Shadow"
-msgstr ""
+msgstr "Gölge"
 
 msgid "Share"
-msgstr ""
+msgstr "Paylaş"
 
 msgid "Shared file size"
-msgstr ""
+msgstr "Paylaşılan dosya boyutu"
 
 msgid "Shared secret"
-msgstr ""
+msgstr "Paylaşılan gizli anahtar"
 
 msgid "Show Rufin in headline"
-msgstr ""
+msgstr "Başlıkta Rufin'i göster"
 
 msgid "Show Rufin"
-msgstr ""
+msgstr "Rufin'i göster"
 
 msgid "Show artwork"
-msgstr ""
+msgstr "Kapak görselini göster"
 
 msgid "Show comparison"
-msgstr ""
+msgstr "Karşılaştırmayı göster"
 
 msgid "Show current lyrics line"
-msgstr ""
+msgstr "Geçerli şarkı sözü satırını göster"
 
 msgid "Show downloaded badge"
-msgstr ""
+msgstr "İndirildi rozetini göster"
 
 msgid "Show external site links"
-msgstr ""
+msgstr "Harici site bağlantılarını göster"
 
 msgid "Show header"
-msgstr ""
+msgstr "Başlığı göster"
 
 msgid "Show lyrics in the right panel"
-msgstr ""
+msgstr "Şarkı sözlerini sağ panelde göster"
 
 msgid "Show lyrics"
-msgstr ""
+msgstr "Şarkı sözlerini göster"
 
 msgid "Show paused status"
-msgstr ""
+msgstr "Duraklatıldı durumunu göster"
 
 msgid "Show peak markers"
-msgstr ""
+msgstr "Tepe işaretlerini göster"
 
 msgid "Show playback queue"
-msgstr ""
+msgstr "Oynatma kuyruğunu göster"
 
 msgid "Show ratings in the bottom bar"
-msgstr ""
+msgstr "Puanlamaları alt çubukta göster"
 
 msgid "Show sidebar"
-msgstr ""
+msgstr "Kenar çubuğunu göster"
 
 msgid "Show tray icon"
-msgstr ""
+msgstr "Sistem tepsisi simgesini göster"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Görselleştiriciyi ve şarkı sözlerini sağ panelde göster"
 
 msgid "Show visualizer in the right panel"
-msgstr ""
+msgstr "Görselleştiriciyi sağ panelde göster"
 
 msgid "Show visualizer"
-msgstr ""
+msgstr "Görselleştiriciyi göster"
 
 msgid "Show"
-msgstr ""
+msgstr "Göster"
 
 msgid "Show/hide lyrics"
-msgstr ""
+msgstr "Şarkı sözlerini göster/gizle"
 
 msgid "Show/hide right sidebar"
-msgstr ""
+msgstr "Sağ kenar çubuğunu göster/gizle"
 
 msgid "Showcase"
-msgstr ""
+msgstr "Vitrin"
 
 msgid "Shows what you are playing on your Discord profile"
-msgstr ""
+msgstr "Discord profilinizde ne çaldığınızı gösterir"
 
 msgid "Shows what you play on your Discord profile"
-msgstr ""
+msgstr "Discord profilinizde ne çaldığınızı gösterir"
 
 msgid "Shuffle"
-msgstr ""
+msgstr "Karıştır"
 
 msgid "Sidebar Items"
-msgstr ""
+msgstr "Kenar Çubuğu Öğeleri"
 
 #, rust-format
 msgid "Sidebar item {position}"
-msgstr ""
+msgstr "Kenar çubuğu öğesi {position}"
 
 msgid "Sidebar items"
-msgstr ""
+msgstr "Kenar çubuğu öğeleri"
 
 msgid "Sidebar route by position"
-msgstr ""
+msgstr "Konuma göre kenar çubuğu rotası"
 
 msgid "Sidebar"
-msgstr ""
+msgstr "Kenar çubuğu"
 
 msgid "Sign In in Browser"
-msgstr ""
+msgstr "Tarayıcıda Oturum Aç"
 
 msgid "Sign In with Password"
-msgstr ""
+msgstr "Parolayla Oturum Aç"
 
 msgid "Sign in again"
-msgstr ""
+msgstr "Yeniden oturum aç"
 
 msgid "Sign in to Plex first"
-msgstr ""
+msgstr "Önce Plex'e oturum açın"
 
 msgid "Sign in with Nextcloud"
-msgstr ""
+msgstr "Nextcloud ile oturum aç"
 
 msgid "Sign in with a code"
-msgstr ""
+msgstr "Kodla oturum aç"
 
 msgid "Sign in"
-msgstr ""
+msgstr "Oturum aç"
 
 msgid "Signing in..."
-msgstr ""
+msgstr "Oturum açılıyor..."
 
 msgid "Similar artists"
-msgstr ""
+msgstr "Benzer sanatçılar"
 
 msgid "SimpMusic"
-msgstr ""
+msgstr "SimpMusic"
 
 msgid "Single"
-msgstr ""
+msgstr "Single"
 
 msgid "Singles"
-msgstr ""
+msgstr "Single'lar"
 
 msgid "Size"
-msgstr ""
+msgstr "Boyut"
 
 msgid "Skip count"
-msgstr ""
+msgstr "Atlama sayısı"
 
 msgid "Skip same-album crossfade"
-msgstr ""
+msgstr "Aynı albümdeki çapraz geçişi atla"
 
 msgid "Skip unplayable tracks"
-msgstr ""
+msgstr "Oynatılamayan parçaları atla"
 
 msgid "Skip"
-msgstr ""
+msgstr "Atla"
 
 msgid "Slate"
-msgstr ""
+msgstr "Arduvaz"
 
 msgid "Sleep timer"
-msgstr ""
+msgstr "Uyku zamanlayıcısı"
 
 msgid "Small"
-msgstr ""
+msgstr "Küçük"
 
 msgid "Smart Playlist"
-msgstr ""
+msgstr "Akıllı Çalma Listesi"
 
 msgid "Smart Playlists"
-msgstr ""
+msgstr "Akıllı Çalma Listeleri"
 
 msgid "Smart playlist tracks"
-msgstr ""
+msgstr "Akıllı çalma listesi parçaları"
 
 msgid "Smart playlists"
-msgstr ""
+msgstr "Akıllı çalma listeleri"
 
 msgid "Soft spectrum"
-msgstr ""
+msgstr "Yumuşak spektrum"
 
 msgid "Solid bars"
-msgstr ""
+msgstr "Dolu çubuklar"
 
 msgid "Some playlist entries could not be imported"
-msgstr ""
+msgstr "Bazı çalma listesi girişleri içe aktarılamadı"
 
 msgid "Song and artist links"
-msgstr ""
+msgstr "Şarkı ve sanatçı bağlantıları"
 
 msgid "Song title"
-msgstr ""
+msgstr "Şarkı başlığı"
 
 msgid "Song"
-msgstr ""
+msgstr "Şarkı"
 
 msgid "Sort artists and albums by their sort tags instead of their names"
 msgstr ""
+"Sanatçıları ve albümleri adları yerine sıralama etiketlerine göre sırala"
 
 msgid "Sort by"
-msgstr ""
+msgstr "Sıralama ölçütü"
 
 msgid "Sort name"
-msgstr ""
+msgstr "Sıralama adı"
 
 msgid "Sort title"
-msgstr ""
+msgstr "Sıralama başlığı"
 
 msgid "Soundtrack"
-msgstr ""
+msgstr "Film müziği"
 
 msgid "Soundtracks"
-msgstr ""
+msgstr "Film müzikleri"
 
 msgid "Source by position"
-msgstr ""
+msgstr "Konuma göre kaynak"
 
 msgid "Source is no longer available"
-msgstr ""
+msgstr "Kaynak artık kullanılamıyor"
 
 msgid "Source setup is unavailable"
-msgstr ""
+msgstr "Kaynak kurulumu kullanılamıyor"
 
 msgid "Source type"
-msgstr ""
+msgstr "Kaynak türü"
 
 msgid "Source"
-msgstr ""
+msgstr "Kaynak"
 
 msgid "Sources"
-msgstr ""
+msgstr "Kaynaklar"
 
+#, fuzzy
 msgid "Spectrum \302\267 dBFS"
-msgstr ""
+msgstr "Spektrum \\\\302\\\\267 dBFS"
 
 msgid "Spectrum line"
-msgstr ""
+msgstr "Spektrum çizgisi"
 
 msgid "Spectrum"
-msgstr ""
+msgstr "Spektrum"
 
 msgid "Start Listening"
-msgstr ""
+msgstr "Dinlemeye Başla"
 
 msgid "Start from"
-msgstr ""
+msgstr "Şuradan başla"
 
 msgid "Start minimized"
-msgstr ""
+msgstr "Küçültülmüş başlat"
 
 msgid "Start playing automatically"
-msgstr ""
+msgstr "Otomatik oynatmayı başlat"
 
 msgid "Start"
-msgstr ""
+msgstr "Başlat"
 
 msgid "Starting page"
-msgstr ""
+msgstr "Başlangıç sayfası"
 
 msgid "Starting..."
-msgstr ""
+msgstr "Başlatılıyor..."
 
 msgid "Static"
-msgstr ""
+msgstr "Statik"
 
 #, rust-format
 msgid "Stations are saved on {saved_on}."
-msgstr ""
+msgstr "İstasyonlar {saved_on} üzerinde kaydedilir."
 
 msgid "Stations"
-msgstr ""
+msgstr "İstasyonlar"
 
 msgid "Status display"
-msgstr ""
+msgstr "Durum göstergesi"
 
 msgid "Status"
-msgstr ""
+msgstr "Durum"
 
 msgid "Stereo for lossy formats"
-msgstr ""
+msgstr "Kayıplı formatlar için stereo"
 
 msgid "Stereo"
-msgstr ""
+msgstr "Stereo"
 
 msgid "Stop"
-msgstr ""
+msgstr "Durdur"
 
 msgid "Storage"
-msgstr ""
+msgstr "Depolama"
 
 msgid "Store calculated loudness in supported Local music files"
-msgstr ""
+msgstr "Hesaplanan ses yüksekliğini desteklenen Yerel müzik dosyalarında sakla"
 
 msgid "Stream address"
-msgstr ""
+msgstr "Akış adresi"
 
 msgid "Stream quality"
-msgstr ""
+msgstr "Akış kalitesi"
 
 msgid "Streaming"
-msgstr ""
+msgstr "Akış"
 
 msgid "Studio"
-msgstr ""
+msgstr "Stüdyo"
 
 msgid "Studios"
-msgstr ""
+msgstr "Stüdyolar"
 
 msgid "Style"
-msgstr ""
+msgstr "Stil"
 
 msgid "Suggested"
-msgstr ""
+msgstr "Önerilen"
 
 msgid "Sunday"
-msgstr ""
+msgstr "Pazar"
 
 msgid "Swipe left"
-msgstr ""
+msgstr "Sola kaydır"
 
 msgid "Swipe on a row"
-msgstr ""
+msgstr "Bir satırda kaydır"
 
 msgid "Swipe right"
-msgstr ""
+msgstr "Sağa kaydır"
 
 msgid "Switch Search/Favorites tabs"
-msgstr ""
+msgstr "Arama/Favoriler sekmelerini değiştir"
 
 msgid "Switch between layouts"
-msgstr ""
+msgstr "Düzenler arasında geçiş yap"
 
 msgid "Switch pane"
-msgstr ""
+msgstr "Bölmeyi değiştir"
 
 msgid "Switching library..."
-msgstr ""
+msgstr "Kitaplık değiştiriliyor..."
 
 msgid "Symbolic"
-msgstr ""
+msgstr "Sembolik"
 
 msgid "Sync folder"
-msgstr ""
+msgstr "Klasörü eşitle"
 
 msgid "Synced and plain lyrics"
-msgstr ""
+msgstr "Eşzamanlı ve düz şarkı sözleri"
 
 msgid "Synced lyrics"
-msgstr ""
+msgstr "Eşzamanlı şarkı sözleri"
 
 msgid "Synced lyrics, some word by word"
-msgstr ""
+msgstr "Eşzamanlı şarkı sözleri, bazıları kelime kelime"
 
 msgid "System default"
-msgstr ""
+msgstr "Sistem varsayılanı"
 
 msgid "System flatpak:"
-msgstr ""
+msgstr "Sistem flatpak:"
 
 msgid "System keyring"
-msgstr ""
+msgstr "Sistem anahtarlığı"
 
 msgid "System"
-msgstr ""
+msgstr "Sistem"
 
 msgid "Tags"
-msgstr ""
+msgstr "Etiketler"
 
 msgid "Target loudness"
-msgstr ""
+msgstr "Hedef ses yüksekliği"
 
 msgid "Teal"
-msgstr ""
+msgstr "Deniz mavisi"
 
 msgid "Techno"
-msgstr ""
+msgstr "Techno"
 
 msgid "Test connection"
-msgstr ""
+msgstr "Bağlantıyı test et"
 
 msgid "Text"
-msgstr ""
+msgstr "Metin"
 
 msgid "The API token was not accepted. Please connect again."
-msgstr ""
+msgstr "API token'ı kabul edilmedi. Lütfen yeniden bağlanın."
 
 msgid "The anchored track is gone"
-msgstr ""
+msgstr "Sabitlenen parça gitti"
 
 msgid "The closest match wins; on a tie, the higher one."
-msgstr ""
+msgstr "En yakın eşleşme kazanır; eşitlik durumunda daha yüksek olan."
 
 msgid "The connection no longer exists"
-msgstr ""
+msgstr "Bağlantı artık mevcut değil"
 
 msgid "The files are deleted where they are stored. This cannot be undone."
-msgstr ""
+msgstr "Dosyalar depolandıkları yerden silinir. Bu geri alınamaz."
 
 msgid "The sheet a long press opens. Tap an entry to show or hide it."
 msgstr ""
+"Uzun basmanın açtığı sayfa. Göstermek veya gizlemek için bir girişe dokunun."
 
 msgid "TheAudioDB album ID"
-msgstr ""
+msgstr "TheAudioDB albüm kimliği"
 
 msgid "TheAudioDB artist ID"
-msgstr ""
+msgstr "TheAudioDB sanatçı kimliği"
 
 msgid "Theme"
-msgstr ""
+msgstr "Tema"
 
 msgid "These emoji match"
-msgstr ""
+msgstr "Bu emojiler eşleşiyor"
 
 msgid "This can be turned off after pairing if you want"
-msgstr ""
+msgstr "İsterseniz eşleştirmeden sonra bu kapatılabilir"
 
 msgid "This device was removed from the profile"
-msgstr ""
+msgstr "Bu cihaz profilden kaldırıldı"
 
 msgid "This device"
-msgstr ""
+msgstr "Bu cihaz"
 
 #, rust-format
 msgid "This is owned by {source} and synced to it."
-msgstr ""
+msgstr "Bu {source} kaynağına aittir ve onunla eşitlenir."
 
 msgid "This isn't available"
-msgstr ""
+msgstr "Bu kullanılamıyor"
 
 msgid "This item has no link to share"
-msgstr ""
+msgstr "Bu öğenin paylaşılacak bağlantısı yok"
 
 #, rust-format
 msgid "This playlist only accepts {source} tracks"
-msgstr ""
+msgstr "Bu çalma listesi yalnızca {source} parçalarını kabul eder"
 
 msgid "This source cannot edit this field"
-msgstr ""
+msgstr "Bu kaynak bu alanı düzenleyemez"
 
 msgid "This will remove all configured state. Do you want to continue?"
-msgstr ""
+msgstr "Bu, yapılandırılmış tüm durumu kaldırır. Devam etmek istiyor musunuz?"
 
 msgid "Thursday"
-msgstr ""
+msgstr "Perşembe"
 
 msgid "Time"
-msgstr ""
+msgstr "Zaman"
 
 msgid "Title (merged)"
-msgstr ""
+msgstr "Başlık (birleştirilmiş)"
 
 msgid "Title"
-msgstr ""
+msgstr "Başlık"
 
 msgid "Toggle Fullscreen"
-msgstr ""
+msgstr "Tam Ekranı Aç/Kapat"
 
 msgid "Tone and channels"
-msgstr ""
+msgstr "Ton ve kanallar"
 
 msgid "Tools"
-msgstr ""
+msgstr "Araçlar"
 
 msgid "Top albums"
-msgstr ""
+msgstr "En iyi albümler"
 
 msgid "Top artists"
-msgstr ""
+msgstr "En iyi sanatçılar"
 
 msgid "Top genres"
-msgstr ""
+msgstr "En iyi türler"
 
 msgid "Top tracks"
-msgstr ""
+msgstr "En iyi parçalar"
 
 msgid "Total discs"
-msgstr ""
+msgstr "Toplam disk"
 
 msgid "Total tracks"
-msgstr ""
+msgstr "Toplam parça"
 
 msgid "Track details"
-msgstr ""
+msgstr "Parça ayrıntıları"
 
 msgid "Track gain"
-msgstr ""
+msgstr "Parça kazancı"
 
 msgid "Track number"
-msgstr ""
+msgstr "Parça numarası"
 
 msgid "Track peak"
-msgstr ""
+msgstr "Parça tepe değeri"
 
 msgid "Track radio"
-msgstr ""
+msgstr "Parça radyosu"
 
 msgid "Track unavailable"
-msgstr ""
+msgstr "Parça kullanılamıyor"
 
 msgid "Track"
-msgstr ""
+msgstr "Parça"
 
 msgid "Tracks from every playlist"
-msgstr ""
+msgstr "Her çalma listesinden parçalar"
 
 msgid "Tracks from your five latest albums"
-msgstr ""
+msgstr "En son beş albümünüzden parçalar"
 
 msgid "Tracks"
-msgstr ""
+msgstr "Parçalar"
 
 msgid "Transcoded"
-msgstr ""
+msgstr "Dönüştürülmüş"
 
 msgid "Transition mode"
-msgstr ""
+msgstr "Geçiş modu"
 
 msgid "Translation language"
-msgstr ""
+msgstr "Çeviri dili"
 
 msgid "Tray icon"
-msgstr ""
+msgstr "Sistem tepsisi simgesi"
 
 msgid "Treble"
-msgstr ""
+msgstr "Tiz"
 
 msgid "Troubleshooting"
-msgstr ""
+msgstr "Sorun giderme"
 
 msgid "Trust self-signed certificate"
-msgstr ""
+msgstr "Kendinden imzalı sertifikaya güven"
 
 msgid "Tuesday"
-msgstr ""
+msgstr "Salı"
 
 msgid "Turn off only for a server you control"
-msgstr ""
+msgstr "Yalnızca kontrol ettiğiniz bir sunucu için kapat"
 
 msgid "Turn off private mode"
-msgstr ""
+msgstr "Gizli modu kapat"
 
 msgid "Turn off"
-msgstr ""
+msgstr "Kapat"
 
 msgid "Turn on private mode"
-msgstr ""
+msgstr "Gizli modu aç"
 
 msgid "Turns off lookups, scrobbling, play reporting and update checks"
 msgstr ""
+"Aramaları, scrobbling'i, çalma raporlamayı ve güncelleme kontrollerini "
+"kapatır"
 
 msgid "Type to search or create a new playlist"
-msgstr ""
+msgstr "Aramak veya yeni çalma listesi oluşturmak için yazın"
 
 msgid "Type to search"
-msgstr ""
+msgstr "Aramak için yazın"
 
 msgid "Typography"
-msgstr ""
+msgstr "Tipografi"
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Unavailable"
-msgstr ""
+msgstr "Kullanılamıyor"
 
 msgid "Undo"
-msgstr ""
+msgstr "Geri al"
 
 msgid "Unknown artist"
-msgstr ""
+msgstr "Bilinmeyen sanatçı"
 
 msgid "Unknown disc"
-msgstr ""
+msgstr "Bilinmeyen disk"
 
 msgid "Unlink"
-msgstr ""
+msgstr "Bağlantıyı kaldır"
 
 msgid "Unmute"
-msgstr ""
+msgstr "Sesi aç"
 
 msgid "Unmuted"
-msgstr ""
+msgstr "Ses açık"
 
 msgid "Unplayed"
-msgstr ""
+msgstr "Çalınmadı"
 
 msgid "Unsaved"
-msgstr ""
+msgstr "Kaydedilmedi"
 
 msgid "Untitled"
-msgstr ""
+msgstr "Başlıksız"
 
 msgid "Update check interval"
-msgstr ""
+msgstr "Güncelleme kontrol aralığı"
 
 msgid "Update"
-msgstr ""
+msgstr "Güncelle"
 
 #, rust-format
 msgid "Updated Rufin to {version}"
-msgstr ""
+msgstr "Rufin {version} sürümüne güncellendi"
 
 #, rust-format
 msgid "Updating Rufin to {version}..."
-msgstr ""
+msgstr "Rufin {version} sürümüne güncelleniyor..."
 
 msgid "Upload artwork"
-msgstr ""
+msgstr "Kapak görseli yükle"
 
 msgid "Use API key"
-msgstr ""
+msgstr "API anahtarı kullan"
 
 msgid "Use Instant Mix for recommendations"
-msgstr ""
+msgstr "Öneriler için Instant Mix kullan"
 
 msgid "Use Rufin data folder"
-msgstr ""
+msgstr "Rufin veri klasörünü kullan"
 
 msgid "Use Saved Login"
-msgstr ""
+msgstr "Kaydedilmiş Oturumu Kullan"
 
 msgid "Use This Source"
-msgstr ""
+msgstr "Bu Kaynağı Kullan"
 
 msgid "Use a number above zero"
-msgstr ""
+msgstr "Sıfırdan büyük bir sayı kullanın"
 
 msgid "Use a public relay"
-msgstr ""
+msgstr "Herkese açık bir aktarma kullan"
 
 msgid "Use accent color"
-msgstr ""
+msgstr "Vurgu rengini kullan"
 
 msgid "Use an existing connection?"
-msgstr ""
+msgstr "Mevcut bir bağlantı kullanılsın mı?"
 
 msgid "Use current artwork"
-msgstr ""
+msgstr "Mevcut kapak görselini kullan"
 
 msgid "Use default folder"
-msgstr ""
+msgstr "Varsayılan klasörü kullan"
 
 msgid "Use different layout below a threshold width"
-msgstr ""
+msgstr "Eşik genişliğinin altında farklı düzen kullan"
 
 msgid "Use each track's own cover when available"
-msgstr ""
+msgstr "Mevcut olduğunda her parçanın kendi kapağını kullan"
 
 msgid "Use existing"
-msgstr ""
+msgstr "Mevcut olanı kullan"
 
 msgid "Use for this output"
-msgstr ""
+msgstr "Bu çıkış için kullan"
 
 msgid "Use listening activity"
-msgstr ""
+msgstr "Dinleme etkinliğini kullan"
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
+"Oynatma, şarkı sözleri ve desteklenen meta veri düzenleme için yerel "
+"dosyaları kullan"
 
 msgid "Use sort tags"
-msgstr ""
+msgstr "Sıralama etiketlerini kullan"
 
 msgid "Use source setting"
-msgstr ""
+msgstr "Kaynak ayarını kullan"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
+msgstr "Radyo ve Otomatik DJ için sunucunun Instant Mix'ini kullan."
 
 msgid "User flatpak:"
-msgstr ""
+msgstr "Kullanıcı flatpak:"
 
 msgid "User token"
-msgstr ""
+msgstr "Kullanıcı token'ı"
 
 msgid "User"
-msgstr ""
+msgstr "Kullanıcı"
 
 msgid "Username and password"
-msgstr ""
+msgstr "Kullanıcı adı ve parola"
 
 msgid "Username or email"
-msgstr ""
+msgstr "Kullanıcı adı veya e-posta"
 
 msgid "Username"
-msgstr ""
+msgstr "Kullanıcı adı"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
-msgstr ""
+msgstr "Mevcut karaoke şarkı sözlerini kullanır veya internetten getirir"
 
 msgid "Verification Code"
-msgstr ""
+msgstr "Doğrulama Kodu"
 
 msgid "Verify server certificate"
-msgstr ""
+msgstr "Sunucu sertifikasını doğrula"
 
 msgid "Version History"
-msgstr ""
+msgstr "Sürüm Geçmişi"
 
 msgid "Via relay"
-msgstr ""
+msgstr "Aktarma yoluyla"
 
 msgid "View all"
-msgstr ""
+msgstr "Tümünü görüntüle"
 
 msgid "View"
-msgstr ""
+msgstr "Görüntüle"
 
 msgid "Visible"
-msgstr ""
+msgstr "Görünür"
 
 msgid "Visualizer"
-msgstr ""
+msgstr "Görselleştirici"
 
 msgid "Volume Down"
-msgstr ""
+msgstr "Sesi Azalt"
 
 msgid "Volume Up"
-msgstr ""
+msgstr "Sesi Artır"
 
 msgid "Volume scale"
-msgstr ""
+msgstr "Ses ölçeği"
 
 msgid "Volume"
-msgstr ""
+msgstr "Ses düzeyi"
 
 msgid "Waiting for connection"
-msgstr ""
+msgstr "Bağlantı bekleniyor"
 
 msgid "Waiting for device"
-msgstr ""
+msgstr "Cihaz bekleniyor"
 
 msgid "Waiting for the other device to approve"
-msgstr ""
+msgstr "Diğer cihazın onaylaması bekleniyor"
 
 msgid "Waveform seekbar"
-msgstr ""
+msgstr "Dalga biçimi arama çubuğu"
 
 msgid "Waveforms"
-msgstr ""
+msgstr "Dalga biçimleri"
 
 msgid "WebDAV / Nextcloud"
-msgstr ""
+msgstr "WebDAV / Nextcloud"
 
 msgid "WebDAV"
-msgstr ""
+msgstr "WebDAV"
 
 msgid "Wednesday"
-msgstr ""
+msgstr "Çarşamba"
 
 msgid "Weekday"
-msgstr ""
+msgstr "Hafta içi"
 
 msgid "Weekly"
-msgstr ""
+msgstr "Haftalık"
 
 msgid "Weighting"
-msgstr ""
+msgstr "Ağırlıklandırma"
 
 msgid "Welcome to Rufin"
-msgstr ""
+msgstr "Rufin'e Hoş Geldiniz"
 
 msgid "While your library loads"
-msgstr ""
+msgstr "Kitaplığınız yüklenirken"
 
 msgid "Wide"
-msgstr ""
+msgstr "Geniş"
 
 msgid "Width unit"
-msgstr ""
+msgstr "Genişlik birimi"
 
 msgid "Width"
-msgstr ""
+msgstr "Genişlik"
 
 msgid "Window"
-msgstr ""
+msgstr "Pencere"
 
 msgid "Write EBU R128 tags to files"
-msgstr ""
+msgstr "EBU R128 etiketlerini dosyalara yaz"
 
 msgid "Year"
-msgstr ""
+msgstr "Yıl"
 
 msgid "Yearly"
-msgstr ""
+msgstr "Yıllık"
 
 msgid "Years"
-msgstr ""
+msgstr "Yıl"
 
 msgid "Yellow"
-msgstr ""
+msgstr "Sarı"
 
 msgid "Yes"
-msgstr ""
+msgstr "Evet"
 
 msgid "Your library is ready"
-msgstr ""
+msgstr "Kitaplığınız hazır"
 
 msgid "Your music belongs here"
-msgstr ""
+msgstr "Müziğiniz buraya ait"
 
 msgid "Your own API key"
-msgstr ""
+msgstr "Kendi API anahtarınız"
 
 msgid "Your queue is empty."
-msgstr ""
+msgstr "Kuyruğunuz boş."
 
 #, rust-format
 msgid "Your {period} in Rufin"
-msgstr ""
+msgstr "Rufin'deki {period} döneminiz"
 
 #, rust-format
 msgid "Your {period}"
-msgstr ""
+msgstr "{period} döneminiz"
 
 msgid "above"
-msgstr ""
+msgstr "üstünde"
 
 msgid "after"
-msgstr ""
+msgstr "sonra"
 
 msgid "all"
-msgstr ""
+msgstr "tümü"
 
 msgid "any"
-msgstr ""
+msgstr "herhangi biri"
 
 msgid "before"
-msgstr ""
+msgstr "önce"
 
 msgid "below"
-msgstr ""
+msgstr "altında"
 
 msgid "contains"
-msgstr ""
+msgstr "içerir"
 
 msgid "days"
-msgstr ""
+msgstr "gün"
 
 msgid "does not contain"
-msgstr ""
+msgstr "içermez"
 
 msgid "does not equal"
-msgstr ""
+msgstr "eşit değildir"
 
 msgid "equals"
-msgstr ""
+msgstr "eşittir"
 
 msgid "excludes"
-msgstr ""
+msgstr "hariç tutar"
 
 msgid "fanart.tv key"
-msgstr ""
+msgstr "fanart.tv anahtarı"
 
 msgid "in the last"
-msgstr ""
+msgstr "son"
 
 msgid "is empty"
-msgstr ""
+msgstr "boş"
 
 msgid "is not empty"
-msgstr ""
+msgstr "boş değil"
 
 msgid "is not"
-msgstr ""
+msgstr "eşit değildir"
 
 msgid "is"
-msgstr ""
+msgstr "eşittir"
 
 msgid "kbps"
-msgstr ""
+msgstr "kbps"
 
 msgid "not in the last"
-msgstr ""
+msgstr "son ... içinde değil"
 
 msgid "of these rules"
-msgstr ""
+msgstr "bu kurallardan"
 
 msgid "of these"
-msgstr ""
+msgstr "bunlardan"
 
 msgid "range"
-msgstr ""
+msgstr "aralık"
 
 msgid "to"
-msgstr ""
+msgstr "ile"
 
 msgid "today"
-msgstr ""
+msgstr "bugün"
 
 msgid "yesterday"
-msgstr ""
+msgstr "dün"
 
 #, rust-format
 msgid "{action} (Shuffle)"
-msgstr ""
+msgstr "{action} (Karıştır)"
 
 #, rust-format
 msgid "{completed} of {total} ({cached} cached)"
-msgstr ""
+msgstr "{total} içinden {completed} ({cached} önbellekte)"
 
 #, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} albüm"
+msgstr[1] "{count} albüm"
 
 #, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} gün önce"
+msgstr[1] "{count} gün önce"
 
 #, rust-format
 msgid "{count} entry matches no track in the library."
 msgid_plural "{count} entries match no track in the library."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} giriş kitaplıkta hiçbir parçayla eşleşmiyor."
+msgstr[1] "{count} giriş kitaplıkta hiçbir parçayla eşleşmiyor."
 
 #, rust-format
 msgid "{count} entry"
 msgid_plural "{count} entries"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} giriş"
+msgstr[1] "{count} giriş"
 
 #, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} klasör seçildi"
+msgstr[1] "{count} klasör seçildi"
 
 #, rust-format
 msgid "{count} folder"
 msgid_plural "{count} folders"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} klasör"
+msgstr[1] "{count} klasör"
 
 #, rust-format
 msgid "{count} line could not be read."
 msgid_plural "{count} lines could not be read."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} satır okunamadı."
+msgstr[1] "{count} satır okunamadı."
 
 #, rust-format
 msgid "{count} listen was already in Rufin."
 msgid_plural "{count} listens were already in Rufin."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} dinleme zaten Rufin'deydi."
+msgstr[1] "{count} dinleme zaten Rufin'deydi."
 
 #, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} ay önce"
+msgstr[1] "{count} ay önce"
 
 #, rust-format
 msgid "{count} play"
 msgid_plural "{count} plays"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} çalma"
+msgstr[1] "{count} çalma"
 
 #, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} sonuç"
+msgstr[1] "{count} sonuç"
 
 #, rust-format
 msgid "{count} selected"
-msgstr ""
+msgstr "{count} seçildi"
 
 #, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} parça"
+msgstr[1] "{count} parça"
 
 #, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} hafta önce"
+msgstr[1] "{count} hafta önce"
 
 #, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} yıl önce"
+msgstr[1] "{count} yıl önce"
 
 #, rust-format
 msgid "{field} \302\267 Different across {count} track"
@@ -4930,27 +5043,27 @@ msgstr[1] ""
 
 #, rust-format
 msgid "{minutes} min"
-msgstr ""
+msgstr "{minutes} dk"
 
 #, rust-format
 msgid "{shown} of {total} shown"
-msgstr ""
+msgstr "{total} içinden {shown} gösteriliyor"
 
 #, rust-format
 msgid "{stage} ({completed} of {total}, {cached} cached)"
-msgstr ""
+msgstr "{stage} ({total} içinden {completed}, {cached} önbellekte)"
 
 #, rust-format
 msgid "{stage} ({count} of {total} tracks)"
-msgstr ""
+msgstr "{stage} ({total} parçadan {count})"
 
 #, rust-format
 msgid "{stage}: {completed} / {total}"
-msgstr ""
+msgstr "{stage}: {completed} / {total}"
 
 #, rust-format
 msgid "{stage}: {completed}"
-msgstr ""
+msgstr "{stage}: {completed}"
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"
@@ -4959,6 +5072,9 @@ msgid ""
 "\n"
 "Click Finish to finalize Setup."
 msgstr ""
+"Rufin bilgisayarınıza kuruldu.\n"
+"\n"
+"Kurulumu tamamlamak için Son'a tıklayın."
 
 #. Windows installer: WelcomeText.
 msgctxt "Windows installer"
@@ -4971,58 +5087,66 @@ msgid ""
 "\n"
 "Click Next to continue."
 msgstr ""
+"Rufin; Jellyfin, Navidrome/OpenSubsonic, Plex ve Emby sunucuları için yerel "
+"bir müzik oynatıcıdır; yerel klasörler, doğrudan Nextcloud tarayıcı oturum "
+"açma yolu dahil WebDAV, Samba ve NAS paylaşımları.\n"
+"\n"
+"Bu kurulum Rufin'i bilgisayarınıza kuracak.\n"
+"\n"
+"Devam etmek için İleri'ye tıklayın."
 
 #. Windows installer: CleanupFailed.
 msgctxt "Windows installer"
 msgid ""
 "Setup could not remove the existing Rufin files. Close Rufin and try again."
 msgstr ""
+"Kurulum mevcut Rufin dosyalarını kaldıramadı. Rufin'i kapatıp tekrar deneyin."
 
 #. Windows installer: DirectoryConflict.
 msgctxt "Windows installer"
 msgid "Choose a separate installation folder."
-msgstr ""
+msgstr "Ayrı bir kurulum klasörü seçin."
 
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
 #, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
-msgstr ""
+msgstr "{app_name} uygulamasını kapatıp kurulumu tekrar deneyin."
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
 #, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
-msgstr ""
+msgstr "{app_name} uygulamasını kapatıp kaldırmayı tekrar deneyin."
 
 #. Windows installer: FinishTitle.
 msgctxt "Windows installer"
 msgid "Completing Rufin Setup"
-msgstr ""
+msgstr "Rufin Kurulumu Tamamlanıyor"
 
 #. Windows installer: DesktopShortcut.
 msgctxt "Windows installer"
 msgid "Create desktop shortcut"
-msgstr ""
+msgstr "Masaüstü kısayolu oluştur"
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
 #, rust-format
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
-msgstr ""
+msgstr "{app_name} önbelleğini kaldır"
 
 #. Windows installer: InstallWriteFailed.
 msgctxt "Windows installer"
 msgid "Setup could not complete the installation. Please try again."
-msgstr ""
+msgstr "Kurulum tamamlanamadı. Lütfen tekrar deneyin."
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
 #, rust-format
 msgctxt "Windows installer"
 msgid "The {app_name} automatic update option is invalid."
-msgstr ""
+msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
 
 #. Windows installer: WelcomeTitle.
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
-msgstr ""
+msgstr "Rufin Kurulumuna Hoş Geldiniz"
