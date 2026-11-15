@@ -1,4 +1,5 @@
 mod activity;
+pub(crate) mod file;
 mod player;
 mod preferences;
 pub use app::{
@@ -26,8 +27,8 @@ mod web_controller;
 pub use web_controller::ControllerSettings;
 
 pub use app::{
-    ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
-    RandomPlaySettings, Settings, SettingsHandle, default_home_blocks,
+    ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, MixGenreSelection, MixSettings,
+    Settings, SettingsHandle, default_home_blocks,
 };
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
 pub use layout::{
@@ -46,7 +47,7 @@ pub use sidebar::{
 };
 
 use std::fs;
-use std::io::{ErrorKind, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
@@ -205,6 +206,35 @@ impl StoredSettings {
         self.ui.visualizer.migrate_named_presets();
         app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
+        self.settle_server_recommendations();
+    }
+
+    /// Server recommendations start on once a Navidrome or Plex server is configured, whose
+    /// picks are good, or where a Jellyfin or Emby source was set to its instant mix before
+    /// the choice became one setting. Once set, the choice is the user's.
+    fn settle_server_recommendations(&mut self) {
+        if self.ui.application.server_recommendations.is_some() {
+            return;
+        }
+        let recommends = self.sources.configured.iter().any(|source| {
+            match library::SourceKind::parse(&source.configuration.kind) {
+                Some(library::SourceKind::Navidrome | library::SourceKind::Plex) => true,
+                Some(library::SourceKind::Jellyfin | library::SourceKind::Emby) => {
+                    serde_json::from_str::<serde_json::Value>(
+                        &source.configuration.provider_payload,
+                    )
+                    .is_ok_and(|payload| {
+                        ["use_instant_mix", "use_jellyfin_instant_mix"]
+                            .iter()
+                            .any(|key| payload[key] == true)
+                    })
+                }
+                _ => false,
+            }
+        });
+        if recommends {
+            self.ui.application.server_recommendations = Some(true);
+        }
     }
 
     /// Whether `other` names the same scrobbling accounts and secrets; the switches may
@@ -283,6 +313,8 @@ impl SettingsFile {
     }
     pub(crate) fn open(path: PathBuf) -> Result<Self, String> {
         let (mut value, mut changed) = read_startup_settings(&path)?;
+        // A first start, and the first after a `settings.json`, writes the two files.
+        changed |= !path.is_file();
         value.migrate_defaults();
         for recent in &mut value.ui.recent_search_results {
             if let Some(binding) = &mut recent.artwork_binding {
@@ -304,7 +336,7 @@ impl SettingsFile {
             }
         }
         if changed {
-            if let Err(error) = write_settings(&path, &value) {
+            if let Err(error) = write_settings(&path, None, &value) {
                 warn!(%error, "could not save startup settings");
             }
         }
@@ -443,7 +475,7 @@ impl SettingsFile {
         {
             let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
             if next != *saved {
-                self.persist(&next)?;
+                self.persist(&saved, &next)?;
                 *saved = next.clone();
             }
         }
@@ -458,7 +490,7 @@ impl SettingsFile {
         let result = (|| {
             let next = self.load();
             if *next != *saved {
-                self.persist(&next)?;
+                self.persist(&saved, &next)?;
                 *saved = StoredSettings::clone(&next);
             }
             Ok(())
@@ -468,16 +500,17 @@ impl SettingsFile {
         result
     }
 
-    fn persist(&self, value: &StoredSettings) -> Result<(), String> {
+    fn persist(&self, saved: &StoredSettings, value: &StoredSettings) -> Result<(), String> {
         self.path
             .as_ref()
-            .map_or(Ok(()), |path| write_settings(path, value))
+            .map_or(Ok(()), |path| write_settings(path, Some(saved), value))
     }
 }
 
 impl StoredSettings {
     fn prepare(&mut self) -> Result<(), String> {
         self.ui.sanitize();
+        self.settle_server_recommendations();
         let backup = &mut self.ui.application.backup;
         if backup.enabled
             && backup.schedule.frequency == crate::backup::format::BackupFrequency::Off
@@ -1066,17 +1099,6 @@ pub(crate) fn random_identity(prefix: &str) -> Result<String, String> {
     }
     Ok(value)
 }
-fn read_settings_json(path: &Path) -> Result<Option<serde_json::Value>, String> {
-    match fs::read_to_string(path) {
-        Ok(raw) if raw.trim().is_empty() => Ok(None),
-        Ok(raw) => serde_json::from_str(&raw)
-            .map(Some)
-            .map_err(|error| error.to_string()),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
 fn replace_setting(
     root: &mut serde_json::Value,
     path: &[String],
@@ -1114,6 +1136,9 @@ fn recover_setting(
     }
 }
 
+/// Where Mix kept its settings while it was Play random.
+const LEGACY_MIX_KEY: &str = "random_play";
+
 pub(crate) fn decode_settings(
     raw: &serde_json::Value,
 ) -> Result<(StoredSettings, Vec<Vec<String>>), String> {
@@ -1124,6 +1149,13 @@ pub(crate) fn decode_settings(
         migrated["equalizer"] =
             serde_json::to_value(crate::playback::EqualizerPreferences::from_legacy(legacy))
                 .map_err(|e| e.to_string())?;
+    }
+    // Mix kept its settings under the name it had before.
+    if let Some(fields) = migrated.as_object_mut()
+        && !fields.contains_key("mix")
+        && let Some(legacy) = fields.remove(LEGACY_MIX_KEY)
+    {
+        fields.insert("mix".into(), legacy);
     }
     let raw = &migrated;
     if let Ok(stored) = serde_json::from_value::<StoredSettings>(raw.clone()) {
@@ -1143,7 +1175,7 @@ pub(crate) fn decode_settings(
 }
 
 fn read_startup_settings(path: &Path) -> Result<(StoredSettings, bool), String> {
-    let Some(raw) = read_settings_json(path)? else {
+    let Some(raw) = file::read(path)? else {
         return Ok((StoredSettings::default(), false));
     };
     let (stored, unsupported) = decode_settings(&raw)?;
@@ -1151,11 +1183,12 @@ fn read_startup_settings(path: &Path) -> Result<(StoredSettings, bool), String> 
         warn!(?unsupported, path = %path.display(),
             "using defaults for incompatible preferences; saved values remain intact");
     }
-    let migrated = raw.get("equalizer").is_none()
-        && raw
-            .get("playback")
-            .and_then(|p| p.get("equalizer"))
-            .is_some();
+    let migrated = raw.get(LEGACY_MIX_KEY).is_some()
+        || raw.get("equalizer").is_none()
+            && raw
+                .get("playback")
+                .and_then(|p| p.get("equalizer"))
+                .is_some();
     Ok((stored, migrated))
 }
 
@@ -1205,32 +1238,58 @@ fn persistent_settings(value: &StoredSettings) -> StoredSettings {
     persistent
 }
 
-pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
+/// Saves `value` over what the files hold, changing only what differs from `saved`, the
+/// settings as Rufin last saved them: a key edited in the files by hand since then stays as
+/// it was written and takes effect at the next start. With no `saved`, at startup, what
+/// differs from the files themselves is changed.
+pub(crate) fn write_settings(
+    path: &Path,
+    saved: Option<&StoredSettings>,
+    value: &StoredSettings,
+) -> Result<(), String> {
     let next =
         serde_json::to_value(persistent_settings(value)).map_err(|error| error.to_string())?;
-    let mut merged = match read_settings_json(path)? {
+    let mut merged = match file::read(path)? {
         None => next,
-        Some(mut saved) => {
-            let (mut previous, unsupported) = decode_settings(&saved)?;
-            let mut before = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
-            if !unsupported.is_empty() {
-                previous.migrate_defaults();
-                let defaults =
-                    serde_json::to_value(&previous).map_err(|error| error.to_string())?;
-                // Sanitizing a runtime default must not overwrite an unsupported saved value.
-                for path in unsupported {
-                    let default = path
-                        .iter()
-                        .try_fold(&defaults, |parent, key| parent.get(key));
-                    replace_setting(&mut before, &path, default.cloned());
+        Some(mut kept) => {
+            let before = match saved {
+                Some(saved) => serde_json::to_value(persistent_settings(saved))
+                    .map_err(|error| error.to_string())?,
+                None => {
+                    let (mut previous, unsupported) = decode_settings(&kept)?;
+                    let mut before =
+                        serde_json::to_value(&previous).map_err(|error| error.to_string())?;
+                    if !unsupported.is_empty() {
+                        previous.migrate_defaults();
+                        let defaults =
+                            serde_json::to_value(&previous).map_err(|error| error.to_string())?;
+                        // Sanitizing a runtime default must not overwrite an unsupported saved
+                        // value.
+                        for path in unsupported {
+                            let default = path
+                                .iter()
+                                .try_fold(&defaults, |parent, key| parent.get(key));
+                            replace_setting(&mut before, &path, default.cloned());
+                        }
+                    }
+                    before
                 }
-            }
-            merge_settings(&mut saved, &before, &next);
-            saved
+            };
+            merge_settings(&mut kept, &before, &next);
+            kept
         }
     };
     // The decoded legacy value can compare equal before and after migration.
     // Install its new key even when the ordinary merge has no changed fields.
+    if let Some(fields) = merged.as_object_mut()
+        && fields.remove(LEGACY_MIX_KEY).is_some()
+        && !fields.contains_key("mix")
+    {
+        fields.insert(
+            "mix".into(),
+            serde_json::to_value(&value.ui.mix).map_err(|e| e.to_string())?,
+        );
+    }
     if merged.get("equalizer").is_none() {
         merged["equalizer"] = serde_json::to_value(&value.equalizer).map_err(|e| e.to_string())?;
     }
@@ -1240,9 +1299,7 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
     {
         playback.remove("equalizer");
     }
-    let mut json = serde_json::to_vec_pretty(&merged).map_err(|error| error.to_string())?;
-    json.push(b'\n');
-    write_private(path, &json)
+    file::write(path, &merged)
 }
 
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -1284,7 +1341,7 @@ mod tests {
         use std::time::Duration;
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
+        let path = directory.path().join("rufin.toml");
         let file = SettingsFile {
             path: Some(path.clone()),
             ..SettingsFile::memory_at(directory.path().to_path_buf())
@@ -1341,9 +1398,72 @@ mod tests {
     }
 
     #[test]
+    fn a_save_keeps_a_choice_edited_by_hand_while_running() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rufin.toml");
+        let file = SettingsFile::open(path.clone()).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(written.contains("refill_count = 5"));
+        fs::write(
+            &path,
+            written.replace("refill_count = 5", "refill_count = 9"),
+        )
+        .unwrap();
+        file.update(|stored| {
+            stored.ui.application.private_mode = true;
+            Ok(())
+        })
+        .unwrap();
+        file.flush().unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("refill_count = 9"));
+        assert!(saved.contains("private_mode = true"));
+        // The running app keeps its own value; the edit takes effect at the next start.
+        assert_eq!(file.load().ui.application.auto_dj_refill_count, 5);
+        let reopened = SettingsFile::open(path.clone()).unwrap().load();
+        assert_eq!(reopened.ui.application.auto_dj_refill_count, 9);
+        assert!(reopened.ui.application.private_mode);
+        // A change in the app to the edited key is the later word.
+        file.update(|stored| {
+            stored.ui.application.auto_dj_refill_count = 7;
+            Ok(())
+        })
+        .unwrap();
+        file.flush().unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("refill_count = 7")
+        );
+    }
+
+    #[test]
+    fn settings_from_before_the_two_files_are_converted_with_mix_under_its_name() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join("settings.json"),
+            r#"{"random_play":{"albums":true,"limit":50,"album_limit":10,"played_filter":"Played"},"shuffle_enabled":true,"later":{"kept":true}}"#,
+        )
+        .unwrap();
+        let path = directory.path().join("rufin.toml");
+        let opened = SettingsFile::open(path.clone()).unwrap().load();
+        assert!(opened.ui.mix.albums);
+        assert!(opened.ui.shuffle_enabled);
+        assert!(!directory.path().join("settings.json").exists());
+        assert!(directory.path().join("settings.json.bak").exists());
+        let choices = fs::read_to_string(&path).unwrap();
+        assert!(choices.contains("[mix]\nalbums = true"));
+        let state = fs::read_to_string(directory.path().join("state.json")).unwrap();
+        assert!(!state.contains("random_play") && !choices.contains("random_play"));
+        // What this version does not know stays saved.
+        assert!(state.contains("\"later\""));
+        assert_eq!(*SettingsFile::open(path).unwrap().load(), *opened);
+    }
+
+    #[test]
     fn failed_settings_save_does_not_publish_and_later_saves_succeed() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
+        let path = directory.path().join("rufin.toml");
         // A directory at the target path makes the atomic replacement fail.
         fs::create_dir(&path).unwrap();
         let file = SettingsFile {
@@ -1408,7 +1528,7 @@ mod tests {
     #[test]
     fn backup_schedule_identity_and_private_settings_survive_replacement() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
+        let path = directory.path().join("rufin.toml");
         let file = SettingsFile {
             path: Some(path.clone()),
             ..SettingsFile::memory_at(directory.path().to_path_buf())
@@ -1450,7 +1570,8 @@ mod tests {
                 0o600
             );
         }
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        // The choices and the state beside them.
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
         let secrets = directory.path().join("secrets.json");
         fs::write(&secrets, b"old").unwrap();
         write_private(&secrets, br#"{"restored": "secret"}"#).unwrap();

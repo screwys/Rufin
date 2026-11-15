@@ -2,17 +2,70 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20" />
   <requires lib="libadwaita" version="1.9" />
-  <object class="AdwPreferencesPage" id="playback_page">
-    <property name="title" translatable="yes">Playback</property>
-    <property name="icon-name">rufin-music-queue-symbolic</property>
+  <object class="GtkBox" id="playback_page">
+    <property name="orientation">vertical</property>
     <child>
-      <object class="AdwPreferencesGroup" id="transition_group">
-        <property name="title" translatable="yes">Queue and transitions</property>
+      <object class="AdwClamp">
+        <property name="maximum-size">600</property>
+        <property name="tightening-threshold">400</property>
+        <property name="margin-top">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="child">
+          <object class="AdwInlineViewSwitcher">
+            <property name="stack">playback_tabs</property>
+            <property name="homogeneous">true</property>
+            <property name="hexpand">true</property>
+          </object>
+        </property>
       </object>
     </child>
     <child>
-      <object class="AdwPreferencesGroup" id="audio_group">
-        <property name="title" translatable="yes">Audio</property>
+      <object class="AdwViewStack" id="playback_tabs">
+        <property name="vexpand">true</property>
+        <child>
+          <object class="AdwViewStackPage">
+            <property name="name">queue</property>
+            <property name="title" translatable="yes">Queue</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup" id="transition_group">
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStackPage">
+            <property name="name">auto-dj</property>
+            <property name="title" translatable="yes">Auto DJ</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup" id="auto_dj_group">
+                    <property name="description" translatable="yes">What Auto DJ and radio pick</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStackPage">
+            <property name="name">audio</property>
+            <property name="title" translatable="yes">Audio</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup" id="audio_group">
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
       </object>
     </child>
   </object>
@@ -37,6 +90,26 @@
         <property name="valign">center</property>
       </object>
     </child>
+  </object>
+  <object class="AdwSwitchRow" id="server_recommendations_row">
+    <property name="title" translatable="yes">Use server recommendations</property>
+    <property name="subtitle" translatable="yes">Play the server's own picks; Rufin's fill in where it has too few</property>
+  </object>
+  <object class="AdwSwitchRow" id="similar_artists_row">
+    <property name="title" translatable="yes">Similar artists from ListenBrainz</property>
+    <property name="subtitle" translatable="yes">Look up the artists that listeners play alongside the current one</property>
+  </object>
+  <object class="AdwActionRow" id="refill_count_row">
+    <property name="title" translatable="yes">Tracks per refill</property>
+    <child type="suffix">
+      <object class="GtkSpinButton" id="refill_count">
+        <property name="valign">center</property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwSwitchRow" id="skip_low_rated_row">
+    <property name="title" translatable="yes">Skip low-rated tracks</property>
+    <property name="subtitle" translatable="yes">Leave out tracks rated two stars or lower</property>
   </object>
   <object class="AdwSwitchRow" id="clear_queue_row">
     <property name="title" translatable="yes">Clearing queue also clears the current song</property>

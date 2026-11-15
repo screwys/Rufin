@@ -9778,14 +9778,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/tokio-util/tokio-util-0.7.19.crate",
-        "sha256": "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52",
-        "dest": "cargo/vendor/tokio-util-0.7.19"
+        "url": "https://static.crates.io/crates/tokio-util/tokio-util-0.7.20.crate",
+        "sha256": "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b",
+        "dest": "cargo/vendor/tokio-util-0.7.20"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52\", \"files\": {}}",
-        "dest": "cargo/vendor/tokio-util-0.7.19",
+        "contents": "{\"package\": \"e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b\", \"files\": {}}",
+        "dest": "cargo/vendor/tokio-util-0.7.20",
         "dest-filename": ".cargo-checksum.json"
     },
     {

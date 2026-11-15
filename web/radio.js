@@ -1,4 +1,4 @@
-import { $, button, cover, el, icon, releaseCovers, run, slideText, tr } from "./ui.js";
+import { $, bindGenres, button, cover, el, icon, releaseCovers, run, slideText, tr } from "./ui.js";
 import { api, fragment, session } from "./connection.js";
 import { readFile } from "./metadata.js";
 import { pinAction } from "./pins.js";
@@ -138,7 +138,10 @@ async function loadRadio(path, signal, opening) {
   const page = $("content").querySelector(".radio-page");
   savedOn = page.dataset.savedOn;
   for (const node of page.querySelectorAll("time[data-at]")) node.textContent = clock(Number(node.dataset.at));
-  for (const node of page.querySelectorAll(".detail-below > .detail-facts")) slideText(node);
+  for (const node of page.querySelectorAll(".detail-meta")) {
+    slideText(node.querySelector(".detail-facts"));
+    bindGenres(node);
+  }
   for (const node of page.querySelectorAll("[data-station]"))
     logo(node.querySelector(".cover"), stationOf(node), signal);
   // The logos of the page this one replaced go once each of these had the chance to take its own.
@@ -197,7 +200,7 @@ function pin(station, anchor) {
     station.channels.map((channel) => [
       channel.name,
       pinAction(channel.pin)[1],
-      channel.pinned ? "rufin-object-select-symbolic" : "rufin-bookmark-symbolic",
+      channel.pinned ? "rufin-object-select-symbolic" : undefined,
     ]),
     anchor,
   );

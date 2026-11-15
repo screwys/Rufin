@@ -24,6 +24,7 @@ library = { path = "crates/library" }
 localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
 metadata-lookup = { path = "crates/metadata-lookup" }
+names = { path = "crates/names" }
 playback = { path = "crates/playback" }
 playback-cast = { path = "crates/playback-cast" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
@@ -144,6 +145,7 @@ sqlx-core = { version = "=0.9.0", default-features = false }
 libsqlite3-sys = "=0.37.0"
 regex = "1.13.1"
 tempfile = "3.23.0"
+toml_edit = "0.25.13"
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 csv = "1.4.0"
 thiserror = "2.0.18"

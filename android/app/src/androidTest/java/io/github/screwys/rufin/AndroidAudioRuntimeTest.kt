@@ -38,8 +38,9 @@ class AndroidAudioRuntimeTest {
         val cache = File(root, "cache").apply { check(mkdirs()) }
         val noBackup = File(root, "no-backup").apply { check(mkdirs()) }
         val config = File(files, "config").apply { check(mkdirs()) }
-        File(config, "settings.json").writeText(
-            """{"playback":{"volume":0.0},"external_metadata_enabled":false,"secret_storage_mode":"config-file"}"""
+        File(config, "state.json").writeText("""{"playback":{"volume":0.0}}""")
+        File(config, "rufin.toml").writeText(
+            "[metadata]\nexternal_lookups = false\n\n[privacy]\nsecret_storage = \"config-file\"\n"
         )
         val media = File(root, "tone.flac")
         InstrumentationRegistry.getInstrumentation().context.assets.open("tone.flac").use { input ->

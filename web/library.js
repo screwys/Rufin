@@ -14,6 +14,7 @@ import {
   showFavorite,
   coverGroup,
   bindHoverControls,
+  bindGenres,
   slideText,
 } from "./ui.js";
 
@@ -764,7 +765,7 @@ function bindPlaylistDrop(card, kind, row) {
 }
 
 function bindCard(card) {
-  for (const node of card.querySelectorAll(".detail-title, .home-showcase .detail-heading > .detail-facts, .detail-below > .detail-facts")) slideText(node);
+  for (const node of card.querySelectorAll(".detail-title, .detail-meta > .detail-facts")) slideText(node);
   // The header's width, not the row's, which the fitting itself changes.
   for (const actions of card.querySelectorAll(".detail-actions")) {
     new ResizeObserver(() => fitActions(actions)).observe(card);
@@ -846,7 +847,6 @@ function bindCard(card) {
       run(() => {
         if (action === "open") return open();
         if (action === "genre") return navigate(JSON.parse(button.dataset.page));
-        if (action === "genres") return genreMenu(card, button);
         if (action === "step-showcase") return stepShowcase(card, button.dataset.forward === "true");
         if (action === "link") return openLinks(row, button.dataset.field, button);
         if (action === "favorite") return setFavorite(row, kind);
@@ -878,29 +878,9 @@ function bindCard(card) {
       event.preventDefault();
       run(() => menu(card, event));
     });
-    const genres = card.querySelector(".detail-genres");
-    if (genres) new ResizeObserver(() => fitGenres(genres)).observe(genres);
+    const meta = card.querySelector(".detail-meta");
+    if (meta) bindGenres(meta);
   }
-}
-
-// Genre chips fill the row; those that do not fit go under the last chip's +n.
-function fitGenres(row) {
-  const chips = [...row.querySelectorAll('[data-action="genre"]')];
-  const more = row.querySelector(".detail-genre-more");
-  chips.forEach((chip) => (chip.hidden = false));
-  more.hidden = true;
-  const fits = () => row.scrollWidth <= row.clientWidth;
-  if (fits()) return;
-  more.hidden = false;
-  for (let shown = chips.length - 1; shown >= 0 && !fits(); shown--) {
-    chips[shown].hidden = true;
-    more.textContent = `+${chips.length - shown}`;
-  }
-}
-
-function genreMenu(card, anchor) {
-  const hidden = [...card.querySelectorAll('[data-action="genre"][hidden]')];
-  showMenu(hidden.map((chip) => [chip.textContent, () => navigate(JSON.parse(chip.dataset.page))]), anchor);
 }
 
 // Steps Home's showcase; the header core answers slides in from the side it went to.

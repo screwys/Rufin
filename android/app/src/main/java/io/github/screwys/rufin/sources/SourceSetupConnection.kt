@@ -203,8 +203,8 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val session = auth
         if (authorized && session != null) {
             val input = when (form.kind) {
-                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.instantMix, form.optional(form.localUrl))
-                "emby" -> SourceAuthorizationInput.Emby(selectedServer, form.instantMix)
+                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.optional(form.localUrl))
+                "emby" -> SourceAuthorizationInput.Emby(selectedServer)
                 "plex" -> SourceAuthorizationInput.Plex(selectedServer, form.url.trim().takeIf(String::isNotEmpty), form.trustInvalidCertificate)
                 "webdav" -> SourceAuthorizationInput.Files(form.fileSettings(), form.fileCredentialsEdit())
                 else -> error(translate("Select Source"))

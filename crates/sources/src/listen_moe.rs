@@ -17,6 +17,11 @@ use crate::{SourceError, SourceResult};
 pub struct ListenMoeSong {
     pub title: String,
     pub artists: Vec<String>,
+    /// The title as the feed also writes it, in Latin letters.
+    pub also_titled: Vec<String>,
+    /// Who else the song is credited to: its artists in Latin letters, and the characters
+    /// they sing as, under either name.
+    pub also_credited: Vec<String>,
     pub duration_millis: u64,
     /// When the station began it, by the station's clock: a listener hears it later by the
     /// stream's delay.
@@ -121,16 +126,32 @@ fn song(update: &serde_json::Value) -> Option<ListenMoeSong> {
     let ends = chrono::DateTime::parse_from_rfc3339(update["startTime"].as_str()?)
         .ok()?
         .timestamp_millis();
-    Some(ListenMoeSong {
-        title: song["title"].as_str()?.trim().to_string(),
-        artists: song["artists"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|artist| artist["name"].as_str())
+    let named = |values: &[&serde_json::Value]| {
+        values
+            .iter()
+            .filter_map(|value| value.as_str())
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty())
-            .collect(),
+            .collect::<Vec<_>>()
+    };
+    let each = |list: &'static str| song[list].as_array().into_iter().flatten();
+    Some(ListenMoeSong {
+        title: song["title"].as_str()?.trim().to_string(),
+        artists: named(
+            &each("artists")
+                .map(|artist| &artist["name"])
+                .collect::<Vec<_>>(),
+        ),
+        also_titled: named(&[&song["titleRomaji"]]),
+        also_credited: named(
+            &each("artists")
+                .map(|artist| &artist["nameRomaji"])
+                .chain(
+                    each("characters")
+                        .flat_map(|character| [&character["name"], &character["nameRomaji"]]),
+                )
+                .collect::<Vec<_>>(),
+        ),
         duration_millis,
         started_unix_millis: ends - duration_millis as i64,
     })
@@ -143,12 +164,19 @@ mod tests {
     #[test]
     fn a_feed_update_tells_when_its_song_began() {
         let update = serde_json::json!({
-            "song": {"title": " GO☆Summer Girl ", "artists": [{"name": "Chihara Minori"}], "duration": 316},
+            "song": {
+                "title": " GO☆Summer Girl ", "titleRomaji": "GO Summer Girl",
+                "artists": [{"name": "茅原実里", "nameRomaji": "Chihara Minori", "characters": [{"id": 1}]}],
+                "characters": [{"id": 1, "name": "長門有希", "nameRomaji": null}],
+                "duration": 316,
+            },
             "startTime": "2026-11-15T05:46:01.000Z",
         });
         let song = song(&update).unwrap();
         assert_eq!(song.title, "GO☆Summer Girl");
-        assert_eq!(song.artists, ["Chihara Minori"]);
+        assert_eq!(song.artists, ["茅原実里"]);
+        assert_eq!(song.also_titled, ["GO Summer Girl"]);
+        assert_eq!(song.also_credited, ["Chihara Minori", "長門有希"]);
         assert_eq!(song.duration_millis, 316_000);
         assert_eq!(
             song.started_unix_millis,

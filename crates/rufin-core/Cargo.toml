@@ -14,6 +14,7 @@ publish.workspace = true
 bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindings", "metadata-lookup/bindings", "library/bindings"]
 
 [dependencies]
+names.workspace = true
 uniffi = { workspace = true, optional = true }
 rufin-connect.workspace = true
 age.workspace = true
@@ -51,6 +52,7 @@ lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+toml_edit.workspace = true
 notify.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }

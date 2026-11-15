@@ -345,10 +345,10 @@ function placeBarButtons(bar, up) {
   const row = document.querySelector(".transport-buttons");
   const seekRow = document.querySelector(".seek-row");
   const volumeBox = document.querySelector(".volume");
-  const extras = ["auto-dj", "random-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
-  const [dj, random, sleep, settings, volume, favorite] = extras;
+  const extras = ["auto-dj", "mix-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
+  const [dj, mix, sleep, settings, volume, favorite] = extras;
   row.prepend(dj);
-  row.append(random);
+  row.append(mix);
   document.querySelector(".player-actions").prepend(sleep, settings);
   volumeBox.prepend(favorite);
   volumeBox.insertBefore(volume, $("volume"));
@@ -358,7 +358,7 @@ function placeBarButtons(bar, up) {
   } else if (bar === "strip") row.prepend(volume);
   else if (bar === "controls") {
     const raised = (button) => extras.indexOf(button) < up;
-    const start = [sleep, volume, dj], end = [random, favorite, settings];
+    const start = [sleep, volume, dj], end = [mix, favorite, settings];
     row.prepend(...start.filter(raised));
     row.append(...end.filter(raised));
     seekRow.prepend(...start.filter((button) => !raised(button)));
@@ -647,6 +647,47 @@ function slideText(node) {
   startSlide(node, state);
 }
 
+// The genres follow the facts on one line. Those that do not fit go under +n (› when none
+// fits), which opens them onto further lines; ‹ closes them again.
+function fitGenres(row) {
+  const more = row.querySelector(".detail-genre-more");
+  if (!more) return;
+  const chips = [...row.querySelectorAll(".detail-genre-chip:not(.detail-genre-more)")];
+  for (const chip of chips) chip.hidden = false;
+  more.hidden = true;
+  row.classList.remove("open");
+  // The facts keep their width while the genres are counted, then give way to +n.
+  row.classList.add("fitting");
+  const fits = () => row.scrollWidth <= row.clientWidth;
+  if (fits()) {
+    delete row.dataset.open;
+  } else if (row.dataset.open) {
+    more.hidden = false;
+    more.replaceChildren(icon("rufin-go-previous-symbolic"));
+    row.classList.add("open");
+  } else {
+    more.hidden = false;
+    let shown = chips.length;
+    while (shown > 0 && !fits()) {
+      chips[--shown].hidden = true;
+      more.textContent = `+${chips.length - shown}`;
+    }
+    if (!shown) more.replaceChildren(icon("rufin-go-next-symbolic"));
+  }
+  row.classList.remove("fitting");
+}
+
+function bindGenres(row) {
+  const more = row.querySelector(".detail-genre-more");
+  if (!more) return;
+  more.addEventListener("click", () => {
+    if (row.dataset.open) delete row.dataset.open;
+    else row.dataset.open = "true";
+    fitGenres(row);
+  });
+  new ResizeObserver(() => fitGenres(row)).observe(row);
+}
+
 function bindHoverControls(row) {
   if (!row.querySelector(".cover-controls, .pin-controls")) return;
   let revealTouch = false;
@@ -709,6 +750,7 @@ export {
   closeFullscreen,
   switchPane,
   slideText,
+  bindGenres,
   button,
   el,
   icon,

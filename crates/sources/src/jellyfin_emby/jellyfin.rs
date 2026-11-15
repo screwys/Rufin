@@ -248,7 +248,6 @@ mod tests {
                 user_id: "listener".into(),
                 username: "Listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),

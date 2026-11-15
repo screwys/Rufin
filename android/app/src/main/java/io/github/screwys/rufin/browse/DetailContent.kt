@@ -18,6 +18,7 @@ import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.ui.rufinMarquee
+import io.github.screwys.rufin.player.LocalToolIconSize
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.player.PlayerConnection
 
@@ -34,6 +35,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -46,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -53,6 +57,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
@@ -80,7 +85,7 @@ internal fun DetailContent(
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (Route, String) -> Unit,
-    onLink: (AndroidDetailLink) -> Unit, onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
+    onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
     onDownload: (BrowseItem) -> Unit,
 ) {
     val favorites = page.favoritePages.collectAsLazyPagingItems()
@@ -137,7 +142,7 @@ internal fun DetailContent(
         LazyColumn(Modifier.fillMaxSize().nestedScroll(reveal), state = state, contentPadding = PaddingValues(
             top = if (finding) LocalOverlayBarHeight.current else 0.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
             if (!finding) item("detail-header") { CompositionLocalProvider(LocalFindHeight provides findHeight) {
-                DetailHeader(route, summary, favoriteItem(player.model, headerItem), player, onPlay, onFavorite, onOpenRoute, onLink, onMenu,
+                DetailHeader(route, summary, favoriteItem(player.model, headerItem), player, onPlay, onFavorite, onOpenRoute, onMenu,
                     onRadio, onDownload)
             } }
             if (artist && page.favoriteCount > 0UL) item("detail-favorites") {
@@ -268,28 +273,32 @@ private fun FindField(name: String, open: () -> Unit, modifier: Modifier) {
     }
 }
 
-/** A detail page's header: Rufin's band behind the bar with the cover's top edge level with the
- *  bar's centre; on phones the cover takes its own row and the rest sits left-aligned under it,
- *  in wider panes it sits beside the text. Then the title, an album's artist, the facts ending
- *  with the links, the genres and the buttons. An artist's sub-pages show a plain band. */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+/** The name of the section an artist's sub-page shows, which has a plain band for a header. */
+private val Route.sectionTitle get() = when (this) {
+    is Route.ArtistDiscography, is Route.AlbumArtistDiscography -> "Discography"
+    is Route.ArtistFavoriteTracks, is Route.AlbumArtistFavoriteTracks -> "Favorite tracks"
+    is Route.ArtistTracks, is Route.AlbumArtistTracks -> "Tracks"
+    else -> null
+}
+
+/** A detail page's header, starting under the bar, which carries the page's links (`DetailLinks`). On a
+ *  fold or tablet Rufin's band holds the cover over its lower edge and beside it the title, an album's
+ *  artist and one line of the facts and genres, with only the buttons under the band, beside the cover.
+ *  On a phone the band holds a small cover and beside it the title, whole, and the artist; the facts and
+ *  genres, then the buttons, take the page's width under it. An artist's sub-pages show a plain band. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailHeader(
     route: Route, summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
     onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
-    onOpenRoute: (Route, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
+    onOpenRoute: (Route, String) -> Unit, onMenu: (BrowseItem) -> Unit,
     onRadio: (BrowseItem) -> Unit, onDownload: (BrowseItem) -> Unit,
 ) {
     val bar = LocalOverlayBarHeight.current
     val albumCount = (item.row.artistRow?.summary?.albumCount ?: 0L).coerceAtLeast(0).toULong()
     val playlist = item.row.playlist != null || item.row.smartPlaylist != null
     val title = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold)
-    val sectionTitle = when (route) {
-        is Route.ArtistDiscography, is Route.AlbumArtistDiscography -> "Discography"
-        is Route.ArtistFavoriteTracks, is Route.AlbumArtistFavoriteTracks -> "Favorite tracks"
-        is Route.ArtistTracks, is Route.AlbumArtistTracks -> "Tracks"
-        else -> null
-    }
+    val sectionTitle = route.sectionTitle
     if (sectionTitle != null) {
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.matchParentSize().then(showcaseBand(detailArtwork(item.row.artworkIdentity, player, 128.dp).image?.band)))
@@ -298,96 +307,77 @@ private fun DetailHeader(
                 FindRow(summary.row.title, LocalFindHeight.current)
                 BrowseTitle(item, maxLines = 1, style = title, marquee = true, showDownloadBadge = false)
                 Text(translate(sectionTitle), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                FactsPill(listOf(Triple("rufin-albums-symbolic", "Albums", albumCountText(albumCount)),
-                    Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount))), Modifier.padding(top = 6.dp))
             }
         }
         return
     }
-    // Under a cover on its own row (small screens) the facts, links, genres and buttons are centred like the title.
-    val facts: @Composable (Boolean) -> Unit = { centred ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (centred) Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally) else Arrangement.Start) {
-            Box(if (centred) Modifier.weight(1f, fill = false) else Modifier.weight(1f)) {
-                // An artist's counts are chips that open the albums and tracks; other pages' facts sit in the
-                // showcase's pill.
-                if (route is Route.ArtistDetail || route is Route.AlbumArtistDetail) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip(false, { onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistDiscography(route.v1)
-                            else Route.ArtistDiscography((route as Route.ArtistDetail).v1), translate("Albums")) },
-                        label = { Text(albumCountText(albumCount)) },
-                        leadingIcon = { RufinIcon("rufin-albums-symbolic", null, Modifier.size(16.dp)) })
-                    ChoiceChip(false, { onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistTracks(route.v1)
-                            else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks")) },
-                        label = { Text(trackCountText(item.row.trackCount)) },
-                        leadingIcon = { RufinIcon("rufin-tracks-symbolic", null, Modifier.size(16.dp)) })
-                } else FactsPill(listOfNotNull(item.row.yearText?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it) },
-                    Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
-                    Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
-                        .takeIf { item.row.durationMillis > 0UL || playlist }), onBand = false)
-            }
-            // The external links end the facts row; a playlist's is its source.
-            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (playlist) player.model.sources?.sources?.find { it.id == item.row.sourceId }?.let { source ->
-                        val link = summary.links.firstOrNull()
-                        IconButton({ link?.let(onLink) }, Modifier.size(32.dp), enabled = link?.url != null) {
-                            SourceIcon(source.kind, Modifier.size(20.dp).semantics { contentDescription = source.name })
-                        }
-                    } else summary.links.forEach { link ->
-                        IconButton({ onLink(link) }, Modifier.size(32.dp).semantics { contentDescription = translate(link.title) }) {
-                            DetailLinkIcon(link.iconId, Modifier.size(20.dp))
-                        }
+    val names: @Composable (Boolean) -> Unit = { phone ->
+        CompositionLocalProvider(LocalContentColor provides OnBand) {
+            // A phone's title is never cut: it wraps, a long one in a smaller size.
+            if (phone) BrowseTitle(item, maxLines = Int.MAX_VALUE, showDownloadBadge = false,
+                style = if (item.row.title.length > 40) title.copy(fontSize = 20.sp, lineHeight = 26.sp) else title)
+            else BrowseTitle(item, maxLines = 1, style = title, marquee = true, showDownloadBadge = false)
+            if (item.row.albumRow != null && summary.artistText.isNotBlank()) {
+                val credited = buildAnnotatedString {
+                    append(summary.artistText)
+                    summary.artistLinks.forEach { artist ->
+                        addLink(LinkAnnotation.Clickable(artist.route.toString(),
+                            TextLinkStyles(SpanStyle(color = OnBand, textDecoration = TextDecoration.None)),
+                            { onOpenRoute(artist.route, artist.title) }), artist.start.toInt(), artist.end.toInt())
                     }
                 }
+                Text(credited, Modifier.rufinMarquee().padding(top = 2.dp), maxLines = 1, style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold, color = OnBand)
             }
         }
     }
-    val heading: @Composable () -> Unit = {
-        BrowseTitle(item, maxLines = 1, style = title, marquee = true, showDownloadBadge = false)
-        if (item.row.albumRow != null && summary.artistText.isNotBlank()) {
-            // On the band it is the band's text colour, under the cover the page's.
-            val linkColor = LocalContentColor.current
-            val credited = buildAnnotatedString {
-                append(summary.artistText)
-                summary.artistLinks.forEach { artist ->
-                    addLink(LinkAnnotation.Clickable(artist.route.toString(),
-                        TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.None)),
-                        { onOpenRoute(artist.route, artist.title) }), artist.start.toInt(), artist.end.toInt())
-                }
-            }
-            Text(credited, Modifier.rufinMarquee().padding(top = 2.dp), maxLines = 1, style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold, color = linkColor)
+    // The facts and the genres are one line. An artist's counts are chips that open the albums and tracks;
+    // other pages' facts sit in the showcase's pill.
+    val meta: @Composable (Boolean, Modifier) -> Unit = { onBand, place ->
+        MetaLine(summary.genres.map { it.title }, onBand, place, { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }) {
+            // The counts slide, as a pill's facts do, when they are wider than their room.
+            if (route is Route.ArtistDetail || route is Route.AlbumArtistDetail) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+              Row(Modifier.rufinMarquee(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ChoiceChip(false, { onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistDiscography(route.v1)
+                        else Route.ArtistDiscography((route as Route.ArtistDetail).v1), translate("Albums")) },
+                    label = { Text(albumCountText(albumCount)) },
+                    leadingIcon = { RufinIcon("rufin-albums-symbolic", null, Modifier.size(16.dp)) }, onBand = onBand)
+                ChoiceChip(false, { onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistTracks(route.v1)
+                        else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks")) },
+                    label = { Text(trackCountText(item.row.trackCount)) },
+                    leadingIcon = { RufinIcon("rufin-tracks-symbolic", null, Modifier.size(16.dp)) }, onBand = onBand)
+              }
+            } else FactsPill(listOfNotNull(item.row.yearText?.let { Triple("rufin-x-office-calendar-symbolic", "Year", it) },
+                Triple("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount)),
+                Triple("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
+                    .takeIf { item.row.durationMillis > 0UL || playlist }), onBand = onBand)
         }
     }
-    val buttons: @Composable (Boolean) -> Unit = { centred ->
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, if (centred) Alignment.CenterHorizontally else Alignment.Start),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ShowcasePill("rufin-media-playback-start-symbolic", "Play", true,
-                { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) })
-            if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null || item.row.playlist != null)
-                ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) })
-            if (item.row.albumRow != null || item.row.artistRow != null)
-                ShowcaseRound(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
-                    { onFavorite(item) }, if (item.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
-            ShowcaseRound("rufin-download-symbolic", if (item.row.downloaded) "Remove Downloads" else "Download",
-                { onDownload(item) }, if (item.row.downloaded) MaterialTheme.colorScheme.primary else LocalContentColor.current)
-        }
+    val buttons: @Composable (Int) -> Unit = { labels ->
+        ShowcasePill("rufin-media-playback-start-symbolic", "Play", true,
+            { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) }, labels == 2)
+        if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null || item.row.playlist != null)
+            ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) }, labelled = labels >= 1)
+        if (item.row.albumRow != null || item.row.artistRow != null)
+            ShowcaseRound(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
+                { onFavorite(item) }, if (item.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
+        ShowcaseRound("rufin-download-symbolic", if (item.row.downloaded) "Remove Downloads" else "Download",
+            { onDownload(item) }, if (item.row.downloaded) MaterialTheme.colorScheme.primary else LocalContentColor.current)
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val wide = maxWidth >= 560.dp
-        // Beside its list a narrow page keeps the cover small beside the title, over the band's edge; the
-        // centred cover is one pane's.
-        val compact = !wide && LocalBesideList.current
-        val coverTop = if (compact) bar + 4.dp else (bar - 28.dp).coerceAtLeast(16.dp)
-        val cover = if (wide) ((maxWidth - 32.dp) * .3f).coerceIn(164.dp, 224.dp)
-            else if (compact) (if (maxWidth >= 370.dp) 112.dp else 100.dp) else (maxWidth - 32.dp).coerceAtMost(216.dp)
-        val band = if (wide) bar + 128.dp else coverTop + cover * if (compact) .78f else .54f
+        val phone = maxWidth < 560.dp
+        val counts = route is Route.ArtistDetail || route is Route.AlbumArtistDetail
+        val cover = if (phone) 122.dp else ((maxWidth - 32.dp) * .3f).coerceIn(164.dp, 224.dp)
+        // A tap shows the artwork whole, as a click on GTK's cover does; a long press opens the menu.
+        var viewing by remember { mutableStateOf(false) }
         val coverBox: @Composable () -> Unit = {
             Box(Modifier.size(cover).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f),
-                spotColor = Color.Black.copy(alpha = .4f)).pointerInput(item.row.key) { detectTapGestures(onLongPress = { onMenu(item) }) }) {
+                spotColor = Color.Black.copy(alpha = .4f))
+                .pointerInput(item.row.key) { detectTapGestures(onTap = { viewing = true }, onLongPress = { onMenu(item) }) }) {
                 DetailHeaderCover(summary, player, cover)
             }
         }
+        if (viewing) FullArtwork(summary, player) { viewing = false }
         // The band takes the colours of the cover the header shows (its first quadrant for a mosaic).
         val single = summary.artworkBindings.size <= 1
         val stops = detailArtwork(summary.artworkBindings.firstOrNull() ?: summary.row.artworkIdentity, player,
@@ -396,96 +386,166 @@ private fun DetailHeader(
         SideEffect { bandSlot?.value = stops?.get(1) }
         // Above the cover, on the band, the Find field's row, as far as a pull has opened it.
         val find = LocalFindHeight.current
-        Box(Modifier.fillMaxWidth().height(band + find).then(showcaseBand(stops)))
-        FindRow(summary.row.title, find, Modifier.padding(start = 16.dp, end = 16.dp, top = bar))
-        if (wide) Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = coverTop + find, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            coverBox()
-            Column(Modifier.weight(1f)) {
-                Column(Modifier.fillMaxWidth().height(band - coverTop - 12.dp), verticalArrangement = Arrangement.Bottom) {
-                    CompositionLocalProvider(LocalContentColor provides OnBand) { heading() }
-                }
-                Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    facts(false)
-                    if (summary.genres.isNotEmpty()) GenreChips(summary.genres.map { it.title }, false) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
-                }
-                Spacer(Modifier.height(18.dp))
-                buttons(false)
-            }
-        } else if (compact) Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        // The cover and the names start under the bar.
+        val top = bar + find + 4.dp
+        if (phone) Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            // The band holds the cover and the names, centred on it or growing the band past it.
+            Row(Modifier.fillMaxWidth().then(showcaseBand(stops)).padding(start = 16.dp, end = 16.dp, top = top, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 coverBox()
-                Column(Modifier.weight(1f).height(band - coverTop - 10.dp), verticalArrangement = Arrangement.Bottom) {
-                    CompositionLocalProvider(LocalContentColor provides OnBand) { heading() }
+                Column(Modifier.weight(1f).heightIn(min = cover), verticalArrangement = Arrangement.Center) {
+                    names(true)
+                    // An artist's counts stay on the band, under the name.
+                    if (counts) meta(true, Modifier.padding(top = 8.dp))
                 }
             }
-            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                facts(false)
-                if (summary.genres.isNotEmpty()) GenreChips(summary.genres.map { it.title }, false) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
-                buttons(false)
+            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!counts) meta(false, Modifier)
+                ButtonRow(buttons)
             }
-        } else Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { coverBox() }
-            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 22.dp)) {
-                // Under the cover, the title and its line are centred on it.
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { heading() }
-                Spacer(Modifier.height(10.dp))
-                facts(true)
-                if (summary.genres.isNotEmpty()) {
-                    Spacer(Modifier.height(14.dp))
-                    GenreChips(summary.genres.map { it.title }, true) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
+        } else {
+            val textStart = 16.dp + cover + 24.dp
+            Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                // The band grows with the names and the meta line from its least height; they end just above its edge.
+                Column(Modifier.fillMaxWidth().then(showcaseBand(stops))
+                    .padding(start = textStart, end = 16.dp, top = top, bottom = 12.dp).heightIn(min = 112.dp),
+                    verticalArrangement = Arrangement.Bottom) {
+                    names(false)
+                    meta(true, Modifier.padding(top = 6.dp))
                 }
-                Spacer(Modifier.height(20.dp))
-                buttons(true)
+                // The buttons start under the band's edge, beside the cover.
+                Box(Modifier.padding(start = textStart, end = 16.dp, top = 24.dp)) { ButtonRow(buttons) }
+            }
+            Box(Modifier.padding(start = 16.dp, top = top, bottom = 8.dp)) { coverBox() }
+        }
+        FindRow(summary.row.title, find, Modifier.padding(start = 16.dp, end = 16.dp, top = bar))
+    }
+}
+
+/** A detail page's external links, one dark group for the bar over its band; a playlist's is its source.
+ *  Nothing where the page has none. */
+@Composable
+internal fun DetailLinks(route: Route, summary: AndroidDetailSummary, player: PlayerConnection, onLink: (AndroidDetailLink) -> Unit,
+    modifier: Modifier = Modifier) {
+    val playlist = summary.row.playlist != null || summary.row.smartPlaylist != null
+    val source = if (playlist) player.model.sources?.sources?.find { it.id == summary.row.sourceId } else null
+    if (route.sectionTitle != null || if (playlist) source == null else summary.links.isEmpty()) return
+    // Each link is a bar button: the size and the spacing of the tools beside it.
+    val icon = Modifier.size(LocalToolIconSize.current)
+    CompositionLocalProvider(LocalContentColor provides OnBand) {
+        Row(modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = .28f)),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (source != null) {
+                val link = summary.links.firstOrNull()
+                IconButton({ link?.let(onLink) }, enabled = link?.url != null) {
+                    SourceIcon(source.kind, icon.semantics { contentDescription = source.name })
+                }
+            } else summary.links.forEach { link ->
+                IconButton({ onLink(link) }, Modifier.semantics { contentDescription = translate(link.title) }) {
+                    DetailLinkIcon(link.iconId, icon)
+                }
             }
         }
     }
 }
 
-/** The genres as chips filling one line; those that do not fit open from the last chip's +n. A chip
- *  opens its genre by its place in the list, where the page has one to open. */
+/** A header's buttons, always one row: Play, then Radio, give up their labels while the row is wider than
+ *  its room. `buttons` draws them with that many labels. */
 @Composable
-internal fun GenreChips(genres: List<String>, centred: Boolean, onOpen: ((Int) -> Unit)?) {
-    var overflow by remember { mutableStateOf(false) }
-    androidx.compose.ui.layout.SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+internal fun ButtonRow(buttons: @Composable (Int) -> Unit) {
+    SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+        var row = emptyList<Placeable>()
+        for (labels in 2 downTo 0) {
+            row = subcompose(labels) { buttons(labels) }.map { it.measure(Constraints()) }
+            if (row.sumOf { it.width } + 8.dp.roundToPx() * (row.size - 1) <= constraints.maxWidth) break
+        }
+        // Round, they still close up before any leaves the row.
+        val gap = minOf(8.dp.roundToPx(), (constraints.maxWidth - row.sumOf { it.width }) / (row.size - 1).coerceAtLeast(1)).coerceAtLeast(0)
+        layout(constraints.maxWidth, row.maxOfOrNull { it.height } ?: 0) {
+            var x = 0
+            row.forEach { it.placeRelative(x, 0); x += it.width + gap }
+        }
+    }
+}
+
+/** A header's meta line: its facts, then its genres as chips, all on one line. The genres that do not fit
+ *  wait behind a last chip, +n or › where none fits, which opens the line onto as many lines as they need;
+ *  ‹ folds it again. A chip opens its genre by its place in the list, where the page has one to open. */
+@Composable
+internal fun MetaLine(genres: List<String>, onBand: Boolean, modifier: Modifier = Modifier, onOpen: ((Int) -> Unit)? = null,
+    facts: @Composable () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    SubcomposeLayout(modifier.fillMaxWidth()) { constraints ->
         val gap = 6.dp.roundToPx()
-        val free = androidx.compose.ui.unit.Constraints()
+        val width = constraints.maxWidth
         val chips = genres.mapIndexed { index, genre ->
-            subcompose("genre:$index") { GenreChip(genre, onOpen?.let { open -> { open(index) } }) }.first().measure(free)
+            subcompose("genre:$index") { GenreChip(genre, onBand, onOpen?.let { opens -> { opens(index) } }) }.first()
+                .measure(Constraints(maxWidth = width))
         }
+        val span = chips.sumOf { it.width + gap }
+        // The facts come first at their own width, short only of the room the last chip needs, as +n or as ›.
+        val more = if (chips.isEmpty()) 0 else subcompose("probe") {
+            GenreChip("+${chips.size}", onBand, null)
+            GenreChip(translate("Genres"), onBand, null, "rufin-go-next-symbolic")
+        }.maxOf { it.measure(Constraints()).width }
+        var room = width - minOf(span, more + gap)
+        val lead = subcompose("facts", facts).map { fact ->
+            fact.measure(Constraints(maxWidth = room.coerceAtLeast(0))).also { room -= it.width + gap }
+        }
+        val start = lead.sumOf { it.width + gap }
+        val folds = start + span - gap > width
         var shown = chips.size
-        var more: androidx.compose.ui.layout.Placeable? = null
-        if (chips.sumOf { it.width } + gap * (chips.size - 1).coerceAtLeast(0) > constraints.maxWidth) {
-            val reserve = subcompose("probe") { GenreChip("+${chips.size}", null) }.first().measure(free).width + gap
-            var used = 0
-            shown = chips.takeWhile { chip -> (used + chip.width + gap + reserve <= constraints.maxWidth + gap).also { if (it) used += chip.width + gap } }.size
-            val rest = genres.drop(shown)
-            val first = shown
-            more = subcompose("more") {
-                Box {
-                    GenreChip("+${rest.size}") { overflow = true }
-                    DropdownMenu(overflow, { overflow = false }) {
-                        rest.forEachIndexed { index, genre -> DropdownMenuItem(text = { Text(genre) }, onClick = { overflow = false; onOpen?.invoke(first + index) }) }
-                    }
-                }
-            }.first().measure(free)
+        if (folds && !open) {
+            var used = start
+            shown = chips.takeWhile { chip -> (used + chip.width + gap + more <= width).also { fits -> if (fits) used += chip.width + gap } }.size
         }
-        val placed = chips.take(shown)
-        val used = (placed + listOfNotNull(more)).let { all -> all.sumOf { it.width } + gap * (all.size - 1).coerceAtLeast(0) }
-        layout(constraints.maxWidth, (placed + listOfNotNull(more)).maxOfOrNull { it.height } ?: 0) {
-            var x = if (centred) ((constraints.maxWidth - used) / 2).coerceAtLeast(0) else 0
-            placed.forEach { it.placeRelative(x, 0); x += it.width + gap }
-            more?.placeRelative(x, 0)
+        val toggle = if (folds) subcompose("toggle") {
+            if (!open && shown > 0) GenreChip("+${chips.size - shown}", onBand, { open = !open })
+            else GenreChip(translate("Genres"), onBand, { open = !open }, if (open) "rufin-go-previous-symbolic" else "rufin-go-next-symbolic")
+        }.first().measure(Constraints()) else null
+        val lines = mutableListOf(mutableListOf<Placeable>())
+        var x = 0
+        (lead + chips.take(shown) + listOfNotNull(toggle)).forEach { item ->
+            if (open && x > 0 && x + item.width > width) { lines.add(mutableListOf()); x = 0 }
+            lines.last().add(item)
+            x += item.width + gap
+        }
+        // A line is a chip's height with or without chips, so a header keeps its height.
+        val heights = lines.map { line -> maxOf(line.maxOfOrNull { it.height } ?: 0, 28.dp.roundToPx()) }
+        layout(width, heights.sum() + gap * (lines.size - 1)) {
+            var y = 0
+            lines.forEachIndexed { index, line ->
+                var at = 0
+                line.forEach { it.placeRelative(at, y + (heights[index] - it.height) / 2); at += it.width + gap }
+                y += heights[index] + gap
+            }
         }
     }
 }
 
+/** A genre's chip. On the band one that opens something takes a control's light fill, one that only tells
+ *  the facts' dark fill. With an `icon` it shows that in place of its label, which then names it. */
 @Composable
-private fun GenreChip(label: String, onClick: (() -> Unit)?) {
-    Box(Modifier.height(28.dp).clip(RoundedCornerShape(14.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+private fun GenreChip(label: String, onBand: Boolean, onClick: (() -> Unit)?, icon: String? = null) {
+    val fill = if (!onBand) MaterialTheme.colorScheme.surfaceContainerHighest
+        else if (onClick != null) Color.White.copy(alpha = .17f) else Color.Black.copy(alpha = .28f)
+    val text = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface.copy(alpha = .88f)
+    Box(Modifier.height(28.dp).clip(RoundedCornerShape(14.dp)).background(fill)
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-        Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .88f))
+        if (icon != null) RufinIcon(icon, label, Modifier.size(16.dp), text)
+        else Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, color = text)
+    }
+}
+
+/** The header's artwork over the whole screen, as large as its shorter side allows; a tap or Back closes it. */
+@Composable
+private fun FullArtwork(summary: AndroidDetailSummary, player: PlayerConnection, onDismiss: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismiss, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .86f))
+            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }, contentAlignment = Alignment.Center) {
+            val side = minOf(maxWidth, maxHeight) - 32.dp
+            Box(Modifier.size(side).clip(CoverShape)) { DetailHeaderCover(summary, player, side) }
+        }
     }
 }
 
@@ -537,9 +597,6 @@ private fun DetailCover(artwork: Cover, modifier: Modifier,
 
 /** A list row showing the fields its list shows, as columns. */
 @OptIn(ExperimentalFoundationApi::class)
-/** The page is open beside the list it was picked from. */
-internal val LocalBesideList = compositionLocalOf { false }
-
 /** The route of the page open beside a list, whose row shows as picked. */
 internal val LocalSelectedRoute = compositionLocalOf<io.github.screwys.rufin.shared.rufin_core.Route?> { null }
 
@@ -597,6 +654,8 @@ internal fun FieldRow(
                     BrowseTitle(projected, maxLines = 2, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                     item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
                 }
+                // A row found by its lyrics gives their line the room of the album and the like, as GTK's does.
+                else if (item.row.lyricsSnippet != null && field.id !in setOf(LibraryField.DURATION, LibraryField.YEAR)) Unit
                 else Text(value, detailColumn(field.id), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }

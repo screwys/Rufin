@@ -2066,7 +2066,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2712,7 +2712,7 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps 9.0.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4320,6 +4320,7 @@ dependencies = [
  "futures-util",
  "libsqlite3-sys",
  "md-5 0.11.0",
+ "names",
  "percent-encoding",
  "process-memory",
  "proptest",
@@ -4584,6 +4585,7 @@ dependencies = [
  "futures-util",
  "lindera",
  "localization",
+ "names",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -4731,6 +4733,7 @@ version = "0.17.1"
 dependencies = [
  "blake3",
  "library",
+ "names",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -4999,6 +5002,13 @@ dependencies = [
  "derive_more",
  "n0-error",
  "n0-future",
+]
+
+[[package]]
+name = "names"
+version = "0.17.1"
+dependencies = [
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -6635,7 +6645,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7163,6 +7173,7 @@ dependencies = [
  "lyrics",
  "md-5 0.11.0",
  "metadata-lookup",
+ "names",
  "notify",
  "playback",
  "playback-cast",
@@ -7180,6 +7191,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "toml_edit",
  "tracing",
  "tracing-subscriber",
  "uniffi",
@@ -7300,7 +7312,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7359,7 +7371,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8083,6 +8095,7 @@ dependencies = [
  "uniffi",
  "url",
  "walkdir",
+ "windows",
  "winsafe",
  "wiremock",
 ]
@@ -8617,7 +8630,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8841,9 +8854,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.19"
+version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -8919,6 +8932,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -9761,7 +9775,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

@@ -21,8 +21,8 @@ pub use cover::{
     lookup_album_cover, lookup_song_cover, public_album_cover_url, public_song_cover_url,
 };
 pub use musicbrainz::{
-    MetadataCandidate, MetadataLookup, MetadataMatchKind, lookup_metadata, lookup_release_types,
-    metadata_identity, search_metadata,
+    MetadataCandidate, MetadataLookup, MetadataMatchKind, artist_id_by_name, lookup_metadata,
+    lookup_release_types, metadata_identity, search_metadata,
 };
 use serde::{Deserialize, Serialize};
 

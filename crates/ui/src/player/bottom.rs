@@ -2225,7 +2225,7 @@ impl crate::player::PlayerUi {
             for button in &extras {
                 button.set_visible(true);
             }
-            let [dj, random, sleep, settings, volume, favorite] = &extras;
+            let [dj, mix, sleep, settings, volume, favorite] = &extras;
             let up_here = |button: &gtk::Widget| {
                 extras[..up]
                     .contains(button)
@@ -2242,7 +2242,7 @@ impl crate::player::PlayerUi {
                     (player.repeat_button.clone().upcast(), side),
                 ])
                 .chain(
-                    [random, favorite, settings]
+                    [mix, favorite, settings]
                         .into_iter()
                         .filter_map(|button| up_here(button)),
                 )
@@ -2360,14 +2360,14 @@ impl crate::player::PlayerUi {
         let controls = layout == BottomPlayerLayout::Controls;
         let transport_buttons = player.transport_buttons.upcast_ref::<gtk::Widget>();
         let extras = self.controls_extras();
-        let [dj, random, sleep, settings, volume, favorite] = &extras;
+        let [dj, mix, sleep, settings, volume, favorite] = &extras;
         for (index, button) in extras.iter().enumerate() {
             let host: &gtk::Widget = if controls && index < up {
                 transport_buttons
             } else if controls {
                 player.progress_row.upcast_ref()
             } else if button == dj
-                || button == random
+                || button == mix
                 || button == volume && layout == BottomPlayerLayout::Strip
                 || (button == volume || button == favorite) && layout == BottomPlayerLayout::Compact
             {
@@ -2406,7 +2406,7 @@ impl crate::player::PlayerUi {
             return;
         }
         // Both rows keep one order: the sleep timer, volume and Auto DJ before the times, Play
-        // random, favorite and settings after them.
+        // mix, favorite and settings after them.
         let row = player.progress_row.upcast_ref::<gtk::Widget>();
         let mut previous: Option<&gtk::Widget> = None;
         for button in [sleep, volume, dj] {
@@ -2416,7 +2416,7 @@ impl crate::player::PlayerUi {
             }
         }
         let mut previous = player.duration.upcast_ref::<gtk::Widget>();
-        for button in [random, favorite, settings] {
+        for button in [mix, favorite, settings] {
             if button.parent().as_ref() == Some(row) {
                 player
                     .progress_row
@@ -3105,14 +3105,14 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
         },
     );
 
-    let random_shell = Rc::clone(shell);
+    let mix_shell = Rc::clone(shell);
     shell
         .player_ui
         .views
         .player_controls
         .mix_button
         .connect_clicked(move |button| {
-            crate::shell::player::random_play::present_mix_popover(button, &random_shell)
+            crate::shell::player::mix::present_mix_popover(button, &mix_shell)
         });
 
     let queue_shell = Rc::clone(shell);

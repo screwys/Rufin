@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/app.css" />
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
     <noscript><style>
-      [data-action="radio"], .station-tools, [data-action="station-add"], [data-action="station-search"], [data-action="play-home"], [data-action="shuffle-home"], .home-paging, #random, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
+      [data-action="radio"], .station-tools, [data-action="station-add"], [data-action="station-search"], [data-action="play-home"], [data-action="shuffle-home"], .home-paging, #mix, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
     </style></noscript>
     <script src="/htmx.min.js" defer></script>
     <script type="module" src="/app.js"></script>
@@ -335,9 +335,9 @@
             >
               {% call m::icon("rufin-repeat-symbolic") %}{% endcall %}
             </button>
-            <div class="random-buttons" id="random-buttons">
+            <div class="mix-buttons" id="mix-buttons">
               <button
-                id="random"
+                id="mix"
                 class="icon-button"
                 aria-label="{{ localization::tr("Mix") }}"
                 title="{{ localization::tr("Mix") }}"
@@ -445,18 +445,18 @@
     </div>
 
     <div
-      id="random-dialog"
+      id="mix-dialog"
       popover="auto"
       role="dialog"
-      aria-labelledby="random-title"
+      aria-labelledby="mix-title"
     >
-      <form id="random-form">
-        <h2 id="random-title">{{ localization::tr("Mix") }}</h2>
-        <div class="segmented" role="radiogroup" aria-labelledby="random-title">
-          <label><input type="radio" name="random-unit" value="0" checked />{{ localization::tr("Tracks") }}</label>
-          <label><input type="radio" name="random-unit" value="1" />{{ localization::tr("Albums") }}</label>
+      <form id="mix-form">
+        <h2 id="mix-title">{{ localization::tr("Mix") }}</h2>
+        <div class="segmented" role="radiogroup" aria-labelledby="mix-title">
+          <label><input type="radio" name="mix-unit" value="0" checked />{{ localization::tr("Tracks") }}</label>
+          <label><input type="radio" name="mix-unit" value="1" />{{ localization::tr("Albums") }}</label>
         </div>
-        <div id="random-played" class="chips" role="group" aria-labelledby="random-title">
+        <div id="mix-played" class="chips" role="group" aria-labelledby="mix-title">
           <button type="button" class="wide" value="NotPlayedRecently" aria-pressed="false">{{ localization::tr("Not played recently") }}</button>
           <button type="button" value="All" aria-pressed="true">{{ localization::tr("Random") }}</button>
           <button type="button" value="Unplayed" aria-pressed="false">{{ localization::tr("Unplayed") }}</button>
@@ -465,26 +465,26 @@
         </div>
         <div class="pref-group">
           <div class="pref-row">
-            <span class="pref-label"><span id="random-genre-label">{{ localization::tr("Genre") }}</span></span>
+            <span class="pref-label"><span id="mix-genre-label">{{ localization::tr("Genre") }}</span></span>
             <button
-              id="random-genre"
+              id="mix-genre"
               type="button"
               aria-haspopup="listbox"
               aria-expanded="false"
-              aria-labelledby="random-genre-label random-genre"
+              aria-labelledby="mix-genre-label mix-genre"
             ><span>{{ localization::tr("Any") }}</span></button>
           </div>
           <div class="pref-row">
             <span class="pref-label"><span>{{ localization::tr("Years") }}</span></span>
             <span class="pref-unit">
-              <input id="random-min-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Minimum year") }}" />–<input id="random-max-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Maximum year") }}" />
+              <input id="mix-min-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Minimum year") }}" />–<input id="mix-max-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Maximum year") }}" />
             </span>
           </div>
           <div class="pref-row">
-            <span class="pref-label" id="random-count-label"><span>{{ localization::tr("Tracks") }}</span><span hidden>{{ localization::tr("Albums") }}</span><small hidden>{{ localization::tr("Each plays whole") }}</small></span>
-            <div class="spin" role="group" aria-labelledby="random-count-label">
+            <span class="pref-label" id="mix-count-label"><span>{{ localization::tr("Tracks") }}</span><span hidden>{{ localization::tr("Albums") }}</span><small hidden>{{ localization::tr("Each plays whole") }}</small></span>
+            <div class="spin" role="group" aria-labelledby="mix-count-label">
               <button type="button" data-step="-1" aria-label="{{ localization::tr("Decrease") }}">{% call m::icon("rufin-list-remove-symbolic") %}{% endcall %}</button>
-              <input id="random-count" type="number" min="1" max="500" value="100" required aria-labelledby="random-count-label" />
+              <input id="mix-count" type="number" min="1" max="500" value="100" required aria-labelledby="mix-count-label" />
               <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}">{% call m::icon("rufin-list-add-symbolic") %}{% endcall %}</button>
             </div>
           </div>

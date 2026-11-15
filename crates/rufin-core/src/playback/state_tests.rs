@@ -66,7 +66,7 @@ pub(in crate::playback) async fn seeded(
     }
     catalog.save_queue(&sequence.snapshot()).await.unwrap();
     let runtime = tokio::runtime::Handle::current();
-    let settings = SettingsFile::open(directory.path().join("settings.json")).unwrap();
+    let settings = SettingsFile::open(directory.path().join("rufin.toml")).unwrap();
     let downloads = directory.path().join("downloads");
     let source = SourceOwner::open_dormant(
         directory.path().join("artwork"),
@@ -1114,7 +1114,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         stored.sources.configured = vec![crate::settings::ConfiguredSource {
             configuration: sources::SourceConfiguration {
                 source_id: source_id.clone(), kind: "plex".into(), name: "Gapless".into(),
-                provider_payload: serde_json::json!({"version":1,"server_id":"server","profile_id":"user","base_url":endpoint,"address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string(),
+                provider_payload: serde_json::json!({"version":1,"server_id":"server","profile_id":"user","base_url":endpoint,"address_override":endpoint,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string(),
             },
             credential: Some(credential.clone()), music_folder_id: None, local_access: None, enable_half_stars: true,
         }];

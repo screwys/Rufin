@@ -24,7 +24,11 @@ pub(crate) async fn read_saved_file(
         .saved_file_observation(observation.source, media_uri)
         .await?
         .ok_or(SourceError::NotFound)?;
-    let path = normalize_observed_path(path);
+    // The file as the walk lists it, which under a followed link is not its real path.
+    let path = previous.as_ref().map_or_else(
+        || normalize_observed_path(path),
+        |file| PathBuf::from(&file.path),
+    );
     let track = media::read_saved_media(&path, path.clone()).await?;
     let saved_path = path.clone();
     let (mut track, mut file, revision, audio_revision) = tokio::task::spawn_blocking(move || {
@@ -34,11 +38,8 @@ pub(crate) async fn read_saved_file(
             Some(previous) => Some(super::local_row(
                 &previous.root,
                 &previous.relative_path,
-                &super::entry(
-                    String::new(),
-                    &fs::metadata(&saved_path)
-                        .map_err(|error| SourceError::Other(error.to_string()))?,
-                ),
+                &super::stat_path(&saved_path)
+                    .map_err(|error| SourceError::Other(error.to_string()))?,
             )),
             None => None,
         };
@@ -227,6 +228,9 @@ fn read_cue_tracks(
 
 /// A CUE sheet and the media it plays.
 pub(crate) fn read_local_cue(worker: &mut media::Worker, path: &Path) -> walk::CueRead {
+    if super::online_only(path) {
+        return walk::CueRead::Deferred;
+    }
     let Ok(metadata) = fs::metadata(path) else {
         return walk::CueRead::Unreadable;
     };
@@ -239,6 +243,13 @@ pub(crate) fn read_local_cue(worker: &mut media::Worker, path: &Path) -> walk::C
     let Some(sheet) = parse_cue_sheet(&text) else {
         return walk::CueRead::Rejected;
     };
+    if sheet
+        .files
+        .iter()
+        .any(|file| super::online_only(&resolve_cue_file_path(path, &file.path)))
+    {
+        return walk::CueRead::Deferred;
+    }
     let inputs = sheet
         .files
         .iter()

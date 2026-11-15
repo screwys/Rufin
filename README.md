@@ -41,12 +41,13 @@ Downloaded tracks, and tracks of a server matched to local folders, play from di
 
 ## 🎵 Playback
 
+- **Recommendations**: Configurable recommendation engine powered by ListenBrainz for queue and track radios
+- **Queue**: Auto DJ keeps it filled recommendations, skip unavailable tracks automatically, sleep timer
 - **Transitions**: true gapless playback or equal-power crossfade, with an optional fade on play/pause
 - **Loudness**: ReplayGain and EBU R128 normalization with true-peak analysis; results can be written to tags
 - **Sound**: graphic (10, 18 or 31 bands) and parametric equalizer with saved presets per device and AutoEQ/APO import, crossfeed, playback speed and pitch
 - **Radio**: Select a configured radio station or add one yourself, artwork and lyrics are resolved best-effort, with synced lyrics for [LISTEN.moe](https://listen.moe/)
 - **Output**: audio device selection, multichannel output and Dolby/DTS bitstream passthrough, casting to UPnP and Chromecast
-- **Queue**: Auto DJ keeps it filled from server/local recommendations, skip unavailable tracks automatically, sleep timer
 - **Formats**: broad codec support [^codecs], and CUE sheets as separate playable tracks
 
 ## 📚 Library
@@ -73,7 +74,7 @@ Downloaded tracks, and tracks of a server matched to local folders, play from di
 
 ## 🧩 Integrations
 
-- **Scrobbling**: Last.fm, Libre.fm and ListenBrainz, with offline storage and automatic retries; Discord Rich Presence
+- **Scrobbling**: Last.fm, Libre.fm, ListenBrainz, and self-hosted servers with offline storage and automatic retries; Discord Rich Presence
 - **System**: media controls (MPRIS with lyrics on Linux), tray icon, running in the background; credentials are kept in the system keyring
 - **Private mode**: temporarily pauses external activity
 - **Controller**: control playback, browse the library, manage sources and playlists from a browser or the HTTP API, with token authentication; playback stays on the device running Rufin. It also runs without the desktop interface:
@@ -84,8 +85,8 @@ rufin --headless --listen
 
 ## 🖥️ Interface
 
-- **Desktop**: layouts that adapt from a wide window down to a mini player, fullscreen player with visualizer, themes including custom ones, and an extensive keyboard shortcuts catalog.
-- **Android**: same core built with Jetpack Compose, is also reliable in multiple layouts beyond the regular vertical screen: landscape mode, foldables, tablets, and TVs. 
+- **Desktop**: adaptive layout with extra mini player, fullscreen player with visualizer and lyrics, themes including custom ones, and an extensive keyboard shortcuts catalog.
+- **Android**: built with Jetpack Compose, is also reliable in multiple layouts beyond the regular vertical screen: landscape mode, foldables, tablets, and TVs. 
 
 # Screenshots
 

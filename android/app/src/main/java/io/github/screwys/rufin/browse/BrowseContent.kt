@@ -529,25 +529,30 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
     }
 }
 
-/** Play (hold to shuffle) in the accent, and Radio in the tonal box Favorite, Download and ⋯ share. */
+/** Play (hold to shuffle) in the accent, and Radio in the tonal box Favorite, Download and ⋯ share.
+ *  Without its label it is round, as those are. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null,
+    labelled: Boolean = true) {
     val container = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)
     val content = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Row(Modifier.height(40.dp).focusRing(RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(container)
+    Row(Modifier.height(40.dp).then(if (labelled) Modifier else Modifier.width(40.dp))
+        .focusRing(RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(container)
         .combinedClickable(onClick = onClick, onLongClick = onLongClick,
             onLongClickLabel = onLongClick?.let { translate("{action} (Shuffle)").replace("{action}", translate(label)) })
-        .padding(start = 14.dp, end = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        RufinIcon(icon, null, Modifier.size(16.dp), content)
-        Text(translate(label), color = content, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        .then(if (labelled) Modifier.padding(start = 14.dp, end = 18.dp) else Modifier), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+        RufinIcon(icon, if (labelled) null else translate(label), Modifier.size(if (labelled) 16.dp else 20.dp), content)
+        if (labelled) Text(translate(label), color = content, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
     }
 }
 
+/** A round button beside the pills; `onBand` is its fill on a band. */
 @Composable
-internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current) {
+internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current, onBand: Boolean = false) {
     Box(Modifier.size(40.dp).focusRing(androidx.compose.foundation.shape.CircleShape).clip(androidx.compose.foundation.shape.CircleShape)
-        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)).clickable(onClick = onClick),
+        .background(if (onBand) Color.White.copy(alpha = .17f) else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center) {
         RufinIcon(icon, translate(label), Modifier.size(20.dp), tint)
     }
@@ -794,23 +799,25 @@ internal fun FactsPill(facts: List<Triple<String, String, String>>, modifier: Mo
     val text = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface
     Surface(modifier, shape = RoundedCornerShape(50), color = if (onBand) Color.Black.copy(alpha = .28f) else text.copy(alpha = .1f), contentColor = text) {
         // The facts slide inside the pill when they are wider than the room.
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
+        // As tall as a genre's chip beside it, in its type.
+        Row(Modifier.height(28.dp).padding(horizontal = 12.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             first?.invoke()
             facts.forEachIndexed { index, (icon, label, value) ->
-                if (index > 0 || first != null) Text("|", style = MaterialTheme.typography.labelSmall, color = text.copy(alpha = .45f))
-                SummaryFact(icon, label, value)
+                if (index > 0 || first != null) Text("|", style = MaterialTheme.typography.labelLarge, color = text.copy(alpha = .45f))
+                SummaryFact(icon, label, value, MaterialTheme.typography.labelLarge, 16.dp)
             }
         }
     }
 }
 
 @Composable
-internal fun SummaryFact(icon: String, label: String, value: String) {
+internal fun SummaryFact(icon: String, label: String, value: String,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.labelSmall, iconSize: Dp = 14.dp) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.semantics { contentDescription = "${translate(label)} $value" }) {
-        RufinIcon(icon, null, Modifier.size(14.dp))
-        Text(value, style = MaterialTheme.typography.labelSmall)
+        RufinIcon(icon, null, Modifier.size(iconSize))
+        Text(value, style = style)
     }
 }
 

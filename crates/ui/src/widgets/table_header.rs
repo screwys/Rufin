@@ -105,6 +105,8 @@ impl HeaderCell {
 
 #[derive(Clone)]
 pub struct ColumnViewHeader {
+    /// Clips the header like the table's scroller, so the column widths never set a minimum width.
+    clip: gtk::ScrolledWindow,
     root: gtk::Box,
     bindings: Rc<RefCell<Vec<glib::Binding>>>,
 }
@@ -119,15 +121,18 @@ impl ColumnViewHeader {
     pub fn new() -> Self {
         let resource = "routes/column_view_header.ui";
         let builder = crate::ui_resource::builder(resource);
+        let clip = crate::ui_resource::object(&builder, resource, "clip");
         let root = crate::ui_resource::object(&builder, resource, "header");
+        crate::widgets::layout::configure_fill_width_clip(&clip, gtk::PolicyType::Never);
         Self {
+            clip,
             root,
             bindings: Rc::default(),
         }
     }
 
     pub fn widget(&self) -> gtk::Widget {
-        self.root.clone().upcast()
+        self.clip.clone().upcast()
     }
 
     pub fn replace(&self, columns: &[(gtk::ColumnViewColumn, Option<LibraryField>)]) {
@@ -159,7 +164,7 @@ impl ColumnViewHeader {
     }
 
     pub fn set_visible(&self, visible: bool) {
-        self.root.set_visible(visible);
+        self.clip.set_visible(visible);
     }
 }
 

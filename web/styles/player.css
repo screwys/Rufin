@@ -462,7 +462,7 @@
   position: relative;
   grid-template-columns: minmax(0, 1fr) auto;
 }
-#app[data-bar="compact"] :is(#auto-dj, #shuffle, #repeat, #random-buttons, .seek-row time, .seek-row .live-mark) {
+#app[data-bar="compact"] :is(#auto-dj, #shuffle, #repeat, #mix-buttons, .seek-row time, .seek-row .live-mark) {
   display: none;
 }
 #app[data-bar="compact"] .transport-buttons {
@@ -535,7 +535,7 @@
   height: 28px;
   padding: 0;
 }
-#app[data-bar="strip"] :is(.player-track, #auto-dj, #shuffle, #random-buttons) {
+#app[data-bar="strip"] :is(.player-track, #auto-dj, #shuffle, #mix-buttons) {
   display: none;
 }
 #app[data-bar="strip"] .seek-row {

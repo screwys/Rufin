@@ -62,6 +62,8 @@ pub struct ExternalPlayback {
 pub struct AutoDjRequest {
     pub seed_run: Option<RunId>,
     pub seed_media_uri: String,
+    /// The track the refill is picked for: the last one the user queued, not Auto DJ's own.
+    pub anchor_media_uri: String,
     pub requested_count: usize,
 }
 
@@ -151,6 +153,9 @@ const TITLE_DELAY_MILLIS: i64 = 330;
 struct SongClock {
     title: String,
     artists: Vec<String>,
+    /// The other names the feed gives the title, and the song's artists.
+    also_titled: Vec<String>,
+    also_credited: Vec<String>,
     duration_millis: u64,
     /// When the station began it, on the clock of [`ClockSample::monotonic_millis`].
     began_millis: i64,
@@ -2990,10 +2995,23 @@ impl Player {
         else {
             return;
         };
+        let anchor = self
+            .sequence
+            .auto_dj_anchor()
+            .filter(|anchor| library::station_stream(&anchor.track.media_uri).is_none())
+            .unwrap_or(seed);
         let request = AutoDjRequest {
             seed_run: self.current_run(),
             seed_media_uri: seed.track.media_uri.clone(),
-            requested_count: 5,
+            anchor_media_uri: anchor.track.media_uri.clone(),
+            requested_count: usize::from(
+                self.owner()
+                    .settings
+                    .load()
+                    .ui
+                    .application
+                    .auto_dj_refill_count,
+            ),
         };
         self.auto_dj_in_flight = Some(request.clone());
         self.owner().request_auto_dj(self.playback.clone(), request);
@@ -3057,6 +3075,8 @@ impl Player {
         let song = SongClock {
             title: song.title.clone(),
             artists: song.artists.clone(),
+            also_titled: song.also_titled.clone(),
+            also_credited: song.also_credited.clone(),
             duration_millis: song.duration_millis,
             began_millis: sample.monotonic_millis as i64 - age_millis,
         };
@@ -3210,8 +3230,25 @@ impl Player {
                         .is_some()
                         .then(|| {
                             let stream = self.current_run.as_ref().map(|run| &run.stream);
+                            let song = self
+                                .current_run
+                                .as_ref()
+                                .and_then(|run| run.song_clock.as_ref());
                             playback::LiveStream {
                                 station: entry.track.metadata.title.clone(),
+                                also_titled: song
+                                    .map(|song| song.also_titled.clone())
+                                    .unwrap_or_default(),
+                                also_credited: song
+                                    .map(|song| {
+                                        // Each artist by itself too: the row joins them.
+                                        song.artists
+                                            .iter()
+                                            .chain(&song.also_credited)
+                                            .cloned()
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                                 codec: stream.and_then(|stream| stream.codec.clone()),
                                 bitrate: stream.and_then(|stream| stream.bitrate),
                                 timed: self

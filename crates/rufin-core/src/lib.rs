@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod downloads;
 mod features;
 mod loudness;
+pub mod mix;
 pub mod paths;
 pub mod playback;
 pub mod presence;
