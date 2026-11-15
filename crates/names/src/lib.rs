@@ -3,19 +3,29 @@
 
 use unicode_normalization::UnicodeNormalization;
 
+/// A name's words as they compare: letters and digits, whatever their case, width or Latin
+/// accents, one space between what anything else parted.
+pub fn name_words(name: &str) -> String {
+    let mut folded = String::with_capacity(name.len());
+    for character in name.nfkc() {
+        if character.is_alphanumeric() {
+            fold(character, &mut folded);
+        } else {
+            folded.push(' ');
+        }
+    }
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// A name as it compares: its letters and digits, whatever their case, width, Latin accents or
 /// punctuation; a name of punctuation only, such as "&", by its characters.
 pub fn name_key(name: &str) -> String {
-    let mut folded = String::with_capacity(name.len());
-    for character in name.nfkc() {
-        fold(character, &mut folded);
-    }
-    let key = folded
-        .chars()
-        .filter(|character| character.is_alphanumeric())
-        .collect::<String>();
+    let key = name_words(name).replace(' ', "");
     if key.is_empty() {
-        folded.split_whitespace().collect()
+        name.nfkc()
+            .flat_map(char::to_lowercase)
+            .filter(|character| !character.is_whitespace())
+            .collect()
     } else {
         key
     }

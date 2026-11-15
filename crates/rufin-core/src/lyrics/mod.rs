@@ -786,10 +786,27 @@ impl LyricsService {
             return false;
         };
         let metadata = &request.context.media.row.track.metadata;
+        // A track's credits name each artist by itself, and a station's feed gives its song
+        // further names.
+        let live = request.context.media.live.as_ref();
         let lookup = LyricsLookup::from_search(
             &metadata.artist,
             &metadata.title,
             u32::try_from(metadata.duration_millis.max(0) / 1_000).unwrap_or(u32::MAX),
+        )
+        .with_names(
+            live.iter()
+                .flat_map(|live| &live.also_titled)
+                .map(String::as_str),
+            metadata
+                .artists
+                .iter()
+                .map(|artist| artist.name.as_str())
+                .chain(
+                    live.iter()
+                        .flat_map(|live| &live.also_credited)
+                        .map(String::as_str),
+                ),
         );
         let document = external_best_lyrics(
             &lookup,
