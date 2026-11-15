@@ -26,7 +26,7 @@ const RECENT_PLAY_SECONDS: i64 = 180 * 86_400;
 const RECENT_ADDITION_SECONDS: i64 = 30 * 86_400;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RandomCriteria {
+pub struct MixCriteria {
     pub min_year: Option<i64>,
     pub max_year: Option<i64>,
     pub genre: Option<GenreKey>,
@@ -37,7 +37,7 @@ pub struct RandomCriteria {
 
 /// What a random pick chose, in the order it plays.
 #[derive(Clone, Debug, PartialEq)]
-pub enum RandomPick {
+pub enum MixPick {
     Tracks(Vec<TrackKey>),
     Albums(Vec<AlbumKey>),
 }
@@ -47,16 +47,16 @@ impl Catalog {
     /// seconds), chosen evenly as `variation` picks.
     /// The music folder narrows the tracks; an album counts with a track in it and every track
     /// matching. Queued tracks are left out, and albums holding one.
-    pub async fn random_pick(
+    pub async fn mix_pick(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
-        criteria: &RandomCriteria,
+        criteria: &MixCriteria,
         requested: usize,
         now: i64,
         variation: i64,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<RandomPick> {
+    ) -> LibraryResult<MixPick> {
         require_radio_bounds(0, requested)?;
         let queued = {
             let mut connection = self.acquire_cancellable(cancellation).await?;
@@ -67,9 +67,9 @@ impl Catalog {
         let context = Context::new(&snapshot);
         let none = || {
             if criteria.albums {
-                RandomPick::Albums(Vec::new())
+                MixPick::Albums(Vec::new())
             } else {
-                RandomPick::Tracks(Vec::new())
+                MixPick::Tracks(Vec::new())
             }
         };
         let Some(owner) = snapshot.source_slot(source) else {
@@ -126,7 +126,7 @@ impl Catalog {
                 requested,
                 seed,
             );
-            return Ok(RandomPick::Tracks(
+            return Ok(MixPick::Tracks(
                 chosen
                     .into_iter()
                     .map(|(_, track)| TrackKey::from_raw(i64::from(track.key)))
@@ -149,7 +149,7 @@ impl Catalog {
             .collect::<Vec<_>>();
         // The map's order differs between runs; the variation alone picks.
         eligible.sort_unstable();
-        Ok(RandomPick::Albums(
+        Ok(MixPick::Albums(
             sampled(eligible.into_iter(), requested, seed)
                 .into_iter()
                 .filter_map(|album| snapshot.albums.key_of(album))

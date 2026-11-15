@@ -345,10 +345,10 @@ function placeBarButtons(bar, up) {
   const row = document.querySelector(".transport-buttons");
   const seekRow = document.querySelector(".seek-row");
   const volumeBox = document.querySelector(".volume");
-  const extras = ["auto-dj", "random-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
-  const [dj, random, sleep, settings, volume, favorite] = extras;
+  const extras = ["auto-dj", "mix-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
+  const [dj, mix, sleep, settings, volume, favorite] = extras;
   row.prepend(dj);
-  row.append(random);
+  row.append(mix);
   document.querySelector(".player-actions").prepend(sleep, settings);
   volumeBox.prepend(favorite);
   volumeBox.insertBefore(volume, $("volume"));
@@ -358,7 +358,7 @@ function placeBarButtons(bar, up) {
   } else if (bar === "strip") row.prepend(volume);
   else if (bar === "controls") {
     const raised = (button) => extras.indexOf(button) < up;
-    const start = [sleep, volume, dj], end = [random, favorite, settings];
+    const start = [sleep, volume, dj], end = [mix, favorite, settings];
     row.prepend(...start.filter(raised));
     row.append(...end.filter(raised));
     seekRow.prepend(...start.filter((button) => !raised(button)));

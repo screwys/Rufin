@@ -94,16 +94,16 @@ impl Default for ExternalSiteLinkSettings {
     }
 }
 
-const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
-const DEFAULT_RANDOM_PLAY_ALBUM_LIMIT: usize = 10;
-const MIN_RANDOM_PLAY_LIMIT: usize = 1;
-const MAX_RANDOM_PLAY_LIMIT: usize = 500;
-const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
-const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
+const DEFAULT_MIX_LIMIT: usize = 100;
+const DEFAULT_MIX_ALBUM_LIMIT: usize = 10;
+const MIN_MIX_LIMIT: usize = 1;
+const MAX_MIX_LIMIT: usize = 500;
+const MIN_MIX_YEAR: u16 = 1850;
+const MAX_MIX_YEAR: u16 = 2050;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct RandomPlayGenreSelection {
+pub struct MixGenreSelection {
     pub source_id: SourceId,
     #[serde(default)]
     pub music_folder_id: Option<String>,
@@ -113,7 +113,7 @@ pub struct RandomPlayGenreSelection {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct RandomPlaySettings {
+pub struct MixSettings {
     /// Whole albums in place of tracks.
     pub albums: bool,
     pub limit: super::visualizer::PreferenceIndex,
@@ -121,16 +121,16 @@ pub struct RandomPlaySettings {
     pub album_limit: super::visualizer::PreferenceIndex,
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
-    pub genre: Option<RandomPlayGenreSelection>,
+    pub genre: Option<MixGenreSelection>,
     pub played_filter: PlayedFilter,
 }
 
-impl Default for RandomPlaySettings {
+impl Default for MixSettings {
     fn default() -> Self {
         Self {
             albums: false,
-            limit: DEFAULT_RANDOM_PLAY_LIMIT,
-            album_limit: DEFAULT_RANDOM_PLAY_ALBUM_LIMIT,
+            limit: DEFAULT_MIX_LIMIT,
+            album_limit: DEFAULT_MIX_ALBUM_LIMIT,
             min_year: None,
             max_year: None,
             genre: None,
@@ -139,7 +139,7 @@ impl Default for RandomPlaySettings {
     }
 }
 
-impl RandomPlaySettings {
+impl MixSettings {
     pub fn selected_genre_id(
         &self,
         source_id: &SourceId,
@@ -152,18 +152,14 @@ impl RandomPlaySettings {
     }
 
     fn sanitize(&mut self) {
-        self.limit = self
-            .limit
-            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
-        self.album_limit = self
-            .album_limit
-            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
+        self.limit = self.limit.clamp(MIN_MIX_LIMIT, MAX_MIX_LIMIT);
+        self.album_limit = self.album_limit.clamp(MIN_MIX_LIMIT, MAX_MIX_LIMIT);
         self.min_year = self
             .min_year
-            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+            .map(|year| year.clamp(MIN_MIX_YEAR, MAX_MIX_YEAR));
         self.max_year = self
             .max_year
-            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+            .map(|year| year.clamp(MIN_MIX_YEAR, MAX_MIX_YEAR));
     }
 }
 
@@ -362,7 +358,7 @@ pub struct Settings {
     #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default)]
-    pub random_play: RandomPlaySettings,
+    pub mix: MixSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_width: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -408,7 +404,7 @@ impl Default for Settings {
             shuffle_enabled: false,
             repeat_mode: QueueRepeatMode::Off,
             playback: PlaybackSettings::default(),
-            random_play: RandomPlaySettings::default(),
+            mix: MixSettings::default(),
             window_width: None,
             window_height: None,
             lyrics_panel_visible: true,
@@ -476,7 +472,7 @@ impl Settings {
         }
         self.rich_presence.sanitize();
         self.playback.sanitize();
-        self.random_play.sanitize();
+        self.mix.sanitize();
         self.lyrics.sanitize();
         self.application.auto_dj_refill_threshold = self
             .application

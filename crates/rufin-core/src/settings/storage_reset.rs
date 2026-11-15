@@ -65,7 +65,7 @@ impl StorageResetRequest {
             validate_root(root)?;
         }
         // Keep connection records until deletion succeeds so an I/O error does not lose them.
-        let mut keep = vec![paths.settings_file()];
+        let mut keep = super::file::files(&paths.settings_file()).to_vec();
         if reset == StorageReset::KeepCredentials {
             keep.extend(
                 ["secrets.json", "backup-password.json"].map(|name| paths.config_dir().join(name)),
@@ -90,10 +90,9 @@ impl StorageResetRequest {
         }
         fs::create_dir_all(paths.config_dir()).map_err(string_error)?;
         // Replace the whole document, including settings unknown to this version.
-        super::write_private(
+        super::file::replace(
             &paths.settings_file(),
-            &serde_json::to_vec_pretty(&super::persistent_settings(&retained))
-                .map_err(string_error)?,
+            &serde_json::to_value(super::persistent_settings(&retained)).map_err(string_error)?,
         )
     }
 }

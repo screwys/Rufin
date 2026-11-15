@@ -349,7 +349,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             source_rank: 900,
         },
         QueueProvenance::Manual,
-        QueueProvenance::Random,
+        QueueProvenance::Mix,
         QueueProvenance::Radio,
         QueueProvenance::AutoDj,
         QueueProvenance::Legacy,

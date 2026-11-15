@@ -1,5 +1,5 @@
 use library::{
-    LibraryField, PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
+    LibraryField, MixCriteria, PlayedFilter, RadioSeed, ReadCancellation, SearchRequest,
     SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistDefinition,
     SmartPlaylistMatch, SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
     SmartPlaylistRuleValue, SmartPlaylistSort,
@@ -3587,22 +3587,22 @@ async fn home_search_and_radio_results_stay_bounded() {
         1
     );
 
-    let criteria = RandomCriteria {
+    let criteria = MixCriteria {
         min_year: Some(2020),
         max_year: Some(2030),
         genre: Some(fixture.genre),
         played: PlayedFilter::All,
         albums: false,
     };
-    let library::RandomPick::Tracks(random) = fixture
+    let library::MixPick::Tracks(mix) = fixture
         .catalog
-        .random_pick(fixture.source, None, &criteria, 2, 0, 7, &cancel)
+        .mix_pick(fixture.source, None, &criteria, 2, 0, 7, &cancel)
         .await
-        .expect("bounded random pick")
+        .expect("bounded mix pick")
     else {
         panic!("tracks");
     };
-    assert_eq!(random.len(), 2);
+    assert_eq!(mix.len(), 2);
     let radio = fixture
         .catalog
         .radio_candidates(

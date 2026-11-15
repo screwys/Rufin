@@ -72,7 +72,7 @@ pub(crate) async fn stored_rows(
                 source_rank: row.try_get::<i64, _>("provenance_source_rank")? as usize,
             },
             "manual" => QueueProvenance::Manual,
-            "random" => QueueProvenance::Random,
+            "random" => QueueProvenance::Mix,
             "radio" => QueueProvenance::Radio,
             "auto-dj" => QueueProvenance::AutoDj,
             _ => QueueProvenance::Legacy,

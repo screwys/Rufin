@@ -66,7 +66,7 @@ pub(in crate::playback) async fn seeded(
     }
     catalog.save_queue(&sequence.snapshot()).await.unwrap();
     let runtime = tokio::runtime::Handle::current();
-    let settings = SettingsFile::open(directory.path().join("settings.json")).unwrap();
+    let settings = SettingsFile::open(directory.path().join("rufin.toml")).unwrap();
     let downloads = directory.path().join("downloads");
     let source = SourceOwner::open_dormant(
         directory.path().join("artwork"),
