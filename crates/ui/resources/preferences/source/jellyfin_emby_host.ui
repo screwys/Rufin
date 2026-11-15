@@ -13,10 +13,6 @@
       <child><object class="AdwPasswordEntryRow" id="password"><property name="title" translatable="yes">Password</property></object></child>
     </object></child>
     <child><object class="AdwPreferencesGroup" id="options">
-      <child><object class="AdwSwitchRow" id="instant_mix">
-        <property name="title" translatable="yes">Use Instant Mix for recommendations</property>
-        <property name="subtitle" translatable="yes">Use the server's Instant Mix for Radio and Auto DJ.</property>
-      </object></child>
       <child><object class="AdwSwitchRow" id="manual"><property name="title" translatable="yes">Connect manually</property></object></child>
     </object></child>
     <child><object class="GtkBox" id="manual_extras">

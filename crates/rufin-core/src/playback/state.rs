@@ -62,6 +62,8 @@ pub struct ExternalPlayback {
 pub struct AutoDjRequest {
     pub seed_run: Option<RunId>,
     pub seed_media_uri: String,
+    /// The track the refill is picked for: the last one the user queued, not Auto DJ's own.
+    pub anchor_media_uri: String,
     pub requested_count: usize,
 }
 
@@ -2990,10 +2992,23 @@ impl Player {
         else {
             return;
         };
+        let anchor = self
+            .sequence
+            .auto_dj_anchor()
+            .filter(|anchor| library::station_stream(&anchor.track.media_uri).is_none())
+            .unwrap_or(seed);
         let request = AutoDjRequest {
             seed_run: self.current_run(),
             seed_media_uri: seed.track.media_uri.clone(),
-            requested_count: 5,
+            anchor_media_uri: anchor.track.media_uri.clone(),
+            requested_count: usize::from(
+                self.owner()
+                    .settings
+                    .load()
+                    .ui
+                    .application
+                    .auto_dj_refill_count,
+            ),
         };
         self.auto_dj_in_flight = Some(request.clone());
         self.owner().request_auto_dj(self.playback.clone(), request);

@@ -31,8 +31,10 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
                     fixture.source,
                     seed.clone(),
                     &[],
+                    library::RadioTaste::default(),
                     &[],
                     20,
+                    0,
                     variation,
                     &cancel,
                 )
@@ -68,8 +70,10 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
                     fixture.source,
                     seed,
                     &[],
+                    library::RadioTaste::default(),
                     &[fixture.tracks[2]],
                     20,
+                    0,
                     3,
                     &cancel
                 )
@@ -156,7 +160,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         assert_eq!(
             fixture
                 .catalog
-                .recommended_track_keys(fixture.source, &seed, &ids, &cancel)
+                .recommended_track_keys(fixture.source, &seed, &ids, false, &cancel)
                 .await
                 .unwrap(),
             fixture.tracks[2..]
@@ -171,14 +175,24 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         assert!(
             fixture
                 .catalog
-                .recommended_track_keys(fixture.source, &seed, &["track-0".into()], &cancel)
+                .recommended_track_keys(fixture.source, &seed, &["track-0".into()], false, &cancel)
                 .await
                 .unwrap()
                 .is_empty()
         );
         let mut result = fixture
             .catalog
-            .radio_candidates(fixture.source, seed, &[], &[], 20, 0, &cancel)
+            .radio_candidates(
+                fixture.source,
+                seed,
+                &[],
+                library::RadioTaste::default(),
+                &[],
+                20,
+                0,
+                0,
+                &cancel,
+            )
             .await
             .unwrap();
         result.sort();
@@ -216,8 +230,10 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
                 fixture.source,
                 RadioSeed::Track(fixture.track_uris[0].clone()),
                 &[],
+                library::RadioTaste::default(),
                 &[],
                 1,
+                0,
                 0,
                 &cancel
             )
@@ -233,8 +249,10 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
                 fixture.source,
                 RadioSeed::Album(fixture.albums[1]),
                 &[],
+                library::RadioTaste::default(),
                 &[],
                 1,
+                0,
                 2,
                 &cancel
             )
@@ -3591,8 +3609,10 @@ async fn home_search_and_radio_results_stay_bounded() {
             fixture.source,
             RadioSeed::Genre(fixture.genre),
             &[],
+            library::RadioTaste::default(),
             &[],
             3,
+            0,
             9,
             &cancel,
         )
@@ -3611,8 +3631,10 @@ async fn home_search_and_radio_results_stay_bounded() {
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
                 &[],
+                library::RadioTaste::default(),
                 &[],
                 2,
+                0,
                 9,
                 &cancel
             )
@@ -3628,8 +3650,10 @@ async fn home_search_and_radio_results_stay_bounded() {
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
                 &[],
+                library::RadioTaste::default(),
                 &vec![fixture.tracks[1]; 501],
                 2,
+                0,
                 9,
                 &cancel
             )
@@ -3643,8 +3667,10 @@ async fn home_search_and_radio_results_stay_bounded() {
             fixture.source,
             RadioSeed::Album(fixture.albums[0]),
             &[],
+            library::RadioTaste::default(),
             &[],
             2,
+            0,
             0,
             &cancel,
         )
@@ -3671,8 +3697,10 @@ async fn home_search_and_radio_results_stay_bounded() {
             fixture.source,
             RadioSeed::Playlist(playlist),
             &[],
+            library::RadioTaste::default(),
             &[],
             2,
+            0,
             0,
             &cancel,
         )

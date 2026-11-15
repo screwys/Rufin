@@ -282,6 +282,22 @@ impl Sequence {
     pub(super) fn selected_index(&self) -> Option<usize> {
         self.selected_index
     }
+    /// The row Auto DJ picks for: the nearest at or before the current one that Auto DJ did
+    /// not add itself, as far back as the rows are read. Its own picks never lead the next.
+    pub(super) fn auto_dj_anchor(&self) -> Option<&Arc<QueueRow>> {
+        let mut index = self.selected_index?;
+        let mut anchor = self.at(index)?;
+        while index > 0
+            && self
+                .entry_at(index)
+                .is_some_and(|entry| entry.provenance == QueueProvenance::AutoDj)
+            && let Some(before) = self.at(index - 1)
+        {
+            index -= 1;
+            anchor = before;
+        }
+        Some(anchor)
+    }
     pub(super) fn context_index(
         &self,
         context_id: &str,

@@ -21,6 +21,7 @@ impl Catalog {
         key: &str,
         payload: &[u8],
         now: i64,
+        days: i64,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
         let transaction = write.connection().await?;
@@ -29,7 +30,7 @@ impl Catalog {
             .execute(&mut *transaction)
             .await?;
         sqlx::query("INSERT INTO metadata_lookup_cache(key,payload,written_at,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,written_at=excluded.written_at,expires_at=excluded.expires_at")
-            .bind(key).bind(payload).bind(now).bind(now + 7 * 86400).execute(&mut *transaction).await?;
+            .bind(key).bind(payload).bind(now).bind(now + days * 86400).execute(&mut *transaction).await?;
         sqlx::query("DELETE FROM metadata_lookup_cache WHERE key IN (SELECT key FROM (SELECT key,row_number() OVER(ORDER BY written_at DESC,key DESC) AS position,sum(length(payload)) OVER(ORDER BY written_at DESC,key DESC) AS bytes FROM metadata_lookup_cache) WHERE position>10000 OR bytes>67108864)")
             .execute(&mut *transaction).await?;
         write.commit().await?;

@@ -9,7 +9,6 @@ struct Draft {
     authorization: Option<Arc<SourceAuthorization>>,
     server: usize,
     name: String,
-    use_instant_mix: bool,
 }
 
 struct Flow {
@@ -35,7 +34,6 @@ impl Flow {
                 name: saved
                     .map(|s| s.credentials.source_name.clone())
                     .unwrap_or_default(),
-                use_instant_mix: saved.and_then(|s| s.use_instant_mix).unwrap_or(false),
             })),
         }
     }
@@ -87,7 +85,7 @@ impl Flow {
             password: adw::PasswordEntryRow, sign_in_actions: adw::WrapBox,
             sign_in: gtk::Button, code_sign_in: gtk::Button, connection: adw::PreferencesGroup,
             server: adw::ComboRow, server_options: gtk::StringList, name: adw::EntryRow,
-            instant_mix: adw::SwitchRow, connect: gtk::Button, save: gtk::Button,
+            connect: gtk::Button, save: gtk::Button,
             quick_connect: gtk::Button, status: gtk::Label,
         });
         let emby = self.presentation.kind == "emby";
@@ -119,7 +117,6 @@ impl Flow {
             username.set_text(&draft.username);
             password.set_text(&draft.password);
             name.set_text(&draft.name);
-            instant_mix.set_active(draft.use_instant_mix);
         }
         if let Some(context) = context {
             let discovery = discovered_servers_view(&host, self.presentation.kind);
@@ -293,9 +290,6 @@ impl Flow {
         let state = self.draft.clone();
         name.connect_text_notify(move |row| state.borrow_mut().name = row.text().into());
         let state = self.draft.clone();
-        instant_mix
-            .connect_active_notify(move |row| state.borrow_mut().use_instant_mix = row.is_active());
-        let state = self.draft.clone();
         let name_row = name.downgrade();
         server.connect_selected_notify(move |row| {
             let name = {
@@ -429,7 +423,6 @@ impl Flow {
         let source = shell.products.source.clone();
         let parent = section.downgrade();
         let local = self.local.clone();
-        let state = self.draft.clone();
         let id = source_id.clone();
         let dialogs = active_dialog;
         quick_connect.connect_clicked(move |_| {
@@ -441,8 +434,7 @@ impl Flow {
                 let local = local.borrow();
                 (local.url.clone(), !local.cert_verify)
             };
-            let (source, local, state, id) =
-                (source.clone(), local.clone(), state.clone(), id.clone());
+            let (source, local, id) = (source.clone(), local.clone(), id.clone());
             let dialog = present_code_dialog(&parent, move |view| {
                 let events = SourceAuthorization::new(
                     source.clone(),
@@ -451,7 +443,7 @@ impl Flow {
                         trust_invalid_cert: trust,
                     },
                 );
-                let (local, state, id) = (local.clone(), state.clone(), id.clone());
+                let (local, id) = (local.clone(), id.clone());
                 gtk::glib::spawn_future_local(async move {
                     loop {
                         match events.next().await {
@@ -463,17 +455,13 @@ impl Flow {
                                 let local_server_url = Some(local.borrow().local_url.trim())
                                     .filter(|address| !address.is_empty())
                                     .map(str::to_owned);
-                                let use_instant_mix = state.borrow().use_instant_mix;
                                 gtk::glib::spawn_future_local(async move {
                                     let _ = events
                                         .finish(
                                             name,
                                             id,
                                             false,
-                                            SourceAuthorizationInput::Jellyfin {
-                                                use_instant_mix,
-                                                local_server_url,
-                                            },
+                                            SourceAuthorizationInput::Jellyfin { local_server_url },
                                         )
                                         .await;
                                 });
@@ -498,7 +486,6 @@ impl Flow {
         let weak_shell = Rc::downgrade(shell);
         action.connect_clicked(move |button| {
             let draft = state.borrow();
-            let use_instant_mix = draft.use_instant_mix;
             if source_id.is_none()
                 && let Some(status) = submit_status.upgrade()
             {
@@ -510,7 +497,6 @@ impl Flow {
                 let name = draft.name.clone();
                 let input = SourceAuthorizationInput::Emby {
                     server_index: draft.server as u32,
-                    use_instant_mix,
                 };
                 let id = source_id.clone();
                 drop(draft);
@@ -561,7 +547,6 @@ impl Flow {
                                 sources::ServerKind::Jellyfin
                             },
                             credentials,
-                            use_instant_mix,
                             connect_manually,
                         )
                         .await

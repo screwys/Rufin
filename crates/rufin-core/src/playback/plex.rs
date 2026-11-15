@@ -930,7 +930,7 @@ impl PlaybackOwner {
             return false;
         };
         let request = request.clone();
-        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let seed = library::RadioSeed::Track(request.anchor_media_uri.clone());
         let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
             let result = async {

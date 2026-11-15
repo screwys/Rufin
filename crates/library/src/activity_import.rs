@@ -7,10 +7,9 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use serde::Deserialize;
-use unicode_normalization::UnicodeNormalization;
 
 use crate::catalog::views::Context;
-use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey};
+use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey, name_key};
 
 /// Two listens of a track this close together are one: a scrobble of a play Rufin recorded,
 /// or the same listen in two exports.
@@ -219,21 +218,6 @@ fn local_period(started_at: i64) -> String {
         .with_timezone(&chrono::Local)
         .format("%Y-%m")
         .to_string()
-}
-
-/// Names compare by their letters and digits, whatever their case, width or punctuation; a
-/// name of punctuation only, such as "&", by its characters.
-fn name_key(name: &str) -> String {
-    let lower = name.nfkc().flat_map(char::to_lowercase).collect::<String>();
-    let key = lower
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect::<String>();
-    if key.is_empty() {
-        lower.split_whitespace().collect()
-    } else {
-        key
-    }
 }
 
 #[derive(Clone)]

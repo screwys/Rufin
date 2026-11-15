@@ -168,6 +168,11 @@ pub(crate) async fn radio_candidates(
     cancellation: &ReadCancellation,
 ) -> Result<Vec<library::TrackKey>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
+    let settings = source_owner.shared.settings.committed();
+    let taste = library::RadioTaste {
+        same_artist: settings.application.auto_dj_same_artist,
+        skip_low_rated: settings.application.auto_dj_skip_low_rated,
+    };
     let seed_source = catalog
         .radio_source(&seed, cancellation)
         .await
@@ -176,20 +181,29 @@ pub(crate) async fn radio_candidates(
     let seed_source_key = seed_source.as_ref().map(|(key, _, _)| *key);
     let mut fallback_sources = Vec::new();
     if let Some((source_key, source_id, object_id)) = seed_source {
-        let seed_owner = Arc::clone(&source_owner);
-        let source = tokio::task::spawn_blocking(move || seed_owner.client(&source_id).ok())
-            .await
-            .map_err(|error| error.to_string())?;
-        let native_seed = source_seed(source.as_deref(), &seed, object_id);
-        if let (Some(source), Some(native_seed)) = (source.as_deref(), native_seed)
-            && let Ok(ids) = source
-                .generated_track_object_ids(&native_seed, requested.min(256))
-                .await
-        {
-            candidates = catalog
-                .recommended_track_keys(source_key, &seed, &ids, cancellation)
+        // The server's own picks play as it orders them; Rufin's fill what it leaves short.
+        if settings.uses_server_recommendations() {
+            let seed_owner = Arc::clone(&source_owner);
+            let source = tokio::task::spawn_blocking(move || seed_owner.client(&source_id).ok())
                 .await
                 .map_err(|error| error.to_string())?;
+            let native_seed = source_seed(source.as_deref(), &seed, object_id);
+            if let (Some(source), Some(native_seed)) = (source.as_deref(), native_seed)
+                && let Ok(ids) = source
+                    .generated_track_object_ids(&native_seed, requested.min(256))
+                    .await
+            {
+                candidates = catalog
+                    .recommended_track_keys(
+                        source_key,
+                        &seed,
+                        &ids,
+                        taste.skip_low_rated,
+                        cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
         }
         fallback_sources.push(source_key);
     }
@@ -199,30 +213,30 @@ pub(crate) async fn radio_candidates(
         fallback_sources.push(selected.source_key);
     }
     candidates.truncate(requested);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
     let mut similar = None;
     for source_key in fallback_sources {
         if candidates.len() == requested {
             break;
         }
-        // The seed's similar artists are looked up once, when a fallback first needs them.
+        // The seed's similar artists are looked up once, when Rufin first picks.
         let similar = match &similar {
             Some(similar) => similar,
             None => similar.insert(
-                similar_artist_mbids(catalog, &source_owner, seed_source_key, &seed, cancellation)
-                    .await,
+                similar_artists(catalog, &source_owner, seed_source_key, &seed, cancellation).await,
             ),
         };
-        let similar = catalog
-            .artists_with_mbids(source_key, similar, cancellation)
-            .await
-            .map_err(|error| error.to_string())?;
         let fallback = catalog
             .radio_candidates(
                 source_key,
                 seed.clone(),
-                &similar,
+                similar,
+                taste,
                 &candidates,
                 requested - candidates.len(),
+                now,
                 random_u64() as i64,
                 cancellation,
             )
@@ -233,29 +247,27 @@ pub(crate) async fn radio_candidates(
     Ok(candidates)
 }
 
-/// The MusicBrainz ids of the artists ListenBrainz's listeners play alongside the seed's first
-/// two artists. None where external lookups are off, the seed's artists carry no ids, or the
-/// lookup fails: the Catalog's own relations then pick alone.
-async fn similar_artist_mbids(
+/// The artists ListenBrainz's listeners play alongside the seed's first two artists, closest
+/// first. An artist whose tags carry no MusicBrainz id is found there by its name. None where
+/// external lookups or this one are off, the seed names no artist, or the lookups fail: the
+/// library's own relations then pick alone.
+async fn similar_artists(
     catalog: &Catalog,
     source_owner: &SourceOwner,
     seed_source: Option<SourceKey>,
     seed: &RadioSeed,
     cancellation: &ReadCancellation,
-) -> Vec<String> {
+) -> Vec<library::SimilarArtist> {
     let Some(seed_source) = seed_source else {
         return Vec::new();
     };
-    if !source_owner
-        .shared
-        .settings
-        .committed()
-        .allows_external_metadata_lookup()
+    let settings = source_owner.shared.settings.committed();
+    if !settings.allows_external_metadata_lookup() || !settings.application.auto_dj_similar_artists
     {
         return Vec::new();
     }
     let Ok(mut artists) = catalog
-        .radio_artist_mbids(seed_source, seed, cancellation)
+        .radio_seed_artists(seed_source, seed, cancellation)
         .await
     else {
         return Vec::new();
@@ -270,11 +282,39 @@ async fn similar_artist_mbids(
         metadata_lookup::CacheMode::Use,
     );
     tokio::task::spawn_blocking(move || {
-        artists
+        let named = |name: &str| {
+            metadata_lookup::artist_id_by_name(&cache, name)
+                .ok()
+                .flatten()
+        };
+        let seeds = artists
+            .into_iter()
+            .filter_map(|(name, mbid)| {
+                // A credit of several artists goes by the first of them MusicBrainz knows.
+                mbid.or_else(|| named(&name)).or_else(|| {
+                    let credited = library::credit_artists(&name);
+                    (credited.len() > 1)
+                        .then(|| credited.iter().take(2).find_map(|artist| named(artist)))
+                        .flatten()
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut similar = Vec::<library::SimilarArtist>::new();
+        for artist in seeds
             .iter()
-            .filter_map(|artist| metadata_lookup::similar_artists(&cache, artist).ok())
+            .filter_map(|seed| metadata_lookup::similar_artists(&cache, seed).ok())
             .flatten()
-            .collect()
+        {
+            if seeds.contains(&artist.mbid) {
+                continue;
+            }
+            match similar.iter_mut().find(|known| known.mbid == artist.mbid) {
+                Some(known) => known.closeness = known.closeness.max(artist.closeness),
+                None => similar.push(artist),
+            }
+        }
+        similar.sort_by(|left, right| right.closeness.total_cmp(&left.closeness));
+        similar
     })
     .await
     .unwrap_or_default()

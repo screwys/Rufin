@@ -287,8 +287,7 @@
           "username": "user",
           "secret": "password",
           "trust_invalid_cert": false
-        },
-        "use_instant_mix": false
+        }
       }
     },
     "open_subsonic": {
@@ -307,8 +306,8 @@
     },
     "web_dav_smb": "{type: web_dav or smb, data: {name, settings: file_settings below, credentials: {secret,headers:[]}}}",
     "plex": "{type: plex, data: {name,login,profile_id,server,address_override:null,trust_invalid_cert:false}}",
-    "emby_connect": "{type: emby_connect, data: {server: a server from the login result,source_name:null,use_instant_mix:false}}",
-    "jellyfin_quick_connect": "{type: jellyfin_quick_connect, data: {login: the completed login result,source_name:null,use_instant_mix:false}}"
+    "emby_connect": "{type: emby_connect, data: {server: a server from the login result,source_name:null}}",
+    "jellyfin_quick_connect": "{type: jellyfin_quick_connect, data: {login: the completed login result,source_name:null}}"
   },
   "source_update": {
     "local": {
@@ -346,8 +345,7 @@
           "username": "user",
           "secret": "password",
           "trust_invalid_cert": false
-        },
-        "use_instant_mix": false
+        }
       }
     },
     "other_types": "For open_subsonic, emby_connect and jellyfin_quick_connect, add source_id to the corresponding source_setup data."

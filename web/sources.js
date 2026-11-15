@@ -494,7 +494,7 @@ function sourceInput() {
     input = ["jellyfin", "emby"].includes(kind)
       ? {
           type: "jellyfin_emby",
-          data: { kind, credentials, use_instant_mix: false },
+          data: { kind, credentials },
         }
       : {
           type: "open_subsonic",
@@ -539,7 +539,6 @@ function sourceInput() {
     else if (kind === "jellyfin" || kind === "emby") {
       delete input.data.kind;
       input.data.connect_manually = !preset.emby_connect;
-      input.data.use_instant_mix = preset.use_instant_mix || false;
     } else if (
       kind === "local" &&
       $("source-paths").value === editingSource.roots.join("\n")

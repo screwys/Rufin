@@ -104,6 +104,15 @@ pub fn shows_lyrics_cache_prompt(
         })
 }
 
+/// Whether the choice between a server's recommendations and Rufin's is shown: a configured
+/// source is a server that recommends.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn shows_server_recommendations(sources: Vec<SourceSummary>) -> bool {
+    sources.iter().any(|source| {
+        library::SourceKind::parse(&source.kind).is_some_and(library::SourceKind::recommends)
+    })
+}
+
 impl ConfiguredSources {
     pub fn half_stars_enabled(&self, media_uri: &str, source_id: Option<&str>) -> bool {
         let uri_source = library::source_entity_parts(media_uri).map(|(source, _, _)| source);
@@ -125,7 +134,6 @@ pub struct EditableSource {
     pub file_settings: Option<sources::FileSourceSettings>,
     pub source: SourceSummary,
     pub credentials: CredentialPreset,
-    pub use_instant_mix: Option<bool>,
     pub emby_connect: bool,
 }
 
