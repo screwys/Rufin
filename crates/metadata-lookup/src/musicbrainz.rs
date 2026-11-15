@@ -421,7 +421,7 @@ fn search_album_identity_ids(
 /// so a romanised name finds an artist listed in its own script. None when no artist does, or
 /// when a second one answers nearly as well.
 pub fn artist_id_by_name(cache: &LookupCache, name: &str) -> Result<Option<String>, String> {
-    let wanted = library::name_key(name);
+    let wanted = names::name_key(name);
     if wanted.is_empty() {
         return Ok(None);
     }
@@ -461,10 +461,10 @@ fn named_artist(answer: &Value, wanted: &str) -> Option<String> {
                 .chain(aliases)
                 .filter_map(Value::as_str)
                 .any(|known| {
-                    library::name_key(known) == wanted
+                    names::name_key(known) == wanted
                         // A sort name reads "family, given".
                         || known.split_once(", ").is_some_and(|(family, given)| {
-                            library::name_key(&format!("{given} {family}")) == wanted
+                            names::name_key(&format!("{given} {family}")) == wanted
                         })
                 })
         })

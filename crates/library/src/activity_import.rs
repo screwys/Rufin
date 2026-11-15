@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::catalog::views::Context;
-use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey, name_key};
+use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey};
 
 /// Two listens of a track this close together are one: a scrobble of a play Rufin recorded,
 /// or the same listen in two exports.
@@ -204,8 +204,8 @@ fn import_id(track: &Named, started_at: i64) -> String {
     let hash = blake3::hash(
         format!(
             "{}\0{}\0{started_at}",
-            name_key(&track.artist),
-            name_key(&track.title)
+            names::name_key(&track.artist),
+            names::name_key(&track.title)
         )
         .as_bytes(),
     );
@@ -246,7 +246,7 @@ impl Matcher {
             if context.visible(slot).is_none() {
                 continue;
             }
-            let title = name_key(snapshot.text(record.title));
+            let title = names::name_key(snapshot.text(record.title));
             if title.is_empty() {
                 continue;
             }
@@ -254,14 +254,14 @@ impl Matcher {
             durations.insert(key, record.duration_ms);
             let candidate = Candidate {
                 key,
-                album: name_key(snapshot.text(record.album_title)),
+                album: names::name_key(snapshot.text(record.album_title)),
                 duration_ms: record.duration_ms,
                 listens: context.counts_listens(record),
             };
-            let mut artists = vec![name_key(snapshot.text(record.artist))];
+            let mut artists = vec![names::name_key(snapshot.text(record.artist))];
             for artist in snapshot.track_runs(record)[0] {
                 if let Some(artist) = snapshot.artists.live(*artist) {
-                    artists.push(name_key(snapshot.text(artist.name)));
+                    artists.push(names::name_key(snapshot.text(artist.name)));
                 }
             }
             artists.sort_unstable();
@@ -291,10 +291,11 @@ impl Matcher {
                 listens: true,
             });
         }
-        let candidates = self
-            .names
-            .get(&(name_key(&named.artist), name_key(&named.title)))?;
-        let album = name_key(&named.album);
+        let candidates = self.names.get(&(
+            names::name_key(&named.artist),
+            names::name_key(&named.title),
+        ))?;
+        let album = names::name_key(&named.album);
         candidates
             .iter()
             .min_by_key(|candidate| {

@@ -1,5 +1,5 @@
-//! How Rufin tells that two names are the same: one key to compare by, the artists a credit
-//! names, and a title without what marks a version of it.
+//! How Rufin tells that two names are the same: how a character folds, one key to compare by,
+//! the artists a credit names, and a title without what marks a version of it.
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -8,7 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 pub fn name_key(name: &str) -> String {
     let mut folded = String::with_capacity(name.len());
     for character in name.nfkc() {
-        crate::lyrics_search::fold(character, &mut folded);
+        fold(character, &mut folded);
     }
     let key = folded
         .chars()
@@ -18,6 +18,36 @@ pub fn name_key(name: &str) -> String {
         folded.split_whitespace().collect()
     } else {
         key
+    }
+}
+
+/// A combining mark that `unicode61` folds away inside a word.
+pub fn diacritic(character: char) -> bool {
+    let code = character as u32;
+    match code {
+        768..=799 => 0x0802_9FDF_u32 >> (code - 768) & 1 == 1,
+        800..=817 => 0x0003_61F8_u32 >> (code - 800) & 1 == 1,
+        _ => false,
+    }
+}
+
+/// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
+/// letter with diacritics becomes its base letter.
+pub fn fold(character: char, folded: &mut String) {
+    for lower in character.to_lowercase() {
+        let mut base = None;
+        let mut marks = true;
+        unicode_normalization::char::decompose_canonical(lower, |part| match base {
+            None => base = Some(part),
+            Some(_) => marks &= unicode_normalization::char::is_combining_mark(part),
+        });
+        match base {
+            _ if diacritic(lower) => {}
+            Some(base) if u32::from(lower) < 0x2000 && base.is_ascii_alphabetic() && marks => {
+                folded.push(base);
+            }
+            _ => folded.push(lower),
+        }
     }
 }
 

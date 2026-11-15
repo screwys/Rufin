@@ -327,7 +327,7 @@ fn match_release_track(
             return Some(id);
         }
     }
-    let title = library::name_key(value("title"));
+    let title = names::name_key(value("title"));
     if title.is_empty() {
         return None;
     }
@@ -337,7 +337,7 @@ fn match_release_track(
             .filter(|(_, track)| {
                 text(track, "title")
                     .or_else(|| track.get("recording").and_then(|r| text(r, "title")))
-                    .is_some_and(|name| library::name_key(&name) == title)
+                    .is_some_and(|name| names::name_key(&name) == title)
             })
             .collect(),
     )

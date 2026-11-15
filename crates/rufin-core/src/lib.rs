@@ -18,6 +18,7 @@ pub mod paths;
 pub mod playback;
 pub mod presence;
 pub mod radio;
+pub mod random;
 pub mod release_update;
 pub mod route;
 pub mod runtime;

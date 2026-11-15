@@ -67,9 +67,8 @@ pub mod rank;
 mod waveform;
 pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
-mod names;
-pub use names::{base_title, credit_artists, name_key};
 mod radio;
+mod random;
 mod scroll_sections;
 pub use scroll_sections::ScrollSection;
 mod schema;
@@ -145,9 +144,8 @@ pub use queue::{
     QueueProvenance, QueueRank, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
     QueueUpdate, shuffle_order,
 };
-pub use radio::{
-    PlayedFilter, RadioSeed, RadioTaste, RandomCriteria, RandomPick, SameArtist, SimilarArtist,
-};
+pub use radio::{RadioSeed, RadioTaste, SameArtist, SimilarArtist};
+pub use random::{PlayedFilter, RandomCriteria, RandomPick};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,
