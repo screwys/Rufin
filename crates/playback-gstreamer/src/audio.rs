@@ -937,6 +937,27 @@ fn make_element(factory: &str, name: &str) -> Result<gst::Element, String> {
         .map_err(|error| error.to_string())
 }
 
+/// pulsesink frees its process-wide PulseAudio loop when the last sink closes, while a
+/// streaming thread can still be querying that sink. One idle sink keeps the loop.
+/// Its own client name gives it its own connection: pulsesink never drops a shared one
+/// that died, so every later track would reuse it and fail.
+pub(super) fn hold_pulse_loop() {
+    static HOLDER: Mutex<Option<gst::Element>> = Mutex::new(None);
+    let mut holder = super::lock_recover(&HOLDER);
+    if holder.is_some() {
+        return;
+    }
+    let Ok(sink) = gst::ElementFactory::make("pulsesink")
+        .property("client-name", "Rufin idle")
+        .build()
+    else {
+        return;
+    };
+    if sink.set_state(gst::State::Ready).is_ok() {
+        *holder = Some(sink);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use library::LoudnessMeasurement;

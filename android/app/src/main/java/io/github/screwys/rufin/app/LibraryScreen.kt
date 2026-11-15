@@ -960,7 +960,7 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
             Surface(Modifier.fillMaxSize().padding(top = if (plain) barHeight else 0.dp)) {
                 CompositionLocalProvider(LocalRowSwipes provides true, LocalOverlayBarHeight provides barHeight,
                     LocalDetailBand provides bandColor, LocalFinding provides state.finding,
-                    LocalOpenFind provides { state.finding = true }, LocalBesideList provides beside) {
+                    LocalOpenFind provides { state.finding = true }) {
                     BrowsePageContent(model, browse, player, location, location.options, active, onMenu, onPlaylist, {}, owner = page)
                 }
             }
@@ -992,6 +992,12 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
                     Text(summary?.row?.title ?: location.title, Modifier.padding(start = 4.dp), maxLines = 1,
                         overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                 }
+            }
+            // The page's links ride in the bar's row and leave with its header.
+            if (!state.finding && !past && summary != null) LocalContext.current.let { context ->
+                DetailLinks(location.route, summary, player, { link -> model.runAction {
+                    openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
+                } }, Modifier.graphicsLayer { translationY = -state.offset })
             }
             if (state.finding) { if (browse.filter.isNotEmpty()) PlayerIconButton("rufin-window-close-symbolic", "Clear", { browse.filter = "" }) }
             else if (past && !plain && page != null) PlayerIconButton("rufin-media-playback-start-symbolic", "Play",
@@ -1155,9 +1161,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
             DetailContent(summary, page, rows, player, page.releaseGroups,
                 onOpen, onMenu, { item, placement, shuffled -> page.play(placement, shuffled, item.row.title) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, summary.row.title) },
-                onLink = { link -> model.runAction {
-                    openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
-                } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
+                onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
                 onDownload = { browse.download(it, remove = it.row.downloaded) })
             return@Column
         }

@@ -1,6 +1,9 @@
 package io.github.screwys.rufin.radio
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -15,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -23,8 +27,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.zIndex
@@ -33,8 +40,9 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.browse.BrowseEmptyState
+import io.github.screwys.rufin.browse.ButtonRow
 import io.github.screwys.rufin.browse.FactsPill
-import io.github.screwys.rufin.browse.GenreChips
+import io.github.screwys.rufin.browse.MetaLine
 import io.github.screwys.rufin.browse.OnBand
 import io.github.screwys.rufin.browse.ShowcasePill
 import io.github.screwys.rufin.browse.ShowcaseRound
@@ -157,21 +165,47 @@ internal fun RadioContent(model: RufinConnection, player: PlayerConnection, stat
         val columns = ((maxWidth - edge * 2 + gap) / (280.dp + gap)).toInt().coerceAtLeast(1)
         // A slim card keeps its room for the text.
         val logo = if ((maxWidth - edge * 2 - gap * (columns - 1)) / columns >= 340.dp) 72.dp else 56.dp
+        // The card dragged in Select: its place among the added stations, the place it is over, and how far
+        // apart two places are.
+        var dragFrom by remember { mutableIntStateOf(-1) }
+        var dragTo by remember { mutableIntStateOf(-1) }
+        var dragStep by remember { mutableStateOf(Offset.Zero) }
         val cards: @Composable (List<Station>) -> Unit = { row ->
-            // Every card of a row is as tall as its tallest.
-            Row(Modifier.fillMaxWidth().padding(horizontal = edge).height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            // Every card of a row is as tall as its tallest. The dragged card's row is over the others.
+            Row(Modifier.zIndex(if (dragFrom >= 0 && stations.getOrNull(dragFrom) in row) 1f else 0f).fillMaxWidth().padding(horizontal = edge)
+                .height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 row.forEach { station ->
+                    val place = if (station.key != null) stations.indexOf(station) else -1
+                    // While one is dragged, the cards between its place and the one it is over stand a place nearer to where it came from.
+                    val stand = when {
+                        dragFrom < 0 || place < 0 -> place
+                        place in dragFrom + 1..dragTo -> place - 1
+                        place in dragTo until dragFrom -> place + 1
+                        else -> place
+                    }
                     StationCard(station, player, page.savedOn, logo, Modifier.weight(1f).fillMaxHeight(), state.selecting && station.key != null, gap,
+                        Offset((stand % columns - place % columns) * dragStep.x, (stand / columns - place / columns) * dragStep.y), dragFrom >= 0,
                         onSelect = { state.selecting = true },
-                        // The card goes to the place of the one it was dropped on, among all the added stations.
-                        onMoved = { columnsMoved, rowsMoved ->
-                            val target = stations.getOrNull((stations.indexOf(station) + rowsMoved * columns + columnsMoved).coerceIn(0, stations.lastIndex))
+                        onDrag = { columnsMoved, rowsMoved, step ->
+                            dragFrom = place
+                            dragTo = (place + rowsMoved * columns + columnsMoved).coerceIn(0, stations.lastIndex)
+                            dragStep = step
+                        },
+                        // The card goes to the place of the one it was dropped on, among all the added stations; the
+                        // page shows the order at once and core keeps it.
+                        onDrop = { moved ->
+                            val target = stations.getOrNull(dragTo)
                             val to = page.stations.indexOf(target)
-                            if (target != null && target != station && to >= 0) model.runAction {
+                            if (moved && target != null && target != station && to >= 0) {
                                 val order = (page.stations - station).toMutableList().also { it.add(to.coerceAtMost(it.size), station) }
-                                radio?.reorder(order.mapNotNull { it.key })
-                                reads.trySend(Unit)
+                                state.page = page.copy(stations = order)
+                                model.runAction {
+                                    radio?.reorder(order.mapNotNull { it.key })
+                                    reads.trySend(Unit)
+                                }
                             }
+                            dragFrom = -1
+                            dragTo = -1
                         },
                         onPlay = { channel -> play(station, channel) },
                         onPin = { pin, pinned -> model.browse.pin(pin, pinned) }, onEdit = { editing = station },
@@ -185,11 +219,13 @@ internal fun RadioContent(model: RufinConnection, player: PlayerConnection, stat
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap),
             contentPadding = PaddingValues(bottom = 12.dp + LocalPlayerBottomPadding.current)) {
             // The station that plays, or the page's first one ready to play: always there, so a station
-            // going on air moves nothing under it. Its band reaches the page's edges.
+            // going on air moves nothing under it.
             page.onAir?.let { onAir ->
                 item(key = "onAir") {
-                    OnAirHeader(onAir, player, onToggle = { if (onAir.tuned) player.togglePlayback() else play(onAir.station) },
-                        onHomepage = { model.runAction { openMediaUri(context, onAir.station.homepage) } })
+                    OnAirHeader(onAir, player, Modifier.padding(start = edge, end = edge, top = gap),
+                        onToggle = { if (onAir.tuned) player.togglePlayback() else play(onAir.station) },
+                        onHomepage = { model.runAction { openMediaUri(context, onAir.station.homepage) } },
+                        onPin = { pin, pinned -> model.browse.pin(pin, pinned) }, onEdit = { editing = onAir.station })
                 }
             }
             if (query.isEmpty() || stations.isNotEmpty()) item(key = "stations") { SectionHeading("Stations", edge) }
@@ -256,21 +292,44 @@ private fun CardButton(icon: String, label: String, active: Boolean = false, onC
     }
 }
 
+/** A station's pin, which `button` draws with its label and whether it is on. The pin of a station with
+ *  channels lists them: each is saved by itself. */
+@Composable
+private fun StationPin(station: Station, pin: SidebarPin, onPin: (SidebarPin, Boolean) -> Unit,
+    button: @Composable (label: String, active: Boolean, onClick: () -> Unit) -> Unit) {
+    if (station.channels.isEmpty()) button(if (station.pinned) "Remove from Saved" else "Add to Saved", station.pinned) { onPin(pin, !station.pinned) }
+    else Box {
+        var saving by remember { mutableStateOf(false) }
+        button("Add to Saved", station.pinned || station.channels.any { it.pinned }) { saving = true }
+        DropdownMenu(saving, { saving = false }) {
+            station.channels.forEach { channel ->
+                DropdownMenuItem(text = { Text(channel.name) },
+                    onClick = { saving = false; channel.pin?.let { onPin(it, !channel.pinned) } },
+                    trailingIcon = if (channel.pinned) { { RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp)) } } else null)
+            }
+        }
+    }
+}
+
 /** A station card: its picture, name, genres, description and channels. A tap plays the station, a
  *  channel's chip that channel; a suggested one ends with +. A long press on an added one opens Select,
  *  where it ends with its pin, Edit, Delete and the handle it is dragged to another's place by, as Saved's rows.
- *  The pin of a station with channels lists them: each is saved by itself. */
+ *  `shift` is how far it stands from its place while another card is dragged past it (`dragging`). */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun StationCard(station: Station, player: PlayerConnection, savedOn: String?, logo: Dp, modifier: Modifier,
-    selecting: Boolean, gap: Dp, onSelect: () -> Unit, onMoved: (Int, Int) -> Unit,
+    selecting: Boolean, gap: Dp, shift: Offset, dragging: Boolean, onSelect: () -> Unit,
+    onDrag: (Int, Int, Offset) -> Unit, onDrop: (Boolean) -> Unit,
     onPlay: (String?) -> Unit, onPin: (SidebarPin, Boolean) -> Unit, onEdit: () -> Unit, onDelete: () -> Unit, onAdd: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     var drag by remember { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val step = with(LocalDensity.current) { gap.toPx() }
-    val moved by rememberUpdatedState(onMoved)
-    Surface(modifier.zIndex(if (drag == Offset.Zero) 0f else 1f).graphicsLayer { translationX = drag.x; translationY = drag.y }
+    val dragged by rememberUpdatedState(onDrag)
+    val dropped by rememberUpdatedState(onDrop)
+    // The others slide to where they stand; the drop puts every card in its new place at once.
+    val slide by animateOffsetAsState(shift, if (dragging) spring() else snap(), label = "stationSlide")
+    Surface(modifier.zIndex(if (drag == Offset.Zero) 0f else 1f).graphicsLayer { translationX = drag.x + slide.x; translationY = drag.y + slide.y }
         .onSizeChanged { size = it }.focusRing(RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
         .combinedClickable(onClick = { onPlay(null) }, onLongClick = onSelect.takeIf { station.key != null }),
         shape = RoundedCornerShape(18.dp), color = scheme.surfaceContainerHigh, contentColor = scheme.onSurface) {
@@ -285,32 +344,18 @@ private fun StationCard(station: Station, player: PlayerConnection, savedOn: Str
                     if (selecting) {
                         // Without Saved a station has no pin.
                         station.pin?.let { pin ->
-                            if (station.channels.isEmpty()) CardButton("rufin-bookmark-symbolic",
-                                translate(if (station.pinned) "Remove from Saved" else "Add to Saved"), station.pinned) { onPin(pin, !station.pinned) }
-                            else Box {
-                                var saving by remember { mutableStateOf(false) }
-                                CardButton("rufin-bookmark-symbolic", translate("Add to Saved"),
-                                    station.pinned || station.channels.any { it.pinned }) { saving = true }
-                                DropdownMenu(saving, { saving = false }) {
-                                    station.channels.forEach { channel ->
-                                        DropdownMenuItem(text = { Text(channel.name) },
-                                            onClick = { saving = false; channel.pin?.let { onPin(it, !channel.pinned) } },
-                                            leadingIcon = {
-                                                if (channel.pinned) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp))
-                                                else Spacer(Modifier.size(18.dp))
-                                            })
-                                    }
-                                }
-                            }
+                            StationPin(station, pin, onPin) { label, active, click -> CardButton(if (active) "rufin-bookmark-filled-symbolic" else "rufin-bookmark-symbolic", translate(label), active, click) }
                         }
                         CardButton("rufin-document-edit-symbolic", translate("Edit"), onClick = onEdit)
                         CardButton("rufin-user-trash-symbolic", translate("Delete"), onClick = onDelete)
                         Box(Modifier.size(40.dp).pointerInput(station.key) {
-                            detectDragGestures(onDragEnd = {
-                                if (size.width > 0 && size.height > 0)
-                                    moved(Math.round(drag.x / (size.width + step)), Math.round(drag.y / (size.height + step)))
-                                drag = Offset.Zero
-                            }, onDragCancel = { drag = Offset.Zero }) { change, amount -> change.consume(); drag += amount }
+                            detectDragGestures(onDragEnd = { dropped(true); drag = Offset.Zero },
+                                onDragCancel = { dropped(false); drag = Offset.Zero }) { change, amount ->
+                                change.consume()
+                                drag += amount
+                                if (size.width > 0 && size.height > 0) dragged(Math.round(drag.x / (size.width + step)),
+                                    Math.round(drag.y / (size.height + step)), Offset(size.width + step, size.height + step))
+                            }
                         }, contentAlignment = Alignment.Center) {
                             RufinIcon("rufin-list-drag-handle-symbolic", translate("Drag to reorder"), Modifier.size(20.dp), scheme.onSurfaceVariant)
                         }
@@ -341,122 +386,108 @@ private fun StationCard(station: Station, player: PlayerConnection, savedOn: Str
     }
 }
 
-/** The station on air, in the shape of the album page's header (`DetailHeader`): the picture over the
- *  edge of a band of its colours (on it, on a phone), the station with its channel, the announced song and
- *  its artist on the band beside it, then the facts, the genres and the buttons on the page, and the
- *  songs heard under or beside those. Every row keeps its room while it is empty, so the header is one
- *  height whatever plays. The facts sit in the buttons' row, between Play and the homepage. */
+/** The station on air, one card in its band's colours: its picture and, ending level with it, the station
+ *  with its channel, the announced song and its artist, one line of Live, the format and the genres, then
+ *  the buttons: Play, and an added station's pin and Edit, as its card has in Select. The songs heard before
+ *  sit under those, or beside them in a wide card. */
 @Composable
-private fun OnAirHeader(onAir: OnAir?, player: PlayerConnection, onToggle: () -> Unit, onHomepage: () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val wide = maxWidth >= 560.dp
-        // The songs heard go beside the facts and buttons only where both have room.
-        val beside = maxWidth >= 800.dp
-        val coverTop = 16.dp
-        val cover = ((maxWidth - 32.dp) * .3f).let { if (wide) it.coerceIn(164.dp, 224.dp) else it.coerceIn(112.dp, 164.dp) }
-        // Beside the picture the band holds the three lines at any font size. On a phone the picture stays
-        // on the band too, which leaves the page under it to the songs heard.
-        val lines = with(LocalDensity.current) { 84.sp.toDp() } + 16.dp
-        // Beside the text the songs heard are on the band: its caption and three rows at any font size.
-        val heard = if (beside) with(LocalDensity.current) { 124.sp.toDp() } + 24.dp else 0.dp
-        val band = if (wide) coverTop + maxOf(lines, 100.dp, heard) + 12.dp else coverTop + maxOf(lines, cover) + 16.dp
-        val station = onAir?.station
-        val stops = rememberArtwork(station?.artworkBinding, player, with(LocalDensity.current) { cover.roundToPx() }).image?.band
-        val room: Modifier = Modifier
-        val coverBox: @Composable () -> Unit = {
-            Box(Modifier.size(cover).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f))
-                .clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                StationLogo(station?.artworkBinding, player, cover)
-            }
-        }
-        val heading: @Composable () -> Unit = {
-            val text = LocalContentColor.current
-            Row(Modifier.heightIn(min = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(station?.name.orEmpty(), Modifier.weight(1f, fill = false).rufinMarquee(), maxLines = 1,
-                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                onAir?.channel?.let { channel ->
-                    Box(Modifier.height(24.dp).clip(RoundedCornerShape(12.dp)).background(text.copy(alpha = .16f)).padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center) {
-                        Text(channel, maxLines = 1, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+private fun OnAirHeader(onAir: OnAir, player: PlayerConnection, modifier: Modifier, onToggle: () -> Unit, onHomepage: () -> Unit,
+    onPin: (SidebarPin, Boolean) -> Unit, onEdit: () -> Unit) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val wide = maxWidth >= 700.dp
+        val picture = if (wide) 164.dp else (maxWidth * .34f).coerceIn(120.dp, 150.dp)
+        val station = onAir.station
+        val stops = rememberArtwork(station.artworkBinding, player, with(LocalDensity.current) { picture.roundToPx() }).image?.band
+        // The song announced now is among the names; the songs heard are the ones before it.
+        val now = onAir.heard.firstOrNull()?.let { it.title == onAir.title && it.artist == onAir.artist.orEmpty() } == true
+        val earlier = if (now) onAir.heard.drop(1) else onAir.heard
+        val top: @Composable (Modifier) -> Unit = { place ->
+            // The picture stays at the top; the text ends level with it, or grows the card past it.
+            Row(place, horizontalArrangement = Arrangement.spacedBy(if (wide) 24.dp else 16.dp)) {
+                Box(Modifier.size(picture).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f))
+                    .clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                    StationLogo(station.artworkBinding, player, picture)
+                }
+                Column(Modifier.weight(1f).heightIn(min = picture), verticalArrangement = Arrangement.Bottom) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(station.name, Modifier.weight(1f, fill = false).rufinMarquee(), maxLines = 1,
+                            style = if (wide) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold)
+                        onAir.channel?.let { channel ->
+                            Box(Modifier.height(24.dp).clip(RoundedCornerShape(12.dp)).background(OnBand.copy(alpha = .16f)).padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.Center) {
+                                Text(channel, maxLines = 1, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    onAir.title?.takeIf(String::isNotBlank)?.let { title ->
+                        Text(title, Modifier.padding(top = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                    }
+                    onAir.artist?.takeIf(String::isNotBlank)?.let { artist ->
+                        Text(artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
+                            color = OnBand.copy(alpha = .84f))
+                    }
+                    // Live and the format in the facts' pill, then the genres.
+                    MetaLine(station.genres, true, Modifier.padding(top = if (wide) 12.dp else 8.dp)) {
+                        FactsPill(listOfNotNull(onAir.format?.takeIf(String::isNotBlank)?.let { Triple("rufin-sound-symbolic", "Format", it) })) {
+                            LiveMark(MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                    Box(Modifier.padding(top = 12.dp)) {
+                        ButtonRow { labels ->
+                            if (onAir.playing) ShowcasePill("rufin-media-playback-pause-symbolic", "Pause", true, onToggle, labelled = labels == 2)
+                            else ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, onToggle, labelled = labels == 2)
+                            if (station.key != null) {
+                                station.pin?.let { pin ->
+                                    StationPin(station, pin, onPin) { label, active, click ->
+                                        ShowcaseRound(if (active) "rufin-bookmark-filled-symbolic" else "rufin-bookmark-symbolic", label, click, OnBand, onBand = true)
+                                    }
+                                }
+                                ShowcaseRound("rufin-document-edit-symbolic", "Edit", onEdit, onBand = true)
+                            }
+                            if (station.homepage.isNotBlank()) ShowcaseRound("rufin-external-link-symbolic", "Open homepage", onHomepage, onBand = true)
+                        }
                     }
                 }
             }
-            Text(onAir?.title.orEmpty(), Modifier.padding(top = 2.dp), maxLines = 1,
-                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-            Text(onAir?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
-                color = text.copy(alpha = .84f))
         }
-        // The chips' room stays for a station without genres.
-        val genres: @Composable (Boolean) -> Unit = { centred ->
-            Box(Modifier.fillMaxWidth().height(28.dp)) { GenreChips(station?.genres.orEmpty(), centred, null) }
-        }
-        val buttons: @Composable (Boolean) -> Unit = { centred ->
-            Row(room.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, if (centred) Alignment.CenterHorizontally else Alignment.Start),
-                verticalAlignment = Alignment.CenterVertically) {
-                if (onAir?.playing == true) ShowcasePill("rufin-media-playback-pause-symbolic", "Pause", true, onToggle)
-                else ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, onToggle)
-                FactsPill(listOfNotNull(onAir?.format?.takeIf(String::isNotBlank)?.let { Triple("rufin-sound-symbolic", "Format", it) }),
-                    Modifier.weight(1f, fill = false), onBand = false) { LiveMark(MaterialTheme.typography.labelSmall) }
-                if (station?.homepage?.isNotBlank() == true) ShowcaseRound("rufin-external-link-symbolic", "Open homepage", onHomepage)
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(band).then(showcaseBand(stops)))
-        if (wide) Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = coverTop, bottom = 8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                coverBox()
-                Column(Modifier.weight(1f)) {
-                    Column(Modifier.fillMaxWidth().height(band - coverTop - 12.dp), verticalArrangement = Arrangement.Bottom) {
-                        CompositionLocalProvider(LocalContentColor provides OnBand) { heading() }
-                    }
-                    Column(Modifier.padding(top = 24.dp)) { genres(false) }
-                    Spacer(Modifier.height(14.dp))
-                    buttons(false)
+        val card = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).then(showcaseBand(stops)).padding(if (wide) 20.dp else 16.dp)
+        val line = Color.White.copy(alpha = .16f)
+        CompositionLocalProvider(LocalContentColor provides OnBand) {
+            if (wide) Row(card, verticalAlignment = Alignment.CenterVertically) {
+                top(Modifier.weight(1f))
+                if (earlier.isNotEmpty()) Heard(earlier, Modifier.padding(start = 24.dp).width(340.dp)
+                    .drawBehind { drawLine(line, Offset.Zero, Offset(0f, size.height), 1.dp.toPx()) }.padding(start = 20.dp))
+            } else Column(card) {
+                top(Modifier.fillMaxWidth())
+                if (earlier.isNotEmpty()) {
+                    HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 12.dp), color = line)
+                    Heard(earlier, Modifier.fillMaxWidth())
                 }
-                if (beside) CompositionLocalProvider(LocalContentColor provides OnBand) {
-                    Heard(onAir?.heard.orEmpty(), 3, room.width(260.dp), LocalContentColor.current.copy(alpha = .84f))
-                }
-            }
-            if (!beside) Heard(onAir?.heard.orEmpty(), 2, room.padding(top = 16.dp).fillMaxWidth())
-        } else Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-            Row(Modifier.fillMaxWidth().height(band).padding(start = 16.dp, end = 16.dp, top = coverTop, bottom = 16.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                coverBox()
-                Column(Modifier.weight(1f)) { CompositionLocalProvider(LocalContentColor provides OnBand) { heading() } }
-            }
-            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                genres(false)
-                buttons(false)
-                Heard(onAir?.heard.orEmpty(), 2, room.fillMaxWidth())
             }
         }
     }
 }
 
-/** The songs the station announced, newest first, in `slots` rows that keep their room while they are
- *  empty: the time each began, "now" for the one that plays, then its title over its artist. */
+/** The songs the station announced before the one that plays, newest first, a line each on the on-air
+ *  card: the time it began, its title, then its artist. */
 @Composable
-private fun Heard(songs: List<HeardSong>, slots: Int, modifier: Modifier, secondary: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+private fun Heard(songs: List<HeardSong>, modifier: Modifier) {
     val clock = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     // A time's width at any font size, so the titles start in one line.
     val time = with(LocalDensity.current) { 44.sp.toDp() }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(translate("Heard").uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = secondary)
-        repeat(slots) { index ->
-            val song = songs.getOrNull(index)
-            Box(contentAlignment = Alignment.CenterStart) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(when {
-                        song == null -> ""
-                        index == 0 -> translate("now")
-                        else -> clock.format(Date(song.atUnixSeconds * 1000))
-                    }, Modifier.width(time).alignByBaseline(), maxLines = 1, style = MaterialTheme.typography.bodySmall, color = secondary)
-                    Column(Modifier.weight(1f).alignByBaseline()) {
-                        Text(song?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium)
-                        Text(song?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                            color = secondary)
-                    }
-                }
+    val dim = OnBand.copy(alpha = .72f)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(translate("Heard").uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = dim)
+        songs.forEach { song ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(clock.format(Date(song.atUnixSeconds * 1000)), Modifier.width(time).alignByBaseline(), maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall, color = dim)
+                Text(buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(song.title) }
+                    if (song.artist.isNotBlank()) withStyle(SpanStyle(color = dim)) { append("  ${song.artist}") }
+                }, Modifier.weight(1f).alignByBaseline(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
