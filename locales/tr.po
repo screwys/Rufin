@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-15 13:58+0000\n"
+"PO-Revision-Date: 2026-11-15 14:29+0000\n"
 "Last-Translator: US <uma@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Turkish <https://hosted.weblate.org/projects/rufin/app/tr/>\n"
 "Language: tr\n"
@@ -103,9 +103,8 @@ msgstr ""
 "Günlüklerde gizli bilgiler ve mutlak klasör yolları gizlenir, ancak "
 "paylaşmadan önce yine de günlükleri gözden geçirmek isteyebilirsiniz"
 
-#, fuzzy
 msgid "No results ¯\\_(°╭╮°)_/¯"
-msgstr "Sonuç yok"
+msgstr "Sonuç yok ¯\\_(°╭╮°)_/¯"
 
 msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
@@ -587,7 +586,7 @@ msgid "Application name"
 msgstr "Uygulama adı"
 
 msgid "Applies to sidebar and fullscreen separately"
-msgstr "Kenar çubuğu ve tam ekran için ayrı ayrı geçerlidir"
+msgstr "Kenar çubuğu ve tam ekrana ayrı ayrı uygulanır"
 
 msgid "Apply"
 msgstr "Uygula"
@@ -674,7 +673,6 @@ msgstr "Yayınlama sırasında ses işleme kullanılamaz"
 msgid "Audio"
 msgstr "Ses"
 
-#, fuzzy
 msgid "Audioscrobbler API"
 msgstr "Audioscrobbler API"
 
@@ -4132,10 +4130,8 @@ msgstr "Oturum aç"
 msgid "Signing in..."
 msgstr "Oturum açılıyor..."
 
-#, fuzzy
-#| msgid "Similar artists"
 msgid "Similar artists from ListenBrainz"
-msgstr "ListenBrainz'dan benzer sanatçılar"
+msgstr "ListenBrainz benzer sanatçılar"
 
 msgid "Similar artists"
 msgstr "Benzer sanatçılar"
@@ -4246,9 +4242,8 @@ msgstr "Kaynak"
 msgid "Sources"
 msgstr "Kaynaklar"
 
-#, fuzzy
 msgid "Spectrum · dBFS"
-msgstr "Spektrum \\\\302\\\\267 dBFS"
+msgstr "Spektrum · dBFS"
 
 msgid "Spectrum line"
 msgstr "Spektrum çizgisi"
@@ -4365,7 +4360,7 @@ msgid "Synced lyrics"
 msgstr "Eşzamanlı şarkı sözleri"
 
 msgid "Synced lyrics, some word by word"
-msgstr "Senkronize şarkı sözleri, bazıları kelime kelime"
+msgstr "Eşzamanlı şarkı sözleri, bazıları kelime kelime"
 
 msgid "System default"
 msgstr "Sistem varsayılanı"
@@ -4521,10 +4516,8 @@ msgstr "Her çalma listesinden parçalar"
 msgid "Tracks from your five latest albums"
 msgstr "En son beş albümünüzden parçalar"
 
-#, fuzzy
-#| msgid "Track details"
 msgid "Tracks per refill"
-msgstr "Parça ayrıntıları"
+msgstr "Yenileme başına parça sayısı"
 
 msgid "Tracks"
 msgstr "Parçalar"
@@ -4677,10 +4670,8 @@ msgstr ""
 "Oynatma, şarkı sözleri ve desteklenen meta veri düzenleme için yerel "
 "dosyaları kullan"
 
-#, fuzzy
-#| msgid "Use Instant Mix for recommendations"
 msgid "Use server recommendations"
-msgstr "Öneriler için Instant Mix kullan"
+msgstr "Sunucu önerilerini kullanın"
 
 msgid "Use sort tags"
 msgstr "Sıralama etiketlerini kullan"
@@ -4887,7 +4878,7 @@ msgid "is not"
 msgstr "eşit değildir"
 
 msgid "is"
-msgstr "eşittir"
+msgstr "şudur"
 
 msgid "kbps"
 msgstr "kbps"
