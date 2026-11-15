@@ -4,8 +4,8 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use crate::widgets::layout::configure_fill_width_clip;
 
 const ROUTE_SCROLL_OWNER_CLASS: &str = "route-scroll-owner";
-/// Under this width a detail page's cover takes its own row.
-pub const DETAIL_SHOWCASE_STACKED_WIDTH: i32 = 560;
+/// Under this width a showcase takes its small cover, band and insets.
+pub const DETAIL_SHOWCASE_NARROW_WIDTH: i32 = 560;
 pub const ROUTE_TOP_MARGIN: i32 = 8;
 pub const PRIMARY_ROUTE_MARGIN_START: i32 = 10;
 pub const PRIMARY_ROUTE_MARGIN_END: i32 = 10;
@@ -30,13 +30,13 @@ pub fn detail_route_inner_width_for_viewport(viewport_width: i32, horizontal_ins
         .max(1)
 }
 
-/// A detail page's cover side at `width`: centred in its own row when narrow, beside the
-/// text from [`DETAIL_SHOWCASE_STACKED_WIDTH`], growing to 224 px.
+/// A showcase cover's side at `width`: never narrower than its hover controls when narrow,
+/// growing to 224 px from [`DETAIL_SHOWCASE_NARROW_WIDTH`].
 pub fn detail_showcase_cover_size(width: i32) -> i32 {
-    if width < DETAIL_SHOWCASE_STACKED_WIDTH {
-        (width - 32).clamp(72, 196)
+    if width < DETAIL_SHOWCASE_NARROW_WIDTH {
+        ((width - 32) * 3 / 10).clamp(crate::widgets::cover_controls::cover_hover_min_width(), 150)
     } else {
-        164 + (width - DETAIL_SHOWCASE_STACKED_WIDTH).min(200) * 60 / 200
+        164 + (width - DETAIL_SHOWCASE_NARROW_WIDTH).min(200) * 60 / 200
     }
 }
 
