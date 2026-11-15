@@ -261,26 +261,14 @@ msgstr ""
 msgid "12 hours"
 msgstr ""
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr ""
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "最新的 5 張專輯"
@@ -5063,6 +5051,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "定位資料夾"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "串流品質"
+
 msgid "Stream quality"
 msgstr "串流品質"
 
@@ -5713,9 +5706,6 @@ msgstr "不是"
 msgid "is"
 msgstr "是"
 
-msgid "kbps"
-msgstr "kbps"
-
 msgid "not in the last"
 msgstr ""
 
@@ -5912,6 +5902,21 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #, fuzzy
 #~| msgid "Window"

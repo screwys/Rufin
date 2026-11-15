@@ -271,26 +271,14 @@ msgstr ""
 msgid "12 hours"
 msgstr "12 tuntia"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 tuntia"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 uusinta albumia"
@@ -4990,6 +4978,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "Valitse kansio"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Suoratoiston laatu"
+
 msgid "Stream quality"
 msgstr "Suoratoiston laatu"
 
@@ -5657,9 +5650,6 @@ msgstr "ei ole"
 msgid "is"
 msgstr "on"
 
-msgid "kbps"
-msgstr "kbps"
-
 msgid "not in the last"
 msgstr ""
 
@@ -5881,6 +5871,21 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Jono ja siirtymät"

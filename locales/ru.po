@@ -334,26 +334,14 @@ msgstr "10 диапазонов"
 msgid "12 hours"
 msgstr "12 часов"
 
-msgid "128 kbps"
-msgstr "128 кбит/с"
-
 msgid "18 bands"
 msgstr "18 диапазонов"
-
-msgid "192 kbps"
-msgstr "192 кбит/с"
 
 msgid "24 hours"
 msgstr "24 часа"
 
-msgid "256 kbps"
-msgstr "256 кбит/с"
-
 msgid "31 bands"
 msgstr "31 диапазон"
-
-msgid "320 kbps"
-msgstr "320 кбит/с"
 
 msgid "5 Latest Albums"
 msgstr "5 последних альбомов"
@@ -4498,6 +4486,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "Адрес ретранслятора"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Качество потока"
+
 msgid "Stream quality"
 msgstr "Качество потока"
 
@@ -5092,9 +5085,6 @@ msgstr "не является"
 msgid "is"
 msgstr "является"
 
-msgid "kbps"
-msgstr "кбит/с"
-
 #, fuzzy
 #| msgid "Finish the last track"
 msgid "not in the last"
@@ -5327,6 +5317,21 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 кбит/с"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 кбит/с"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 кбит/с"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 кбит/с"
+
+#~ msgid "kbps"
+#~ msgstr "кбит/с"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Очередь и переходы"

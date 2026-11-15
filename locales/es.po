@@ -337,26 +337,14 @@ msgstr "10 bandas"
 msgid "12 hours"
 msgstr "12 horas"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr "18 bandas"
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 Horas"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr "31 bandas"
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 Últimos álbumes"
@@ -4471,6 +4459,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "Dirección del relay"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Calidad de transmisión"
+
 msgid "Stream quality"
 msgstr "Calidad de transmisión"
 
@@ -5074,9 +5067,6 @@ msgstr "no está"
 msgid "is"
 msgstr "está"
 
-msgid "kbps"
-msgstr "kbps"
-
 #, fuzzy
 #| msgid "Finish the last track"
 msgid "not in the last"
@@ -5303,6 +5293,21 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Cola y transiciones"

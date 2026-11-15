@@ -333,26 +333,14 @@ msgstr "10 bant"
 msgid "12 hours"
 msgstr "12 saat"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr "18 bant"
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 saat"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr "31 bant"
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "En Son 5 Albüm"
@@ -3752,7 +3740,8 @@ msgstr "Kaydedilmiş oturumlar"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] "Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[0] ""
+"Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
 msgstr[1] ""
 "Eşleme kaydedildi. {total} sunucular yolundan {matched} tanesi eşleşiyor"
 
@@ -4304,6 +4293,11 @@ msgstr "Hesaplanan ses yüksekliğini desteklenen Yerel müzik dosyalarında sak
 
 msgid "Stream address"
 msgstr "Akış adresi"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Akış kalitesi"
 
 msgid "Stream quality"
 msgstr "Akış kalitesi"
@@ -4880,9 +4874,6 @@ msgstr "eşit değildir"
 msgid "is"
 msgstr "şudur"
 
-msgid "kbps"
-msgstr "kbps"
-
 msgid "not in the last"
 msgstr "son ... içinde değil"
 
@@ -5087,6 +5078,21 @@ msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Rufin Kurulumuna Hoş Geldiniz"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Kuyruk ve geçişler"

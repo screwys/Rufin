@@ -313,26 +313,14 @@ msgstr ""
 msgid "12 hours"
 msgstr "12 stundas"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 stundas"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 jaunākie albumi"
@@ -4999,6 +4987,11 @@ msgstr "Saglabāt aprēķināto skaļumu atbalstītajos lokālajos mūzikas fail
 msgid "Stream address"
 msgstr "Izvēlēties adresi"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Straumes kvalitāte"
+
 msgid "Stream quality"
 msgstr "Straumes kvalitāte"
 
@@ -5669,9 +5662,6 @@ msgstr "nav"
 msgid "is"
 msgstr "ir"
 
-msgid "kbps"
-msgstr "kbit/s"
-
 msgid "not in the last"
 msgstr ""
 
@@ -5920,6 +5910,21 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbit/s"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Rinda un pārejas"

@@ -302,26 +302,14 @@ msgstr ""
 msgid "12 hours"
 msgstr "12 ore"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 ore"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 Ultimi Album"
@@ -4661,6 +4649,9 @@ msgstr ""
 msgid "Stream address"
 msgstr "Seleziona un indirizzo"
 
+msgid "Stream quality on mobile data"
+msgstr ""
+
 msgid "Stream quality"
 msgstr ""
 
@@ -5275,9 +5266,6 @@ msgstr ""
 msgid "is"
 msgstr ""
 
-msgid "kbps"
-msgstr ""
-
 msgid "not in the last"
 msgstr ""
 
@@ -5475,6 +5463,18 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
 
 #~ msgid "All tracks"
 #~ msgstr "Tutte le Tracce"

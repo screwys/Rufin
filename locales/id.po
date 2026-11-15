@@ -334,30 +334,14 @@ msgstr "10 pita"
 msgid "12 hours"
 msgstr "12 jam"
 
-#, fuzzy
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr "18 pita"
-
-#, fuzzy
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 jam"
 
-#, fuzzy
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr "31 pita"
-
-#, fuzzy
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 Album Terbaru"
@@ -4457,6 +4441,9 @@ msgstr ""
 msgid "Stream address"
 msgstr "Alamat alternatif"
 
+msgid "Stream quality on mobile data"
+msgstr ""
+
 msgid "Stream quality"
 msgstr ""
 
@@ -5037,9 +5024,6 @@ msgstr ""
 msgid "is"
 msgstr ""
 
-msgid "kbps"
-msgstr ""
-
 #, fuzzy
 #| msgid "Finish the last track"
 msgid "not in the last"
@@ -5242,6 +5226,22 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#, fuzzy
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#, fuzzy
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#, fuzzy
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
 
 #~ msgid "All tracks"
 #~ msgstr "Semua lagu"

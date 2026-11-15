@@ -340,26 +340,14 @@ msgstr "10 bandes"
 msgid "12 hours"
 msgstr "12 heures"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr "18 bandes"
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 heures"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr "31 bandes"
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 derniers albums"
@@ -4341,6 +4329,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "Adresse du flux"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Qualité du flux"
+
 msgid "Stream quality"
 msgstr "Qualité du flux"
 
@@ -4695,7 +4688,8 @@ msgid "Use different layout below a threshold width"
 msgstr "Utiliser une disposition différente sous une largeur seuil"
 
 msgid "Use each track's own cover when available"
-msgstr "Utiliser la pochette propre à chaque morceau lorsqu’elle est disponible"
+msgstr ""
+"Utiliser la pochette propre à chaque morceau lorsqu’elle est disponible"
 
 msgid "Use existing"
 msgstr "Utiliser les éléments existants"
@@ -4922,9 +4916,6 @@ msgstr "n'est pas"
 msgid "is"
 msgstr "est"
 
-msgid "kbps"
-msgstr "kbps"
-
 msgid "not in the last"
 msgstr "pas dans les derniers"
 
@@ -4965,7 +4956,8 @@ msgstr[1] "il y a {count} jours"
 msgid "{count} entry matches no track in the library."
 msgid_plural "{count} entries match no track in the library."
 msgstr[0] "{count} entrée ne correspond à aucun morceau de la bibliothèque."
-msgstr[1] "{count} entrées ne correspondent à aucun morceau de la bibliothèque."
+msgstr[1] ""
+"{count} entrées ne correspondent à aucun morceau de la bibliothèque."
 
 msgid "{count} entry"
 msgid_plural "{count} entries"
@@ -5132,6 +5124,21 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "File d’attente et transitions"

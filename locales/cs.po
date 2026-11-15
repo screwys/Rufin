@@ -274,26 +274,14 @@ msgstr ""
 msgid "12 hours"
 msgstr ""
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr ""
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 nejnovějších alb"
@@ -5185,6 +5173,11 @@ msgstr ""
 msgid "Stream address"
 msgstr "Vyhledat složku"
 
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Kvalita streamu"
+
 msgid "Stream quality"
 msgstr "Kvalita streamu"
 
@@ -5857,9 +5850,6 @@ msgstr "není"
 msgid "is"
 msgstr "je"
 
-msgid "kbps"
-msgstr "kbps"
-
 msgid "not in the last"
 msgstr ""
 
@@ -6086,6 +6076,21 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
 
 #~ msgid "Queue and transitions"
 #~ msgstr "Fronta a přechody"
