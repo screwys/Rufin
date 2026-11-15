@@ -52,6 +52,7 @@
                 ./resources/io.github.screwys.Rufin.metainfo.xml
                 ./resources/themes
                 ./locales
+                ./radio-stations
                 ./web
               ];
             };

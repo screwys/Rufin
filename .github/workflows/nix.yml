@@ -17,6 +17,7 @@ on:
       - resources/**
       - vendor/**
       - packaging/linux/**
+      - radio-stations/**
       - web/**
       - flake.lock
       - flake.nix
