@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-11 09:01+0000\n"
+"PO-Revision-Date: 2026-11-15 16:13+0000\n"
 "Last-Translator: Javcar Tech <javcarr@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Spanish <https://hosted.weblate.org/projects/rufin/app/es/>\n"
 "Language: es\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.11.2.dev0\n"
+"X-Generator: Weblate 2026.12.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
@@ -222,9 +222,9 @@ msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
-"Rufín calculará los metadatos EBU R128 de toda la librería. Esto puede usar "
-"una cantidad significativa de CPU, batería y ancho de banda de red por un "
-"largo periodo de tiempo."
+"Rufín calculará los metadatos EBU R128 de toda la biblioteca. Esto puede "
+"usar una cantidad significativa de CPU, batería y ancho de banda de red por "
+"un largo periodo de tiempo."
 
 msgid ""
 "Some changes were saved. Close this editor and reopen it to review the "
@@ -236,8 +236,8 @@ msgstr ""
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
-"El espacio temporal de la librería está en uso. Los cambios podrían perderse "
-"cuando se cierre Rufin."
+"El espacio temporal de la biblioteca está en uso. Los cambios podrían "
+"perderse cuando se cierre Rufin."
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -486,7 +486,7 @@ msgid "Add to folder"
 msgstr "Agregar a la carpeta"
 
 msgid "Add to library"
-msgstr "Añadir a la librería"
+msgstr "Añadir a la biblioteca"
 
 #, fuzzy
 #| msgid "Add to Saved"
@@ -1376,10 +1376,8 @@ msgstr "Por defecto"
 msgid "Default"
 msgstr "Por defecto"
 
-#, fuzzy
-#| msgid "Delete preset"
 msgid "Delete Permanently?"
-msgstr "Elimininar preajuste"
+msgstr "Elimininar Permanentemente?"
 
 msgid "Delete Playlist"
 msgstr "Eliminar lista de reproducción"
@@ -1585,10 +1583,8 @@ msgstr "Arrastra para ordenar"
 msgid "Drag to reorder"
 msgstr "Arrastra para ordenar"
 
-#, fuzzy
-#| msgid "Drag to reorder"
 msgid "Drag to reorder."
-msgstr "Arrastra para ordenar"
+msgstr "Arrastra para ordenar."
 
 msgid "Duplicate preset"
 msgstr "Duplicar preajuste"
@@ -1730,13 +1726,11 @@ msgstr ""
 msgid "Enter your user token first"
 msgstr ""
 
-#, fuzzy
-#| msgid "Username and password"
 msgid "Enter your username and password."
-msgstr "Usuario y contraseña"
+msgstr "Usuario y contraseña."
 
 msgid "Entire Library"
-msgstr "Toda la librería"
+msgstr "Toda la Biblioteca"
 
 msgid "Equalizer is controlled by the receiver"
 msgstr "El equalizador esta siendo controlado por el receptor"
@@ -2169,13 +2163,10 @@ msgstr "Importar tema"
 msgid "Import"
 msgstr "Importar"
 
-#, fuzzy
-#| msgid "Delete {count} playlist?"
-#| msgid_plural "Delete {count} playlists?"
 msgid "Imported {count} listen."
 msgid_plural "Imported {count} listens."
-msgstr[0] "¿Eliminar {count} lista de reproducción?"
-msgstr[1] "¿Eliminar {count} listas de reproducción?"
+msgstr[0] "{count} reproducción importada."
+msgstr[1] "{count} reproducciones importadas."
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2267,10 +2258,8 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr "Atajos de teclado"
 
-#, fuzzy
-#| msgid "Find your ListenBrainz user token"
 msgid "Koito, Maloja and other ListenBrainz servers."
-msgstr "Encuentra tu token de usuario de ListenBrainz"
+msgstr "Koito, Maloja y otros servidores de ListenBrainz."
 
 msgid "LED spectrum"
 msgstr "Espectro LED"
@@ -2349,7 +2338,7 @@ msgid "Library items"
 msgstr "Elementos de la biblioteca"
 
 msgid "Library"
-msgstr "Librería"
+msgstr "Biblioteca"
 
 msgid "Light"
 msgstr "Claro"
@@ -2449,7 +2438,7 @@ msgid "Local imports and access"
 msgstr "Importaciones y accesos locales"
 
 msgid "Local library"
-msgstr "Librería local"
+msgstr "Biblioteca local"
 
 msgid "Local music folder is unavailable"
 msgstr "La carpeta de música local no está disponible"
@@ -2555,10 +2544,8 @@ msgstr "Coincidencias"
 msgid "Matched"
 msgstr "Coincidencias"
 
-#, fuzzy
-#| msgid "No matching tracks"
 msgid "Matching tracks..."
-msgstr "Ninguna pista coincide"
+msgstr "Pistas con coincidencias..."
 
 msgid "Maximum frequency (Hz)"
 msgstr "Frecuencia máxima (Hz)"
@@ -4173,13 +4160,10 @@ msgstr "Servidores"
 msgid "Set the Discord activity type to Listening"
 msgstr "Establecer el tipo de actividad de Discord en \"Escuchando\""
 
-#, fuzzy
-#| msgid "{count} play"
-#| msgid_plural "{count} plays"
 msgid "Set {count} play count."
 msgid_plural "Set {count} play counts."
-msgstr[0] "{count} reproducción"
-msgstr[1] "{count} reproducciones"
+msgstr[0] "Colocar {count} reproducción."
+msgstr[1] "Colocar {count} reproducciones."
 
 msgid "Settings and sources"
 msgstr "Ajustes y fuentes"
@@ -4319,10 +4303,8 @@ msgstr "Inicia sesión con un código"
 msgid "Sign in"
 msgstr "Iniciar sesión"
 
-#, fuzzy
-#| msgid "Sign in"
 msgid "Signing in..."
-msgstr "Iniciar sesión"
+msgstr "Iniciando sesión..."
 
 #, fuzzy
 #| msgid "Similar artists"
