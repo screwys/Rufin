@@ -11,6 +11,9 @@ pub const DEFAULT_PLAYBACK_RATE: f64 = 1.0;
 pub const DEFAULT_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MIN_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MAX_AUTO_DJ_REFILL_THRESHOLD: u8 = 10;
+pub const DEFAULT_AUTO_DJ_REFILL_COUNT: u8 = 5;
+pub const MIN_AUTO_DJ_REFILL_COUNT: u8 = 1;
+pub const MAX_AUTO_DJ_REFILL_COUNT: u8 = 20;
 const PERCEPTUAL_DB_RANGE: f64 = 50.0;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

@@ -8,7 +8,8 @@ use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 pub use metadata_lookup::{ArtistImageProvider, CoverProvider};
 use playback::{
-    DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
+    DEFAULT_AUTO_DJ_REFILL_COUNT, DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_COUNT,
+    MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_COUNT, MIN_AUTO_DJ_REFILL_THRESHOLD,
     PlaybackSettings, QueueRepeatMode,
 };
 use serde::{Deserialize, Serialize};
@@ -253,6 +254,22 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     download_on_mobile_data: bool = false => set_download_on_mobile_data;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
+    /// How many tracks one Auto DJ refill adds.
+    #[serde(default = "default_auto_dj_refill_count")]
+    auto_dj_refill_count: u8 = DEFAULT_AUTO_DJ_REFILL_COUNT => set_auto_dj_refill_count;
+    /// Whether radio and Auto DJ play the server's own recommendations, Rufin's filling what
+    /// they leave short. Unset until a server that recommends well is configured or the user
+    /// chooses; unset reads as off.
+    #[serde(default)]
+    server_recommendations: Option<bool> = None => set_server_recommendations;
+    /// Whether Rufin's picks ask ListenBrainz for artists similar to the seed's.
+    #[serde(default = "default_true")]
+    auto_dj_similar_artists: bool = true => set_auto_dj_similar_artists;
+    #[serde(default)]
+    auto_dj_same_artist: library::SameArtist = library::SameArtist::default() => set_auto_dj_same_artist;
+    /// Leaves tracks rated two stars or lower out of radio and Auto DJ.
+    #[serde(default)]
+    auto_dj_skip_low_rated: bool = false => set_auto_dj_skip_low_rated;
     #[serde(default)]
     external_site_links: ExternalSiteLinkSettings = ExternalSiteLinkSettings::default() => set_external_site_links;
     #[serde(default)]
@@ -421,6 +438,11 @@ impl Settings {
         self.application.notifications_enabled
     }
 
+    /// Whether radio and Auto DJ ask the seed's server for its recommendations.
+    pub fn uses_server_recommendations(&self) -> bool {
+        self.application.server_recommendations == Some(true)
+    }
+
     pub fn allows_external_metadata_lookup(&self) -> bool {
         self.application.external_metadata_enabled && !self.application.private_mode
     }
@@ -460,6 +482,10 @@ impl Settings {
             .application
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
+        self.application.auto_dj_refill_count = self
+            .application
+            .auto_dj_refill_count
+            .clamp(MIN_AUTO_DJ_REFILL_COUNT, MAX_AUTO_DJ_REFILL_COUNT);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
         self.application.fanart_api_key = self.application.fanart_api_key.trim().to_string();
         dedupe(&mut self.application.cover_providers);
@@ -619,6 +645,10 @@ fn default_lyrics_panel_visible() -> bool {
 
 fn default_auto_dj_refill_threshold() -> u8 {
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD
+}
+
+fn default_auto_dj_refill_count() -> u8 {
+    DEFAULT_AUTO_DJ_REFILL_COUNT
 }
 
 fn sanitize_home_blocks(blocks: &mut Vec<HomeBlockKind>) {

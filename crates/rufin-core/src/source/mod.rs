@@ -3175,7 +3175,6 @@ fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, Stri
         },
         plex_settings: None,
         file_settings: None,
-        use_instant_mix: None,
         emby_connect: false,
     };
     match configuration.editable().map_err(string_error)? {
@@ -3186,12 +3185,10 @@ fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, Stri
         }
         sources::EditableSource::Credentials {
             credentials,
-            use_instant_mix,
             emby_connect,
             ..
         } => {
             editable.credentials = credentials;
-            editable.use_instant_mix = use_instant_mix;
             editable.emby_connect = emby_connect;
         }
         sources::EditableSource::Files { settings, .. } => {
@@ -4216,14 +4213,12 @@ impl SourceOwner {
         source_id: Option<SourceId>,
         kind: sources::ServerKind,
         credentials: sources::CredentialInput,
-        use_instant_mix: bool,
         connect_manually: bool,
     ) -> sources::SourceResult<()> {
         if let Some(source_id) = source_id {
             self.update_source(SourceSettingsChange::JellyfinEmby {
                 source_id,
                 credentials,
-                use_instant_mix,
                 connect_manually,
             })
             .recv()
@@ -4231,16 +4226,12 @@ impl SourceOwner {
             .map_err(|error| SourceError::Other(error.to_string()))?
             .map_err(SourceError::Other)
         } else {
-            self.configure_source(SourceSetup::JellyfinEmby {
-                kind,
-                credentials,
-                use_instant_mix,
-            })
-            .recv()
-            .await
-            .map_err(|error| SourceError::Other(error.to_string()))?
-            .map(|_| ())
-            .map_err(SourceError::Other)
+            self.configure_source(SourceSetup::JellyfinEmby { kind, credentials })
+                .recv()
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))?
+                .map(|_| ())
+                .map_err(SourceError::Other)
         }
     }
     pub async fn save_subsonic(

@@ -205,6 +205,35 @@ impl StoredSettings {
         self.ui.visualizer.migrate_named_presets();
         app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
+        self.settle_server_recommendations();
+    }
+
+    /// Server recommendations start on once a Navidrome or Plex server is configured, whose
+    /// picks are good, or where a Jellyfin or Emby source was set to its instant mix before
+    /// the choice became one setting. Once set, the choice is the user's.
+    fn settle_server_recommendations(&mut self) {
+        if self.ui.application.server_recommendations.is_some() {
+            return;
+        }
+        let recommends = self.sources.configured.iter().any(|source| {
+            match library::SourceKind::parse(&source.configuration.kind) {
+                Some(library::SourceKind::Navidrome | library::SourceKind::Plex) => true,
+                Some(library::SourceKind::Jellyfin | library::SourceKind::Emby) => {
+                    serde_json::from_str::<serde_json::Value>(
+                        &source.configuration.provider_payload,
+                    )
+                    .is_ok_and(|payload| {
+                        ["use_instant_mix", "use_jellyfin_instant_mix"]
+                            .iter()
+                            .any(|key| payload[key] == true)
+                    })
+                }
+                _ => false,
+            }
+        });
+        if recommends {
+            self.ui.application.server_recommendations = Some(true);
+        }
     }
 
     /// Whether `other` names the same scrobbling accounts and secrets; the switches may
@@ -478,6 +507,7 @@ impl SettingsFile {
 impl StoredSettings {
     fn prepare(&mut self) -> Result<(), String> {
         self.ui.sanitize();
+        self.settle_server_recommendations();
         let backup = &mut self.ui.application.backup;
         if backup.enabled
             && backup.schedule.frequency == crate::backup::format::BackupFrequency::Off

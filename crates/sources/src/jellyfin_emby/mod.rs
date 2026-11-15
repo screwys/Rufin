@@ -111,10 +111,6 @@ struct JellyfinEmbySourcePayload {
     username: String,
     trust_invalid_cert: bool,
     #[serde(default)]
-    use_jellyfin_instant_mix: Option<bool>,
-    #[serde(default)]
-    use_instant_mix: Option<bool>,
-    #[serde(default)]
     emby_connect: bool,
 }
 
@@ -127,7 +123,6 @@ pub struct JellyfinEmbySourceConfig {
     pub(crate) user_id: String,
     pub(crate) username: String,
     pub(crate) trust_invalid_cert: bool,
-    pub(crate) use_instant_mix: bool,
     pub(crate) emby_connect: bool,
 }
 
@@ -144,10 +139,6 @@ impl JellyfinEmbySourceConfig {
             user_id: payload.user_id,
             username: payload.username,
             trust_invalid_cert: payload.trust_invalid_cert,
-            use_instant_mix: payload
-                .use_instant_mix
-                .or(payload.use_jellyfin_instant_mix)
-                .unwrap_or(true),
             emby_connect: payload.emby_connect,
         })
     }
@@ -160,7 +151,6 @@ impl JellyfinEmbySourceConfig {
             "user_id": self.user_id,
             "username": self.username,
             "trust_invalid_cert": self.trust_invalid_cert,
-            "use_instant_mix": self.use_instant_mix,
             "emby_connect": self.emby_connect,
         });
         if let Some(local) = self.local_url {
@@ -186,10 +176,9 @@ pub(crate) async fn connect(
     source_id: SourceId,
     kind: ServerKind,
     credentials: CredentialInput,
-    use_instant_mix: bool,
     device_id: String,
 ) -> SourceResult<ConnectedSource> {
-    JellyfinEmbySource::authenticate(source_id, kind, credentials, use_instant_mix, device_id)
+    JellyfinEmbySource::authenticate(source_id, kind, credentials, device_id)
         .await
         .map(AuthenticatedJellyfinEmby::connected)
 }
@@ -216,7 +205,6 @@ pub(crate) async fn edit(
     current_credential: Option<String>,
     connect_manually: bool,
     mut credentials: CredentialInput,
-    use_instant_mix: bool,
     device_id: Option<String>,
 ) -> SourceResult<SourceEditResult> {
     let saved = JellyfinEmbySourceConfig::from_configuration(&current)?;
@@ -243,22 +231,15 @@ pub(crate) async fn edit(
             SourceError::InvalidConfig("the app-wide Jellyfin device ID is missing".to_string())
         })?;
         credentials.source_name = Some(name);
-        let authenticated = JellyfinEmbySource::authenticate(
-            current.source_id,
-            saved.kind,
-            credentials,
-            use_instant_mix,
-            device_id,
-        )
-        .await?;
+        let authenticated =
+            JellyfinEmbySource::authenticate(current.source_id, saved.kind, credentials, device_id)
+                .await?;
         return Ok(SourceEditResult::Connected(Box::new(
             authenticated.connected(),
         )));
     }
 
-    let reopen = address_changed
-        || credentials.trust_invalid_cert != saved.trust_invalid_cert
-        || use_instant_mix != saved.use_instant_mix;
+    let reopen = address_changed || credentials.trust_invalid_cert != saved.trust_invalid_cert;
     let configuration = crate::config::encode_provider_payload(
         current.source_id.clone(),
         saved.kind.source_kind(),
@@ -275,7 +256,6 @@ pub(crate) async fn edit(
             user_id: saved.user_id,
             username: saved.username,
             trust_invalid_cert: credentials.trust_invalid_cert,
-            use_instant_mix,
         }
         .into_payload(),
     );
@@ -335,7 +315,6 @@ pub struct JellyfinEmbySource {
     access_token: Arc<str>,
     device_id: Arc<str>,
     authorization: header::HeaderValue,
-    use_instant_mix: bool,
     trust_invalid_cert: bool,
     connect_credential: Option<connect::EmbyConnectCredential>,
     connect_token: tokio::sync::OnceCell<(String, header::HeaderValue)>,
@@ -374,7 +353,6 @@ impl JellyfinEmbySource {
             access_token: Arc::from(access_token),
             device_id: Arc::from(client_config.device_id),
             authorization,
-            use_instant_mix: config.use_instant_mix,
             trust_invalid_cert: client_config.trust_invalid_cert,
         })
     }
@@ -384,7 +362,6 @@ impl JellyfinEmbySource {
         source_id: SourceId,
         kind: ServerKind,
         credentials: CredentialInput,
-        use_instant_mix: bool,
         device_id: String,
     ) -> SourceResult<AuthenticatedJellyfinEmby> {
         let CredentialInput {
@@ -419,7 +396,6 @@ impl JellyfinEmbySource {
         Self::finish_authentication(
             source_id,
             submitted_name,
-            use_instant_mix,
             config,
             local_url,
             body.username,
@@ -431,7 +407,6 @@ impl JellyfinEmbySource {
     async fn finish_authentication(
         source_id: SourceId,
         submitted_name: Option<String>,
-        use_instant_mix: bool,
         config: JellyfinEmbyClientConfig,
         local_url: Option<String>,
         submitted_username: String,
@@ -469,7 +444,6 @@ impl JellyfinEmbySource {
                 user_id: user_id.clone(),
                 username,
                 trust_invalid_cert,
-                use_instant_mix,
             }
             .into_payload(),
         );
@@ -488,7 +462,6 @@ impl JellyfinEmbySource {
             access_token: Arc::from(credential.clone()),
             device_id: Arc::from(config.device_id),
             authorization,
-            use_instant_mix,
             trust_invalid_cert: config.trust_invalid_cert,
         };
         Ok(AuthenticatedJellyfinEmby {
@@ -562,17 +535,10 @@ mod config_tests {
     use super::*;
 
     #[test]
-    fn saved_mix_preferences_and_manual_tokens_survive_migration() {
-        for (kind, legacy, expected) in [
-            ("emby", None, true),
-            ("jellyfin", None, true),
-            ("jellyfin", Some(false), false),
-            ("jellyfin", Some(true), true),
-        ] {
-            let mut payload = serde_json::json!({"version":1,"base_url":"https://music.example","server_id":"server","user_id":"user","username":"Listener","trust_invalid_cert":false});
-            if let Some(value) = legacy {
-                payload["use_jellyfin_instant_mix"] = value.into();
-            }
+    fn a_saved_manual_token_opens_its_source() {
+        for kind in ["emby", "jellyfin"] {
+            // A payload saved while each source chose its own recommendations still reads.
+            let payload = serde_json::json!({"version":1,"base_url":"https://music.example","server_id":"server","user_id":"user","username":"Listener","trust_invalid_cert":false,"use_instant_mix":true});
             let configuration = crate::config::encode_provider_payload(
                 SourceId::new("source"),
                 kind,
@@ -580,11 +546,7 @@ mod config_tests {
                 payload,
             );
             let config = JellyfinEmbySourceConfig::from_configuration(&configuration).unwrap();
-            assert_eq!(config.use_instant_mix, expected);
             assert!(!config.emby_connect);
-            let migrated = config.into_payload();
-            assert_eq!(migrated["use_instant_mix"], expected);
-            assert!(migrated.get("use_jellyfin_instant_mix").is_none());
             let reopened = open(
                 &configuration,
                 Some("legacy-token".into()),

@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.more
 
 import io.github.screwys.rufin.settings.CustomizationSettingsPage
+import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.settings.ThemeSettingsPage
 import io.github.screwys.rufin.settings.StorageSettingsPage
 import io.github.screwys.rufin.settings.OverviewSettingsPage
@@ -99,8 +100,9 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
             }
         }
         MoreDestination.Library -> SourcesPage(model, onAddSource, onEditSource)
-        MoreDestination.General, MoreDestination.Playback,
-        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, onOutput, navigate)
+        MoreDestination.General,
+        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, navigate)
+        MoreDestination.Playback -> PlaybackPreferences(player, preferences, model.sources?.sources.orEmpty(), onOutput)
         MoreDestination.Integrations -> IntegrationsPage(model, preferences, player, openIntegration)
         MoreDestination.Integration -> integration?.let { page -> key(page.id) {
             IntegrationDetailPage(model, preferences, player, page, openIntegration, back)

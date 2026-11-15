@@ -12,6 +12,7 @@ use reqwest::blocking::Client;
 use serde_json::Value;
 use sources::{MetadataChanges, SourceEntityKind};
 
+use crate::cache::{LookupCache, cache_key};
 use crate::http::{fetch_json, fetch_optional_json, ipv4_client as client};
 
 const MUSICBRAINZ_RELEASE_SEARCH_URL: &str = "https://musicbrainz.org/ws/2/release/";
@@ -414,6 +415,70 @@ fn search_album_identity_ids(
     .map_err(|error| error.to_string())?;
     let value = fetch_musicbrainz_json(client()?, url, context)?;
     Ok(json_ids(&value, collection_pointer))
+}
+
+/// The MusicBrainz id of the artist that answers to `name` by its name, sort name or an alias,
+/// so a romanised name finds an artist listed in its own script. None when no artist does, or
+/// when a second one answers nearly as well.
+pub fn artist_id_by_name(cache: &LookupCache, name: &str) -> Result<Option<String>, String> {
+    let wanted = library::name_key(name);
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    let key = cache_key("musicbrainz-artist-id", &wanted);
+    let found = cache.fetch(&key, 30, || {
+        let query = format!("\"{}\"", musicbrainz_phrase(name));
+        let url = Url::parse_with_params(
+            MUSICBRAINZ_ARTIST_URL,
+            [("query", query.as_str()), ("fmt", "json"), ("limit", "3")],
+        )
+        .map_err(|error| error.to_string())?;
+        let value = fetch_musicbrainz_json(client()?, url, "MusicBrainz artist lookup")?;
+        Ok(named_artist(&value, &wanted))
+    })?;
+    Ok(found.flatten())
+}
+
+/// The artist of a search answer that carries the name `wanted` keys, when the next one that
+/// carries it scores well below: of two bands of one name, the search ranks the known one far
+/// ahead.
+fn named_artist(answer: &Value, wanted: &str) -> Option<String> {
+    let mut named = answer
+        .pointer("/artists")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|artist| {
+            let aliases = artist
+                .get("aliases")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|alias| alias.get("name"));
+            [artist.get("name"), artist.get("sort-name")]
+                .into_iter()
+                .flatten()
+                .chain(aliases)
+                .filter_map(Value::as_str)
+                .any(|known| {
+                    library::name_key(known) == wanted
+                        // A sort name reads "family, given".
+                        || known.split_once(", ").is_some_and(|(family, given)| {
+                            library::name_key(&format!("{given} {family}")) == wanted
+                        })
+                })
+        })
+        .filter_map(|artist| {
+            Some((
+                artist.get("id")?.as_str()?,
+                artist.get("score").and_then(Value::as_i64).unwrap_or(0),
+            ))
+        });
+    let (artist, score) = named.next()?;
+    named
+        .next()
+        .is_none_or(|(_, next)| next + 20 <= score)
+        .then(|| artist.to_owned())
 }
 
 /// The release groups and releases a recording of this artist and title is on, best match

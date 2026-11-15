@@ -62,6 +62,11 @@ const SETTINGS: &[&str] = &[
     "/playback/volume_scale",
     "/playback/stream_quality",
     "/auto_dj_refill_threshold",
+    "/auto_dj_refill_count",
+    "/server_recommendations",
+    "/auto_dj_similar_artists",
+    "/auto_dj_same_artist",
+    "/auto_dj_skip_low_rated",
     "/clear_queue_includes_current",
     "/fullscreen_lyrics_visible",
     "/fullscreen_visualizer_visible",
@@ -114,8 +119,11 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         "/artist_image_providers": rufin_core::settings::ArtistImageProvider::all().into_iter().map(|provider| provider_json(json!(provider), String::new())).collect::<Vec<_>>(),
         "/external_lyrics_providers": lyrics,
     });
+    let server_recommendations_shown = rufin_core::runtime::source::shows_server_recommendations(
+        products.source.list_sources().sources,
+    );
     Ok(
-        json!({"values": values, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors}),
+        json!({"values": values, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
     )
 }
 

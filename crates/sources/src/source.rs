@@ -982,13 +982,11 @@ impl Source {
             SourceSetup::EmbyConnect {
                 server,
                 source_name,
-                use_instant_mix,
             } => {
                 crate::jellyfin_emby::connect::connect_server(
                     source_id,
                     server,
                     source_name,
-                    use_instant_mix,
                     jellyfin_device_id.to_owned(),
                 )
                 .await
@@ -996,14 +994,12 @@ impl Source {
             SourceSetup::JellyfinQuickConnect {
                 login,
                 source_name,
-                use_instant_mix,
                 local_server_url,
             } => {
                 crate::jellyfin_emby::quick_connect::connect_quick(
                     source_id,
                     login,
                     source_name,
-                    use_instant_mix,
                     local_server_url,
                 )
                 .await
@@ -1022,16 +1018,11 @@ impl Source {
                 credentials,
             } => crate::file::remote::connect(source_id, "smb", name, settings, credentials).await,
             SourceSetup::Local { roots } => crate::file::local::connect(source_id, roots),
-            SourceSetup::JellyfinEmby {
-                kind,
-                credentials,
-                use_instant_mix,
-            } => {
+            SourceSetup::JellyfinEmby { kind, credentials } => {
                 crate::jellyfin_emby::connect(
                     source_id,
                     kind,
                     credentials,
-                    use_instant_mix,
                     jellyfin_device_id.to_owned(),
                 )
                 .await
@@ -1054,7 +1045,6 @@ impl Source {
             SourceSettingsChange::EmbyConnect {
                 server,
                 source_name,
-                use_instant_mix,
                 ..
             } => {
                 let device_id = jellyfin_device_id.ok_or_else(|| {
@@ -1064,7 +1054,6 @@ impl Source {
                     current.source_id,
                     server,
                     source_name,
-                    use_instant_mix,
                     device_id,
                 )
                 .await
@@ -1073,14 +1062,12 @@ impl Source {
             SourceSettingsChange::JellyfinQuickConnect {
                 login,
                 source_name,
-                use_instant_mix,
                 local_server_url,
                 ..
             } => crate::jellyfin_emby::quick_connect::connect_quick(
                 current.source_id,
                 login,
                 source_name,
-                use_instant_mix,
                 local_server_url,
             )
             .await
@@ -1115,7 +1102,6 @@ impl Source {
             SourceSettingsChange::JellyfinEmby {
                 connect_manually,
                 credentials,
-                use_instant_mix,
                 ..
             } => {
                 crate::jellyfin_emby::edit(
@@ -1123,7 +1109,6 @@ impl Source {
                     current_credential,
                     connect_manually,
                     credentials,
-                    use_instant_mix,
                     jellyfin_device_id,
                 )
                 .await

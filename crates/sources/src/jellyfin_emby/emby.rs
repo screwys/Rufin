@@ -209,7 +209,6 @@ mod tests {
                 user_id: "listener".into(),
                 username: "Listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret".into(),
             "device".into(),
@@ -238,18 +237,12 @@ mod tests {
                 secret: "password".into(),
                 trust_invalid_cert: false,
             },
-            false,
             "device".into(),
         )
         .await
         .unwrap();
         let (configuration, _, credential) = authenticated.connected().into_parts();
         assert_eq!(configuration.kind, "emby");
-        assert!(
-            !configuration
-                .provider_payload
-                .contains("use_jellyfin_instant_mix")
-        );
         assert!(configuration.is(library::SourceKind::playlist_tracks_can_repeat));
         let source = super::super::open(&configuration, credential, Some("device".into())).unwrap();
         let owner = crate::Source::new(
