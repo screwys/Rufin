@@ -423,15 +423,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .map_or(0, |counts| counts.1),
         0
     );
-    let malformed = root.path().join("truncated.wma");
-    let mut bytes = vec![
-        0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce,
-        0x6c,
-    ];
-    bytes.extend_from_slice(&1_000_u64.to_le_bytes());
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-    bytes.extend_from_slice(&[1, 2]);
-    fs::write(&malformed, bytes).unwrap();
+    // No type is found for these bytes. A header that a demuxer accepts and then fails on is
+    // no use here: decodebin drops an error the demuxer posts while it is still being plugged,
+    // and discovery then waits out its timeout and reports the file unreadable.
+    let malformed = root.path().join("malformed.wma");
+    fs::write(&malformed, [0x01, 0xfe].repeat(15)).unwrap();
     source
         .acquire_catalog(
             &catalog,

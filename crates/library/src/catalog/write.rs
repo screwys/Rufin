@@ -662,8 +662,10 @@ impl Catalog {
                 scopes: vec![Scope::Reload],
             }));
         }
-        SqliteTransactionManager::begin(&mut writer, None).await?;
         let changes = total_changes(&mut writer).await?;
+        // Nothing awaits between the BEGIN and the Write that rolls it back: a caller cancelled
+        // there would leave the writer in a transaction that every later Write nests in.
+        SqliteTransactionManager::begin(&mut writer, None).await?;
         Ok(Write {
             catalog: self,
             writer,
