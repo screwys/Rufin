@@ -4,6 +4,8 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::glib;
 
+const ARTWORK_RESIZE_STEP: i32 = 128;
+
 struct CoverReveal {
     animation: adw::TimedAnimation,
     softened: gtk::Picture,
@@ -384,7 +386,18 @@ impl ArtworkTile {
         self.area.set_height_request(size);
         self.area.set_size_request(size, size);
         self.area.queue_resize();
-        self.refresh_artwork_size(size);
+        // GTK scales the bound texture down, so only outgrowing it needs a new one. That one is a
+        // step larger, so resizing the window decodes the artwork a few times, not every frame.
+        let bound_size = self
+            .bound_request
+            .borrow()
+            .as_ref()
+            .map(|bound| bound.display_size);
+        if bound_size.is_some_and(|bound_size| bound_size < size) {
+            self.refresh_artwork_size(
+                (size + ARTWORK_RESIZE_STEP - 1) / ARTWORK_RESIZE_STEP * ARTWORK_RESIZE_STEP,
+            );
+        }
         let session = self
             .animation
             .borrow()

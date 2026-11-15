@@ -1309,20 +1309,26 @@ fn render_panel(
         } else {
             LibraryListKey::Queue
         };
-        panel.append(&queue_header(shell, key).widget());
+        // The header copies the column widths, so it is allocated after the fit below.
+        let frame = crate::widgets::table_header::TableFrame::new(
+            &overlay,
+            Some(&queue_header(shell, key).widget()),
+        );
         let weak = scroller.downgrade();
         let previous_height = Cell::new(0);
         let resize_offset = Rc::new(Cell::new(None));
         let before_offset = Rc::clone(&resize_offset);
-        let owner = crate::widgets::layout::allocation_owner(&overlay, move |width, height| {
-            if let Some(scroller) = weak.upgrade() {
-                let previous = previous_height.replace(height);
-                before_offset.set(
-                    (previous > 0 && previous != height).then(|| scroller.vadjustment().value()),
-                );
-                width_fit.fit_scroller_allocation(&scroller, width);
-            }
-        });
+        let owner =
+            crate::widgets::layout::allocation_owner(&frame.widget(), move |width, height| {
+                if let Some(scroller) = weak.upgrade() {
+                    let previous = previous_height.replace(height);
+                    before_offset.set(
+                        (previous > 0 && previous != height)
+                            .then(|| scroller.vadjustment().value()),
+                    );
+                    width_fit.fit_scroller_allocation(&scroller, width);
+                }
+            });
         let weak = scroller.downgrade();
         let weak_shell = Rc::downgrade(shell);
         // The table's first reveal shows the playing row at the top, whether the queue
@@ -1382,8 +1388,7 @@ fn render_panel(
         .is_some_and(|queue| queue.reveal_current[usize::from(fullscreen)].get())
     {
         scroller
-            .parent()
-            .and_then(|overlay| overlay.parent())
+            .ancestor(crate::widgets::layout::AllocationOwner::static_type())
             .expect("queue allocation owner")
             .queue_allocate();
     }
@@ -1401,8 +1406,8 @@ fn queue_panel_scroller(panel: &gtk::Box) -> Option<gtk::ScrolledWindow> {
 }
 
 fn queue_scroller_in(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
-    if let Ok(scroller) = widget.clone().downcast::<gtk::ScrolledWindow>() {
-        return Some(scroller);
+    if widget.has_css_class("queue-scroller") {
+        return widget.clone().downcast::<gtk::ScrolledWindow>().ok();
     }
     let mut child = widget.first_child();
     while let Some(widget) = child {
