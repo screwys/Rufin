@@ -1214,6 +1214,8 @@ impl Source {
         match &self.implementation {
             Implementation::OpenSubsonic(_) | Implementation::Peer(_) => true,
             Implementation::Files(files) => !files.has_notifications(),
+            // The check walks the folders once they have gone an hour without a walk.
+            Implementation::Local(_) => true,
             _ => false,
         }
     }
@@ -1257,6 +1259,7 @@ impl Source {
                     (Implementation::Plex(_) | Implementation::JellyfinEmby(_), _) => true,
                     (_, Some(_)) => !accepted,
                     (Implementation::OpenSubsonic(_), None) => daily,
+                    (Implementation::Local(local), None) => local.rescan_due(),
                     (implementation, None) => matches!(implementation, Implementation::Files(_)),
                 };
                 if !full {
@@ -1271,7 +1274,12 @@ impl Source {
             changes.start_observation().await?;
             let mut started = unix_now();
             let report = |value| {
-                if !check || !matches!(&self.implementation, Implementation::Files(_)) {
+                if !check
+                    || !matches!(
+                        &self.implementation,
+                        Implementation::Files(_) | Implementation::Local(_)
+                    )
+                {
                     progress(value);
                 }
             };

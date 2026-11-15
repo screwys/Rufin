@@ -341,6 +341,8 @@ pub enum SourceError {
     Server { status: u16, message: String },
     #[error("source item was not found")]
     NotFound,
+    #[error("source denied access: {0}")]
+    Denied(String),
     #[error("source request is invalid: {0}")]
     InvalidRequest(&'static str),
     #[error("source operation was cancelled")]

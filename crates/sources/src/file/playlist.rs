@@ -66,7 +66,7 @@ pub async fn import_local_playlist_file(
                     true
                 }
                 media::MediaRead::Rejected => false,
-                media::MediaRead::Unreadable => true,
+                media::MediaRead::Unreadable | media::MediaRead::Deferred => true,
             }
         });
         document.skipped += (before - document.entries.len()) as u64;
