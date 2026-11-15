@@ -119,7 +119,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let login=serde_json::json!({"client_id":"source-switch-fixture","token":"fixture-token","account_id":"user","profiles":{},"resources":{},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
     let root = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Handle::current();
-    let settings = SettingsFile::open(root.path().join("settings.json")).unwrap();
+    let settings = SettingsFile::open(root.path().join("rufin.toml")).unwrap();
     let credential = crate::settings::Credential::new("plex-fixture");
     settings
         .update(|stored| {

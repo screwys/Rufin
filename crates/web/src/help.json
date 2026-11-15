@@ -248,8 +248,8 @@
       "mode": "replace"
     },
     "POST /api/playback/auto-dj": "Toggle Auto DJ using the app’s existing settings.",
-    "GET /api/random?source=...": "Saved Mix settings and genres. Use q and offset to browse genres, 64 at a time.",
-    "POST /api/queue/random": {
+    "GET /api/mix?source=...": "Saved Mix settings and genres. Use q and offset to browse genres, 64 at a time.",
+    "POST /api/queue/mix": {
       "source": "source ID",
       "albums": false,
       "count": "tracks, or whole albums when albums is true",
@@ -383,12 +383,12 @@
       "api_key"
     ]
   },
-  "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. A track page without sort or descending lists in the order its list is set to, as the other clients show it, and its response names that sort and descending. Track, album, artist, playlist and smart-playlist pages accept total=true to include the matching result count; otherwise total is null. Reuse that count while browsing the same results instead of requesting it for every window. The random genre picker also accepts total=true. Browsing or refreshing a source does not switch the source currently in use.",
+  "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. A track page without sort or descending lists in the order its list is set to, as the other clients show it, and its response names that sort and descending. Track, album, artist, playlist and smart-playlist pages accept total=true to include the matching result count; otherwise total is null. Reuse that count while browsing the same results instead of requesting it for every window. The Mix genre picker also accepts total=true. Browsing or refreshing a source does not switch the source currently in use.",
   "events": "Update routes use server-sent events (SSE). Each data line contains JSON. The combined events route also follows theme changes.",
   "browser": "GET / serves full HTML pages for login, browsing and playback without JavaScript. POST /session accepts a token form field and sets a persistent HttpOnly, SameSite=Lax session cookie. Reconnecting renews the same browser session so open tabs remain valid. It survives browser and controller restarts while the API token is unchanged. Signing out clears the browser cookie; changing the API token invalidates existing cookies. Accept: application/json returns the browser CSRF token. Cookie-authenticated API writes require X-Rufin-CSRF for JSON requests or a csrf form field. The same API routes accept browser forms and redirect after success; logout forms also require csrf. API clients can continue using Authorization: Bearer without cookies.",
   "html": "Library browsing routes return HTML for the web page when HX-Request is true. Other callers receive JSON.",
   "playlist_selection": "When creating a playlist or adding entries, page can replace uris: a page token, such as the play token a card row carries. The tracks are what that page lists, in its order and filter, in the source and music folder the token names (see music_folders); with ranges, those rows of it.",
-  "music_folders": "folder is a music folder id from GET /api/sources (libraries), read with source. It narrows that source's tracks in the lists (tracks, albums, artists, genres, moods, favorites, folders), Home, search, artist, genre and mood pages, smart playlists and random play. Albums and playlists stay whole, and the playlist lists follow source only. Collections of other sources are never narrowed. Without a folder, reads cover every folder.",
+  "music_folders": "folder is a music folder id from GET /api/sources (libraries), read with source. It narrows that source's tracks in the lists (tracks, albums, artists, genres, moods, favorites, folders), Home, search, artist, genre and mood pages, smart playlists and Mix. Albums and playlists stay whole, and the playlist lists follow source only. Collections of other sources are never narrowed. Without a folder, reads cover every folder.",
   "queue_modes": {
     "replace": "Play now and replace the queue",
     "append": "Add to the end of the queue",

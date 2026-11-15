@@ -129,7 +129,7 @@ pub use local::{
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
-pub use mix::{PlayedFilter, RandomCriteria, RandomPick};
+pub use mix::{MixCriteria, MixPick, PlayedFilter};
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,

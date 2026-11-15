@@ -1073,7 +1073,7 @@ mod tests {
         }
 
         let directory = tempfile::tempdir().unwrap();
-        let file = SettingsFile::open(directory.path().join("settings.json")).unwrap();
+        let file = SettingsFile::open(directory.path().join("rufin.toml")).unwrap();
         file.update(|current| {
             current.sources.configured = vec![source("exact", "destination-reference")];
             current.scrobbling.listenbrainz.enabled = true;

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use library::{MixCriteria, RadioSeed};
 pub use library::{QueuePlacement, QueueReorderTarget};
-use library::{RadioSeed, RandomCriteria};
 
 use playback::{QueueProvenance, TrackReference};
 
@@ -279,10 +279,10 @@ pub enum QueueSelection {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RandomPlayRequest {
+pub struct MixRequest {
     pub placement: QueuePlacement,
     pub requested: usize,
-    pub criteria: RandomCriteria,
+    pub criteria: MixCriteria,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

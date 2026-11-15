@@ -4042,7 +4042,7 @@ mod source_tests {
                     .await
                     .unwrap(),
             );
-            let settings_path = directory.path().join("settings.json");
+            let settings_path = directory.path().join("rufin.toml");
             let settings = SettingsFile::open(settings_path.clone()).unwrap();
             let first = SourceId::new("first");
             let second = SourceId::new("second");
