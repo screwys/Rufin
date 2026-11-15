@@ -1873,6 +1873,9 @@ msgstr "Laadin metateavet…"
 msgid "Fetching playlists"
 msgstr "Laadin esitusloendeid"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr "Väli"
 
@@ -2326,6 +2329,9 @@ msgstr "Paigutus"
 msgid "Leave empty for an unencrypted archive."
 msgstr "Krüptimata arhiivi jaoks jäta tühjaks."
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Salvestatud salasõna säilitamiseks jäta väli tühjaks"
 
@@ -2492,6 +2498,9 @@ msgstr "Logaritmiline"
 msgid "Logs are copied"
 msgstr "Logid on kopeeritud"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr "Tuvastus"
 
@@ -2535,6 +2544,9 @@ msgstr "MP3"
 
 msgid "Manage"
 msgstr "Halda"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Vastendatud kohalik kaust"
@@ -3280,6 +3292,9 @@ msgstr "Esita järgmiseks raadiorežiimis"
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "Esita lugu"
 
@@ -3480,9 +3495,6 @@ msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Alustamiseks lisa midagi esitusjärjekorda"
-
-msgid "Queue and transitions"
-msgstr "Esitusjärjekord ja üleminekud"
 
 msgid "Queue tracks to show"
 msgstr "Lisa näidatavad lood esitusjärjekorda"
@@ -3863,6 +3875,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB domeen"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Esita esitajat"
 
 msgid "Sample peak"
 msgstr "Valimi signaalitipp"
@@ -4317,6 +4334,11 @@ msgstr "Logi sisse"
 msgid "Signing in..."
 msgstr "Logi sisse"
 
+#, fuzzy
+#| msgid "Similar artists"
+msgid "Similar artists from ListenBrainz"
+msgstr "Sarnased esitajad"
+
 msgid "Similar artists"
 msgstr "Sarnased esitajad"
 
@@ -4334,6 +4356,11 @@ msgstr "Suurus"
 
 msgid "Skip count"
 msgstr "Vahelejätmiste arv"
+
+#, fuzzy
+#| msgid "Skip unplayable tracks"
+msgid "Skip low-rated tracks"
+msgstr "Jäta esitamatud lood vahele"
 
 msgid "Skip same-album crossfade"
 msgstr "Ära kasuta risthajutamist sama albumi lugude vahel"
@@ -4375,6 +4402,9 @@ msgstr "Pidevad/ühtlased ribad"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Mõne esitusloendi kirje importimine ei õnnestunud"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr ""
@@ -4725,6 +4755,11 @@ msgstr "Lood igast esitusloendist"
 msgid "Tracks from your five latest albums"
 msgstr "Lood sinu viimaselt viielt albumilt"
 
+#, fuzzy
+#| msgid "Track details"
+msgid "Tracks per refill"
+msgstr "Raja üksikasjad"
+
 msgid "Tracks"
 msgstr "Lugusid"
 
@@ -4831,9 +4866,6 @@ msgstr "Laadi kaanepilt üles"
 msgid "Use API key"
 msgstr "Kasuta API-võtit"
 
-msgid "Use Instant Mix for recommendations"
-msgstr "Kasuta soovitusteks „Instant Mix“ liidestust"
-
 msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
 
@@ -4883,17 +4915,17 @@ msgstr ""
 "metateabe muutmiseks"
 
 #, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Kasuta soovitusteks „Instant Mix“ liidestust"
+
+#, fuzzy
 #| msgid "Use source setting"
 msgid "Use sort tags"
 msgstr "Kasuta allika seadistust"
 
 msgid "Use source setting"
 msgstr "Kasuta allika seadistust"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
-"Kasuta serveri „Instant Mix“ valikut raadiorežiimi ja automaatse diskori "
-"jaoks."
 
 msgid "User flatpak:"
 msgstr "Kasutaja flatpak:"
@@ -4993,6 +5025,9 @@ msgstr "Osakaalud"
 #| msgid "Welcome to Rufin Setup"
 msgid "Welcome to Rufin"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""
@@ -5330,6 +5365,14 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Esitusjärjekord ja üleminekud"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr ""
+#~ "Kasuta serveri „Instant Mix“ valikut raadiorežiimi ja automaatse diskori "
+#~ "jaoks."
 
 #, fuzzy
 #~| msgid "Window"

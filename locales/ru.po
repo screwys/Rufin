@@ -1856,6 +1856,9 @@ msgstr "Получение метаданных..."
 msgid "Fetching playlists"
 msgstr "Получение плейлистов"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr "Поле"
 
@@ -2308,6 +2311,9 @@ msgstr "Макет"
 msgid "Leave empty for an unencrypted archive."
 msgstr "Оставьте пустым для незашифрованного архива."
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Оставьте поле пароля пустым, чтобы сохранить введенные учетные данные"
 
@@ -2477,6 +2483,9 @@ msgstr "Логарифмический"
 msgid "Logs are copied"
 msgstr "Журналы скопированы"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr "Поиск"
 
@@ -2523,6 +2532,9 @@ msgstr "MP3"
 
 msgid "Manage"
 msgstr "Управление"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Сопоставленный локальный путь"
@@ -3254,6 +3266,9 @@ msgstr "Воспроизвести радио следующим"
 msgid "Play radio"
 msgstr "Воспроизвести радио"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "Воспроизвести трек"
 
@@ -3454,9 +3469,6 @@ msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Добавьте трек в очередь, чтобы начать воспроизведение"
-
-msgid "Queue and transitions"
-msgstr "Очередь и переходы"
 
 msgid "Queue tracks to show"
 msgstr "Отобразить треки в очереди"
@@ -3833,6 +3845,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-домен"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Воспроизвести исполнителя"
 
 msgid "Sample peak"
 msgstr "Пик образца"
@@ -4288,6 +4305,11 @@ msgstr "Войти"
 msgid "Signing in..."
 msgstr "Войти"
 
+#, fuzzy
+#| msgid "Similar artists"
+msgid "Similar artists from ListenBrainz"
+msgstr "Похожие исполнители"
+
 msgid "Similar artists"
 msgstr "Похожие исполнители"
 
@@ -4305,6 +4327,11 @@ msgstr "Размер"
 
 msgid "Skip count"
 msgstr "Количество пропусков"
+
+#, fuzzy
+#| msgid "Skip unplayable tracks"
+msgid "Skip low-rated tracks"
+msgstr "Пропускать неиграемые треки"
 
 msgid "Skip same-album crossfade"
 msgstr "Пропускать плавный переход между треками одного альбома"
@@ -4344,6 +4371,9 @@ msgstr "Сплошные полосы"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Некоторые элементы плейлиста не удалось импортировать"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr ""
@@ -4680,6 +4710,11 @@ msgstr "Треки из каждого плейлиста"
 msgid "Tracks from your five latest albums"
 msgstr "Треки из ваших пяти последних альбомов"
 
+#, fuzzy
+#| msgid "Track details"
+msgid "Tracks per refill"
+msgstr "Подробности трека"
+
 msgid "Tracks"
 msgstr "Треки"
 
@@ -4786,9 +4821,6 @@ msgstr "Загрузить обложку"
 msgid "Use API key"
 msgstr "Использовать ключ API"
 
-msgid "Use Instant Mix for recommendations"
-msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
-
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
@@ -4838,14 +4870,16 @@ msgstr ""
 "Использовать локальные файлы для воспроизведения, текстов песен и "
 "редактирования поддерживаемых метаданных"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
+
 msgid "Use sort tags"
 msgstr "Использовать теги сортировки"
 
 msgid "Use source setting"
 msgstr "Использовать настройки источника"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
 
 msgid "User flatpak:"
 msgstr "Пользователь flatpak:"
@@ -4939,6 +4973,9 @@ msgstr "Взвешивание"
 
 msgid "Welcome to Rufin"
 msgstr "Добро пожаловать в Rufin"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr "Пока ваша библиотека загружается"
@@ -5290,6 +5327,12 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Очередь и переходы"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
 
 #, fuzzy
 #~| msgid "Window"

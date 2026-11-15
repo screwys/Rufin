@@ -2091,6 +2091,9 @@ msgstr "Rādīt albuma vāciņu"
 msgid "Fetching playlists"
 msgstr "Meklēt atskaņošanas sarakstos"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr ""
 
@@ -2591,6 +2594,9 @@ msgstr ""
 "Piemērojams tikai šai importēšanas vai eksportēšanas operācijai. Atstājiet "
 "tukšu, lai izveidotu nešifrētu arhivu."
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Atstājiet paroli tukšu, lai saglabātu esošos autentifikācijas datus"
 
@@ -2771,6 +2777,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr "Žurnāls ir kopēts"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2812,6 +2821,9 @@ msgstr ""
 
 msgid "Manage"
 msgstr "Pārvaldīt"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Nokartētais lokālais ceļš"
@@ -3620,6 +3632,9 @@ msgstr "Atskaņot radio"
 msgid "Play radio"
 msgstr "Atskaņot radio"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "Atskaņot dziesmu"
 
@@ -3836,9 +3851,6 @@ msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Pievienojiet dziesmu rindai, lai sāktu"
-
-msgid "Queue and transitions"
-msgstr "Rinda un pārejas"
 
 msgid "Queue tracks to show"
 msgstr "Pievienojiet dziesmas rindai, lai tās tiktu rādītas"
@@ -4267,6 +4279,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB domēns"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Atskaņot mākslinieku"
 
 msgid "Sample peak"
 msgstr ""
@@ -4763,6 +4780,11 @@ msgstr "Pieslēgties"
 
 #, fuzzy
 #| msgid "Clear artist"
+msgid "Similar artists from ListenBrainz"
+msgstr "Dzēst izpildītāju"
+
+#, fuzzy
+#| msgid "Clear artist"
 msgid "Similar artists"
 msgstr "Dzēst izpildītāju"
 
@@ -4780,6 +4802,11 @@ msgstr ""
 
 msgid "Skip count"
 msgstr "Izlaišanas skaits"
+
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip low-rated tracks"
+msgstr "Tikai neatskaņotās dziesmas"
 
 msgid "Skip same-album crossfade"
 msgstr "Izlaist pāreju starp dziesmām no viena un tā paša albuma"
@@ -4825,6 +4852,9 @@ msgstr "Vertikālas joslas"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Dažus atskaņošanas saraksta ierakstus neizdevās importēt"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr ""
@@ -5224,6 +5254,11 @@ msgstr "Dziesmas no visiem atskaņošanas sarakstiem"
 msgid "Tracks from your five latest albums"
 msgstr "Pēdējo piecu albumu dziesmas"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Tracks per refill"
+msgstr "Dziesmas radio"
+
 msgid "Tracks"
 msgstr "Dziesmas"
 
@@ -5340,9 +5375,6 @@ msgstr "Rādīt albuma vāciņu"
 msgid "Use API key"
 msgstr "Izmantot API atslēgu"
 
-msgid "Use Instant Mix for recommendations"
-msgstr "Izmantot funkciju Instant Mix”, lai saņemtu ieteikumus"
-
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
 
@@ -5399,16 +5431,17 @@ msgstr ""
 "rediģēšanai"
 
 #, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Izmantot funkciju Instant Mix”, lai saņemtu ieteikumus"
+
+#, fuzzy
 #| msgid "Use source setting"
 msgid "Use sort tags"
 msgstr "Izmantot avota iestatījumu"
 
 msgid "Use source setting"
 msgstr "Izmantot avota iestatījumu"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
-"Izmantot servera funkciju Instant Mix” radio un automātiskajam DJ režīmam."
 
 #, fuzzy
 #| msgid "User token"
@@ -5515,6 +5548,9 @@ msgstr ""
 #| msgid "Welcome to Rufin Setup"
 msgid "Welcome to Rufin"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""
@@ -5884,6 +5920,13 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Rinda un pārejas"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr ""
+#~ "Izmantot servera funkciju Instant Mix” radio un automātiskajam DJ režīmam."
 
 #, fuzzy
 #~| msgid "Window"

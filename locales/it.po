@@ -2012,6 +2012,9 @@ msgstr "Rete di casting"
 msgid "Fetching playlists"
 msgstr "Cancella Playlist"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr ""
 
@@ -2469,6 +2472,9 @@ msgstr ""
 msgid "Leave empty for an unencrypted archive."
 msgstr ""
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 
@@ -2637,6 +2643,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2679,6 +2688,9 @@ msgid "MP3"
 msgstr ""
 
 msgid "Manage"
+msgstr ""
+
+msgid "Many"
 msgstr ""
 
 msgid "Mapped Local Path"
@@ -3412,6 +3424,9 @@ msgstr ""
 msgid "Play radio"
 msgstr ""
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr ""
 
@@ -3607,9 +3622,6 @@ msgid "Q"
 msgstr ""
 
 msgid "Queue a track to begin"
-msgstr ""
-
-msgid "Queue and transitions"
 msgstr ""
 
 msgid "Queue tracks to show"
@@ -4005,6 +4017,11 @@ msgstr ""
 
 msgid "SMB Domain"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album artist"
+msgid "Same artist"
+msgstr "Artista dell'album"
 
 msgid "Sample peak"
 msgstr ""
@@ -4444,6 +4461,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Clear artist"
+msgid "Similar artists from ListenBrainz"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Clear artist"
 msgid "Similar artists"
 msgstr "Rimuovi artista"
 
@@ -4461,6 +4483,11 @@ msgstr ""
 
 msgid "Skip count"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Skip low-rated tracks"
+msgstr "Album non disponibile"
 
 msgid "Skip same-album crossfade"
 msgstr ""
@@ -4501,6 +4528,9 @@ msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
+msgstr ""
+
+msgid "Some"
 msgstr ""
 
 msgid "Song and artist links"
@@ -4863,6 +4893,9 @@ msgstr ""
 msgid "Tracks from your five latest albums"
 msgstr ""
 
+msgid "Tracks per refill"
+msgstr ""
+
 msgid "Tracks"
 msgstr ""
 
@@ -4967,9 +5000,6 @@ msgstr ""
 msgid "Use API key"
 msgstr ""
 
-msgid "Use Instant Mix for recommendations"
-msgstr ""
-
 msgid "Use Rufin data folder"
 msgstr ""
 
@@ -5023,15 +5053,15 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use server recommendations"
+msgstr ""
+
 #, fuzzy
 #| msgid "App settings"
 msgid "Use sort tags"
 msgstr "Impostazioni dell'app"
 
 msgid "Use source setting"
-msgstr ""
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
 
 msgid "User flatpak:"
@@ -5130,6 +5160,9 @@ msgstr ""
 #| msgid "Connect to Rufin"
 msgid "Welcome to Rufin"
 msgstr "Connetti a Rufin"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""

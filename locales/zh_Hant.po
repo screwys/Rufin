@@ -2099,6 +2099,9 @@ msgstr "搜尋歌詞"
 msgid "Fetching playlists"
 msgstr "智慧播放清單"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr ""
 
@@ -2583,6 +2586,9 @@ msgstr "佈局"
 msgid "Leave empty for an unencrypted archive."
 msgstr ""
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 
@@ -2762,6 +2768,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2805,6 +2814,9 @@ msgstr ""
 
 msgid "Manage"
 msgstr "管理"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr ""
@@ -3650,6 +3662,9 @@ msgstr "播放電台"
 msgid "Play radio"
 msgstr "播放電台"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "播放曲目"
 
@@ -3880,9 +3895,6 @@ msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "將曲目加入佇列的開頭"
-
-msgid "Queue and transitions"
-msgstr ""
 
 #, fuzzy
 #| msgid "Queue a track to begin"
@@ -4313,6 +4325,11 @@ msgstr ""
 
 msgid "SMB Domain"
 msgstr ""
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "播放藝人"
 
 msgid "Sample peak"
 msgstr ""
@@ -4827,6 +4844,11 @@ msgstr "無歌詞"
 
 #, fuzzy
 #| msgid "Play artist"
+msgid "Similar artists from ListenBrainz"
+msgstr "播放藝人"
+
+#, fuzzy
+#| msgid "Play artist"
 msgid "Similar artists"
 msgstr "播放藝人"
 
@@ -4844,6 +4866,11 @@ msgstr ""
 
 msgid "Skip count"
 msgstr "跳過次數"
+
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip low-rated tracks"
+msgstr "僅未播放過的曲目"
 
 msgid "Skip same-album crossfade"
 msgstr ""
@@ -4884,6 +4911,9 @@ msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
+msgstr ""
+
+msgid "Some"
 msgstr ""
 
 msgid "Song and artist links"
@@ -5281,6 +5311,11 @@ msgstr "所有播放清單的曲目"
 msgid "Tracks from your five latest albums"
 msgstr "五個最新專輯的曲目"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Tracks per refill"
+msgstr "曲目電台"
+
 msgid "Tracks"
 msgstr "曲目"
 
@@ -5393,9 +5428,6 @@ msgstr ""
 msgid "Use API key"
 msgstr "使用 API 金鑰"
 
-msgid "Use Instant Mix for recommendations"
-msgstr ""
-
 msgid "Use Rufin data folder"
 msgstr "使用 Rufin 資料資料夾"
 
@@ -5453,6 +5485,9 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use server recommendations"
+msgstr ""
+
 #, fuzzy
 #| msgid "Lyrics settings"
 msgid "Use sort tags"
@@ -5462,9 +5497,6 @@ msgstr "歌詞設定"
 #| msgid "Lyrics settings"
 msgid "Use source setting"
 msgstr "歌詞設定"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
 
 msgid "User flatpak:"
 msgstr ""
@@ -5566,6 +5598,9 @@ msgstr ""
 #| msgid "Connection"
 msgid "Welcome to Rufin"
 msgstr "連接"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""

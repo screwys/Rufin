@@ -1863,6 +1863,9 @@ msgstr "Récupération des métadonnées..."
 msgid "Fetching playlists"
 msgstr "Récupération des playlists"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr "Champ"
 
@@ -2315,6 +2318,9 @@ msgstr "Disposition"
 msgid "Leave empty for an unencrypted archive."
 msgstr "Laisser vide pour une archive non chiffrée."
 
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
+
 msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 "Laissez le mot de passe vide pour conserver les identifiants enregistrés"
@@ -2485,6 +2491,9 @@ msgstr "Logarithmique"
 msgid "Logs are copied"
 msgstr "Les journaux sont copiés"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr "Chercher"
 
@@ -2532,6 +2541,9 @@ msgstr "MP3"
 
 msgid "Manage"
 msgstr "Gérer"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Chemin local mappé"
@@ -3266,6 +3278,9 @@ msgstr "Lire la radio ensuite"
 msgid "Play radio"
 msgstr "Lire la radio"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "Lire le morceau"
 
@@ -3466,9 +3481,6 @@ msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Ajoutez un morceau à la file d’attente pour commencer"
-
-msgid "Queue and transitions"
-msgstr "File d’attente et transitions"
 
 msgid "Queue tracks to show"
 msgstr "Morceaux de la file d’attente à afficher"
@@ -3846,6 +3858,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "Domaine SMB"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Lire l’artiste"
 
 msgid "Sample peak"
 msgstr "Pic d’échantillon"
@@ -4300,6 +4317,11 @@ msgstr "Se connecter"
 msgid "Signing in..."
 msgstr "Se connecter"
 
+#, fuzzy
+#| msgid "Similar artists"
+msgid "Similar artists from ListenBrainz"
+msgstr "Artistes similaires"
+
 msgid "Similar artists"
 msgstr "Artistes similaires"
 
@@ -4317,6 +4339,11 @@ msgstr "Taille"
 
 msgid "Skip count"
 msgstr "Nombre de fois ignoré"
+
+#, fuzzy
+#| msgid "Skip unplayable tracks"
+msgid "Skip low-rated tracks"
+msgstr "Ignorer les morceaux illisibles"
 
 msgid "Skip same-album crossfade"
 msgstr "Ignorer le fondu enchaîné au sein du même album"
@@ -4356,6 +4383,9 @@ msgstr "Barres pleines"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Certaines entrées de playlist n’ont pas pu être importées"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr ""
@@ -4694,6 +4724,11 @@ msgstr "Morceaux de chaque playlist"
 msgid "Tracks from your five latest albums"
 msgstr "Morceaux de vos cinq derniers albums"
 
+#, fuzzy
+#| msgid "Track details"
+msgid "Tracks per refill"
+msgstr "Détails du morceau"
+
 msgid "Tracks"
 msgstr "Morceaux"
 
@@ -4800,9 +4835,6 @@ msgstr "Téléverser une illustration"
 msgid "Use API key"
 msgstr "Utiliser la clé API"
 
-msgid "Use Instant Mix for recommendations"
-msgstr "Utiliser Instant Mix pour des recommandations"
-
 msgid "Use Rufin data folder"
 msgstr "Utiliser le dossier de données de Rufin"
 
@@ -4850,14 +4882,16 @@ msgstr ""
 "Utiliser les fichiers locaux pour la lecture, les paroles et la modification "
 "des métadonnées prises en charge"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Utiliser Instant Mix pour des recommandations"
+
 msgid "Use sort tags"
 msgstr "Utiliser les balises de tri"
 
 msgid "Use source setting"
 msgstr "Utiliser les paramètres de la source"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr "Utiliser le mix instantané du serveur pour la radio et l’Auto DJ."
 
 msgid "User flatpak:"
 msgstr "Flatpak utilisateur :"
@@ -4952,6 +4986,9 @@ msgstr "Pondération"
 
 msgid "Welcome to Rufin"
 msgstr "Bienvenue dans Rufin"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr "Pendant le chargement de votre bibliothèque"
@@ -5289,6 +5326,12 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "File d’attente et transitions"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr "Utiliser le mix instantané du serveur pour la radio et l’Auto DJ."
 
 #, fuzzy
 #~| msgid "Window"

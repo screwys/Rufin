@@ -35,7 +35,6 @@ msgid ""
 msgstr ""
 "Yedek dosyası hassas bilgiler içerebilir. Parola belirlemek ister misiniz?"
 
-#, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
@@ -104,8 +103,7 @@ msgstr ""
 "Günlüklerde gizli bilgiler ve mutlak klasör yolları gizlenir, ancak "
 "paylaşmadan önce yine de günlükleri gözden geçirmek isteyebilirsiniz"
 
-msgid ""
-"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr ""
 
 msgid ""
@@ -175,7 +173,6 @@ msgstr ""
 "Rufin'in Yerel hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
 "sözleri dahil kaldırılsın mı? Müzik dosyalarınız silinmeyecek."
 
-#, rust-format
 msgid ""
 "Remove everything Rufin keeps about {name}, including its favorites, ratings "
 "and lyrics?"
@@ -183,7 +180,6 @@ msgstr ""
 "Rufin'in {name} hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
 "sözleri dahil kaldırılsın mı?"
 
-#, rust-format
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
@@ -478,7 +474,6 @@ msgstr "Klasöre ekle"
 msgid "Add to library"
 msgstr "Kitaplığa ekle"
 
-#, rust-format
 msgid "Add to {saved_on}"
 msgstr "{saved_on} öğesine ekle"
 
@@ -602,7 +597,6 @@ msgstr "Tarayıcınızda oturum açmayı onaylayın"
 msgid "Approve"
 msgstr "Onayla"
 
-#, rust-format
 msgid "April {year}"
 msgstr "Nisan {year}"
 
@@ -682,7 +676,6 @@ msgstr "Ses"
 msgid "Audioscrobbler API"
 msgstr "Audioscrobbler API"
 
-#, rust-format
 msgid "August {year}"
 msgstr "Ağustos {year}"
 
@@ -734,11 +727,9 @@ msgstr "Yedek Ayarları"
 msgid "Backup exported"
 msgstr "Yedek dışa aktarıldı"
 
-#, rust-format
 msgid "Backup failed: {error}"
 msgstr "Yedekleme başarısız: {error}"
 
-#, rust-format
 msgid "Backup restored with warnings: {warnings}"
 msgstr "Yedek uyarılarla geri yüklendi: {warnings}"
 
@@ -868,13 +859,11 @@ msgstr "Sıralama düzenini değiştir"
 msgid "Change"
 msgstr "Değiştir"
 
-#, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "Değişiklikler {count} parçaya uygulanır"
 msgstr[1] "Değişiklikler {count} parçaya uygulanır"
 
-#, rust-format
 msgid "Changes apply to {count} tracks"
 msgstr "Değişiklikler {count} parçaya uygulanır"
 
@@ -1082,7 +1071,6 @@ msgstr "Koşul"
 msgid "Configure another"
 msgstr "Başka bir tane yapılandır"
 
-#, rust-format
 msgid "Configured items: {count}"
 msgstr "Yapılandırılmış öğeler: {count}"
 
@@ -1104,7 +1092,6 @@ msgstr "Rufin'e bağlan"
 msgid "Connect"
 msgstr "Bağlan"
 
-#, rust-format
 msgid "Connected as {username}"
 msgstr "{username} olarak bağlandı"
 
@@ -1120,7 +1107,6 @@ msgstr "Cihazlar bağlanıyor"
 msgid "Connecting to music server..."
 msgstr "Müzik sunucusuna bağlanılıyor..."
 
-#, rust-format
 msgid "Connecting to {device}..."
 msgstr "{device} cihazına bağlanılıyor..."
 
@@ -1151,7 +1137,6 @@ msgstr "Bağlantı"
 msgid "Contents"
 msgstr "İçerik"
 
-#, rust-format
 msgid "Continue from {device}"
 msgstr "{device} cihazından devam et"
 
@@ -1176,7 +1161,6 @@ msgstr "Daveti kopyala"
 msgid "Copy link"
 msgstr "Bağlantıyı kopyala"
 
-#, rust-format
 msgid "Copy of {name}"
 msgstr "{name} kopyası"
 
@@ -1201,11 +1185,9 @@ msgstr "Bu sayfa yüklenemedi"
 msgid "Could not open browser"
 msgstr "Tarayıcı açılamadı"
 
-#, rust-format
 msgid "Could not open file: {error}"
 msgstr "Dosya açılamadı: {error}"
 
-#, rust-format
 msgid "Could not open folder: {error}"
 msgstr "Klasör açılamadı: {error}"
 
@@ -1221,11 +1203,9 @@ msgstr "Canlı güncellemeler alınamadı"
 msgid "Could not save diagnostic log"
 msgstr "Tanılama günlüğü kaydedilemedi"
 
-#, rust-format
 msgid "Could not share: {error}"
 msgstr "Paylaşılamadı: {error}"
 
-#, rust-format
 msgid "Could not update Rufin to {version}"
 msgstr "Rufin {version} sürümüne güncellenemedi"
 
@@ -1244,14 +1224,13 @@ msgstr "Bu parça çözülemedi"
 msgid "Couldn't load this folder"
 msgstr "Bu klasör yüklenemedi"
 
-#, rust-format
 msgid "Couldn't open the sign-in page: {error}"
 msgstr "Oturum açma sayfası açılamadı: {error}"
 
 msgid "Couldn't search for lyrics"
 msgstr "Şarkı sözleri aranamadı"
 
-msgid "Couldn\342\200\231t download Japanese dictionary"
+msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
 msgid "Country"
@@ -1345,7 +1324,6 @@ msgstr "Yıl bitmeden önceki günler"
 msgid "Debug logging"
 msgstr "Hata ayıklama günlüğü"
 
-#, rust-format
 msgid "December {year}"
 msgstr "Aralık {year}"
 
@@ -1367,7 +1345,7 @@ msgstr "Çalma Listesini Sil"
 msgid "Delete Station"
 msgstr "İstasyonu Sil"
 
-#, python-brace-format, rust-format
+#, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "\"{name}\" silinsin mi?"
 
@@ -1386,7 +1364,6 @@ msgstr "Ön ayarı sil"
 msgid "Delete this station?"
 msgstr "Bu istasyon silinsin mi?"
 
-#, rust-format
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
 msgstr[0] "{count} çalma listesi silinsin mi?"
@@ -1449,7 +1426,6 @@ msgstr "Disk numarası"
 msgid "Disc subtitle"
 msgstr "Disk alt başlığı"
 
-#, rust-format
 msgid "Disc {number}"
 msgstr "Disk {number}"
 
@@ -1486,7 +1462,6 @@ msgstr "Görüntü"
 msgid "Do not encrypt"
 msgstr "Şifreleme"
 
-#, rust-format
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
 msgstr[0] "Meta veri değişiklikleri {count} parçaya uygulansın mı?"
@@ -1537,14 +1512,12 @@ msgstr "Japonca sözlük indiriliyor..."
 msgid "Downloading artwork"
 msgstr "Kapak görseli indiriliyor"
 
-#, rust-format
 msgid "Downloading artwork... {count} checked"
 msgstr "Kapak görseli indiriliyor... {count} kontrol edildi"
 
 msgid "Downloading lyrics"
 msgstr "Şarkı sözleri indiriliyor"
 
-#, rust-format
 msgid "Downloading lyrics... {count} checked"
 msgstr "Şarkı sözleri indiriliyor... {count} kontrol edildi"
 
@@ -1677,7 +1650,6 @@ msgstr "Yedekleri şifrele"
 msgid "End of this track"
 msgstr "Bu parçanın sonu"
 
-#, rust-format
 msgid "Ends around {time}"
 msgstr "Yaklaşık {time} civarında biter"
 
@@ -1802,7 +1774,6 @@ msgstr "Favoriler"
 msgid "Featured genres"
 msgstr "Öne çıkan türler"
 
-#, rust-format
 msgid "February {year}"
 msgstr "Şubat {year}"
 
@@ -1829,6 +1800,9 @@ msgstr "Meta veriler getiriliyor..."
 
 msgid "Fetching playlists"
 msgstr "Çalma listeleri getiriliyor"
+
+msgid "Few"
+msgstr ""
 
 msgid "Field"
 msgstr "Alan"
@@ -1859,7 +1833,6 @@ msgstr "Dolgulu spektrum"
 msgid "Filter type"
 msgstr "Filtre türü"
 
-#, rust-format
 msgid "Find in {name}"
 msgstr "{name} içinde bul"
 
@@ -1875,7 +1848,6 @@ msgstr "Şarkı sözleri aranıyor..."
 msgid "Finish the last track"
 msgstr "Son parçayı bitir"
 
-#, rust-format
 msgid "Finishes the track playing at {time}"
 msgstr "{time} zamanında çalan parçayı bitirir"
 
@@ -1937,7 +1909,7 @@ msgstr "Kare hızı sınırı"
 msgid "Frames per second"
 msgstr "Saniyedeki kare sayısı"
 
-msgid "Frequency \302\267 Hz"
+msgid "Frequency · Hz"
 msgstr ""
 
 msgid "Frequency scale"
@@ -1971,7 +1943,7 @@ msgid "Furigana"
 msgstr "Furigana"
 
 #, fuzzy
-msgid "Gain \302\267 dB"
+msgid "Gain · dB"
 msgstr "Kazanç \\\\302\\\\267 dB"
 
 msgid "Gain"
@@ -2007,7 +1979,6 @@ msgstr "Kişisel anahtar al"
 msgid "Go to Album"
 msgstr "Albüme Git"
 
-#, rust-format
 msgid "Go to {artist}"
 msgstr "{artist} sanatçısına git"
 
@@ -2128,7 +2099,6 @@ msgstr "Temayı içe aktar"
 msgid "Import"
 msgstr "İçe Aktar"
 
-#, rust-format
 msgid "Imported {count} listen."
 msgid_plural "Imported {count} listens."
 msgstr[0] "{count} dinleme içe aktarıldı."
@@ -2175,7 +2145,6 @@ msgstr "Öğe artık kullanılamıyor"
 msgid "Item menus"
 msgstr "Öğe menüleri"
 
-#, rust-format
 msgid "January {year}"
 msgstr "Ocak {year}"
 
@@ -2194,11 +2163,9 @@ msgstr "Kaynaklarını ve oturum açmalarını kopyalamak için katıl"
 msgid "Join"
 msgstr "Katıl"
 
-#, rust-format
 msgid "July {year}"
 msgstr "Temmuz {year}"
 
-#, rust-format
 msgid "June {year}"
 msgstr "Haziran {year}"
 
@@ -2269,6 +2236,9 @@ msgstr "Düzen"
 
 msgid "Leave empty for an unencrypted archive."
 msgstr "Şifrelenmemiş arşiv için boş bırakın."
+
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Kaydedilmiş kimlik bilgisini korumak için parolayı boş bırakın"
@@ -2372,7 +2342,6 @@ msgstr "Yerel dosya erişimi yapılandırıldı"
 msgid "Local file access is required before these tags can be saved."
 msgstr "Bu etiketler kaydedilmeden önce yerel dosya erişimi gerekir."
 
-#, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2425,6 +2394,9 @@ msgstr "Logaritmik"
 msgid "Logs are copied"
 msgstr "Günlükler kopyalandı"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr "Arama"
 
@@ -2468,10 +2440,12 @@ msgstr "MP3"
 msgid "Manage"
 msgstr "Yönet"
 
+msgid "Many"
+msgstr ""
+
 msgid "Mapped Local Path"
 msgstr "Eşlenen Yerel Yol"
 
-#, rust-format
 msgid "March {year}"
 msgstr "Mart {year}"
 
@@ -2496,7 +2470,6 @@ msgstr "Maksimum yıl"
 msgid "Maximum"
 msgstr "Maksimum"
 
-#, rust-format
 msgid "May {year}"
 msgstr "Mayıs {year}"
 
@@ -2840,7 +2813,6 @@ msgstr "Henüz çalma listesi yok"
 msgid "No related tracks found"
 msgstr "İlgili parça bulunamadı"
 
-#, rust-format
 msgid "No results for \"{query}\""
 msgstr "\"{query}\" için sonuç yok"
 
@@ -2907,7 +2879,6 @@ msgstr "Burada oynatılacak bir şey yok"
 msgid "Notifications"
 msgstr "Bildirimler"
 
-#, rust-format
 msgid "November {year}"
 msgstr "Kasım {year}"
 
@@ -2926,7 +2897,6 @@ msgstr "Yedek sayısı"
 msgid "Number of songs"
 msgstr "Şarkı sayısı"
 
-#, rust-format
 msgid "October {year}"
 msgstr "Ekim {year}"
 
@@ -3051,7 +3021,6 @@ msgstr "Özgün sürüm tarihi"
 msgid "Original"
 msgstr "Özgün"
 
-#, rust-format
 msgid "Original: {value}"
 msgstr "Özgün: {value}"
 
@@ -3100,7 +3069,6 @@ msgstr "Yol"
 msgid "Pause"
 msgstr "Duraklat"
 
-#, rust-format
 msgid "Pauses at {time}"
 msgstr "{time} zamanında duraklatır"
 
@@ -3180,6 +3148,9 @@ msgstr "Radyoyu sıradaki çal"
 msgid "Play radio"
 msgstr "Radyoyu çal"
 
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
+
 msgid "Play track"
 msgstr "Parçayı çal"
 
@@ -3207,7 +3178,6 @@ msgstr "Çalındı"
 msgid "Player"
 msgstr "Oynatıcı"
 
-#, rust-format
 msgid "Playing from {}"
 msgstr "Şuradan çalınıyor: {}"
 
@@ -3217,7 +3187,6 @@ msgstr "Şuradan çalınıyor"
 msgid "Playing on this device"
 msgstr "Bu cihazda çalınıyor"
 
-#, rust-format
 msgid "Playing on {device}"
 msgstr "{device} cihazında çalınıyor"
 
@@ -3370,9 +3339,6 @@ msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Başlamak için bir parçayı kuyruğa alın"
-
-msgid "Queue and transitions"
-msgstr "Kuyruk ve geçişler"
 
 msgid "Queue tracks to show"
 msgstr "Gösterilecek parçaları kuyruğa al"
@@ -3629,7 +3595,6 @@ msgstr "ReplayGain etiketleri"
 msgid "ReplayGain"
 msgstr "ReplayGain"
 
-#, rust-format
 msgid "Request failed ({status})"
 msgstr "İstek başarısız ({status})"
 
@@ -3723,7 +3688,6 @@ msgstr "Rufin veri klasörü"
 msgid "Rufin host"
 msgstr "Rufin ana bilgisayarı"
 
-#, rust-format
 msgid "Rufin needs local access to {path}"
 msgstr "Rufin'in {path} için yerel erişime ihtiyacı var"
 
@@ -3735,6 +3699,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB Etki Alanı"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Sanatçıyı çal"
 
 msgid "Sample peak"
 msgstr "Örnek tepe değeri"
@@ -3781,11 +3750,12 @@ msgstr "Kaydedilmiş Plex Oturumu"
 msgid "Saved logins"
 msgstr "Kaydedilmiş oturumlar"
 
-#, rust-format
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] "Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
-msgstr[1] "Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[0] ""
+"Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[1] ""
+"Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
 
 msgid "Saved preset"
 msgstr "Ön ayar kaydedildi"
@@ -3892,7 +3862,6 @@ msgstr "MusicBrainz aranıyor..."
 msgid "Searching for devices..."
 msgstr "Cihazlar aranıyor..."
 
-#, rust-format
 msgid "Searching for {provider} servers on the local network..."
 msgstr "Yerel ağda {provider} sunucuları aranıyor..."
 
@@ -3917,7 +3886,6 @@ msgstr "İleri Sar"
 msgid "Seek playback"
 msgstr "Oynatma konumuna git"
 
-#, rust-format
 msgid "Seek to {time}"
 msgstr "{time} konumuna git"
 
@@ -3951,14 +3919,12 @@ msgstr "Tümünü seç"
 msgid "Select an entry to show or hide it."
 msgstr "Göstermek veya gizlemek için bir giriş seçin."
 
-#, rust-format
 msgid "Select {title}"
 msgstr "{title} seç"
 
 msgid "Selected folders"
 msgstr "Seçili klasörler"
 
-#, rust-format
 msgid "Selected items: {count}"
 msgstr "Seçili öğeler: {count}"
 
@@ -3974,7 +3940,6 @@ msgstr "Iroh Relay'i kendi sunucunuzda barındırın"
 msgid "Self-hosted scrobbling"
 msgstr "Kendi sunucunuzda barındırılan scrobbling"
 
-#, rust-format
 msgid "September {year}"
 msgstr "Eylül {year}"
 
@@ -4005,7 +3970,6 @@ msgstr "Sunucu URL'si"
 msgid "Server default"
 msgstr "Sunucu varsayılanı"
 
-#, rust-format
 msgid "Server discovery failed: {error}"
 msgstr "Sunucu keşfi başarısız: {error}"
 
@@ -4027,7 +3991,6 @@ msgstr "Hizmetler"
 msgid "Set the Discord activity type to Listening"
 msgstr "Discord etkinlik türünü Dinliyor olarak ayarla"
 
-#, rust-format
 msgid "Set {count} play count."
 msgid_plural "Set {count} play counts."
 msgstr[0] "{count} çalma sayısı ayarla."
@@ -4132,7 +4095,6 @@ msgstr "Karıştır"
 msgid "Sidebar Items"
 msgstr "Kenar Çubuğu Öğeleri"
 
-#, rust-format
 msgid "Sidebar item {position}"
 msgstr "Kenar çubuğu öğesi {position}"
 
@@ -4169,6 +4131,11 @@ msgstr "Oturum aç"
 msgid "Signing in..."
 msgstr "Oturum açılıyor..."
 
+#, fuzzy
+#| msgid "Similar artists"
+msgid "Similar artists from ListenBrainz"
+msgstr "Benzer sanatçılar"
+
 msgid "Similar artists"
 msgstr "Benzer sanatçılar"
 
@@ -4186,6 +4153,11 @@ msgstr "Boyut"
 
 msgid "Skip count"
 msgstr "Atlama sayısı"
+
+#, fuzzy
+#| msgid "Skip unplayable tracks"
+msgid "Skip low-rated tracks"
+msgstr "Oynatılamayan parçaları atla"
 
 msgid "Skip same-album crossfade"
 msgstr "Aynı albümdeki çapraz geçişi atla"
@@ -4225,6 +4197,9 @@ msgstr "Dolu çubuklar"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Bazı çalma listesi girişleri içe aktarılamadı"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr "Şarkı ve sanatçı bağlantıları"
@@ -4273,7 +4248,7 @@ msgid "Sources"
 msgstr "Kaynaklar"
 
 #, fuzzy
-msgid "Spectrum \302\267 dBFS"
+msgid "Spectrum · dBFS"
 msgstr "Spektrum \\\\302\\\\267 dBFS"
 
 msgid "Spectrum line"
@@ -4306,7 +4281,6 @@ msgstr "Başlatılıyor..."
 msgid "Static"
 msgstr "Statik"
 
-#, rust-format
 msgid "Stations are saved on {saved_on}."
 msgstr "İstasyonlar {saved_on} üzerinde kaydedilir."
 
@@ -4464,7 +4438,6 @@ msgstr "Bu cihaz profilden kaldırıldı"
 msgid "This device"
 msgstr "Bu cihaz"
 
-#, rust-format
 msgid "This is owned by {source} and synced to it."
 msgstr "Bu {source} kaynağına aittir ve onunla eşitlenir."
 
@@ -4474,7 +4447,6 @@ msgstr "Bu kullanılamıyor"
 msgid "This item has no link to share"
 msgstr "Bu öğenin paylaşılacak bağlantısı yok"
 
-#, rust-format
 msgid "This playlist only accepts {source} tracks"
 msgstr "Bu çalma listesi yalnızca {source} parçalarını kabul eder"
 
@@ -4549,6 +4521,11 @@ msgstr "Her çalma listesinden parçalar"
 
 msgid "Tracks from your five latest albums"
 msgstr "En son beş albümünüzden parçalar"
+
+#, fuzzy
+#| msgid "Track details"
+msgid "Tracks per refill"
+msgstr "Parça ayrıntıları"
 
 msgid "Tracks"
 msgstr "Parçalar"
@@ -4642,11 +4619,9 @@ msgstr "Güncelleme kontrol aralığı"
 msgid "Update"
 msgstr "Güncelle"
 
-#, rust-format
 msgid "Updated Rufin to {version}"
 msgstr "Rufin {version} sürümüne güncellendi"
 
-#, rust-format
 msgid "Updating Rufin to {version}..."
 msgstr "Rufin {version} sürümüne güncelleniyor..."
 
@@ -4655,9 +4630,6 @@ msgstr "Kapak görseli yükle"
 
 msgid "Use API key"
 msgstr "API anahtarı kullan"
-
-msgid "Use Instant Mix for recommendations"
-msgstr "Öneriler için Instant Mix kullan"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin veri klasörünü kullan"
@@ -4706,14 +4678,16 @@ msgstr ""
 "Oynatma, şarkı sözleri ve desteklenen meta veri düzenleme için yerel "
 "dosyaları kullan"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Öneriler için Instant Mix kullan"
+
 msgid "Use sort tags"
 msgstr "Sıralama etiketlerini kullan"
 
 msgid "Use source setting"
 msgstr "Kaynak ayarını kullan"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr "Radyo ve Otomatik DJ için sunucunun Instant Mix'ini kullan."
 
 msgid "User flatpak:"
 msgstr "Kullanıcı flatpak:"
@@ -4808,6 +4782,9 @@ msgstr "Ağırlıklandırma"
 msgid "Welcome to Rufin"
 msgstr "Rufin'e Hoş Geldiniz"
 
+msgid "What Auto DJ and radio pick"
+msgstr ""
+
 msgid "While your library loads"
 msgstr "Kitaplığınız yüklenirken"
 
@@ -4853,11 +4830,9 @@ msgstr "Kendi API anahtarınız"
 msgid "Your queue is empty."
 msgstr "Kuyruğunuz boş."
 
-#, rust-format
 msgid "Your {period} in Rufin"
 msgstr "Rufin'deki {period} döneminiz"
 
-#, rust-format
 msgid "Your {period}"
 msgstr "{period} döneminiz"
 
@@ -4939,129 +4914,105 @@ msgstr "bugün"
 msgid "yesterday"
 msgstr "dün"
 
-#, rust-format
 msgid "{action} (Shuffle)"
 msgstr "{action} (Karıştır)"
 
-#, rust-format
 msgid "{completed} of {total} ({cached} cached)"
 msgstr "{total} içinden {completed} ({cached} önbellekte)"
 
-#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} albüm"
 msgstr[1] "{count} albüm"
 
-#, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "{count} gün önce"
 msgstr[1] "{count} gün önce"
 
-#, rust-format
 msgid "{count} entry matches no track in the library."
 msgid_plural "{count} entries match no track in the library."
 msgstr[0] "{count} giriş kitaplıkta hiçbir parçayla eşleşmiyor."
 msgstr[1] "{count} giriş kitaplıkta hiçbir parçayla eşleşmiyor."
 
-#, rust-format
 msgid "{count} entry"
 msgid_plural "{count} entries"
 msgstr[0] "{count} giriş"
 msgstr[1] "{count} giriş"
 
-#, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "{count} klasör seçildi"
 msgstr[1] "{count} klasör seçildi"
 
-#, rust-format
 msgid "{count} folder"
 msgid_plural "{count} folders"
 msgstr[0] "{count} klasör"
 msgstr[1] "{count} klasör"
 
-#, rust-format
 msgid "{count} line could not be read."
 msgid_plural "{count} lines could not be read."
 msgstr[0] "{count} satır okunamadı."
 msgstr[1] "{count} satır okunamadı."
 
-#, rust-format
 msgid "{count} listen was already in Rufin."
 msgid_plural "{count} listens were already in Rufin."
 msgstr[0] "{count} dinleme zaten Rufin'deydi."
 msgstr[1] "{count} dinleme zaten Rufin'deydi."
 
-#, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} ay önce"
 msgstr[1] "{count} ay önce"
 
-#, rust-format
 msgid "{count} play"
 msgid_plural "{count} plays"
 msgstr[0] "{count} çalma"
 msgstr[1] "{count} çalma"
 
-#, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] "{count} sonuç"
 msgstr[1] "{count} sonuç"
 
-#, rust-format
 msgid "{count} selected"
 msgstr "{count} seçildi"
 
-#, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} parça"
 msgstr[1] "{count} parça"
 
-#, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] "{count} hafta önce"
 msgstr[1] "{count} hafta önce"
 
-#, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} yıl önce"
 msgstr[1] "{count} yıl önce"
 
-#, rust-format
-msgid "{field} \302\267 Different across {count} track"
-msgid_plural "{field} \302\267 Different across {count} tracks"
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{minutes} min"
 msgstr "{minutes} dk"
 
-#, rust-format
 msgid "{shown} of {total} shown"
 msgstr "{total} içinden {shown} gösteriliyor"
 
-#, rust-format
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({total} içinden {completed}, {cached} önbellekte)"
 
-#, rust-format
 msgid "{stage} ({count} of {total} tracks)"
 msgstr "{stage} ({total} parçadan {count})"
 
-#, rust-format
 msgid "{stage}: {completed} / {total}"
 msgstr "{stage}: {completed} / {total}"
 
-#, rust-format
 msgid "{stage}: {completed}"
 msgstr "{stage}: {completed}"
 
@@ -5108,13 +5059,11 @@ msgid "Choose a separate installation folder."
 msgstr "Ayrı bir kurulum klasörü seçin."
 
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
 msgstr "{app_name} uygulamasını kapatıp kurulumu tekrar deneyin."
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
 msgstr "{app_name} uygulamasını kapatıp kaldırmayı tekrar deneyin."
@@ -5130,7 +5079,6 @@ msgid "Create desktop shortcut"
 msgstr "Masaüstü kısayolu oluştur"
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
 msgstr "{app_name} önbelleğini kaldır"
@@ -5141,7 +5089,6 @@ msgid "Setup could not complete the installation. Please try again."
 msgstr "Kurulum tamamlanamadı. Lütfen tekrar deneyin."
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
-#, rust-format
 msgctxt "Windows installer"
 msgid "The {app_name} automatic update option is invalid."
 msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
@@ -5150,3 +5097,9 @@ msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Rufin Kurulumuna Hoş Geldiniz"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Kuyruk ve geçişler"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr "Radyo ve Otomatik DJ için sunucunun Instant Mix'ini kullan."
