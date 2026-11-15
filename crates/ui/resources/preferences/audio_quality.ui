@@ -3,7 +3,7 @@
   <object class="AdwComboRow" id="format">
     <property name="title" translatable="yes">Format</property>
     <property name="model">
-      <object class="GtkStringList">
+      <object class="GtkStringList" id="format_choices">
         <items>
           <item translatable="yes">Original</item>
           <item>Opus</item>

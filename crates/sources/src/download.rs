@@ -1,27 +1,5 @@
 use audio_processing::ResolvedStream;
-use library::{AudioCodec, AudioEncoding};
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum DownloadQuality {
-    #[default]
-    Original,
-    Transcoded(AudioEncoding),
-}
-
-impl DownloadQuality {
-    pub fn encoding(self) -> Option<AudioEncoding> {
-        match self {
-            Self::Original => None,
-            Self::Transcoded(encoding) => Some(encoding),
-        }
-    }
-    pub fn extension(self) -> Option<&'static str> {
-        self.encoding().map(|encoding| encoding.codec.extension())
-    }
-}
+use library::{AudioCodec, AudioEncoding, AudioQuality};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolvedDownload {
@@ -39,7 +17,7 @@ impl ResolvedDownload {
     pub(crate) fn ready(stream: ResolvedStream, codec: Option<AudioCodec>) -> Self {
         Self::Ready { stream, codec }
     }
-    pub(crate) fn encode(stream: ResolvedStream, quality: DownloadQuality) -> Self {
+    pub(crate) fn encode(stream: ResolvedStream, quality: AudioQuality) -> Self {
         match quality.encoding() {
             Some(encoding) => Self::Encode {
                 stream: stream.without_window(),

@@ -252,25 +252,13 @@ msgstr ""
 msgid "12 hours"
 msgstr ""
 
-msgid "128 kbps"
-msgstr ""
-
 msgid "18 bands"
-msgstr ""
-
-msgid "192 kbps"
 msgstr ""
 
 msgid "24 hours"
 msgstr ""
 
-msgid "256 kbps"
-msgstr ""
-
 msgid "31 bands"
-msgstr ""
-
-msgid "320 kbps"
 msgstr ""
 
 msgid "5 Latest Albums"
@@ -4248,6 +4236,9 @@ msgstr ""
 msgid "Stream address"
 msgstr ""
 
+msgid "Stream quality on mobile data"
+msgstr ""
+
 msgid "Stream quality"
 msgstr ""
 
@@ -4822,9 +4813,6 @@ msgid "is not"
 msgstr ""
 
 msgid "is"
-msgstr ""
-
-msgid "kbps"
 msgstr ""
 
 msgid "not in the last"

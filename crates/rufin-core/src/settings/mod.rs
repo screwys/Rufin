@@ -53,7 +53,7 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use crate::scrobbling::Settings as ScrobblingSettings;
 use app::Settings as UiSettings;
-use playback::StreamQuality;
+use playback::AudioQuality;
 use secrets::{
     CachedSecretStore, ConfigSecretStore, SecretKey, SecretStore, SwitchableSecretStore,
 };
@@ -296,6 +296,7 @@ pub struct SettingsFile {
     persistence: Arc<Mutex<StoredSettings>>,
     edits: Arc<OnceLock<Result<mpsc::SyncSender<Self>, String>>>,
     persistence_error: tokio::sync::watch::Sender<Option<String>>,
+    metered: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) secret_storage_fallbacks: (
         async_channel::Sender<KeyringSecretStore>,
         async_channel::Receiver<KeyringSecretStore>,
@@ -351,6 +352,7 @@ impl SettingsFile {
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
+            metered: Arc::default(),
             secret_storage_fallbacks: async_channel::unbounded(),
         })
     }
@@ -372,6 +374,7 @@ impl SettingsFile {
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
+            metered: Arc::default(),
             secret_storage_fallbacks: async_channel::unbounded(),
         }
     }
@@ -399,8 +402,22 @@ impl SettingsFile {
             .cloned()
     }
 
-    pub(crate) fn playback_stream_quality(&self) -> StreamQuality {
-        self.committed.borrow().ui.playback.stream_quality
+    /// The quality a stream from `source_id` is asked for on the network as it is now.
+    pub(crate) fn stream_quality(&self, source_id: Option<&str>) -> AudioQuality {
+        self.committed
+            .borrow()
+            .ui
+            .stream_quality(source_id, self.metered())
+    }
+
+    /// Whether the device's network is metered, as mobile data is.
+    pub(crate) fn metered(&self) -> bool {
+        self.metered.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_metered(&self, metered: bool) {
+        self.metered
+            .store(metered, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn local_configuration(&self) -> Option<SourceConfiguration> {
@@ -756,10 +773,23 @@ impl SettingsOwner {
     pub fn set_download_quality(
         &self,
         source_id: SourceId,
-        quality: sources::DownloadQuality,
+        quality: sources::AudioQuality,
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_quality(source_id, quality);
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    /// The source's own stream quality; `None` follows the one for every source.
+    pub fn set_source_stream_quality(
+        &self,
+        source_id: SourceId,
+        quality: Option<sources::AudioQuality>,
+    ) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.set_source_stream_quality(source_id, quality);
             Ok(())
         })
         .map_err(Into::into)

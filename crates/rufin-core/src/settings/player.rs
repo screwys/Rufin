@@ -3,8 +3,8 @@ use super::{
     visualizer::{self, PreferenceIndex},
 };
 use playback::{
-    LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, PlaybackTransitionMode,
-    StreamQuality, VolumeScale,
+    AudioQuality, LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings,
+    PlaybackTransitionMode, VolumeScale,
 };
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Error))]

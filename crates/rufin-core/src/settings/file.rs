@@ -264,6 +264,10 @@ pub(super) const CHOICES: &[(&str, &str)] = &[
         "android.download_on_mobile_data",
         "/download_on_mobile_data",
     ),
+    (
+        "android.mobile_data_stream_quality",
+        "/mobile_data_stream_quality",
+    ),
 ];
 
 /// What stays in `state.json`, by where it is in the settings document: every part of the

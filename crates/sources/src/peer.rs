@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use audio_processing::ResolvedStream;
 use futures_util::future::BoxFuture;
-use library::{AudioChannels, AudioCodec, AudioEncoding, Freshness, SourceId, TrackObservation};
+use library::{AudioEncoding, Freshness, SourceId, TrackObservation};
 use serde::Deserialize;
 
 use crate::file::remote::input::{FileInput, FileInputServer};
@@ -175,29 +175,11 @@ impl PeerSource {
         Ok(clock)
     }
 
-    /// The owner's file through the loopback server. A transcoding owner applies the window
-    /// it is asked for; the original bytes are windowed here.
-    pub(crate) async fn stream(
-        &self,
-        playable: &library::Playable,
-        request: playback::StreamRequest,
-    ) -> SourceResult<ResolvedStream> {
-        let encoding = request
-            .quality
-            .max_bitrate_kbps()
-            .map(|bitrate| AudioEncoding {
-                codec: AudioCodec::Opus,
-                bitrate_kbps: Some(bitrate),
-                channels: AudioChannels::StereoLossy,
-            });
-        self.audio_stream(playable, encoding).await
-    }
-
     /// A download in the profile's format, which the owner encodes as it does for streaming.
     pub(crate) async fn download(
         &self,
         playable: &library::Playable,
-        quality: crate::DownloadQuality,
+        quality: crate::AudioQuality,
     ) -> SourceResult<crate::ResolvedDownload> {
         let encoding = quality.encoding();
         let stream = self.audio_stream(playable, encoding).await?;
@@ -207,8 +189,10 @@ impl PeerSource {
         ))
     }
 
-    /// The track's audio from the owner, encoded there when `encoding` names a format.
-    async fn audio_stream(
+    /// The owner's file through the loopback server, encoded there when `encoding` names a
+    /// format. A transcoding owner applies the window it is asked for; the original bytes are
+    /// windowed here.
+    pub(crate) async fn audio_stream(
         &self,
         playable: &library::Playable,
         encoding: Option<AudioEncoding>,
@@ -225,7 +209,7 @@ impl PeerSource {
             None => stream,
         };
         let stream = if encoding.is_some() {
-            stream.with_time_seek()
+            stream.with_time_seek(audio_processing::TimeSeek::Millis)
         } else {
             stream
         };

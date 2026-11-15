@@ -429,54 +429,62 @@ impl SubsonicSource {
     pub(crate) async fn resolve_stream(
         &self,
         track_object_id: &str,
-        quality: StreamQuality,
+        encoding: Option<library::AudioEncoding>,
     ) -> SourceResult<ResolvedStream> {
-        let format = if quality.max_bitrate_kbps().is_some() {
-            "mp3"
-        } else {
-            "raw"
-        };
-        self.resolve_audio(track_object_id, quality.max_bitrate_kbps(), format)
+        let stream = self.resolve_audio(track_object_id, encoding)?;
+        // An encoding has no length to seek in; a server that starts one at a time says so.
+        if encoding.is_some()
+            && self
+                .extension_version("transcodeOffset")
+                .await
+                .unwrap_or_default()
+                > 0
+        {
+            return Ok(stream.with_time_seek(audio_processing::TimeSeek::Seconds("timeOffset")));
+        }
+        Ok(stream)
     }
 
     pub(crate) fn resolve_download(
         &self,
         track: &str,
-        quality: crate::DownloadQuality,
+        quality: crate::AudioQuality,
     ) -> SourceResult<crate::ResolvedDownload> {
         let Some(encoding) = quality.encoding() else {
             return self
-                .resolve_audio(track, None, "raw")
+                .resolve_audio(track, None)
                 .map(|stream| crate::ResolvedDownload::ready(stream, None));
         };
         if encoding.stereo() {
             return self
-                .resolve_audio(track, None, "raw")
+                .resolve_audio(track, None)
                 .map(|stream| crate::ResolvedDownload::encode(stream, quality));
         }
-        let stream = self.resolve_audio(track, encoding.bitrate_kbps, encoding.codec.name())?;
+        let stream = self.resolve_audio(track, Some(encoding))?;
         Ok(crate::ResolvedDownload::ready(stream, Some(encoding.codec)))
     }
 
+    /// The track's own file, or the server's encoding of it.
     fn resolve_audio(
         &self,
         track_id: &str,
-        max_bitrate_kbps: Option<u32>,
-        format: &str,
+        encoding: Option<library::AudioEncoding>,
     ) -> SourceResult<ResolvedStream> {
         let mut extra = vec![("id", raw_item_id(track_id).to_string())];
-        if let Some(kbps) = max_bitrate_kbps {
+        if let Some(kbps) = encoding.and_then(|encoding| encoding.bitrate_kbps) {
             extra.push(("maxBitRate", kbps.to_string()));
         }
-        extra.push(("format", format.to_string()));
+        extra.push((
+            "format",
+            encoding
+                .map_or("raw", |encoding| encoding.codec.name())
+                .into(),
+        ));
         let url = self.authenticated_url("stream", &extra)?;
         let redacted = redacted_subsonic_url(&url);
         Ok(ResolvedStream::with_redacted(url.to_string(), redacted)
-            .with_content_type(match format {
-                "mp3" => Some("audio/mpeg".to_string()),
-                "opus" => Some("audio/ogg".to_string()),
-                _ => None,
-            })
+            .with_content_type(encoding.map(|encoding| encoding.codec.content_type().into()))
+            .with_transcoding(encoding.is_some())
             .with_trust_invalid_certificate(self.trust_invalid_cert))
     }
 }

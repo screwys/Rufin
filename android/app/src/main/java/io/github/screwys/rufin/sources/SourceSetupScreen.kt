@@ -164,6 +164,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     "plex" -> item { PlexSourceForm(setup, sourceId != null, browser) }
                     "webdav", "smb" -> item { FileSourceForm(setup, sourceId != null, browser) }
                 }
+                if (form.encodes) item { SourceStreamSettings(setup) }
                 if (form.offersHalfStarSetting) item { SourceRatingSettings(setup) }
                 item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     setup.code?.let { code -> Text(code, style = MaterialTheme.typography.headlineLarge) }

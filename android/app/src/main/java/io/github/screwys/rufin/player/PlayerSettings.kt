@@ -46,7 +46,7 @@ import io.github.screwys.rufin.shared.playback.PlaybackTransitionMode
 import io.github.screwys.rufin.shared.playback.LoudnessNormalization
 import io.github.screwys.rufin.shared.playback.LoudnessNormalizationScope
 import io.github.screwys.rufin.shared.playback.VolumeScale
-import io.github.screwys.rufin.shared.playback.StreamQuality
+import io.github.screwys.rufin.downloads.AudioQualityControls
 import io.github.screwys.rufin.shared.rufin_core.VisualizerStyle
 import io.github.screwys.rufin.shared.rufin_core.VisualizerFrequencyScale
 import io.github.screwys.rufin.shared.rufin_core.VisualizerWeighting
@@ -211,10 +211,16 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
                         PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
                             listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
                             select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
-                        val bitrate = (playback.streamQuality as? StreamQuality.MaxBitrateKbps)?.v1?.toString() ?: "original"
-                        PreferenceChoice(translate("Stream quality"), bitrate,
-                            listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
-                            select = { change { setStreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt())) } })
+                    }
+                    SettingsGroup(translate("Stream quality")) {
+                        AudioQualityControls(playback.streamQuality) { quality -> quality?.let { change { setStreamQuality(it) } } }
+                    }
+                    preferences.applicationSettings?.let { application ->
+                        SettingsGroup(translate("Stream quality on mobile data")) {
+                            AudioQualityControls(application.mobileDataStreamQuality, follows = true) { quality ->
+                                preferences.changePreference { setMobileDataStreamQuality(quality) }
+                            }
+                        }
                     }
                 }
             }

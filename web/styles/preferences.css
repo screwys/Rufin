@@ -307,7 +307,7 @@ button.pref-row:hover {
 .pref-quality {
   display: block;
 }
-.pref-quality .download-quality-controls {
+.pref-quality .audio-quality-controls {
   display: grid;
   gap: 4px;
 }

@@ -5,20 +5,10 @@ impl JellyfinEmbySource {
     pub(crate) fn jellyfin_download(
         &self,
         track: &str,
-        quality: crate::DownloadQuality,
+        quality: crate::AudioQuality,
         channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
-        let original = || {
-            stream_descriptor(
-                &self.base_url(),
-                &self.user_id,
-                &self.device_id,
-                &self.access_token,
-                self.trust_invalid_cert,
-                track,
-                StreamQuality::Original,
-            )
-        };
+        let original = || self.jellyfin_original(track, None);
         let Some(encoding) = quality.encoding() else {
             return Ok(crate::ResolvedDownload::ready(original()?, None));
         };
@@ -33,6 +23,42 @@ impl JellyfinEmbySource {
         {
             return Ok(crate::ResolvedDownload::encode(original()?, quality));
         }
+        Ok(crate::ResolvedDownload::ready(
+            self.jellyfin_transcode(track, encoding, None)?,
+            Some(encoding.codec),
+        ))
+    }
+
+    /// The track's own file.
+    pub(super) fn jellyfin_original(
+        &self,
+        track: &str,
+        session: Option<&str>,
+    ) -> SourceResult<ResolvedStream> {
+        let mut url = endpoint(
+            &self.base_url(),
+            &format!("Audio/{}/stream", raw_item_id(track)),
+        )?;
+        url.query_pairs_mut()
+            .append_pair("UserId", &self.user_id)
+            .append_pair("DeviceId", &self.device_id)
+            .append_pair("Static", "true")
+            .append_pair("ApiKey", &self.access_token);
+        if let Some(session) = session {
+            url.query_pairs_mut().append_pair("PlaySessionId", session);
+        }
+        Ok(ResolvedStream::new(url.to_string())
+            .with_trust_invalid_certificate(self.trust_invalid_cert))
+    }
+
+    /// The server's encoding of the track. It has no length to seek in, so it starts again
+    /// at a source time.
+    pub(super) fn jellyfin_transcode(
+        &self,
+        track: &str,
+        encoding: library::AudioEncoding,
+        session: Option<&str>,
+    ) -> SourceResult<ResolvedStream> {
         let mut url = endpoint(
             &self.base_url(),
             &format!("Audio/{}/Universal", raw_item_id(track)),
@@ -57,11 +83,14 @@ impl JellyfinEmbySource {
         if encoding.stereo() {
             url.query_pairs_mut().append_pair("maxAudioChannels", "2");
         }
-        let stream = ResolvedStream::new(url.to_string())
+        if let Some(session) = session {
+            url.query_pairs_mut().append_pair("PlaySessionId", session);
+        }
+        Ok(ResolvedStream::new(url.to_string())
             .with_trust_invalid_certificate(self.trust_invalid_cert)
             .with_content_type(Some(encoding.codec.content_type().into()))
-            .with_transcoding(true);
-        Ok(crate::ResolvedDownload::ready(stream, Some(encoding.codec)))
+            .with_transcoding(true)
+            .with_time_seek(audio_processing::TimeSeek::Ticks("startTimeTicks")))
     }
 
     pub(crate) async fn jellyfin_create_playlist(
@@ -126,63 +155,6 @@ impl JellyfinEmbySource {
             Err(error) => Err(error),
         }
     }
-}
-
-pub(super) fn stream_descriptor(
-    base_url: &Url,
-    user_id: &str,
-    device_id: &str,
-    access_token: &str,
-    trust_invalid_certificate: bool,
-    track_object_id: &str,
-    quality: StreamQuality,
-) -> SourceResult<ResolvedStream> {
-    let raw_track_id = raw_item_id(track_object_id);
-    let max_bitrate = quality
-        .max_bitrate_kbps()
-        .map(|kbps| kbps.saturating_mul(1_000).to_string());
-
-    let mut url = endpoint(base_url, &format!("Audio/{raw_track_id}/stream"))?;
-    let static_stream = if max_bitrate.is_some() {
-        "false"
-    } else {
-        "true"
-    };
-    {
-        let mut query = url.query_pairs_mut();
-        query
-            .append_pair("UserId", user_id)
-            .append_pair("DeviceId", device_id)
-            .append_pair("Static", static_stream)
-            .append_pair("ApiKey", access_token);
-        if let Some(max_bitrate) = &max_bitrate {
-            query
-                .append_pair("MaxStreamingBitrate", max_bitrate)
-                .append_pair("TranscodingContainer", "mp3")
-                .append_pair("AudioCodec", "mp3");
-        }
-    }
-    let mut redacted_url = url.clone();
-    {
-        let mut redacted_query = redacted_url.query_pairs_mut();
-        redacted_query
-            .clear()
-            .append_pair("UserId", user_id)
-            .append_pair("DeviceId", device_id)
-            .append_pair("Static", static_stream)
-            .append_pair("ApiKey", "<redacted>");
-        if let Some(max_bitrate) = &max_bitrate {
-            redacted_query
-                .append_pair("MaxStreamingBitrate", max_bitrate)
-                .append_pair("TranscodingContainer", "mp3")
-                .append_pair("AudioCodec", "mp3");
-        }
-    }
-    Ok(
-        ResolvedStream::with_redacted(url.to_string(), redacted_url.to_string())
-            .with_content_type(max_bitrate.map(|_| "audio/mpeg".to_string()))
-            .with_trust_invalid_certificate(trust_invalid_certificate),
-    )
 }
 
 fn lyrics_from_item(item: &Value) -> LyricsBundle {

@@ -281,7 +281,12 @@
           <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Target loudness") }}</span><small>{{ localization::tr("EBU R128 reference level") }}</small></span><span class="pref-range"><input type="range" min="-48" max="0" step="1" data-setting="/playback/ebu_r128_target_lufs" /><output></output></span></label>
           <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Write EBU R128 tags to files") }}</span><small>{{ localization::tr("Store calculated loudness in supported Local music files") }}</small></span><input type="checkbox" role="switch" data-setting="/playback/write_ebu_r128_tags" /></label>
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Volume scale") }}</span><small>{{ localization::tr("Perceptual for a finer control at low volume; Linear for a direct scale") }}</small></span><select data-setting="/playback/volume_scale"><option value='"Perceptual"'>{{ localization::tr("Perceptual") }}</option><option value='"Linear"'>{{ localization::tr("Linear") }}</option></select></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Stream quality") }}</span></span><select data-setting="/playback/stream_quality"><option value='"Original"'>{{ localization::tr("Original") }}</option>{% for kbps in [320, 256, 192, 128] %}<option value='{"MaxBitrateKbps":{{ kbps }}}'>{{ kbps }} kbps</option>{% endfor %}</select></label>
+        </div>
+        <div data-tabs="playback-tab" data-tab="audio" hidden>
+          <h4>{{ localization::tr("Stream quality") }}</h4>
+          <div class="pref-group">
+            <div class="pref-row pref-quality" id="pref-stream-quality">{% include "audio_quality.html" %}</div>
+          </div>
         </div>
       </section>
       <section id="pref-library" role="tabpanel" hidden>
@@ -299,6 +304,12 @@
         </div>
       </section>
       <section id="pref-source" role="tabpanel" hidden>
+        <div id="pref-source-stream">
+          <h4>{{ localization::tr("Stream quality") }}</h4>
+          <div class="pref-group">
+            <div class="pref-row pref-quality" id="pref-source-stream-quality">{% include "audio_quality.html" %}</div>
+          </div>
+        </div>
         <h4>{{ localization::tr("Server Actions") }}</h4>
         <div class="pref-group" id="pref-source-actions"></div>
       </section>
@@ -308,7 +319,7 @@
         </div>
         <h4>{{ localization::tr("Downloads") }}</h4>
         <div class="pref-group">
-          <div class="pref-row pref-quality" id="pref-download-quality">{% include "download_quality.html" %}</div>
+          <div class="pref-row pref-quality" id="pref-download-quality">{% include "audio_quality.html" %}</div>
           {% call m::switch("/show_downloaded_badges", localization::tr("Show downloaded badge"), "") %}{% endcall %}
         </div>
       </section>

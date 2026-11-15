@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::{DownloadQuality, ResolvedDownload};
+use crate::{AudioQuality, ResolvedDownload};
 use async_channel::{Receiver, Sender};
 use audio_processing::ResolvedStream;
 use library::{Catalog, Freshness};
@@ -1386,20 +1386,23 @@ impl Source {
         }
     }
 
-    /// The stream of a remote or document file, or of a server track.
+    /// The stream of a remote or document file, or of a server track. A server encodes the
+    /// track when its own audio does not fit the quality asked for.
     pub async fn stream(
         &self,
         playable: &library::Playable,
         request: StreamRequest,
     ) -> SourceResult<ResolvedStream> {
+        let encoding = playable.stream_encoding(request.quality);
+        let session = request.session_identifier.as_deref();
         self.reach(async {
             match &self.implementation {
                 Implementation::Plex(source) => {
                     source
                         .resolve_stream(
                             &self.track_object_id(&playable.media_uri)?,
-                            request.quality,
-                            request.session_identifier.as_deref(),
+                            encoding,
+                            session,
                         )
                         .await
                 }
@@ -1414,20 +1417,17 @@ impl Source {
                     source
                         .resolve_stream(
                             &self.track_object_id(&playable.media_uri)?,
-                            request.quality,
-                            request.session_identifier.as_deref(),
+                            encoding,
+                            session,
                         )
                         .await
                 }
                 Implementation::OpenSubsonic(source) => {
                     source
-                        .resolve_stream(
-                            &self.track_object_id(&playable.media_uri)?,
-                            request.quality,
-                        )
+                        .resolve_stream(&self.track_object_id(&playable.media_uri)?, encoding)
                         .await
                 }
-                Implementation::Peer(source) => source.stream(playable, request).await,
+                Implementation::Peer(source) => source.audio_stream(playable, encoding).await,
             }
         })
         .await
@@ -1436,7 +1436,7 @@ impl Source {
     pub async fn resolve_download(
         &self,
         playable: &library::Playable,
-        quality: DownloadQuality,
+        quality: AudioQuality,
     ) -> SourceResult<ResolvedDownload> {
         let backing = library::cue_media_parts(&playable.media_uri)
             .map_or_else(|| playable.media_uri.clone(), |(_, uri, _, _)| uri);

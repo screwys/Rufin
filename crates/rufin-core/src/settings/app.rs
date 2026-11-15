@@ -248,6 +248,9 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     /// Android: whether rule downloads run on mobile data too.
     #[serde(default)]
     download_on_mobile_data: bool = false => set_download_on_mobile_data;
+    /// Android: the quality streams are asked for on mobile data, in place of every other.
+    #[serde(default)]
+    mobile_data_stream_quality: Option<library::AudioQuality> = None => set_mobile_data_stream_quality;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
     /// How many tracks one Auto DJ refill adds.
@@ -554,9 +557,32 @@ impl Settings {
     pub fn set_download_quality(
         &mut self,
         source_id: SourceId,
-        quality: sources::DownloadQuality,
+        quality: sources::AudioQuality,
     ) -> bool {
         self.update_download_settings(source_id, |settings| settings.quality = quality)
+    }
+
+    /// The quality a stream from `source_id` is asked for: the one for mobile data while the
+    /// network is metered, else the source's own, else the one for every source.
+    pub fn stream_quality(&self, source_id: Option<&str>, metered: bool) -> library::AudioQuality {
+        self.application
+            .mobile_data_stream_quality
+            .filter(|_| metered)
+            .or_else(|| {
+                self.downloads
+                    .iter()
+                    .find(|entry| Some(entry.source_id.as_str()) == source_id)?
+                    .stream_quality
+            })
+            .unwrap_or(self.playback.stream_quality)
+    }
+
+    pub fn set_source_stream_quality(
+        &mut self,
+        source_id: SourceId,
+        quality: Option<library::AudioQuality>,
+    ) -> bool {
+        self.update_download_settings(source_id, |settings| settings.stream_quality = quality)
     }
 
     pub fn set_download_directory(

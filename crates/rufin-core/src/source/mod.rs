@@ -2108,7 +2108,7 @@ impl SourceOwner {
                 });
                 stored.ui.set_download_quality(
                     configuration.source_id.clone(),
-                    sources::DownloadQuality::Transcoded(library::AudioEncoding {
+                    sources::AudioQuality::Transcoded(library::AudioEncoding {
                         codec: library::AudioCodec::Opus,
                         bitrate_kbps: Some(128),
                         channels: library::AudioChannels::Preserve,
@@ -3865,7 +3865,7 @@ mod source_tests {
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(
                     &playable,
-                    playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
+                    playback::StreamRequest::new(&local_uri, playback::AudioQuality::Original),
                     None,
                     None,
                     |source_id| owner.open_client(source_id),

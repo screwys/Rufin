@@ -27,7 +27,7 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
         (Page::Playback, "preferences/playback.ui"),
         (Page::Equalizer, "player/equalizer.ui"),
         (Page::Library, "preferences/library.ui"),
-        (Page::Downloads, "preferences/download_quality.ui"),
+        (Page::Downloads, "preferences/audio_quality.ui"),
         (Page::Connect, "preferences/connect.ui"),
         (Page::Controller, "preferences/controller.ui"),
         (Page::Storage, "preferences/storage.ui"),

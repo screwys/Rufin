@@ -9,14 +9,13 @@ use crate::player::playback_settings::{
     playback_rate_row, preserve_pitch_row, transition_rows, volume_scale_from_index,
     volume_scale_index,
 };
-use crate::widgets::forms::{controlled_selection_row, quality_selection_row, selection_row};
+use crate::widgets::forms::{controlled_selection_row, selection_row};
 use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
 use std::{cell::Cell, rc::Rc};
 
 use crate::shell::shell::Shell;
 use adw::prelude::*;
 use localization::tr;
-use playback::StreamQuality;
 use playback::{
     LoudnessNormalization, LoudnessNormalizationScope, MAX_AUTO_DJ_REFILL_COUNT,
     MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_COUNT,
@@ -55,6 +54,7 @@ pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
         skip_low_rated_row: adw::SwitchRow,
         clear_queue_row: adw::SwitchRow,
         audio_group: adw::PreferencesGroup,
+        stream_quality_group: adw::PreferencesGroup,
         ebu_target_row: adw::ActionRow,
         ebu_target: gtk::Scale,
         write_ebu_tags_row: adw::SwitchRow,
@@ -352,25 +352,15 @@ pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
     audio_group.add(&volume_scale_row);
 
     let quality_shell = Rc::clone(shell);
-    let quality_row = quality_selection_row(
-        &tr(STREAM_QUALITY_TITLE),
-        &[
-            StreamQuality::Original,
-            StreamQuality::MaxBitrateKbps(320),
-            StreamQuality::MaxBitrateKbps(256),
-            StreamQuality::MaxBitrateKbps(192),
-            StreamQuality::MaxBitrateKbps(128),
-        ],
-        stream_quality_index(settings.stream_quality),
-        move |selected| {
+    let quality_rows =
+        crate::preferences::audio_quality::rows(settings.stream_quality, move |quality| {
             quality_shell
                 .player_ui
-                .update_playback_settings(|settings| {
-                    settings.stream_quality = stream_quality_from_index(selected);
-                });
-        },
-    );
-    audio_group.add(&quality_row);
+                .update_playback_settings(|settings| settings.stream_quality = quality);
+        });
+    for row in &quality_rows {
+        stream_quality_group.add(row);
+    }
 
     let output_dropdown = audio_output_dropdown(&shell, 220);
     output_row.add_suffix(&output_dropdown);
@@ -416,25 +406,5 @@ pub fn loudness_scope_from_index(index: u32) -> LoudnessNormalizationScope {
     match index {
         0 => LoudnessNormalizationScope::Track,
         _ => LoudnessNormalizationScope::Album,
-    }
-}
-
-pub fn stream_quality_index(quality: StreamQuality) -> u32 {
-    match quality {
-        StreamQuality::Original => 0,
-        StreamQuality::MaxBitrateKbps(320) => 1,
-        StreamQuality::MaxBitrateKbps(256) => 2,
-        StreamQuality::MaxBitrateKbps(192) => 3,
-        StreamQuality::MaxBitrateKbps(128) => 4,
-        StreamQuality::MaxBitrateKbps(_) => 0,
-    }
-}
-pub fn stream_quality_from_index(index: u32) -> StreamQuality {
-    match index {
-        1 => StreamQuality::MaxBitrateKbps(320),
-        2 => StreamQuality::MaxBitrateKbps(256),
-        3 => StreamQuality::MaxBitrateKbps(192),
-        4 => StreamQuality::MaxBitrateKbps(128),
-        _ => StreamQuality::Original,
     }
 }

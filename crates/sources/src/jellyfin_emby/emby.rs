@@ -1,10 +1,12 @@
 use super::*;
 
 impl JellyfinEmbySource {
+    /// The track's own file, or the server's encoding of it. An encoding has no length to
+    /// seek in, so it starts again at a source time.
     pub(super) async fn emby_stream(
         &self,
         track: &str,
-        quality: StreamQuality,
+        encoding: Option<library::AudioEncoding>,
         session: Option<&str>,
     ) -> SourceResult<ResolvedStream> {
         let session = match session {
@@ -17,11 +19,12 @@ impl JellyfinEmbySource {
             }
         };
         let raw = raw_item_id(track);
-        let transcoded = quality != StreamQuality::Original;
-        let path = if !transcoded {
-            format!("Audio/{raw}/stream")
-        } else {
-            format!("Audio/{raw}/universal")
+        let path = match encoding.map(|encoding| encoding.codec) {
+            Some(library::AudioCodec::Opus | library::AudioCodec::Vorbis) => {
+                format!("Audio/{raw}/stream.ogg")
+            }
+            Some(codec) => format!("Audio/{raw}/stream.{}", codec.name()),
+            None => format!("Audio/{raw}/stream"),
         };
         let token = self.session_access_token().await?;
         let mut url = endpoint(&self.base_url(), &path)?;
@@ -30,24 +33,29 @@ impl JellyfinEmbySource {
             .append_pair("DeviceId", &self.device_id)
             .append_pair("api_key", token)
             .append_pair("PlaySessionId", &session);
-        if let StreamQuality::MaxBitrateKbps(kbps) = quality {
-            let bitrate = kbps.saturating_mul(1000).to_string();
-            url.query_pairs_mut()
-                .append_pair("MaxStreamingBitrate", &bitrate)
-                .append_pair("TranscodingProtocol", "hls")
-                .append_pair("TranscodingContainer", "ts")
-                .append_pair("AudioCodec", "aac");
-        } else {
+        let Some(encoding) = encoding else {
             url.query_pairs_mut().append_pair("Static", "true");
+            return Ok(ResolvedStream::new(url.to_string())
+                .with_trust_invalid_certificate(self.trust_invalid_cert));
+        };
+        url.query_pairs_mut()
+            .append_pair("Static", "false")
+            .append_pair("AudioCodec", encoding.codec.name());
+        if encoding.codec != library::AudioCodec::Flac
+            && let Some(rate) = encoding.bitrate_kbps
+        {
+            url.query_pairs_mut()
+                .append_pair("AudioBitRate", &rate.saturating_mul(1000).to_string());
         }
-        let mut stream = ResolvedStream::new(url.to_string())
+        if encoding.stereo() {
+            url.query_pairs_mut().append_pair("MaxAudioChannels", "2");
+        }
+        let stream = ResolvedStream::new(url.to_string())
             .with_trust_invalid_certificate(self.trust_invalid_cert)
-            .with_transcoding(transcoded)
-            .with_content_type(transcoded.then(|| "application/vnd.apple.mpegurl".to_owned()));
-        if transcoded {
-            stream = self.hold_emby_transcode(stream, &session).await?;
-        }
-        Ok(stream)
+            .with_content_type(Some(encoding.codec.content_type().into()))
+            .with_transcoding(true)
+            .with_time_seek(audio_processing::TimeSeek::Ticks("StartTimeTicks"));
+        self.hold_emby_transcode(stream, &session).await
     }
 
     pub(super) async fn hold_emby_transcode(
@@ -434,7 +442,7 @@ mod tests {
             .mount(&server)
             .await;
         let original = source
-            .resolve_stream("emby:track:11", StreamQuality::Original, Some("original"))
+            .resolve_stream("emby:track:11", None, Some("original"))
             .await
             .unwrap();
         assert!(!original.transcoded());
@@ -442,20 +450,21 @@ mod tests {
         let playing = source
             .resolve_stream(
                 "emby:track:11",
-                StreamQuality::MaxBitrateKbps(128),
+                Some(library::AudioEncoding {
+                    codec: library::AudioCodec::Mp3,
+                    bitrate_kbps: Some(128),
+                    channels: library::AudioChannels::Preserve,
+                }),
                 Some("playing"),
             )
             .await
             .unwrap();
         let retained = playing.clone();
-        assert_eq!(
-            playing.content_type.as_deref(),
-            Some("application/vnd.apple.mpegurl")
-        );
+        assert_eq!(playing.content_type.as_deref(), Some("audio/mpeg"));
         assert!(playing.transcoded());
         assert!(!format!("{playing:?}").contains("secret"));
         let url = Url::parse(playing.uri()).unwrap();
-        assert_eq!(url.path(), "/emby/Audio/11/universal");
+        assert_eq!(url.path(), "/emby/Audio/11/stream.mp3");
         assert!(
             url.query_pairs()
                 .any(|(k, v)| k == "PlaySessionId" && v == "playing")
@@ -463,7 +472,7 @@ mod tests {
         let download = source
             .resolve_download(
                 "emby:track:11",
-                crate::DownloadQuality::Transcoded(library::AudioEncoding {
+                crate::AudioQuality::Transcoded(library::AudioEncoding {
                     codec: library::AudioCodec::Mp3,
                     bitrate_kbps: Some(320),
                     channels: library::AudioChannels::Preserve,

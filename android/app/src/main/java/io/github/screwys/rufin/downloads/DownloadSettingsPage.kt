@@ -79,7 +79,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)) }) { Text(translate("Choose")) }
             })
             if (source.directory() != null) TextButton({ downloads.directory(source.source.id, null) }) { Text(translate("Use default folder")) }
-            DownloadQualityControls(source.settings.quality) { downloads.quality(source.source.id, it) }
+            AudioQualityControls(source.settings.quality) { quality -> quality?.let { downloads.quality(source.source.id, it) } }
             }
             SettingsGroup {
             DownloadRule.entries.forEach { rule -> SettingsRow(downloadRuleTitle(rule), trailing = {
