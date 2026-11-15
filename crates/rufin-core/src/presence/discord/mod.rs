@@ -85,8 +85,21 @@ fn latest_slot<T>() -> (LatestSender<T>, LatestReceiver<T>) {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ArtworkKey {
-    album: library::AlbumCover,
+    cover: Cover,
+    /// The picture shown until the cover is found, and when none is: a radio station's own.
+    fallback: Option<String>,
     lookups: metadata_lookup::LookupPolicy,
+}
+
+/// What a cover is looked up by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum Cover {
+    Album(library::AlbumCover),
+    /// A song a radio stream announced: Discord shows the cover Rufin shows for it.
+    Song {
+        artist: String,
+        title: String,
+    },
 }
 
 pub(crate) struct ArtworkRequest {
@@ -275,10 +288,17 @@ impl Discord {
         lookups: &metadata_lookup::LookupPolicy,
         view: &TransportView,
     ) -> String {
+        // A radio station without an announced song shows the picture its stream or its list
+        // names; with one, that picture until the song's cover is found.
+        let station = station_picture(view);
         let Some(key) = ArtworkKey::from_view(view, lookups) else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
-            return APP_ICON_ASSET.to_string();
+            return station.unwrap_or_else(|| APP_ICON_ASSET.to_string());
+        };
+        let shown = |url: Option<String>| {
+            url.or_else(|| station.clone())
+                .unwrap_or_else(|| APP_ICON_ASSET.to_string())
         };
         match &state.artwork {
             ArtworkState::Pending { key: pending, .. } if pending == &key => {
@@ -286,10 +306,10 @@ impl Discord {
                     .activity
                     .as_ref()
                     .map(|activity| activity.large_image.clone())
-                    .unwrap_or_else(|| APP_ICON_ASSET.to_string());
+                    .unwrap_or_else(|| shown(None));
             }
             ArtworkState::Ready { key: ready, url } if ready == &key => {
-                return url.clone().unwrap_or_else(|| APP_ICON_ASSET.to_string());
+                return shown(url.clone());
             }
             ArtworkState::Empty | ArtworkState::Pending { .. } | ArtworkState::Ready { .. } => {}
         }
@@ -306,7 +326,7 @@ impl Discord {
             queued_at: Instant::now(),
             owner: Arc::downgrade(&self.inner),
         });
-        APP_ICON_ASSET.to_string()
+        shown(None)
     }
 }
 
@@ -365,16 +385,41 @@ impl State {
             key: key.clone(),
             url: url.clone(),
         };
-        let image = url.unwrap_or_else(|| APP_ICON_ASSET.to_string());
+        let image = url
+            .or_else(|| key.fallback.clone())
+            .unwrap_or_else(|| APP_ICON_ASSET.to_string());
         let activity = self.activity.as_mut()?;
         Arc::make_mut(activity).large_image = image;
         Some(Arc::clone(activity))
     }
 }
 
+/// The public picture of the radio station that plays.
+fn station_picture(view: &TransportView) -> Option<String> {
+    view.current
+        .as_ref()
+        .filter(|media| media.live.is_some())
+        .and_then(|media| media.row.track.artwork_binding.as_deref())
+        .and_then(library::station_picture_url)
+}
+
 impl ArtworkKey {
     fn from_view(view: &TransportView, lookups: &metadata_lookup::LookupPolicy) -> Option<Self> {
         let track = &view.current.as_ref()?;
+        if let Some(live) = &track.live {
+            let metadata = &track.row.track.metadata;
+            let announced = live.station != metadata.title
+                && !metadata.artist.trim().is_empty()
+                && !metadata.title.trim().is_empty();
+            return announced.then(|| Self {
+                cover: Cover::Song {
+                    artist: metadata.artist.clone(),
+                    title: metadata.title.clone(),
+                },
+                fallback: station_picture(view),
+                lookups: lookups.clone(),
+            });
+        }
         let album_artist = track
             .row
             .track
@@ -384,7 +429,7 @@ impl ArtworkKey {
             .filter(|artist| !artist.trim().is_empty())
             .unwrap_or(&track.row.track.metadata.artist);
         Some(Self {
-            album: library::AlbumCover::new(
+            cover: Cover::Album(library::AlbumCover::new(
                 album_artist,
                 &track.row.track.metadata.album,
                 track
@@ -394,7 +439,8 @@ impl ArtworkKey {
                     .musicbrainz_release_group_id
                     .as_deref(),
                 track.row.track.metadata.musicbrainz_album_id.as_deref(),
-            )?,
+            )?),
+            fallback: None,
             lookups: lookups.clone(),
         })
     }
@@ -441,6 +487,7 @@ pub(crate) mod tests {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         let current = CurrentMedia {
+            live: None,
             stream: None,
             id: CurrentMediaId {
                 run: Some(RunId::new(run)),

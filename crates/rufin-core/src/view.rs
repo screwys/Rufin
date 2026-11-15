@@ -780,6 +780,8 @@ impl SourceOwner {
                 catalog.sort_search(&mut results, folder, search_sorts(settings));
                 (None, Plan::Search(Box::new(results)))
             }
+            // The Radio page reads `stations::page`; it has no rows of the Catalog.
+            Route::Radio => (None, Plan::Missing),
         };
         Ok((header, plan))
     }
@@ -2404,22 +2406,29 @@ pub fn refresh_unread(
 ) -> Refresh {
     if changed.scope && !Scope::of(route).same(opened_with, current) {
         Refresh::Reopen
+    } else if *route == Route::Radio && (changed.stations || changed.all) {
+        Refresh::Reread
     } else {
         Refresh::Nothing
     }
 }
 
 /// Whether a committed change can change the sidebar pins. Plays, favorites, ratings and the
-/// music folder change only what smart playlist pins count.
+/// music folder change only what smart playlist pins count, and stations only their own pins.
 pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
-    changed.all
+    if changed.all
         || changed.pins
         || changed.scope
         || changed.playlist_lists
         || !changed.sources.is_empty()
         || !changed.playlists.is_empty()
-        || (changed.listened || !changed.items.is_empty())
-            && owner.shared.settings.load().ui.sidebar.pins_use_activity()
+    {
+        return true;
+    }
+    let stored = owner.shared.settings.load();
+    let sidebar = &stored.ui.sidebar;
+    (changed.listened || !changed.items.is_empty()) && sidebar.pins_use_activity()
+        || changed.stations && sidebar.pins_show_stations()
 }
 
 pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryListKey {

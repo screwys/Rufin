@@ -101,18 +101,19 @@ class RufinService : MediaSessionService() {
     private val shuffleCommand = SessionCommand("io.github.screwys.rufin.SHUFFLE", Bundle.EMPTY)
     private val repeatCommand = SessionCommand("io.github.screwys.rufin.REPEAT", Bundle.EMPTY)
     private val autoDjCommand = SessionCommand("io.github.screwys.rufin.AUTO_DJ", Bundle.EMPTY)
-    private fun mediaButtons(state: AndroidPlaybackUpdate?) = listOf(
+    // A radio station plays alone and is no track of the library: the four are disabled.
+    private fun mediaButtons(state: AndroidPlaybackUpdate?) = (state?.transport?.current?.live == null).let { track -> listOf(
         CommandButton.Builder(if (state?.favorite == true) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
-            .setDisplayName(translate("Favorite")).setSessionCommand(favoriteCommand).build(),
+            .setDisplayName(translate("Favorite")).setSessionCommand(favoriteCommand).setEnabled(track).build(),
         CommandButton.Builder(if (state?.controls?.shuffleEnabled == true) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF)
-            .setDisplayName(translate("Shuffle")).setSessionCommand(shuffleCommand).build(),
+            .setDisplayName(translate("Shuffle")).setSessionCommand(shuffleCommand).setEnabled(track).build(),
         CommandButton.Builder(when (state?.controls?.repeatMode) {
             QueueRepeatMode.ALL -> CommandButton.ICON_REPEAT_ALL
             QueueRepeatMode.ONE -> CommandButton.ICON_REPEAT_ONE
             else -> CommandButton.ICON_REPEAT_OFF
-        }).setDisplayName(translate("Repeat")).setSessionCommand(repeatCommand).build(),
+        }).setDisplayName(translate("Repeat")).setSessionCommand(repeatCommand).setEnabled(track).build(),
         CommandButton.Builder(CommandButton.ICON_UNDEFINED).setCustomIconResId(R.drawable.rufin_auto_dj_symbolic)
-            .setDisplayName(translate("Auto DJ")).setSessionCommand(autoDjCommand).build())
+            .setDisplayName(translate("Auto DJ")).setSessionCommand(autoDjCommand).setEnabled(track).build()) }
     private val sessionCallback = object : MediaSession.Callback {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
             MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(
@@ -309,7 +310,8 @@ class RufinService : MediaSessionService() {
                     nativePlayer.update(state)
                     mutablePlayback.value = state
                     if (previous?.favorite != state.favorite || previous?.controls?.shuffleEnabled != state.controls.shuffleEnabled ||
-                        previous?.controls?.repeatMode != state.controls.repeatMode)
+                        previous?.controls?.repeatMode != state.controls.repeatMode ||
+                        (previous?.transport?.current?.live == null) != (state.transport.current?.live == null))
                         session.setMediaButtonPreferences(mediaButtons(state))
                     if (state.controls.playbackOutput !is PlaybackOutput.Local || state.transport.state == TransportStatus.STOPPED || state.transport.state == TransportStatus.FAILED) {
                         audioFocus.abandon()

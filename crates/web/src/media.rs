@@ -16,6 +16,42 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/delete", post(delete))
 }
 
+/// Names a picture no library URI names, a radio station's logo or the cover of the song it
+/// plays, for `/api/artwork?picture=`: its binding, signed so that the endpoint loads only
+/// pictures this server named.
+pub(super) fn picture(binding: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "{}.{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(binding),
+        blake3::keyed_hash(picture_key(), binding).to_hex()
+    )
+}
+
+fn picture_key() -> &'static [u8; 32] {
+    static KEY: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        let mut key = [0; 32];
+        getrandom::fill(&mut key).expect("system randomness");
+        key
+    })
+}
+
+/// The binding a [`picture`] names.
+fn picture_binding(picture: &str) -> Result<Vec<u8>, Error> {
+    use base64::Engine;
+    let unknown = || bad_request("Unknown picture");
+    let (binding, signature) = picture.split_once('.').ok_or_else(unknown)?;
+    let binding = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(binding)
+        .map_err(|_| unknown())?;
+    let signature = blake3::Hash::from_hex(signature).map_err(|_| unknown())?;
+    if signature != blake3::keyed_hash(picture_key(), &binding) {
+        return Err(unknown());
+    }
+    Ok(binding)
+}
+
 /// Delete permanently: the files of `uris`, or of the selected rows of a page or all it lists.
 async fn delete(
     State(products): State<ProductHandles>,
@@ -400,7 +436,9 @@ async fn artwork(
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
-    let binding = if parameters.contains_key("genre") {
+    let binding = if let Some(picture) = parameters.get("picture") {
+        Some(picture_binding(picture)?)
+    } else if parameters.contains_key("genre") {
         let (source, _) = catalog::scope(&products, required(&parameters, "source")?, None).await?;
         products
             .library

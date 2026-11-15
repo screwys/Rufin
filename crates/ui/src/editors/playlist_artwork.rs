@@ -8,6 +8,10 @@ use adw::prelude::*;
 use rufin_core::source::SourceOwner;
 use sources::{ArtworkChange, ImageBytes};
 
+/// Makes a picture anew from what the edited thing holds.
+pub type Regenerate =
+    Box<dyn Fn(&SourceOwner) -> async_channel::Receiver<Result<Option<Arc<ImageBytes>>, String>>>;
+
 pub struct ArtworkEditor {
     pub frame: gtk::AspectFrame,
     pub overlay: gtk::Overlay,
@@ -34,10 +38,7 @@ impl ArtworkEditor {
         editing: rufin_core::playlists::PlaylistArtworkEditing,
         content: &gtk::Box,
         apply: &gtk::Button,
-        regenerate: impl Fn(
-            &SourceOwner,
-        ) -> async_channel::Receiver<Result<Option<Arc<ImageBytes>>, String>>
-        + 'static,
+        regenerate: Option<Regenerate>,
     ) -> Rc<Self> {
         let resource = "preferences/dialogs/playlist_artwork.ui";
         let builder = crate::ui_resource::builder(resource);
@@ -125,8 +126,12 @@ impl ArtworkEditor {
         });
         let weak = Rc::downgrade(&editor);
         let owner = Arc::downgrade(source);
+        // A radio station has nothing to make a picture from.
+        regenerate_image.set_visible(regenerate.is_some());
         regenerate_image.connect_clicked(move |_| {
-            let (Some(editor), Some(owner)) = (weak.upgrade(), owner.upgrade()) else {
+            let (Some(editor), Some(owner), Some(regenerate)) =
+                (weak.upgrade(), owner.upgrade(), &regenerate)
+            else {
                 return;
             };
             editor.begin();

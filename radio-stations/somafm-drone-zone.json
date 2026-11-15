@@ -1,0 +1,15 @@
+{
+  "name": "Drone Zone",
+  "description": "Atmospheric textures with minimal beats, from SomaFM.",
+  "homepage": "https://somafm.com/dronezone/",
+  "genres": [
+    "Ambient"
+  ],
+  "logo": "https://somafm.com/logos/256/dronezone256.png",
+  "channels": [
+    {
+      "name": "Drone Zone",
+      "stream": "https://ice1.somafm.com/dronezone-128-mp3"
+    }
+  ]
+}

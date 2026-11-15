@@ -48,7 +48,7 @@ class RufinPlayerTest {
         queue = QueueSummaryView(1UL, 1UL, 0UL, null, true),
         notices = emptyList(), favorite = false, sourceLabels = listOf("WAV", "44.1 kHz"),
         transport = TransportView(
-            current = CurrentMedia(null, CurrentMediaId(1UL, "file:///test/track.wav"), row),
+            current = CurrentMedia(null, CurrentMediaId(1UL, "file:///test/track.wav"), row, null),
             state = TransportStatus.PLAYING, desiredPlaying = true,
             positionMillis = 10_000UL, positionObservedAtMillis = 1UL, playbackRate = 1.0,
             durationMillis = 60_000UL, canSeek = true, bufferingPercent = null, error = null,

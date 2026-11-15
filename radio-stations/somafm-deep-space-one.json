@@ -1,0 +1,16 @@
+{
+  "name": "Deep Space One",
+  "description": "Deep ambient electronic and space music, from SomaFM.",
+  "homepage": "https://somafm.com/deepspaceone/",
+  "genres": [
+    "Ambient",
+    "Space music"
+  ],
+  "logo": "https://somafm.com/logos/256/deepspaceone256.png",
+  "channels": [
+    {
+      "name": "Deep Space One",
+      "stream": "https://ice1.somafm.com/deepspaceone-128-mp3"
+    }
+  ]
+}

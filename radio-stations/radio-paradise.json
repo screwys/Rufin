@@ -1,0 +1,28 @@
+{
+  "name": "Radio Paradise",
+  "description": "Listener-supported mixes put together by people, across rock, world and electronic.",
+  "homepage": "https://radioparadise.com",
+  "genres": [
+    "Eclectic",
+    "Rock"
+  ],
+  "logo": "https://radioparadise.com/apple-touch-icon.png",
+  "channels": [
+    {
+      "name": "Main Mix",
+      "stream": "https://stream.radioparadise.com/aac-320"
+    },
+    {
+      "name": "Mellow",
+      "stream": "https://stream.radioparadise.com/mellow-320"
+    },
+    {
+      "name": "Rock",
+      "stream": "https://stream.radioparadise.com/rock-320"
+    },
+    {
+      "name": "Global",
+      "stream": "https://stream.radioparadise.com/global-320"
+    }
+  ]
+}

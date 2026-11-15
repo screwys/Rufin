@@ -1161,6 +1161,11 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             source_id,
             album_id: "missing".into(),
         },
+        library::SidebarPin::Station {
+            source_id: None,
+            station_id: "station".into(),
+            channel: None,
+        },
     ];
     let rows = catalog.pin_rows(&pins, 1000, None, &cancel).await.unwrap();
     let totals = |index: usize| {

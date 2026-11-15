@@ -416,6 +416,47 @@ fn search_album_identity_ids(
     Ok(json_ids(&value, collection_pointer))
 }
 
+/// The release groups and releases a recording of this artist and title is on, best match
+/// first, for a cover lookup by song.
+pub(crate) fn search_song_release_ids(
+    artist: &str,
+    title: &str,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let query = format!(
+        "artist:\"{}\" AND recording:\"{}\"",
+        musicbrainz_phrase(artist),
+        musicbrainz_phrase(title)
+    );
+    let url = Url::parse_with_params(
+        MUSICBRAINZ_RECORDING_URL,
+        [("query", query.as_str()), ("fmt", "json"), ("limit", "3")],
+    )
+    .map_err(|error| error.to_string())?;
+    let value = fetch_musicbrainz_json(client()?, url, "MusicBrainz recording lookup")?;
+    let (mut groups, mut releases) = (Vec::new(), Vec::new());
+    for release in value
+        .pointer("/recordings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|recording| recording.get("releases").and_then(Value::as_array))
+        .flatten()
+        .take(4)
+    {
+        for (ids, id) in [
+            (&mut groups, release.pointer("/release-group/id")),
+            (&mut releases, release.get("id")),
+        ] {
+            if let Some(id) = id.and_then(Value::as_str)
+                && !ids.iter().any(|known| known == id)
+            {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    Ok((groups, releases))
+}
+
 fn musicbrainz_phrase(value: &str) -> String {
     value.replace('\\', " ").replace('"', "\\\"")
 }

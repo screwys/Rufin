@@ -1630,6 +1630,59 @@ impl Source {
         }
     }
 
+    /// The radio stations the server keeps.
+    pub async fn stations(&self) -> SourceResult<Vec<library::StationWrite>> {
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => source.stations().await,
+            _ => Err(SourceError::InvalidRequest(
+                "Source keeps no radio stations",
+            )),
+        }
+    }
+
+    /// Creates a radio station on the server and answers it as the server lists it.
+    pub async fn create_station(
+        &self,
+        name: &str,
+        stream_url: &str,
+        homepage: &str,
+    ) -> SourceResult<library::StationWrite> {
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => {
+                source.create_station(name, stream_url, homepage).await
+            }
+            _ => Err(SourceError::InvalidRequest(
+                "Source keeps no radio stations",
+            )),
+        }
+    }
+
+    pub async fn update_station(
+        &self,
+        id: &str,
+        name: &str,
+        stream_url: &str,
+        homepage: &str,
+    ) -> SourceResult<()> {
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => {
+                source.update_station(id, name, stream_url, homepage).await
+            }
+            _ => Err(SourceError::InvalidRequest(
+                "Source keeps no radio stations",
+            )),
+        }
+    }
+
+    pub async fn delete_station(&self, id: &str) -> SourceResult<()> {
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => source.delete_station(id).await,
+            _ => Err(SourceError::InvalidRequest(
+                "Source keeps no radio stations",
+            )),
+        }
+    }
+
     /// Whether the server makes share links for this user.
     pub fn shares_links(&self) -> bool {
         matches!(&self.implementation, Implementation::OpenSubsonic(provider) if provider.shares_links())

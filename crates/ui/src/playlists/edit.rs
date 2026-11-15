@@ -74,7 +74,9 @@ impl Shell {
                 editing,
                 &editor_content,
                 &save_edit,
-                move |owner| rufin_core::playlists::regenerate_playlist_artwork(owner, playlist_id),
+                Some(Box::new(move |owner| {
+                    rufin_core::playlists::regenerate_playlist_artwork(owner, playlist_id)
+                })),
             );
             let artwork_frame = &artwork.frame;
             let artwork_overlay = &artwork.overlay;

@@ -920,6 +920,22 @@ fn append_export_action(
     );
 }
 
+/// The menu of a station pinned in Saved: its pin, as the menus of the other pins end.
+pub fn present_station_pin_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    pin: SidebarPin,
+    position: Option<(f64, f64)>,
+) {
+    let menu = rufin_core::menu::pinned_station(&shell.settings.current.borrow(), &pin);
+    let Some(pin) = menu.pin else {
+        return;
+    };
+    let surface = ContextMenuSurface::new(target, "station", position);
+    append_pin_action(&surface, shell, pin, menu.pinned);
+    surface.popup();
+}
+
 fn append_pin_action(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,

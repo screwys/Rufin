@@ -1,0 +1,16 @@
+{
+  "name": "KEXP",
+  "description": "Seattle's listener-powered station for new and independent music.",
+  "homepage": "https://www.kexp.org",
+  "genres": [
+    "Indie",
+    "Alternative"
+  ],
+  "logo": "https://www.kexp.org/static/assets/img/KEXP_ios_safari_152px.png",
+  "channels": [
+    {
+      "name": "KEXP",
+      "stream": "https://kexp-mp3-128.streamguys1.com/kexp128.mp3"
+    }
+  ]
+}

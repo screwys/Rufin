@@ -44,6 +44,7 @@ Downloaded tracks, and tracks of a server matched to local folders, play from di
 - **Transitions**: true gapless playback or equal-power crossfade, with an optional fade on play/pause
 - **Loudness**: ReplayGain and EBU R128 normalization with true-peak analysis; results can be written to tags
 - **Sound**: graphic (10, 18 or 31 bands) and parametric equalizer with saved presets per device and AutoEQ/APO import, crossfeed, playback speed and pitch
+- **Radio**: Select a configured radio station or add one yourself, artwork and lyrics are resolved best-effort, with synced lyrics for [LISTEN.moe](https://listen.moe/)
 - **Output**: audio device selection, multichannel output and Dolby/DTS bitstream passthrough, casting to UPnP and Chromecast
 - **Queue**: Auto DJ keeps it filled from server/local recommendations, skip unavailable tracks automatically, sleep timer
 - **Formats**: broad codec support [^codecs], and CUE sheets as separate playable tracks

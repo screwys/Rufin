@@ -52,6 +52,10 @@ impl NowPlayingPresentation {
             album_links: DetailLinks::route(
                 &album,
                 current.and_then(|current| {
+                    // A station's name leads to the Radio page.
+                    if current.live.is_some() {
+                        return Some(Route::Radio);
+                    }
                     current
                         .row
                         .track

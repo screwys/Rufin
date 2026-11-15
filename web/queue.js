@@ -110,8 +110,9 @@ function showQueue(value) {
     );
     open.replaceChildren(el("strong", "", row.track.title || tr("Untitled")));
     const metadata = el("div", "queue-track");
+    // A radio station that announces no song shows its genres here, or nothing.
     const artist = button(
-      row.track.artist || tr("Unknown artist"),
+      row.track.artist || (row.track.station ? "" : tr("Unknown artist")),
       () => openLinks(row.track, "artist", artist),
       null,
       "metadata-link queue-artist",

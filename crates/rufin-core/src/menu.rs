@@ -100,6 +100,12 @@ fn offered(
         play: plays && shown(ContextMenuItem::Play),
         ..Menu::default()
     };
+    // A radio station in the queue is no track of the library: it only plays.
+    if let Row::Track(track) = row
+        && library::station_stream(&track.media_uri).is_some()
+    {
+        return menu;
+    }
     let (add_to_playlist, rated) = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             menu.edit_metadata =
@@ -168,6 +174,18 @@ fn offered(
         .as_ref()
         .is_some_and(|pin| settings.sidebar.is_pinned(pin));
     menu
+}
+
+/// The menu of a radio station pinned in Saved: its pin alone, as a station is no row of the
+/// library.
+pub fn pinned_station(settings: &Settings, pin: &SidebarPin) -> Menu {
+    let offered = settings.sidebar.pins_visible
+        && (settings.application.context_menu).is_visible(ContextMenuItem::Pins);
+    Menu {
+        pinned: offered && settings.sidebar.is_pinned(pin),
+        pin: offered.then(|| pin.clone()),
+        ..Menu::default()
+    }
 }
 
 /// The menu of several selected rows: their plays, playlists, metadata and downloads.

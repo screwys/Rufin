@@ -527,6 +527,12 @@ fn finish_playback_projection(
         shell.refresh_current_route_now_playing_selections();
         update_sidebar_pin_playback(shell);
     }
+    if previous_player.as_ref().is_none_or(|previous| {
+        previous.transport.current != next_player.transport.current
+            || previous.transport.desired_playing != next_player.transport.desired_playing
+    }) {
+        shell.refresh_mounted_radio();
+    }
     shell
         .player_ui
         .maybe_clear_player_seek_preview(&next_player, media_changed);

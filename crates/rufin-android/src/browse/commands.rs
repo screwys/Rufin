@@ -1,5 +1,5 @@
 use super::*;
-use rufin_core::source::feed::Changed;
+use rufin_core::source::{Pinned, feed::Changed};
 
 fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
     let descriptor = sidebar_route_descriptor(item);
@@ -17,7 +17,11 @@ fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
 impl AndroidLibrary {
     /// The row's menu, as core's Menu offers it under the saved menu settings.
     pub fn menu(&self, row: AndroidBrowseRow) -> rufin_core::menu::Menu {
-        rufin_core::menu::menu(&self.source, &self.settings.load(), &row.row)
+        let settings = self.settings.load();
+        match (&row.station, &row.pin) {
+            (Some(_), Some(pin)) => rufin_core::menu::pinned_station(&settings, pin),
+            _ => rufin_core::menu::menu(&self.source, &settings, &row.row),
+        }
     }
 
     /// What a swipe on the row can do, as core's Menu offers it with every entry shown.
@@ -498,9 +502,15 @@ impl AndroidLibrary {
                     .await
                     .map_err(error)?
                     .into_iter()
-                    .map(|(pin, row)| AndroidBrowseRow {
-                        pin: Some(pin),
-                        ..row.into()
+                    .map(|(pin, shown)| match shown {
+                        Pinned::Row(row) => AndroidBrowseRow {
+                            pin: Some(pin),
+                            ..(*row).into()
+                        },
+                        Pinned::Station(station) => AndroidBrowseRow {
+                            pin: Some(pin),
+                            ..AndroidBrowseRow::station(*station)
+                        },
                     })
                     .collect();
                 Ok(AndroidPinPage {

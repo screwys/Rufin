@@ -62,6 +62,9 @@ import io.github.screwys.rufin.browse.RandomPlaySheet
 import io.github.screwys.rufin.browse.BrowseGestureSettings
 import io.github.screwys.rufin.browse.SearchContent
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
+import io.github.screwys.rufin.ui.SearchField
+import io.github.screwys.rufin.radio.RadioContent
+import io.github.screwys.rufin.radio.RadioState
 
 
 import android.os.Build
@@ -159,11 +162,15 @@ import androidx.compose.ui.platform.LocalConfiguration
 
 private data class BrowseDestination(val root: String, val depth: Int, val location: BrowseLocation?)
 
-/** The bottom tabs; Library shows the configured routes, Saved the pins. */
+/** The bottom tabs; Library shows the configured routes, Saved the pins, Radio the stations. */
 private enum class ShellTab(val title: String, val icon: String) {
-    Home("Home", "rufin-home-symbolic"), Search("Search", "rufin-search-symbolic"),
-    Library("Library", "rufin-library-symbolic"), Saved("Saved", "rufin-bookmark-symbolic"),
+    Home("Home", "rufin-home-symbolic"), Library("Library", "rufin-library-symbolic"),
+    Search("Search", "rufin-search-symbolic"), Saved("Saved", "rufin-bookmark-symbolic"),
+    Radio("Radio", "rufin-radio-station-symbolic"),
 }
+
+/** Home and Radio have a tab of their own: the Library tab lists the other routes. */
+private fun hasOwnTab(root: String) = root == "Home" || root == "Radio"
 
 /** Phones under 600 dp; a compact icon sidebar to 840 dp; the full sidebar beyond; a TV's focus rail. */
 private enum class ShellWidth { Phone, Medium, Expanded, Tv }
@@ -251,6 +258,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var splitShown by remember { mutableStateOf(false) }
     var random by rememberSaveable { mutableStateOf(false) }
     var sleepTimer by rememberSaveable { mutableStateOf(false) }
+    val radio = remember { RadioState() }
     var menu by remember { mutableStateOf<BrowseItem?>(null) }
     // The playing track's menu from the player, with the player's row on top.
     var playerMenu by remember { mutableStateOf<BrowseItem?>(null) }
@@ -311,8 +319,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     val routeState = rememberSaveableStateHolder()
     val detailState = rememberSaveableStateHolder()
+    // The Radio page reads core's stations, not a View's rows: it has no BrowsePage.
     val rootPages = browse.routes.filter { route ->
-        route.id != "Search" && (route.id == browse.rootId || browse.configuredRoutes.any { it.id == route.id })
+        route.id != "Search" && route.route !is Route.Radio && (route.id == browse.rootId || browse.configuredRoutes.any { it.id == route.id })
     }.associate { route -> key(route.id) {
         val options = remember(route.id) { browse.optionsFor(route.id) }
         val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
@@ -338,14 +347,18 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
     LaunchedEffect(translation) { browse.refreshLabels(translation) }
     // The Library tab returns to the route it last showed.
-    val libraryRoutes = sidebarRoutes(browse).filter { it.id != "Home" }
+    val libraryRoutes = sidebarRoutes(browse).filter { !hasOwnTab(it.id) }
     var libraryRoot by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(browse.rootId) { if (browse.rootId != "Home") libraryRoot = browse.rootId }
+    LaunchedEffect(browse.rootId) { if (!hasOwnTab(browse.rootId)) libraryRoot = browse.rootId }
     val tab = when (browse.section) {
         AppSection.Search -> ShellTab.Search
         AppSection.Pins -> ShellTab.Saved
         AppSection.More -> null
-        AppSection.Browse -> if (browse.rootId == "Home") ShellTab.Home else ShellTab.Library
+        AppSection.Browse -> when (browse.rootId) {
+            "Home" -> ShellTab.Home
+            "Radio" -> ShellTab.Radio
+            else -> ShellTab.Library
+        }
     }
     fun leaveInput() { keyboard?.hide(); focusManager.clearFocus(); searchExpanded = false }
     fun selectRoute(id: String) {
@@ -361,7 +374,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         when (selected) {
             ShellTab.Home -> { browse.chooseRoot("Home"); browse.section = AppSection.Browse }
             ShellTab.Library -> {
-                val routes = sidebarRoutes(browse).filter { it.id != "Home" }
+                val routes = sidebarRoutes(browse).filter { !hasOwnTab(it.id) }
                 val root = libraryRoot?.takeIf { id -> routes.any { it.id == id } } ?: routes.firstOrNull()?.id
                 if (root != null) { browse.chooseRoot(root); browse.section = AppSection.Browse }
             }
@@ -369,6 +382,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 if (browse.section == AppSection.Search) focusSearch++ else { browse.searchText = ""; browse.section = AppSection.Search }
             }
             ShellTab.Saved -> browse.section = AppSection.Pins
+            ShellTab.Radio -> { browse.chooseRoot("Radio"); browse.section = AppSection.Browse }
         }
     }
     BackHandler(drawer.isOpen || searchExpanded || browse.detail || browse.section != AppSection.Browse || browse.rootId != "Home") {
@@ -449,7 +463,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val openPlayerMenu = { player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { playerMenu = BrowseItem(it, 0UL, null) } }; Unit }
     val sidebarActions = remember(browse) {
         SidebarActions(route = { selectRoute(it) }, saved = { item ->
-            browse.section = AppSection.Browse; browse.open(item); closeDrawer()
+            // A station has no page to show in the library: it plays where the app is.
+            if (item.row.station == null) browse.section = AppSection.Browse
+            browse.open(item); closeDrawer()
         }, more = { openMore(it) }, addSource = { editSourceId = null; sources = true; closeDrawer() })
     }
     val barHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
@@ -493,7 +509,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         // The route roots carry this bar, so it moves with its page instead of shifting the page beside it.
         val shellBar: @Composable () -> Unit = {
             ShellTopBar(browse, moreDestination, if (moreDestination == MoreDestination.Integration) integration?.name.orEmpty() else translate(moreDestination.title),
-                if (tabs) null else rootRoute?.title, searchExpanded, searchFocus, tabs, !split,
+                // Under the tabs the Library tab's routes name themselves; Radio is a tab with the one page.
+                rootRoute?.takeIf { !tabs || it.route is Route.Radio }?.title, searchExpanded, searchFocus, tabs, !split,
                 onMenu = { scope.launch { drawer.open() } },
                 onBack = { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) else selectTab(ShellTab.Home) },
                 onSearch = { if (searchExpanded) leaveInput() else { searchExpanded = true; focusSearch++ } },
@@ -523,8 +540,13 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
                     })
                 }
+                // The Radio page has nothing to sort or lay out: its bar ends with Select, as Saved's, and Add Station.
+                if (browse.section == AppSection.Browse && rootRoute?.route is Route.Radio) {
+                    PlayerIconButton("rufin-document-edit-symbolic", "Select", { radio.selecting = !radio.selecting }, selected = radio.selecting)
+                    PlayerIconButton("rufin-list-add-symbolic", "Add Station", { radio.adding = true })
+                }
                 // Beside an opened page the bar is still its list's.
-                if (browse.section == AppSection.Browse) PlayerIconButton("rufin-filter-symbolic", "Customize",
+                else if (browse.section == AppSection.Browse) PlayerIconButton("rufin-filter-symbolic", "Customize",
                     { sortPage = if (split) rootPage else browse.visiblePage; sort = true })
                 if (browse.section == AppSection.Pins) PlayerIconButton("rufin-document-edit-symbolic", "Select", { selectingPins = !selectingPins },
                     selected = selectingPins)
@@ -552,7 +574,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 // Each side of a transition shows the root it was composed for.
                 val rootContent: @Composable (String, Boolean) -> Unit = { root, shown ->
                     CompositionLocalProvider(LocalOverlayBarHeight provides if (root == "Home") barHeight else 0.dp) {
-                        RootContent(model, browse, player, root, rootPages, routeState, libraryRoutes, tiny, tabs, split, shown && !fullPlayer,
+                        RootContent(model, browse, player, radio, root, rootPages, routeState, libraryRoutes, tiny, tabs, split, shown && !fullPlayer,
                             onMenu = { menu = it }, onPlaylist = { playlist = it }, onAddSource = { editSourceId = null; sources = true },
                             onRoutes = { openMore(MoreDestination.Routes) }, onSelect = ::selectRoute)
                     }
@@ -562,7 +584,11 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     if (split) Row(Modifier.fillMaxSize()) {
                         Column(Modifier.width((paneWidth * .4f).coerceIn(236.dp, 360.dp)).fillMaxHeight()) {
                             shellBar()
-                            PaneSearch(browse.optionsFor(browse.rootId))
+                            // The list's filter, kept in view over it.
+                            browse.optionsFor(browse.rootId).let { options ->
+                                SearchField(options.filter, { options.filter = it },
+                                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp))
+                            }
                             Box(Modifier.weight(1f)) {
                                 CompositionLocalProvider(LocalSelectedRoute provides browse.details.firstOrNull()?.route, LocalListPane provides true) {
                                     rootContent(browse.rootId, true)
@@ -583,7 +609,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             if (initialState.depth == 0 && targetState.depth == 0)
                                 fadeIn(tween(if (reduceMotion) 0 else 180)) togetherWith fadeOut(tween(if (reduceMotion) 0 else 180))
                             else pageMotion(targetState.depth > initialState.depth, reduceMotion)
-                        }, contentKey = { it.location ?: if (it.root == "Home") "Home" else "Library" },
+                        }, contentKey = { it.location ?: it.root.takeIf(::hasOwnTab) ?: "Library" },
                     ) { visible ->
                         val location = visible.location
                         val shown = visible.root == browse.rootId
@@ -698,7 +724,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 fullPlayer = false
                 browse.section = AppSection.Browse
                 browse.openRoute(route, title)
-            }, onMore = openPlayerMenu, tiny = tiny, onPull = onReveal, onPullEnd = { close -> settlePlayer(!close) }) { fullPlayer = false }
+            }, onMore = openPlayerMenu, onRadio = { fullPlayer = false; selectTab(ShellTab.Radio) }, tiny = tiny, onPull = onReveal, onPullEnd = { close -> settlePlayer(!close) }) { fullPlayer = false }
         }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
@@ -799,10 +825,10 @@ private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTit
     })
 }
 
-/** Home or the Library tab's routes: route tabs under the bar, and a swipe moves between routes. */
+/** Home, Radio or the Library tab's routes: route tabs under the bar, and a swipe moves between routes. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RootContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, root: String,
+private fun RootContent(model: RufinConnection, browse: BrowseConnection, player: PlayerConnection, radio: RadioState, root: String,
     pages: Map<String, BrowsePage>, routeState: androidx.compose.runtime.saveable.SaveableStateHolder,
     routes: List<AndroidRouteDescriptor>, tiny: Boolean,
     /** The routes show as tabs under the bar. */
@@ -816,7 +842,7 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
         PageLoading()
         return
     }
-    if (model.sources?.sources?.isEmpty() == true && root !in listOf("History", "Playlists", "SmartPlaylists")) {
+    if (model.sources?.sources?.isEmpty() == true && root !in listOf("History", "Playlists", "SmartPlaylists", "Radio")) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
             Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
@@ -828,13 +854,14 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
         val options = remember(route.id) { browse.optionsFor(route.id) }
         val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
         routeState.SaveableStateProvider(route.id) {
-            if (beside) BrowsePageContent(model, browse, player, location, options, shown, onMenu, onPlaylist, {}, owner = pages[route.id],
+            if (route.route is Route.Radio) RadioContent(model, player, radio, options.filter) { options.filter = "" }
+            else if (beside) BrowsePageContent(model, browse, player, location, options, shown, onMenu, onPlaylist, {}, owner = pages[route.id],
                 visible = !browse.detail, onOpen = { item -> if (item.row.route != null) browse.chooseRoot(browse.rootId); browse.open(item) })
             else BrowsePageContent(model, browse, player, location, options, shown, onMenu, onPlaylist, {}, owner = pages[route.id])
         }
     }
-    if (root == "Home") {
-        browse.routes.firstOrNull { it.id == "Home" }?.let { page(it, active) }
+    if (hasOwnTab(root)) {
+        browse.routes.firstOrNull { it.id == root }?.let { page(it, active) }
         return
     }
     if (routes.isEmpty()) {
@@ -857,7 +884,7 @@ private fun RootContent(model: RufinConnection, browse: BrowseConnection, player
     LaunchedEffect(index) { if (pager.currentPage != index) pager.showPage(index, fade, reduceMotion) }
     LaunchedEffect(pager, routes) {
         snapshotFlow { pager.settledPage }.collect { settled ->
-            routes.getOrNull(settled)?.id?.let { id -> if (browse.rootId != "Home" && browse.rootId != id) browse.chooseRoot(id) }
+            routes.getOrNull(settled)?.id?.let { id -> if (!hasOwnTab(browse.rootId) && browse.rootId != id) browse.chooseRoot(id) }
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -883,27 +910,7 @@ private fun RouteDots(count: Int, position: Float) {
     }
 }
 
-/** The filter of a split view's list, kept in view over it. */
-@Composable
-private fun PaneSearch(options: BrowseOptions) {
-    BasicTextField(options.filter, { options.filter = it }, Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-        singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), decorationBox = { input ->
-            Row(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                Box(Modifier.weight(1f)) {
-                    if (options.filter.isEmpty()) Text(translate("Search"), style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    input()
-                }
-                if (options.filter.isNotEmpty()) RufinIcon("rufin-window-close-symbolic", translate("Clear"),
-                    Modifier.size(18.dp).clip(CircleShape).clickable { options.filter = "" })
-            }
-        })
-}
-
-/** A TV's focus rail: the four tabs, and Settings at its foot. */
+/** A TV's focus rail: the tabs, and Settings at its foot. */
 @Composable
 private fun TvRail(tab: ShellTab?, onTab: (ShellTab) -> Unit, settings: Boolean, onSettings: () -> Unit) {
     val entry: @Composable (String, String, Boolean, () -> Unit) -> Unit = { icon, title, picked, onClick ->

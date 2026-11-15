@@ -44,7 +44,43 @@ pub struct QueueSummaryView {
 pub struct CurrentMedia {
     pub stream: Option<CurrentStream>,
     pub id: CurrentMediaId,
+    /// The row that plays. For a radio station it shows the song the stream announces.
     pub row: Arc<QueueRow>,
+    /// The radio station that plays; None for a track.
+    pub live: Option<LiveStream>,
+}
+
+/// A radio station as it plays.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct LiveStream {
+    pub station: String,
+    pub codec: Option<String>,
+    /// Bits per second.
+    pub bitrate: Option<u32>,
+    /// The place in the announced song is known: the position is the song's, and its lyrics
+    /// keep their timing.
+    pub timed: bool,
+}
+
+/// The artist and title of the song a radio stream announces. Streams send one line, most
+/// often "Artist - Title"; one that names the artist apart keeps the title whole.
+pub fn announced_song(title: &str, artist: Option<&str>) -> Option<(String, String)> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    if let Some(artist) = artist.map(str::trim).filter(|artist| !artist.is_empty()) {
+        return Some((artist.into(), title.into()));
+    }
+    Some(
+        [" - ", " – ", " — "]
+            .iter()
+            .find_map(|separator| title.split_once(separator))
+            .map(|(artist, title)| (artist.trim().to_string(), title.trim().to_string()))
+            .filter(|(artist, title)| !artist.is_empty() && !title.is_empty())
+            .unwrap_or_else(|| (String::new(), title.into())),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq)]

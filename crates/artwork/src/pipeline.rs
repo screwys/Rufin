@@ -891,6 +891,7 @@ fn cache_preview(
             tag.as_ref().is_some_and(|tag| !tag.is_empty())
         }
         library::ArtworkImage::Local { revision, .. }
+        | library::ArtworkImage::Station { revision, .. }
         | library::ArtworkImage::Playlist { revision, .. } => {
             !revision.is_empty() && revision != "auto"
         }

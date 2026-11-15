@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <!-- Edit Station, shaped as Edit Playlist: its picture, then its name and homepage, the
+       channel its card plays when Rufin's list gives it several, and its stream when it was
+       added by address. Rust puts the picture editor first in the layout. -->
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Edit Station</property>
+    <property name="content-width">680</property>
+    <property name="default-widget">save</property>
+    <property name="focus-widget">name</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">false</property>
+            <child type="start"><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+            <child type="end"><object class="GtkButton" id="save"><property name="label" translatable="yes">Apply</property><style><class name="suggested-action"/></style></object></child>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkScrolledWindow">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="propagate-natural-height">true</property>
+            <property name="propagate-natural-width">true</property>
+            <property name="max-content-width">480</property>
+            <property name="child">
+              <object class="GtkBox" id="content">
+                <property name="orientation">vertical</property>
+                <property name="spacing">18</property>
+                <property name="margin-start">18</property>
+                <property name="margin-end">18</property>
+                <property name="margin-bottom">18</property>
+                <child>
+                  <object class="AdwWrapBox" id="layout">
+                    <property name="child-spacing">18</property>
+                    <property name="line-spacing">18</property>
+                    <child>
+                      <object class="GtkBox" id="options">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">12</property>
+                        <property name="hexpand">true</property>
+                        <property name="valign">start</property>
+                        <child>
+                          <object class="GtkListBox">
+                            <property name="selection-mode">none</property>
+                            <style><class name="boxed-list"/></style>
+                            <child>
+                              <object class="AdwEntryRow" id="name">
+                                <property name="title" translatable="yes">Name</property>
+                                <property name="activates-default">true</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwEntryRow" id="homepage">
+                                <property name="title" translatable="yes">Homepage</property>
+                                <property name="input-purpose">url</property>
+                                <property name="activates-default">true</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwComboRow" id="channel">
+                                <property name="visible">false</property>
+                                <property name="title" translatable="yes">Default channel</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwEntryRow" id="stream">
+                                <property name="visible">false</property>
+                                <property name="title" translatable="yes">Stream address</property>
+                                <property name="input-purpose">url</property>
+                                <property name="activates-default">true</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

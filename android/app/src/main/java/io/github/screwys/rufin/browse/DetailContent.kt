@@ -407,7 +407,7 @@ private fun DetailHeader(
                 }
                 Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     facts(false)
-                    if (summary.genres.isNotEmpty()) GenreChips(summary.genres, false, onOpenRoute)
+                    if (summary.genres.isNotEmpty()) GenreChips(summary.genres.map { it.title }, false) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
                 }
                 Spacer(Modifier.height(18.dp))
                 buttons(false)
@@ -421,7 +421,7 @@ private fun DetailHeader(
             }
             Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 facts(false)
-                if (summary.genres.isNotEmpty()) GenreChips(summary.genres, false, onOpenRoute)
+                if (summary.genres.isNotEmpty()) GenreChips(summary.genres.map { it.title }, false) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
                 buttons(false)
             }
         } else Column(Modifier.fillMaxWidth().padding(top = coverTop + find, bottom = 8.dp)) {
@@ -433,7 +433,7 @@ private fun DetailHeader(
                 facts(true)
                 if (summary.genres.isNotEmpty()) {
                     Spacer(Modifier.height(14.dp))
-                    GenreChips(summary.genres, true, onOpenRoute)
+                    GenreChips(summary.genres.map { it.title }, true) { index -> summary.genres[index].let { onOpenRoute(it.route, it.title) } }
                 }
                 Spacer(Modifier.height(20.dp))
                 buttons(true)
@@ -442,28 +442,30 @@ private fun DetailHeader(
     }
 }
 
-/** The genres as chips filling one line; those that do not fit open from the last chip's +n. */
+/** The genres as chips filling one line; those that do not fit open from the last chip's +n. A chip
+ *  opens its genre by its place in the list, where the page has one to open. */
 @Composable
-private fun GenreChips(genres: List<io.github.screwys.rufin.core.AndroidGenreLink>, centred: Boolean, onOpen: (Route, String) -> Unit) {
+internal fun GenreChips(genres: List<String>, centred: Boolean, onOpen: ((Int) -> Unit)?) {
     var overflow by remember { mutableStateOf(false) }
     androidx.compose.ui.layout.SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
         val gap = 6.dp.roundToPx()
         val free = androidx.compose.ui.unit.Constraints()
         val chips = genres.mapIndexed { index, genre ->
-            subcompose("genre:$index") { GenreChip(genre.title) { onOpen(genre.route, genre.title) } }.first().measure(free)
+            subcompose("genre:$index") { GenreChip(genre, onOpen?.let { open -> { open(index) } }) }.first().measure(free)
         }
         var shown = chips.size
         var more: androidx.compose.ui.layout.Placeable? = null
         if (chips.sumOf { it.width } + gap * (chips.size - 1).coerceAtLeast(0) > constraints.maxWidth) {
-            val reserve = subcompose("probe") { GenreChip("+${chips.size}") {} }.first().measure(free).width + gap
+            val reserve = subcompose("probe") { GenreChip("+${chips.size}", null) }.first().measure(free).width + gap
             var used = 0
             shown = chips.takeWhile { chip -> (used + chip.width + gap + reserve <= constraints.maxWidth + gap).also { if (it) used += chip.width + gap } }.size
             val rest = genres.drop(shown)
+            val first = shown
             more = subcompose("more") {
                 Box {
                     GenreChip("+${rest.size}") { overflow = true }
                     DropdownMenu(overflow, { overflow = false }) {
-                        rest.forEach { genre -> DropdownMenuItem(text = { Text(genre.title) }, onClick = { overflow = false; onOpen(genre.route, genre.title) }) }
+                        rest.forEachIndexed { index, genre -> DropdownMenuItem(text = { Text(genre) }, onClick = { overflow = false; onOpen?.invoke(first + index) }) }
                     }
                 }
             }.first().measure(free)
@@ -479,10 +481,10 @@ private fun GenreChips(genres: List<io.github.screwys.rufin.core.AndroidGenreLin
 }
 
 @Composable
-private fun GenreChip(label: String, onClick: () -> Unit) {
+private fun GenreChip(label: String, onClick: (() -> Unit)?) {
     Box(Modifier.height(28.dp).clip(RoundedCornerShape(14.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        .clickable(onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
         Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .88f))
     }
 }

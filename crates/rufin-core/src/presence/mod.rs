@@ -303,7 +303,15 @@ fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
                 .as_deref()
                 .and_then(|id| musicbrainz_url("recording", id))
         })
-        .or_else(|| lastfm_track_url(album_artist, &metadata.album, &metadata.title));
+        // A radio station's album text is the station.
+        .or_else(|| {
+            let album = if track.live.is_some() {
+                ""
+            } else {
+                &metadata.album
+            };
+            lastfm_track_url(album_artist, album, &metadata.title)
+        });
     let state = metadata
         .primary_artist_musicbrainz_id
         .as_deref()

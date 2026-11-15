@@ -109,6 +109,8 @@ pub struct ContextMenuSurface {
     submenu_actions: RefCell<Vec<(String, String)>>,
     /// Labels of the actions drawn in the danger accent.
     destructive: RefCell<Vec<String>>,
+    /// The menu has choices, whose chosen ones are marked.
+    choices: Cell<bool>,
     next_action: Cell<usize>,
 }
 
@@ -162,6 +164,7 @@ impl ContextMenuSurface {
             custom_children: RefCell::new(Vec::new()),
             submenu_actions: RefCell::new(Vec::new()),
             destructive: RefCell::new(Vec::new()),
+            choices: Cell::new(false),
             next_action: Cell::new(0),
         }
     }
@@ -260,6 +263,22 @@ impl ContextMenuSurface {
             .push((ContextMenuSection::Fixed, item));
     }
 
+    /// A choice that is marked when `chosen`, as the choices of the other menus are. `label`
+    /// is already translated.
+    pub fn append_fixed_choice(
+        &self,
+        label: &str,
+        icon_name: &str,
+        chosen: bool,
+        run: impl Fn() + 'static,
+    ) {
+        let item = menu_action_item(label, &self.add_action(Some(chosen), true, run), icon_name);
+        self.entries
+            .borrow_mut()
+            .push((ContextMenuSection::Fixed, item));
+        self.choices.set(true);
+    }
+
     /// An action in the danger accent, last of the download actions: Delete permanently.
     pub fn append_destructive_action(
         &self,
@@ -278,9 +297,17 @@ impl ContextMenuSurface {
     /// An action under a generated name that closes the menu before it runs. Returns its
     /// detailed name in this menu's group.
     fn action(&self, enabled: bool, run: impl Fn() + 'static) -> String {
+        self.add_action(None, enabled, run)
+    }
+
+    /// As `action`; `chosen` makes it a choice in that state.
+    fn add_action(&self, chosen: Option<bool>, enabled: bool, run: impl Fn() + 'static) -> String {
         let name = format!("item-{}", self.next_action.get());
         self.next_action.set(self.next_action.get() + 1);
-        let action = gio::SimpleAction::new(&name, None);
+        let action = match chosen {
+            Some(chosen) => gio::SimpleAction::new_stateful(&name, None, &chosen.to_variant()),
+            None => gio::SimpleAction::new(&name, None),
+        };
         action.set_enabled(enabled);
         let popover = self.popover.downgrade();
         let action_activated = Rc::clone(&self.action_activated);
@@ -449,6 +476,9 @@ impl ContextMenuSurface {
             owner.add_css_class(CONTEXT_MENU_HOVER_HELD_CLASS);
         }
         show_native_menu_icons(&self.popover);
+        if self.choices.get() {
+            replace_native_menu_checkmarks(&self.popover);
+        }
         mark_destructive(self.popover.upcast_ref(), &self.destructive.into_inner());
         keep_parent_grab_for_nested_native_menus(&self.popover);
         let unmap_handler = Rc::new(RefCell::new(Some(popdown_on_anchor_unmap(

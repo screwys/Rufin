@@ -329,8 +329,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             library?.playRadio(item.row, placement)
         }
     }
-    fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {
-        withContext(Dispatchers.IO) { item.row.pin?.let { library?.setPin(it, pinned) } }
+    fun pin(item: BrowseItem, pinned: Boolean) { item.row.pin?.let { pin(it, pinned) } }
+    fun pin(pin: SidebarPin, pinned: Boolean) = connection.runAction {
+        withContext(Dispatchers.IO) { library?.setPin(pin, pinned) }
     }
     fun unpin(pins: Collection<SidebarPin>) = connection.runAction {
         withContext(Dispatchers.IO) { pins.forEach { library?.setPin(it, false) } }

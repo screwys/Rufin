@@ -145,6 +145,13 @@ pub struct PlayerControls {
     pub artist_links: RefCell<Option<DetailLinkBinding>>,
     pub album: gtk::Label,
     pub album_links: RefCell<Option<DetailLinkBinding>>,
+    album_fade: crate::widgets::edge_fade::TextFade,
+    album_slide: gtk::ScrolledWindow,
+    /// Live, at the end of the last row.
+    live: gtk::Label,
+    station_icon: gtk::Image,
+    /// A radio station plays.
+    live_stream: Cell<bool>,
     pub now_playing_wall: gtk::Box,
     pub left_slot: gtk::Overlay,
     pub right_slot: gtk::Overlay,
@@ -196,6 +203,10 @@ pub struct NowPlayingControls {
     pub menu_button: gtk::Button,
     pub artist: gtk::Label,
     pub album: gtk::Label,
+    album_fade: crate::widgets::edge_fade::TextFade,
+    album_slide: gtk::ScrolledWindow,
+    live: gtk::Label,
+    station_icon: gtk::Image,
 }
 
 pub struct TransportControls {
@@ -515,6 +526,10 @@ pub fn build_bottom_player() -> PlayerControls {
         menu_button,
         artist,
         album,
+        album_fade,
+        album_slide,
+        live,
+        station_icon,
     } = build_now_playing_controls(&builder, resource);
 
     let TransportControls {
@@ -598,6 +613,11 @@ pub fn build_bottom_player() -> PlayerControls {
         artist_links: RefCell::new(None),
         album,
         album_links: RefCell::new(None),
+        album_fade,
+        album_slide,
+        live,
+        station_icon,
+        live_stream: Cell::new(false),
         now_playing_wall,
         left_slot,
         right_slot,
@@ -651,10 +671,13 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
         title_slide: gtk::ScrolledWindow, title_viewport: gtk::Viewport,
         artist_slide: gtk::ScrolledWindow, artist_viewport: gtk::Viewport,
         album_slide: gtk::ScrolledWindow, album_viewport: gtk::Viewport,
+        album_fade: crate::widgets::edge_fade::TextFade,
         title: gtk::Label,
         menu_button: gtk::Button,
         artist: gtk::Label,
         album: gtk::Label,
+        live: gtk::Label,
+        station_icon: gtk::Image,
     });
     now_playing.set_spacing(BOTTOM_PLAYER_NOW_PLAYING_SPACING);
     now_playing.set_margin_start(BOTTOM_PLAYER_HORIZONTAL_PADDING);
@@ -690,6 +713,10 @@ pub fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> Now
         menu_button,
         artist,
         album,
+        album_fade,
+        album_slide,
+        live,
+        station_icon,
     }
 }
 
@@ -1223,7 +1250,8 @@ impl crate::player::PlayerUi {
         let controls = &self.views.player_controls;
         let displayed_seconds = self.seek_preview_seconds().unwrap_or(position_seconds);
         self.controls.updating_controls.set(true);
-        let time_chars = (format_duration(duration_seconds).chars().count() as i32).max(4);
+        let live = controls.live_stream.get();
+        let time_chars = time_width_chars(live, displayed_seconds, duration_seconds);
         controls.elapsed.set_width_chars(time_chars);
         controls.duration.set_width_chars(time_chars);
         controls
@@ -1231,7 +1259,7 @@ impl crate::player::PlayerUi {
             .set_text(&format_duration(displayed_seconds));
         controls
             .progress
-            .set_value(f64::from(displayed_seconds.min(duration_seconds)));
+            .set_value(progress_value(live, displayed_seconds, duration_seconds));
         let position_fraction = if duration_seconds == 0 {
             0.0
         } else {
@@ -1268,9 +1296,23 @@ impl crate::player::PlayerUi {
             .unwrap_or(QueueRepeatMode::Off);
         let controls = &self.views.player_controls;
         self.controls.updating_controls.set(true);
+        let live = current.is_some_and(|media| media.live.is_some());
+        let live_changed = controls.live_stream.replace(live) != live;
 
         if let Some(presentation) = presentation {
             self.apply_bottom_now_playing(presentation);
+        }
+        // A station is one row that plays as it comes: nothing to skip to, order or keep.
+        for button in [
+            &controls.dj_button,
+            &controls.shuffle_button,
+            &controls.previous_button,
+            &controls.next_button,
+            &controls.repeat_button,
+            &controls.mix_button,
+            &controls.favorite_button,
+        ] {
+            button.set_sensitive(!live);
         }
 
         set_play_icon(
@@ -1300,11 +1342,11 @@ impl crate::player::PlayerUi {
             .repeat_button
             .set_tooltip_text(Some(&repeat_label(repeat_mode)));
 
-        let time_chars = (format_duration(duration_seconds).chars().count() as i32).max(4);
-        controls.elapsed.set_width_chars(time_chars);
-        controls.duration.set_width_chars(time_chars);
         let preview_seconds = self.seek_preview_seconds();
         let displayed_seconds = preview_seconds.unwrap_or(position_seconds);
+        let time_chars = time_width_chars(live, displayed_seconds, duration_seconds);
+        controls.elapsed.set_width_chars(time_chars);
+        controls.duration.set_width_chars(time_chars);
         controls
             .elapsed
             .set_text(&format_duration(displayed_seconds));
@@ -1316,7 +1358,7 @@ impl crate::player::PlayerUi {
         controls.waveform.widget().set_sensitive(can_seek);
         controls
             .progress
-            .set_value(f64::from(displayed_seconds.min(duration_seconds)));
+            .set_value(progress_value(live, displayed_seconds, duration_seconds));
         let position_fraction = if duration_seconds == 0 {
             0.0
         } else {
@@ -1332,6 +1374,7 @@ impl crate::player::PlayerUi {
         let waveform = self.waveform().unwrap_or_default();
         let current_media_id = current.map(|media| &media.id);
         let waveform_matches = waveform_enabled
+            && !live
             && waveform.media_id.as_ref() == current_media_id
             && waveform
                 .peaks
@@ -1351,9 +1394,13 @@ impl crate::player::PlayerUi {
             controls.waveform_peak_count.set(waveform_peak_count);
         }
         self.show_bottom_player_seekbar();
-        controls
-            .duration
-            .set_text(&format_duration(duration_seconds));
+        if live {
+            controls.duration.set_text(&tr("LIVE"));
+        } else {
+            controls
+                .duration
+                .set_text(&format_duration(duration_seconds));
+        }
 
         let (muted, volume) = player
             .map(|player| (player.controls.muted, player.controls.volume))
@@ -1374,6 +1421,52 @@ impl crate::player::PlayerUi {
             .output_button
             .set_tooltip_text(Some(&playback_output_label(&output)));
         self.controls.updating_controls.set(false);
+        if live_changed {
+            // Live is wider than a duration, and the compact layout gives its seek bar up.
+            self.apply_bottom_player_layout();
+        }
+        self.show_bottom_player_live();
+    }
+
+    /// Shows a station as live: Live where the duration was, a full seek bar, and in the
+    /// compact layout, which shows no times, Live beside the station on the last row.
+    fn show_bottom_player_live(&self) {
+        let controls = &self.views.player_controls;
+        let live = controls.live_stream.get();
+        for widget in [
+            controls.duration.upcast_ref::<gtk::Widget>(),
+            controls.progress.upcast_ref(),
+        ] {
+            if live {
+                widget.add_css_class("player-live");
+            } else {
+                widget.remove_css_class("player-live");
+            }
+        }
+        // A station without a picture shows the radio icon on the fallback tile.
+        for cover in [&controls.cover, &self.views.fullscreen_player.cover] {
+            if live {
+                cover.area.add_css_class("station-cover");
+            } else {
+                cover.area.remove_css_class("station-cover");
+            }
+        }
+        // A station row has no menu of its own, and its name leads to the Radio page.
+        controls.menu_button.set_visible(!live);
+        controls
+            .station_icon
+            .set_visible(live && !controls.album.text().is_empty());
+        let beside_station = live && controls.layout.get() == BottomPlayerLayout::Compact;
+        controls.live.set_visible(beside_station);
+        // The station's name takes its own width, so Live follows it.
+        controls.album_fade.set_hexpand(!beside_station);
+        controls.album_slide.set_hexpand(!beside_station);
+        controls
+            .album_slide
+            .set_propagate_natural_width(beside_station);
+        controls
+            .album_fade
+            .set_visible(!beside_station || !controls.album.text().is_empty());
     }
 
     fn apply_bottom_now_playing(self: &Rc<Self>, presentation: &NowPlayingPresentation) {
@@ -1431,7 +1524,9 @@ impl crate::player::PlayerUi {
         else {
             return;
         };
-        if let Some(album) = &current.row.track.links.album_media_uri {
+        if current.live.is_some() {
+            self.navigate(Route::Radio);
+        } else if let Some(album) = &current.row.track.links.album_media_uri {
             self.navigate(Route::AlbumDetail(album.clone()));
         }
     }
@@ -1474,6 +1569,25 @@ fn should_clear_seek_preview(
                 u64::from(target_seconds) * 1_000,
                 position_millis,
             ))
+}
+
+/// The times' width: a track's from its duration, a station's from the time listened.
+fn time_width_chars(live: bool, displayed_seconds: u32, duration_seconds: u32) -> i32 {
+    let longest = if live {
+        displayed_seconds
+    } else {
+        duration_seconds
+    };
+    (format_duration(longest).chars().count() as i32).max(4)
+}
+
+/// Where the seek bar stands: at the position, or full for a station, which has none.
+fn progress_value(live: bool, displayed_seconds: u32, duration_seconds: u32) -> f64 {
+    if live {
+        f64::from(duration_seconds.max(1))
+    } else {
+        f64::from(displayed_seconds.min(duration_seconds))
+    }
 }
 
 fn playback_state_label(state: TransportStatus) -> String {
@@ -2164,9 +2278,16 @@ impl crate::player::PlayerUi {
                     + 2 * spacing
                     + BOTTOM_PLAYER_CONTROLS_SEEK_MIN_WIDTH
         };
-        player.progress_stack.set_visible(seek_bar);
+        // A station has no position for the compact layout's bare seek bar to show, and its
+        // Live stays where the controls layout's buttons took the seek bar's room.
+        let live = player.live_stream.get();
+        player
+            .progress_stack
+            .set_visible(seek_bar && !(compact && live));
         player.elapsed.set_visible(seek_bar && !compact);
-        player.duration.set_visible(seek_bar && !compact);
+        player
+            .duration
+            .set_visible((seek_bar || controls && live) && !compact);
         // The strip puts the seek bar above its single row of buttons.
         if strip {
             player.progress_row.add_css_class("above-controls");
@@ -2214,6 +2335,7 @@ impl crate::player::PlayerUi {
         );
         player.waveform.widget().set_width_request(progress_width);
         player.waveform.widget().set_content_width(progress_width);
+        self.show_bottom_player_live();
     }
 
     /// The controls layout's buttons beside its five: the order they go up to the button row in,
@@ -2411,7 +2533,10 @@ impl crate::player::PlayerUi {
                 .selected_playback()
                 .is_some_and(|player| player.transport.current.is_some());
         controls.rating.widget().set_visible(visible);
-        controls.rating.widget().set_sensitive(visible);
+        controls
+            .rating
+            .widget()
+            .set_sensitive(visible && !controls.live_stream.get());
         controls.action_buttons.set_margin_top(if visible {
             BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
         } else {
@@ -2920,6 +3045,10 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
     let title_shell = Rc::clone(shell);
     add_widget_click(controls.title.upcast_ref(), move || {
         title_shell.player_ui.navigate_current_track_album();
+    });
+    let station_shell = Rc::clone(shell);
+    add_widget_click(controls.station_icon.upcast_ref(), move || {
+        station_shell.player_ui.navigate_current_track_album();
     });
     install_current_track_context_menu(&shell.player_ui.views.player_controls.cover.area, shell);
     let menu_shell = Rc::clone(shell);

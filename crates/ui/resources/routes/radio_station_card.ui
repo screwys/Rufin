@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <!-- A station of the Radio page: its picture, then its name with one button at the row's
+       end, its genres, its description and its channels as chips. -->
+  <template class="RufinStationCardView" parent="GtkBox">
+    <property name="spacing">12</property>
+    <property name="hexpand">true</property>
+    <property name="width-request">1</property>
+    <style><class name="card"/><class name="station-card"/></style>
+    <child>
+      <object class="GtkBox" id="cover">
+        <property name="valign">start</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="valign">start</property>
+        <property name="width-request">1</property>
+        <child>
+          <object class="GtkBox" id="heading">
+            <property name="spacing">6</property>
+            <child>
+              <object class="GtkLabel" id="name">
+                <property name="xalign">0</property>
+                <property name="ellipsize">end</property>
+                <property name="single-line-mode">true</property>
+                <property name="width-chars">1</property>
+                <property name="hexpand">true</property>
+                <property name="valign">center</property>
+                <style><class name="station-card-name"/></style>
+              </object>
+            </child>
+            <child>
+              <!-- The handle, pin, Edit and Delete of an added station, shown while the pointer or the keyboard is on its card. -->
+              <object class="GtkBox" id="manage">
+                <property name="visible">false</property>
+                <property name="spacing">6</property>
+                <property name="valign">center</property>
+                <style><class name="station-card-manage"/></style>
+                <child>
+                  <!-- Not a button: the grid's own drag gesture starts on it. -->
+                  <object class="GtkImage" id="drag">
+                    <property name="icon-name">rufin-list-drag-handle-symbolic</property>
+                    <property name="pixel-size">16</property>
+                    <property name="tooltip-text" translatable="yes">Drag to reorder</property>
+                    <property name="valign">center</property>
+                    <property name="cursor"><object class="GdkCursor"><property name="name">grab</property></object></property>
+                    <style><class name="station-card-drag"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="pin">
+                    <property name="icon-name">rufin-bookmark-symbolic</property>
+                    <style><class name="detail-round"/><class name="station-card-button"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="edit">
+                    <property name="icon-name">rufin-document-edit-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Edit</property>
+                    <accessibility><property name="label" translatable="yes">Edit</property></accessibility>
+                    <style><class name="detail-round"/><class name="station-card-button"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="delete">
+                    <property name="tooltip-text" translatable="yes">Delete</property>
+                    <accessibility><property name="label" translatable="yes">Delete</property></accessibility>
+                    <style><class name="detail-round"/><class name="station-card-button"/></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="add">
+                <property name="visible">false</property>
+                <property name="icon-name">rufin-list-add-symbolic</property>
+                <property name="valign">center</property>
+                <style><class name="detail-round"/><class name="station-card-button"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="genres_row">
+            <property name="visible">false</property>
+            <property name="spacing">6</property>
+            <style><class name="station-card-genres"/></style>
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">rufin-tag-outline-symbolic</property>
+                <property name="pixel-size">13</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="genres">
+                <property name="xalign">0</property>
+                <property name="ellipsize">end</property>
+                <property name="single-line-mode">true</property>
+                <property name="width-chars">1</property>
+                <property name="hexpand">true</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="description">
+            <property name="visible">false</property>
+            <property name="xalign">0</property>
+            <property name="yalign">0</property>
+            <property name="wrap">true</property>
+            <property name="wrap-mode">word-char</property>
+            <property name="lines">2</property>
+            <property name="ellipsize">end</property>
+            <property name="width-chars">1</property>
+            <style><class name="station-card-description"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="AdwWrapBox" id="channels">
+            <property name="visible">false</property>
+            <property name="child-spacing">5</property>
+            <property name="line-spacing">5</property>
+            <property name="margin-top">4</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

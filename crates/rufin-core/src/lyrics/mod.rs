@@ -66,6 +66,28 @@ impl LyricsService {
     }
 }
 
+/// Whether two items of one address show the same song.
+fn same_song(a: &CurrentMedia, b: &CurrentMedia) -> bool {
+    // A song whose place became known shows its lyrics anew, with their timing.
+    let timed = |media: &CurrentMedia| media.live.as_ref().is_some_and(|live| live.timed);
+    let (song, other) = (&a.row.track.metadata, &b.row.track.metadata);
+    song.title == other.title && song.artist == other.artist && timed(a) == timed(b)
+}
+
+/// Drops the timing of lyrics, which then show as plain lines.
+fn untimed(bundle: &mut LyricsBundle) {
+    if let ::lyrics::LyricsContent::Documents(documents) = &mut bundle.content {
+        for line in documents
+            .iter_mut()
+            .flat_map(|document| &mut document.lines)
+        {
+            line.start_millis = None;
+            line.end_millis = None;
+            line.cue_lines.clear();
+        }
+    }
+}
+
 struct CurrentDocument {
     context: LyricsContext,
     content: Option<CurrentLyricsContent>,
@@ -229,12 +251,24 @@ impl LyricsService {
             media,
             playable: None,
         };
+        // A radio station's item stays while its songs change: a new song is a new document,
+        // and loads at once when the song before it showed lyrics.
+        let mut follow = None;
         let (event, write_check) =
             {
                 let mut state = self
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(current) = state.current.as_ref().filter(|current| {
+                    context.media.live.is_some()
+                        && current.context.media.id.media_uri == context.media.id.media_uri
+                        && !same_song(&current.context.media, &context.media)
+                }) {
+                    follow = (current.automatic_attempted || current.loading)
+                        .then(|| context.media.id.clone());
+                    state.current = None;
+                }
                 if let Some(current) = state.current.as_mut().filter(|current| {
                     current.context.media.id.media_uri == context.media.id.media_uri
                 }) {
@@ -267,6 +301,9 @@ impl LyricsService {
         }
         if let Some(context) = write_check {
             self.check_write_access(context);
+        }
+        if let Some(media_id) = follow {
+            self.load(media_id);
         }
     }
 
@@ -558,16 +595,30 @@ impl LyricsService {
 
     async fn resolve_current(self: &Arc<Self>, request: LyricsRequest, use_cache: bool) {
         let mut fallback = LyricsFallback::default();
-        let playable = self.playable(&request.context).await;
-        let document = sources::read_local_lyrics(
-            &self.catalog,
-            request.media_uri(),
-            playable.as_deref(),
-            Some(&request.context.media.row.track.metadata.title),
-        )
-        .await
-        .ok()
-        .flatten();
+        // A radio station has no file, no server and no cache of its own: the song it
+        // announces is looked up, and a stream that announces none has no lyrics.
+        let live = request.context.media.live.as_ref();
+        if live.is_some_and(|live| live.station == request.context.media.row.track.metadata.title) {
+            if self.matches_current(request.id) {
+                self.finish_current(request.id);
+            }
+            return;
+        }
+        let live = live.is_some();
+        let document = if live {
+            None
+        } else {
+            let playable = self.playable(&request.context).await;
+            sources::read_local_lyrics(
+                &self.catalog,
+                request.media_uri(),
+                playable.as_deref(),
+                Some(&request.context.media.row.track.metadata.title),
+            )
+            .await
+            .ok()
+            .flatten()
+        };
         if let Some(document) = document
             && self
                 .resolve_candidate(&request, &mut fallback, document)
@@ -579,7 +630,11 @@ impl LyricsService {
             return;
         }
         for authority in acquisition_order(request.plan.prefers_server()) {
+            if live && authority == LyricsAuthority::Source {
+                continue;
+            }
             if use_cache
+                && !live
                 && authority == LyricsAuthority::External
                 && self.resolve_cached_candidate(&request, &mut fallback).await
             {
@@ -753,9 +808,20 @@ impl LyricsService {
                 None
             }
         };
-        let Some(document) = document else {
+        let Some(mut document) = document else {
             return false;
         };
+        // Where nothing says where in the song a radio stream is, its lyrics show without
+        // timing.
+        if request
+            .context
+            .media
+            .live
+            .as_ref()
+            .is_some_and(|live| !live.timed)
+        {
+            untimed(&mut document);
+        }
         self.resolve_candidate(request, fallback, document).await
     }
 
@@ -799,10 +865,11 @@ impl LyricsService {
         if !self.matches_current(request.id) {
             return;
         }
-        let write_target = matches!(document.origin, LyricsOrigin::External(_))
+        let live = request.context.media.live.is_some();
+        let write_target = (!live && matches!(document.origin, LyricsOrigin::External(_)))
             .then(|| self.fetched_lyrics_write_target(request.id, &document))
             .flatten();
-        if matches!(document.origin, LyricsOrigin::External(_)) {
+        if !live && matches!(document.origin, LyricsOrigin::External(_)) {
             match cache_write(&request.plan, &document) {
                 Ok((authority, role, language, script, payload, updated_at)) => {
                     if let Err(error) = self
@@ -1198,8 +1265,9 @@ impl LyricsService {
                         service.update_lyrics_text(media_id, content);
                         return;
                     }
-                    if let Ok((authority, role, language, script, payload, updated_at)) =
-                        cache_write(&request.plan, &document)
+                    if request.context.media.live.is_none()
+                        && let Ok((authority, role, language, script, payload, updated_at)) =
+                            cache_write(&request.plan, &document)
                     {
                         let _ = service
                             .catalog
@@ -1947,6 +2015,7 @@ mod tests {
                 media_uri: media_uri.as_str().into(),
             };
             service.set_current(Some(Arc::new(CurrentMedia {
+                live: None,
                 stream: None,
                 id: media_id.clone(),
                 row: Arc::new(library::QueueRow {
@@ -2065,6 +2134,7 @@ mod tests {
             media_uri: cue_uri.clone(),
         };
         service.set_current(Some(Arc::new(CurrentMedia {
+            live: None,
             stream: None,
             id: cue_media_id.clone(),
             row: Arc::new(library::QueueRow {

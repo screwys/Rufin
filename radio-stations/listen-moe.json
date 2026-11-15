@@ -1,0 +1,21 @@
+{
+  "name": "LISTEN.moe",
+  "description": "Japanese and Korean pop around the clock, played by request.",
+  "homepage": "https://listen.moe",
+  "genres": [
+    "Anime",
+    "J-pop",
+    "K-pop"
+  ],
+  "logo": "https://listen.moe/images/apple-touch-icon.png",
+  "channels": [
+    {
+      "name": "J-pop",
+      "stream": "https://listen.moe/fallback"
+    },
+    {
+      "name": "K-pop",
+      "stream": "https://listen.moe/kpop/fallback"
+    }
+  ]
+}

@@ -34,6 +34,7 @@ import {
 
 import { openWelcome, sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
+import { loadRadio } from "./radio.js";
 import {
   acceptsPlaylists,
   bindDrag,
@@ -286,7 +287,7 @@ function showPage(data) {
   $("title").textContent = data.name || data.title;
   document.title = `${data.name || data.title} – Rufin`;
   showHistory();
-  $("library-toolbar").hidden = data.section === "Home";
+  $("library-toolbar").hidden = data.section === "Home" || data.section === "Radio";
   $("play-collection").hidden = data.play !== "true";
   $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
   $("new-smart-playlist").hidden = !(opened.route === "SmartPlaylists" || opened.route.PlaylistFolder?.smart);
@@ -403,6 +404,11 @@ async function loadView(initial = false, extra = {}, at = null) {
       showPage(home);
       bindHome(signal, offsets);
       if (home.missed) showChanged(JSON.parse(home.missed));
+    } else if (opened.route === "Radio") {
+      const path = `/api/page?${new URLSearchParams({ page: JSON.stringify(anew(opened)) })}`;
+      const radio = await loadRadio(initial ? null : path, signal, at === null);
+      showPage(radio);
+      if (radio.missed) showChanged(JSON.parse(radio.missed));
     } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, at ?? 0);
   } catch (error) {
     if (!signal.aborted) {
@@ -666,8 +672,9 @@ function init() {
   // shows; the order goes with the first window, and the page names it from then on.
   const order = () => {
     clearTimeout(searchTimer);
-    // Home has no list to search; its search lists the tracks, as the Tracks page does.
-    if (opened.route === "Home") {
+    // Home and Radio have no list to search; their search lists the tracks, as the Tracks
+    // page does.
+    if (opened.route === "Home" || opened.route === "Radio") {
       const filter = $("search").value;
       if (!filter) return;
       navigate({ route: "Tracks", source: state.source || undefined, folder: state.selectedLibrary || undefined, options: { filter } });

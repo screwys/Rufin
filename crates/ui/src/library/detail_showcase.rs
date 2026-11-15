@@ -190,21 +190,21 @@ impl ShowcaseShape {
 }
 
 /// A header's geometry at one width.
-struct ShowcaseLayout {
+pub(crate) struct ShowcaseLayout {
     /// The cover in its own row, centred, with the text under it.
-    stacked: bool,
-    band: i32,
-    cover: i32,
+    pub(crate) stacked: bool,
+    pub(crate) band: i32,
+    pub(crate) cover: i32,
     /// The cover's top edge below the band's.
-    cover_top: i32,
-    inset: i32,
+    pub(crate) cover_top: i32,
+    pub(crate) inset: i32,
     /// Between the cover and the text.
-    gap: i32,
-    size_class: &'static str,
+    pub(crate) gap: i32,
+    pub(crate) size_class: &'static str,
 }
 
 impl ShowcaseLayout {
-    fn of(shape: ShowcaseShape, width: i32) -> Self {
+    pub(crate) fn of(shape: ShowcaseShape, width: i32) -> Self {
         let narrow = width < STACKED_WIDTH;
         let size_class = if narrow {
             "detail-showcase-small"
@@ -304,48 +304,16 @@ impl DetailShowcaseView {
         let weak = view.downgrade();
         imp.band.set_draw_func(move |_, cairo, width, height| {
             if let Some(view) = weak.upgrade() {
-                view.paint_band(cairo, f64::from(width), f64::from(height));
+                paint_band(
+                    cairo,
+                    f64::from(width),
+                    f64::from(height),
+                    view.imp().band_stops.get(),
+                );
             }
         });
         view.set_title(title);
         view
-    }
-
-    /// The design's band: a 135° gradient through the cover's colours, darkening toward the
-    /// edge the cover overlaps.
-    fn paint_band(&self, cairo: &gtk::cairo::Context, width: f64, height: f64) {
-        use std::f64::consts::{FRAC_PI_2, PI};
-        let radius = 8.0_f64.min(height / 2.0);
-        cairo.new_sub_path();
-        cairo.arc(width - radius, radius, radius, -FRAC_PI_2, 0.0);
-        cairo.arc(width - radius, height - radius, radius, 0.0, FRAC_PI_2);
-        cairo.arc(radius, height - radius, radius, FRAC_PI_2, PI);
-        cairo.arc(radius, radius, radius, PI, 3.0 * FRAC_PI_2);
-        cairo.close_path();
-        // CSS places a 135° gradient's ends so the corners are its 0 % and 100 %.
-        let reach = (width + height) / 4.0;
-        let (x, y) = (width / 2.0, height / 2.0);
-        let diagonal = gtk::cairo::LinearGradient::new(x - reach, y - reach, x + reach, y + reach);
-        for (offset, [r, g, b]) in [0.0, 0.58, 1.0]
-            .into_iter()
-            .zip(self.imp().band_stops.get())
-        {
-            diagonal.add_color_stop_rgb(
-                offset,
-                f64::from(r) / 255.0,
-                f64::from(g) / 255.0,
-                f64::from(b) / 255.0,
-            );
-        }
-        let shade = gtk::cairo::LinearGradient::new(0.0, 0.0, 0.0, height);
-        shade.add_color_stop_rgba(0.3, 0.0, 0.0, 0.0, 0.0);
-        shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.3);
-        for source in [&diagonal, &shade] {
-            if cairo.set_source(source).is_err() || cairo.fill_preserve().is_err() {
-                return;
-            }
-        }
-        cairo.new_path();
     }
 
     /// Takes the band's colours from `binding`'s artwork, for a header that shows no cover.
@@ -363,15 +331,7 @@ impl DetailShowcaseView {
 
     /// Takes the band's colours from the texture the cover shows.
     fn take_band_colours(&self, texture: &gtk::gdk::Texture) {
-        let mut downloader = gtk::gdk::TextureDownloader::new(texture);
-        downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
-        let (pixels, stride) = downloader.download_bytes();
-        let stops = rufin_core::artwork::showcase_band(
-            &pixels,
-            texture.width().max(0) as u32,
-            texture.height().max(0) as u32,
-            stride as u32,
-        );
+        let stops = band_stops(texture);
         let imp = self.imp();
         if imp.band_stops.replace(stops) != stops {
             imp.band.queue_draw();
@@ -948,6 +908,58 @@ impl DetailShowcaseView {
     }
 }
 
+/// The design's band: a 135° gradient through the cover's colours `stops`, darkening toward
+/// the edge the cover overlaps.
+pub(crate) fn paint_band(
+    cairo: &gtk::cairo::Context,
+    width: f64,
+    height: f64,
+    stops: [[u8; 3]; 3],
+) {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let radius = 8.0_f64.min(height / 2.0);
+    cairo.new_sub_path();
+    cairo.arc(width - radius, radius, radius, -FRAC_PI_2, 0.0);
+    cairo.arc(width - radius, height - radius, radius, 0.0, FRAC_PI_2);
+    cairo.arc(radius, height - radius, radius, FRAC_PI_2, PI);
+    cairo.arc(radius, radius, radius, PI, 3.0 * FRAC_PI_2);
+    cairo.close_path();
+    // CSS places a 135° gradient's ends so the corners are its 0 % and 100 %.
+    let reach = (width + height) / 4.0;
+    let (x, y) = (width / 2.0, height / 2.0);
+    let diagonal = gtk::cairo::LinearGradient::new(x - reach, y - reach, x + reach, y + reach);
+    for (offset, [r, g, b]) in [0.0, 0.58, 1.0].into_iter().zip(stops) {
+        diagonal.add_color_stop_rgb(
+            offset,
+            f64::from(r) / 255.0,
+            f64::from(g) / 255.0,
+            f64::from(b) / 255.0,
+        );
+    }
+    let shade = gtk::cairo::LinearGradient::new(0.0, 0.0, 0.0, height);
+    shade.add_color_stop_rgba(0.3, 0.0, 0.0, 0.0, 0.0);
+    shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.3);
+    for source in [&diagonal, &shade] {
+        if cairo.set_source(source).is_err() || cairo.fill_preserve().is_err() {
+            return;
+        }
+    }
+    cairo.new_path();
+}
+
+/// A band's colours from the texture its cover shows.
+pub(crate) fn band_stops(texture: &gtk::gdk::Texture) -> [[u8; 3]; 3] {
+    let mut downloader = gtk::gdk::TextureDownloader::new(texture);
+    downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
+    let (pixels, stride) = downloader.download_bytes();
+    rufin_core::artwork::showcase_band(
+        &pixels,
+        texture.width().max(0) as u32,
+        texture.height().max(0) as u32,
+        stride as u32,
+    )
+}
+
 fn summary_value_is_visible(text: &str) -> bool {
     !text.is_empty()
 }
@@ -1190,15 +1202,20 @@ fn connect_web_link(
     url: String,
 ) {
     button.connect_clicked(move |_| {
-        let Some(window) = window.upgrade() else {
-            return;
-        };
-        let launcher = gtk::UriLauncher::new(&url);
-        gtk::glib::spawn_future_local(async move {
-            if let Err(error) = launcher.launch_future(Some(&window)).await {
-                warn!(%error, "failed to open external detail link");
-            }
-        });
+        if let Some(window) = window.upgrade() {
+            open_web_link(&window, &url);
+        }
+    });
+}
+
+/// Opens `url` in the browser.
+pub(crate) fn open_web_link(window: &gtk::ApplicationWindow, url: &str) {
+    let launcher = gtk::UriLauncher::new(url);
+    let window = window.clone();
+    gtk::glib::spawn_future_local(async move {
+        if let Err(error) = launcher.launch_future(Some(&window)).await {
+            warn!(%error, "failed to open external detail link");
+        }
     });
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "Groove Salad",
+  "description": "Chilled ambient and downtempo beats and grooves, from SomaFM.",
+  "homepage": "https://somafm.com/groovesalad/",
+  "genres": [
+    "Ambient",
+    "Downtempo"
+  ],
+  "logo": "https://somafm.com/logos/256/groovesalad256.png",
+  "channels": [
+    {
+      "name": "Groove Salad",
+      "stream": "https://ice1.somafm.com/groovesalad-128-mp3"
+    }
+  ]
+}

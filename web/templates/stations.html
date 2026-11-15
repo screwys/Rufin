@@ -1,0 +1,44 @@
+<dialog id="station-add-dialog" class="pref-dialog station-dialog" aria-labelledby="station-add-title">
+  <header class="pref-header"><span></span><h3 id="station-add-title">{{ localization::tr("Add Station") }}</h3><button type="button" class="icon-button" data-close="station-add-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
+  <form id="station-add-form">
+    <input id="station-address" type="search" placeholder="{{ localization::tr("Name or stream address") }}" aria-label="{{ localization::tr("Name or stream address") }}" autocomplete="off" />
+    <p id="station-add-status" class="pref-note" role="status" hidden></p>
+    <div id="station-results" class="pref-group" hidden></div>
+    <p id="station-results-note" class="pref-note" hidden>{{ localization::tr("Results from radio-browser.info.") }}</p>
+    <div id="station-probe" class="pref-group" hidden>
+      <div class="pref-row"><div class="cover">{% call m::icon("rufin-radio-station-symbolic") %}{% endcall %}</div><span class="pref-label"><span id="station-probe-name"></span><small id="station-probe-detail"></small></span></div>
+      <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Name") }}</span></span><input id="station-add-name" autocomplete="off" /></label>
+      <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Homepage") }}</span></span><input id="station-add-homepage" inputmode="url" autocomplete="off" /></label>
+    </div>
+    <p id="station-saved-on" class="pref-note" hidden></p>
+    <div id="station-add-actions" class="dialog-actions" hidden><button type="submit" class="primary">{{ localization::tr("Add") }}</button></div>
+  </form>
+</dialog>
+<dialog id="station-edit-dialog" class="playlist-edit" aria-labelledby="station-edit-title">
+  <form id="station-edit-form">
+    <h2 id="station-edit-title">{{ localization::tr("Edit Station") }}</h2>
+    <div class="metadata-artwork-current">
+      <div id="station-edit-picture"></div>
+      <div class="metadata-artwork-actions">
+        <label class="button-like">{% call m::icon("rufin-document-open-symbolic") %}{% endcall %}{{ localization::tr("Add image") }}<input type="file" id="station-edit-file" accept="image/*" hidden /></label>
+        <button type="button" id="station-edit-picture-remove">{% call m::icon("rufin-user-trash-symbolic") %}{% endcall %}{{ localization::tr("Remove image") }}</button>
+      </div>
+    </div>
+    <label for="station-edit-name">{{ localization::tr("Name") }}</label>
+    <input id="station-edit-name" autocomplete="off" required />
+    <label for="station-edit-homepage">{{ localization::tr("Homepage") }}</label>
+    <input id="station-edit-homepage" inputmode="url" autocomplete="off" />
+    <div id="station-edit-stream-row">
+      <label for="station-edit-stream">{{ localization::tr("Stream address") }}</label>
+      <input id="station-edit-stream" inputmode="url" autocomplete="off" />
+    </div>
+    <div id="station-edit-channel-row" hidden>
+      <label for="station-edit-channel">{{ localization::tr("Default channel") }}</label>
+      <select id="station-edit-channel"></select>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" data-close="station-edit-dialog">{{ localization::tr("Cancel") }}</button
+      ><button class="primary">{{ localization::tr("Apply") }}</button>
+    </div>
+  </form>
+</dialog>

@@ -289,6 +289,9 @@ pub struct AndroidBrowseRow {
     /// The duration in core's format: a track's clock time, a collection's units.
     pub duration_text: String,
     pub artwork_identity: Option<Vec<u8>>,
+    /// The radio station a Saved entry pins. Its `row` is the item the station plays as, no
+    /// track of the library.
+    pub station: Option<rufin_core::stations::Station>,
 }
 
 impl AndroidBrowseRow {
@@ -327,6 +330,16 @@ impl AndroidBrowseRow {
             route: None,
             context_id: None,
             downloaded: false,
+            station: None,
+        }
+    }
+
+    /// A radio station pinned in Saved.
+    pub(crate) fn station(station: rufin_core::stations::Station) -> Self {
+        let row = station.row();
+        Self {
+            station: Some(station),
+            ..Self::new(row)
         }
     }
 

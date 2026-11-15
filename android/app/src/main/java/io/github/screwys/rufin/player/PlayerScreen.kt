@@ -101,6 +101,8 @@ private enum class PlayerPane(val title: String) { LYRICS("Lyrics"), VISUALIZER(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConnection, onNavigate: (io.github.screwys.rufin.shared.rufin_core.Route, String, String?) -> Unit, onMore: () -> Unit,
+    /** Opens the Radio page, from the station that plays. */
+    onRadio: () -> Unit,
     onSettings: (io.github.screwys.rufin.more.MoreDestination) -> Unit, tiny: Boolean,
     /** A pull down moves the player by each move, then says whether it went far enough to close it. */
     onPull: (Float) -> Unit, onPullEnd: (Boolean) -> Unit, onClose: () -> Unit) {
@@ -250,7 +252,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragEnd = {
                 when (shown) {
                     null -> if (distance < -threshold && player.playback?.queue?.canNext == true) player.next()
-                        else if (distance > threshold && player.currentId != null) player.previous()
+                        else if (distance > threshold && player.currentId != null && !player.live) player.previous()
                     PlayerSurface.LYRICS -> if (distance < -threshold && visualizerEnabled && lyricsSelection == null)
                         surface = PlayerSurface.VISUALIZER
                     PlayerSurface.VISUALIZER -> if (distance > threshold && lyricsEnabled) surface = PlayerSurface.LYRICS
@@ -303,15 +305,17 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                             val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled && !wide, it.clipToBounds(),
                                 trackOffset.value, neighbours) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
-                                PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp)) { navigation = it }
+                                PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp), onRadio) { navigation = it }
                                 PlayerControls(player, Modifier.fillMaxWidth(), play)
                             }
                             if (tiny) Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
                                 .graphicsLayer { translationX = trackOffset.value }, verticalArrangement = Arrangement.Center,
                                 horizontalAlignment = Alignment.CenterHorizontally) {
                                 // Title, seekbar and transport only; the format chips would push the transport off screen.
-                                PlayerMetadata(player, Modifier.fillMaxWidth()) { navigation = it }
-                                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
+                                // A station has no seekbar: its chips, Live first, stand there.
+                                PlayerMetadata(player, Modifier.fillMaxWidth(), onRadio) { navigation = it }
+                                if (player.live) PlayerSourceInfo(player)
+                                else Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
                                 PlayerTransport(player, play)
                             }
                             else if (wide) Row(Modifier.fillMaxSize().padding(start = 8.dp, end = 16.dp)) {
@@ -380,12 +384,13 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                             }
                             if (visible == PlayerSurface.LYRICS) LyricsPanel(player, lyricsScroll, lyricsSelection) { lyricsSelection = it }
                         }
-                        Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp)) { PlayerProgress(player) }
+                        if (player.live) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { PlayerSourceInfo(player) }
+                        else Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp)) { PlayerProgress(player) }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                             ToolButton("rufin-speaker-front-symbolic", "Output") { output = true }
                             Spacer(Modifier.weight(1f))
                             PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous,
-                                Modifier.size(48.dp), enabled = player.currentId != null, iconSize = 24.dp, glyph = true)
+                                Modifier.size(48.dp), enabled = player.currentId != null && !player.live, iconSize = 24.dp, glyph = true)
                             Spacer(Modifier.width(12.dp))
                             PlayerPlayPause(player, play)
                             Spacer(Modifier.width(12.dp))
@@ -528,12 +533,14 @@ private fun PlayerCover(player: PlayerConnection, artwork: Cover, modifier: Modi
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo: (String) -> Unit) {
+private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onRadio: () -> Unit, onGoTo: (String) -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     val metadata by remember(player) { derivedStateOf {
         player.playback?.let { state ->
             val links = player.metadataLinks?.takeIf { it.mediaUri == state.transport.current?.id?.mediaUri }
-            PlayerMetadataText(state.transport.current?.id?.mediaUri, player.currentItem?.metadata?.title.orEmpty(), links?.artistText ?: player.currentItem?.metadata?.artist.orEmpty(), links?.albumText ?: player.currentItem?.metadata?.album.orEmpty())
+            // A station's row names the announced song and leads to no album or artist: its last line names
+            // the station, and leads to the Radio page.
+            PlayerMetadataText(state.transport.current?.id?.mediaUri.takeUnless { player.live }, player.currentItem?.metadata?.title.orEmpty(), links?.artistText ?: player.currentItem?.metadata?.artist.orEmpty(), links?.albumText ?: player.currentItem?.metadata?.album.orEmpty(), player.live)
         }
     } }
     val current = metadata ?: return
@@ -548,30 +555,53 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
                 Text(displayed.title, Modifier.fillMaxWidth().rufinMarquee(), style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
                 val subtitle = listOf(displayed.artist, displayed.album).filter(String::isNotBlank).joinToString(" · ")
-                if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
+                if (displayed.station && displayed.album.isNotBlank()) StationLine(displayed.artist, displayed.album, onRadio)
+                else if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
                     style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val favorite by remember(player) { derivedStateOf {
                 val state = player.playback
                 state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
-            IconButton(player::favorite, Modifier.size(48.dp).focusRing(CircleShape)) {
+            IconButton(player::favorite, Modifier.size(48.dp).focusRing(CircleShape), enabled = !player.live) {
                 RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     translate("Favorite current track"), Modifier.size(24.dp),
-                    if (favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, glyph = true)
+                    if (favorite) MaterialTheme.colorScheme.error else LocalContentColor.current, glyph = true)
             }
         }
     }
 }
 
-private data class PlayerMetadataText(val uri: String?, val title: String, val artist: String, val album: String)
+private data class PlayerMetadataText(val uri: String?, val title: String, val artist: String, val album: String, val station: Boolean)
+
+/** The line under a station's announced song: the artist, then the radio icon and the station, which
+ *  together open the Radio page as a track's line opens its album. */
+@Composable
+private fun StationLine(artist: String, station: String, onRadio: () -> Unit) {
+    val style = MaterialTheme.typography.bodyLarge
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (artist.isNotBlank()) Text("$artist · ", Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = style, color = color)
+        // Beside an artist the station keeps to its share of the line, so a long name leaves the artist in view.
+        Row(Modifier.then(if (artist.isNotBlank()) Modifier.widthIn(max = 180.dp) else Modifier).focusRing(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = translate("Radio"), onClick = onRadio),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            RufinIcon("rufin-radio-station-symbolic", null, Modifier.size(18.dp), color)
+            Text(station, maxLines = 1, overflow = TextOverflow.Ellipsis, style = style, color = color)
+        }
+    }
+}
 
 @Composable
 private fun PlayerControls(player: PlayerConnection, modifier: Modifier, play: IconButtonColors) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         PlayerSourceInfo(player)
-        Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
+        // A station has nothing to seek: no seekbar and no times.
+        if (!player.live) {
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { PlayerProgress(player) }
+        }
         Spacer(Modifier.height(16.dp))
         PlayerTransport(player, play)
     }
@@ -583,8 +613,11 @@ private fun PlayerSourceInfo(player: PlayerConnection) {
     FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Filled like the player's other boxes, so a chip reads as one against any background.
+        if (player.live) Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Box(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) { LiveMark(MaterialTheme.typography.bodySmall) }
+        }
         labels.forEach { label ->
-            // Filled like the player's other boxes, so a chip reads as one against any background.
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Text(label, Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
@@ -689,18 +722,20 @@ private fun PlayerProgress(player: PlayerConnection) {
 }
 
 private data class PlayerTransportState(val shuffle: Boolean, val repeat: QueueRepeatMode,
-    val desiredPlaying: Boolean, val canPrevious: Boolean, val canNext: Boolean)
+    val desiredPlaying: Boolean, val canPrevious: Boolean, val canNext: Boolean, val live: Boolean)
 
 @Composable
 private fun PlayerTransport(player: PlayerConnection, play: IconButtonColors) {
     val transport by remember(player) { derivedStateOf {
-        player.playback?.let { PlayerTransportState(it.controls.shuffleEnabled, it.controls.repeatMode, it.transport.desiredPlaying, it.transport.current != null, it.queue.canNext) }
+        player.playback?.let { PlayerTransportState(it.controls.shuffleEnabled, it.controls.repeatMode, it.transport.desiredPlaying,
+            it.transport.current != null && !player.live, it.queue.canNext, player.live) }
     } }
     val current = transport ?: return
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             PlayerIconButton("rufin-shuffle-symbolic", "Shuffle", player::shuffle,
-                Modifier.size(48.dp).semantics { selected = current.shuffle }, selected = current.shuffle, iconSize = 24.dp, glyph = true)
+                Modifier.size(48.dp).semantics { selected = current.shuffle }, enabled = !current.live, selected = current.shuffle,
+                iconSize = 24.dp, glyph = true)
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous,
@@ -716,7 +751,8 @@ private fun PlayerTransport(player: PlayerConnection, play: IconButtonColors) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             PlayerIconButton(if (current.repeat == QueueRepeatMode.ONE) "rufin-repeat-one-symbolic" else "rufin-repeat-symbolic",
                 when (current.repeat) { QueueRepeatMode.ONE -> "Repeat one"; QueueRepeatMode.ALL -> "Repeat all"; else -> "Repeat off" },
-                player::repeat, Modifier.size(48.dp), selected = current.repeat != QueueRepeatMode.OFF, iconSize = 24.dp, glyph = true)
+                player::repeat, Modifier.size(48.dp), enabled = !current.live, selected = current.repeat != QueueRepeatMode.OFF,
+                iconSize = 24.dp, glyph = true)
         }
     }
 }

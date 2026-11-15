@@ -342,6 +342,9 @@ impl AndroidRuntime {
     pub fn lyrics_owner(&self) -> Arc<rufin_core::lyrics::LyricsHandle> {
         Arc::new(self.products.lyrics.clone())
     }
+    pub fn radio(&self) -> Arc<crate::radio::AndroidRadio> {
+        Arc::new(crate::radio::AndroidRadio::new(&self.products))
+    }
 }
 
 impl AndroidRuntime {

@@ -439,36 +439,19 @@ impl<'a> Head<'a> {
                 },
             ),
         };
-        let allow_external = settings.application.external_metadata_enabled;
-        let [first, middle, last] = row
-            .summary()
-            .and_then(|shown| shown.artwork.first().copied())
-            .and_then(|binding| {
-                products.artwork.preview(
-                    rufin_core::artwork::ArtworkBinding::opaque(binding),
-                    allow_external,
-                )
-            })
-            .map_or_else(
-                || rufin_core::artwork::showcase_band(&[], 0, 0, 0),
-                |preview| {
-                    let image = &preview.image;
-                    rufin_core::artwork::showcase_band(
-                        image.rgba(),
-                        image.width(),
-                        image.height(),
-                        image.row_stride(),
-                    )
-                },
-            )
-            .map(|[r, g, b]| format!("rgb({r} {g} {b})"));
+        let band = band(
+            products,
+            settings,
+            row.summary()
+                .and_then(|shown| shown.artwork.first().copied()),
+        );
         Self {
             artist: matches!(row.row, Row::Album(_) | Row::AlbumHeading(_)),
             row,
             home,
             facts,
             genres,
-            band: format!("--band-start: {first}; --band-middle: {middle}; --band-end: {last}"),
+            band,
         }
     }
 }
@@ -755,6 +738,195 @@ pub(super) fn home(
     .map_err(internal)
 }
 
+/// A radio station as its card or the on-air header shows it.
+struct StationCard<'a> {
+    station: &'a rufin_core::stations::Station,
+    /// Its JSON for the script, as the API lists it.
+    data: String,
+    /// What a click on it posts to play it.
+    play: String,
+    /// What the + of a suggested one posts to add it.
+    add: String,
+    /// What the pin of an added one says.
+    pin: String,
+    /// It is in Saved, or a channel of it is.
+    saved: bool,
+    preview: String,
+    genres: String,
+    /// Its channels: each one's name, what a click on it posts and whether it plays.
+    channels: Vec<(&'a str, String, bool)>,
+}
+
+impl<'a> StationCard<'a> {
+    fn new(products: &ProductHandles, station: &'a rufin_core::stations::Station) -> Self {
+        let data = stations::station_json(products, station);
+        // An added station plays by its key, a suggested one by its place in Rufin's list.
+        let named = |channel: Option<&str>| {
+            let mut play = json!({"key":station.key});
+            if station.key.is_none() {
+                play = json!({"listed":station.listed});
+            }
+            if let Some(channel) = channel {
+                play["channel"] = json!(channel);
+            }
+            play.to_string()
+        };
+        Self {
+            play: named(None),
+            add: json!({"id":station.listed}).to_string(),
+            // The pin of a station with channels opens their list, which removes one.
+            pin: if station.pinned && station.channels.is_empty() {
+                localization::tr("Remove from Saved")
+            } else {
+                localization::tr("Add to Saved")
+            },
+            saved: station.pinned || station.channels.iter().any(|channel| channel.pinned),
+            preview: data["artwork_previews"][0]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            genres: station.genres.join(", "),
+            channels: station
+                .channels
+                .iter()
+                .map(|channel| {
+                    (
+                        channel.name.as_str(),
+                        named(Some(&channel.name)),
+                        channel.playing,
+                    )
+                })
+                .collect(),
+            data: data.to_string(),
+            station,
+        }
+    }
+}
+
+/// The station that plays, as the Radio page's header shows it.
+struct OnAir<'a> {
+    station: StationCard<'a>,
+    channel: Option<&'a str>,
+    /// The song the stream announces and its artist, each in a row that stays when it is empty.
+    title: &'a str,
+    artist: &'a str,
+    format: Option<&'a str>,
+    playing: bool,
+    /// The station is the queue's item; else the header's Play plays it.
+    tuned: bool,
+    /// The slots of Heard, as many as the widest header lists: the songs heard, newest first,
+    /// then the slots that wait for one.
+    heard: [Option<&'a rufin_core::stations::HeardSong>; 3],
+    /// The band's gradient stops, from the logo's preview.
+    band: String,
+}
+
+#[derive(Template)]
+#[template(path = "radio.html")]
+struct Radio<'a> {
+    on_air: Option<OnAir<'a>>,
+    /// Stations, then Suggested: each one's heading and cards.
+    sections: Vec<(String, Vec<StationCard<'a>>)>,
+    /// What the + of a suggested station says.
+    add: String,
+    /// The server the stations are saved on; empty when Rufin keeps them.
+    saved_on: &'a str,
+    page: String,
+    title: String,
+    /// What committed while the page read, as JSON; empty when nothing did.
+    missed: String,
+    form: &'a Form,
+}
+
+/// The gradient stops of a showcase band for the picture `binding` names, from its preview.
+fn band(
+    products: &ProductHandles,
+    settings: &rufin_core::settings::app::Settings,
+    binding: Option<&[u8]>,
+) -> String {
+    let allow_external = settings.application.external_metadata_enabled;
+    let [first, middle, last] = binding
+        .and_then(|binding| {
+            products.artwork.preview(
+                rufin_core::artwork::ArtworkBinding::opaque(binding),
+                allow_external,
+            )
+        })
+        .map_or_else(
+            || rufin_core::artwork::showcase_band(&[], 0, 0, 0),
+            |preview| {
+                let image = &preview.image;
+                rufin_core::artwork::showcase_band(
+                    image.rgba(),
+                    image.width(),
+                    image.height(),
+                    image.row_stride(),
+                )
+            },
+        )
+        .map(|[r, g, b]| format!("rgb({r} {g} {b})"));
+    format!("--band-start: {first}; --band-middle: {middle}; --band-end: {last}")
+}
+
+/// The Radio page as HTML.
+pub(super) fn radio(
+    products: &ProductHandles,
+    token: &page::PageToken,
+    opened: &stations::Opened,
+    form: &Form,
+) -> Result<String, Error> {
+    let page = &opened.page;
+    let settings = products.settings.load();
+    fn cards<'a>(
+        products: &ProductHandles,
+        stations: &'a [rufin_core::stations::Station],
+    ) -> Vec<StationCard<'a>> {
+        stations
+            .iter()
+            .map(|station| StationCard::new(products, station))
+            .collect()
+    }
+    let saved_on = page.saved_on.as_deref();
+    Radio {
+        on_air: page.on_air.as_ref().map(|air| OnAir {
+            station: StationCard::new(products, &air.station),
+            channel: air.channel.as_deref(),
+            title: air.title.as_deref().unwrap_or_default(),
+            artist: air.artist.as_deref().unwrap_or_default(),
+            format: air.format.as_deref(),
+            playing: air.playing,
+            tuned: air.tuned,
+            heard: std::array::from_fn(|slot| air.heard.get(slot)),
+            band: band(products, &settings, air.station.artwork_binding.as_deref()),
+        }),
+        sections: vec![
+            (
+                localization::tr("Stations"),
+                cards(products, &page.stations),
+            ),
+            (
+                localization::tr("Suggested"),
+                cards(products, &page.suggested),
+            ),
+        ],
+        add: match saved_on {
+            Some(server) => localization::tr_with("Add to {saved_on}", &[("saved_on", server)]),
+            None => localization::tr("Add"),
+        },
+        saved_on: saved_on.unwrap_or_default(),
+        page: token.json(),
+        title: page::title(products, token, None),
+        missed: opened
+            .missed
+            .as_ref()
+            .map(Value::to_string)
+            .unwrap_or_default(),
+        form,
+    }
+    .render()
+    .map_err(internal)
+}
+
 /// A library response: HTML for the web page, else JSON.
 pub(super) fn page(
     headers: &hyper::HeaderMap,
@@ -915,7 +1087,7 @@ fn navigation_routes(
         .filter(|(item, _)| {
             matches!(
                 item,
-                Home | Favorites | Albums | Tracks | Artists | Playlists | SmartPlaylists
+                Home | Favorites | Albums | Tracks | Artists | Playlists | SmartPlaylists | Radio
             )
         })
         .collect()
@@ -993,12 +1165,18 @@ impl Page {
     pub fn needs_source(&self) -> bool {
         self.connected && self.token.is_none()
     }
-    pub fn home(&self) -> bool {
-        self.section == "Home"
-            && self
-                .token
-                .as_ref()
-                .is_none_or(|token| token.route == rufin_core::route::Route::Home)
+    /// Whether the page lists nothing the toolbar orders: Home and Radio.
+    pub fn unlisted(&self) -> bool {
+        self.token.as_ref().is_none_or(|token| {
+            matches!(
+                token.route,
+                rufin_core::route::Route::Home | rufin_core::route::Route::Radio
+            )
+        })
+    }
+    /// Whether a radio station plays.
+    pub fn live(&self) -> bool {
+        self.controls["current"]["live"] == true
     }
     pub fn page_json(&self) -> String {
         self.token
@@ -1233,7 +1411,18 @@ async fn index(
             csrf: page.csrf.clone(),
             return_to: page.here.clone(),
         };
-        if token.source.is_some()
+        if token.route == rufin_core::route::Route::Radio {
+            match stations::open(&products, products.source.selected_library(), true).await {
+                Ok(opened) => {
+                    page.title = page::title(&products, &token, None);
+                    page.content = radio(&products, &token, &opened, &form)?;
+                    page.token = Some(token);
+                }
+                Err((_, message)) => {
+                    page.error = message.0["error"].as_str().unwrap_or_default().into()
+                }
+            }
+        } else if token.source.is_some()
             || !token
                 .route
                 .requires_selected_source(token.options.search_mode)

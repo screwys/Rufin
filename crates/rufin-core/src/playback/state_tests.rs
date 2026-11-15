@@ -201,7 +201,7 @@ async fn active_two_track_session() -> (
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     assert!(session.current_run().is_some());
     (
         _directory, _catalog, session, owner, commands, playback, inbox,
@@ -332,7 +332,7 @@ async fn refill_preserves_live_progress_and_prepared_positions() {
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     for _ in 0..20 {
         session.handle_command(Command::Next, &sample).unwrap();
     }
@@ -1133,7 +1133,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     let current_run = session.current_run().unwrap();
     let current_identifier = session.current_run.as_ref().unwrap().play_id.clone();
     let plan = session.next_plan.as_ref().unwrap();
@@ -1729,7 +1729,7 @@ async fn failed_stream_preserves_selected_media_and_player_controls() {
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     let run = session.current_run().unwrap();
     let sample = ClockSample {
         monotonic_millis: 0,
@@ -1771,7 +1771,7 @@ async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() 
     session
         .handle_command(Command::SetRepeat(QueueRepeatMode::All), &sample)
         .unwrap();
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     for rank in 0..500 {
         assert_eq!(
             session.sequence().selected().unwrap().track.media_uri,
@@ -1819,7 +1819,7 @@ async fn backend_advancing_during_removal_uses_the_exact_surviving_successor() {
             local_period: "1970-01".into(),
         };
         session.sequence.activate_index(removed_rank - 1);
-        session.set_playing(true);
+        session.set_playing(true, &first_sample());
         let removed = session.sequence.at(removed_rank).unwrap().position.clone();
         session
             .handle_command(Command::Remove(removed), &sample)
@@ -1864,7 +1864,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
         if stop {
             session.stop(&sample, true);
         } else {
-            session.set_playing(false);
+            session.set_playing(false, &first_sample());
         }
         finish_queue(&mut session, &inbox, &sample).await;
         assert_eq!(
@@ -1924,7 +1924,7 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         local_period: "1970-01".into(),
     };
     session.set_repeat(QueueRepeatMode::All);
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     for _ in 0..100 {
         session.handle_command(Command::Next, &sample).unwrap();
         finish_queue(&mut session, &inbox, &sample).await;
@@ -1960,7 +1960,7 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     let ids = session
         .sequence
         .entries()
@@ -2004,7 +2004,7 @@ async fn skip_session(
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
-    session.set_playing(true);
+    session.set_playing(true, &first_sample());
     (
         session,
         commands,
@@ -2120,4 +2120,13 @@ async fn seeks_before_the_backend_loads_a_run_become_its_start_position() {
             ..
         }
     )));
+}
+
+/// A clock sample for a command a test gives before its own clock starts.
+fn first_sample() -> ClockSample {
+    ClockSample {
+        monotonic_millis: 0,
+        unix_seconds: 0,
+        local_period: "2026-01".into(),
+    }
 }
