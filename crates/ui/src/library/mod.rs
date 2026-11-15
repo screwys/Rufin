@@ -23,6 +23,8 @@ mod named_collections;
 mod named_detail;
 mod playlist_detail;
 mod playlist_entries;
+mod radio;
+pub(crate) use radio::{play_station, station_cover};
 mod route_shell;
 mod routes;
 mod search;

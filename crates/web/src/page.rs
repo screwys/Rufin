@@ -83,6 +83,7 @@ pub(super) fn token(
     let route = match list {
         "page" => None,
         "home" => Some(Route::Home),
+        "stations" => Some(Route::Radio),
         "tracks" if favorites => Some(Route::Favorites),
         "tracks" => Some(Route::Tracks),
         "albums" => Some(Route::Albums),
@@ -249,7 +250,9 @@ pub(super) async fn open(
     let token = PageToken { options, ..token };
     let missed = reading.missed().map(|missed| {
         let mut value = json!({});
-        show_changed(products, &mut value, Some(&opened.view), &missed);
+        let current = products.source.selected_library();
+        let refresh = opened.view.refresh(current.as_ref(), &missed);
+        show_changed(&mut value, Some(refresh), &missed);
         value
     });
     Ok(Opened {
@@ -500,6 +503,7 @@ pub(super) fn section(route: &Route) -> &'static str {
         Route::SmartPlaylists
         | Route::SmartPlaylistDetail(_)
         | Route::PlaylistFolder { smart: true, .. } => "SmartPlaylists",
+        Route::Radio => "Radio",
         _ => "Tracks",
     }
 }

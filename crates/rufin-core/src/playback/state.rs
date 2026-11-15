@@ -140,6 +140,22 @@ impl Command {
     }
 }
 
+/// A stream's delay behind its station until a song change measures it: what LISTEN.moe's
+/// server sends ahead on connecting.
+const STREAM_DELAY_MILLIS: i64 = 6_000;
+/// A stream names a new song at its next block, half of one late on average.
+const TITLE_DELAY_MILLIS: i64 = 330;
+
+/// A song of a station whose feed tells when its songs begin.
+#[derive(Clone, Debug)]
+struct SongClock {
+    title: String,
+    artists: Vec<String>,
+    duration_millis: u64,
+    /// When the station began it, on the clock of [`ClockSample::monotonic_millis`].
+    began_millis: i64,
+}
+
 #[derive(Clone, Debug)]
 struct RunContext {
     id: RunId,
@@ -157,6 +173,21 @@ struct RunContext {
     resolved_stream: Option<PreparedStream>,
     backend_loaded: bool,
     seekable: bool,
+    /// A radio station: it has no end, no place to seek to, and no listen of its own.
+    live: bool,
+    /// What the stream's tags said: the song a station announces, its codec and bitrate.
+    stream: playback::StreamInfo,
+    /// When the announced song began to be heard: the time, its period, and what of the run
+    /// was heard by then.
+    song_heard_from: Option<(i64, String, u64)>,
+    /// The announced song's cover was found; until then the row shows the station's picture.
+    song_cover: bool,
+    /// The song that is heard, where the station's feed tells when its songs begin.
+    song_clock: Option<SongClock>,
+    /// The song the feed says the station has begun, which is heard once the stream names it.
+    next_song: Option<SongClock>,
+    /// How far what is heard runs behind the station: the stream's own delay.
+    stream_delay_millis: i64,
     bitstream: bool,
     /// A seek was sent; the position that answers it is saved.
     seeking: bool,
@@ -166,8 +197,24 @@ struct RunContext {
     continued_start: Option<(i64, String)>,
 }
 
+impl SongClock {
+    /// Whether the line a stream sends for its song is this song's.
+    fn names(&self, named: &str) -> bool {
+        let title = self.title.trim();
+        !title.is_empty() && named.trim().ends_with(title)
+    }
+}
+
 impl RunContext {
+    /// The place in the song that is heard at `monotonic_millis`, where its beginning is known.
+    fn song_place(&self, monotonic_millis: u64) -> Option<u64> {
+        let song = self.song_clock.as_ref().filter(|_| self.live)?;
+        let heard_from = song.began_millis + self.stream_delay_millis;
+        Some((monotonic_millis as i64 - heard_from).clamp(0, song.duration_millis as i64) as u64)
+    }
+
     fn resolving(id: RunId, play_id: String, entry: &Arc<QueueRow>) -> Self {
+        let live = library::station_stream(&entry.track.media_uri).is_some();
         Self {
             id,
             play_id,
@@ -183,7 +230,14 @@ impl RunContext {
             desired_playing: true,
             resolved_stream: None,
             backend_loaded: false,
-            seekable: true,
+            seekable: !live,
+            live,
+            stream: playback::StreamInfo::default(),
+            song_heard_from: None,
+            song_cover: false,
+            song_clock: None,
+            next_song: None,
+            stream_delay_millis: STREAM_DELAY_MILLIS,
             bitstream: false,
             seeking: false,
             failed_local: None,
@@ -193,7 +247,7 @@ impl RunContext {
 
     /// The listen of this run; a run nothing was heard of records none.
     fn listen(&self, skipped: bool) -> Option<library::ListenWrite> {
-        if self.audible_millis == 0 {
+        if self.audible_millis == 0 || self.live {
             return None;
         }
         let track = &self.row.track;
@@ -216,6 +270,17 @@ impl RunContext {
             local_period: self.local_period.clone()?,
             listened_millis: self.audible_millis.min(i64::MAX as u64) as i64,
             skipped,
+        })
+    }
+
+    /// The song a radio station announces, as scrobbling names it; None without an artist.
+    fn announced(&self) -> Option<library::TrackMetadata> {
+        let (artist, title) =
+            playback::announced_song(self.stream.title.as_deref()?, self.stream.artist.as_deref())?;
+        (self.live && !artist.is_empty()).then(|| library::TrackMetadata {
+            title,
+            artist,
+            ..Default::default()
         })
     }
 
@@ -313,6 +378,10 @@ pub(super) struct Player {
     buffering_percent: Option<u8>,
     last_error: Option<String>,
     consecutive_skips: usize,
+    /// How often a radio stream joined again in a row without being heard for a while.
+    live_rejoins: usize,
+    /// A radio station announced another song, which scrobbling announces in turn.
+    announced_changed: bool,
     /// The server failed to connect: the skips that follow play only copies on this device,
     /// until a track starts or ends.
     offline: bool,
@@ -375,6 +444,8 @@ impl Player {
             buffering_percent: None,
             last_error: None,
             consecutive_skips: 0,
+            live_rejoins: 0,
+            announced_changed: false,
             offline: false,
             sleep_timer: None,
         }
@@ -730,6 +801,15 @@ impl Player {
         self.sequence.progress_millis()
     }
 
+    /// Where a starting run begins: the saved place, and for a radio station the stream's own.
+    fn start_position_millis(&self) -> u64 {
+        if self.current_run.as_ref().is_some_and(|run| run.live) {
+            0
+        } else {
+            self.sequence.progress_millis()
+        }
+    }
+
     pub(super) fn position_observed_at_millis(&self) -> u64 {
         if self.external.is_some() {
             self.external_clock_millis
@@ -810,7 +890,7 @@ impl Player {
             run,
             current: stream,
             next,
-            start_position_millis: self.sequence.progress_millis(),
+            start_position_millis: self.start_position_millis(),
             playback_rate: self.settings.playback_rate,
         });
         self.dirty = true;
@@ -961,9 +1041,9 @@ impl Player {
                 self.reorder(&selection, &target, sample);
             }),
             Command::Clear { include_current } => Ok(self.clear(include_current, sample)),
-            Command::PlayPause => Ok(self.play_pause()),
-            Command::Play => Ok(self.set_playing(true)),
-            Command::Pause => Ok(self.set_playing(false)),
+            Command::PlayPause => Ok(self.play_pause(sample)),
+            Command::Play => Ok(self.set_playing(true, sample)),
+            Command::Pause => Ok(self.set_playing(false, sample)),
             Command::Stop => Ok(self.stop(sample, true)),
             Command::Next => Ok(self.next(sample)),
             Command::Previous => Ok(self.previous(sample)),
@@ -1070,6 +1150,9 @@ impl Player {
         sample: &ClockSample,
     ) {
         self.stream_tasks.remove(&run);
+        if self.rejoin_live(run, sample) {
+            return;
+        }
         if let Some(current) = self
             .current_run
             .as_ref()
@@ -1128,6 +1211,65 @@ impl Player {
             BackendEvent::Position { run, millis } => self.accept_position(run, millis, sample),
             BackendEvent::Duration { run, millis } => self.accept_duration(run, millis),
             BackendEvent::Seekable { run, seekable } => self.accept_seekable(run, seekable),
+            BackendEvent::StreamInfo { run, info } => {
+                let next_song = self.current_run.as_ref().is_some_and(|current| {
+                    current.id == run
+                        && current.live
+                        && info.title.is_some()
+                        && info.title != current.stream.title
+                });
+                if next_song {
+                    self.heard_song(sample);
+                    self.announced_changed = true;
+                }
+                let named = info.title.clone();
+                if let Some(current) = self
+                    .current_run
+                    .as_mut()
+                    .filter(|current| current.id == run)
+                {
+                    if next_song {
+                        current.song_cover = false;
+                        current.song_heard_from = Some((
+                            sample.unix_seconds,
+                            sample.local_period.clone(),
+                            current.audible_millis,
+                        ));
+                    }
+                    let before = current.stream.clone();
+                    let stream = &mut current.stream;
+                    // A new title is a new song, which the old artist and link do not describe.
+                    if info.title.is_some() && info.title != stream.title {
+                        stream.artist = None;
+                        stream.link = None;
+                    }
+                    stream.title = info.title.or(stream.title.take());
+                    stream.artist = info.artist.or(stream.artist.take());
+                    stream.link = info.link.or(stream.link.take());
+                    // A stream's encoding does not change while it plays: the first word stays.
+                    stream.codec = stream.codec.take().or(info.codec);
+                    stream.bitrate = stream.bitrate.or(info.bitrate);
+                    if next_song {
+                        // The stream names the song the feed began: what is heard is this
+                        // far behind the station.
+                        current.song_clock = current
+                            .next_song
+                            .take()
+                            .filter(|song| named.as_deref().is_some_and(|named| song.names(named)));
+                        if let Some(song) = &current.song_clock {
+                            current.stream_delay_millis = (sample.monotonic_millis as i64
+                                - TITLE_DELAY_MILLIS
+                                - song.began_millis)
+                                .clamp(0, 30_000);
+                        }
+                    }
+                    if current.live && current.stream != before {
+                        self.current_media_changed = true;
+                        self.dirty = true;
+                    }
+                }
+                self.follow_song(sample);
+            }
             BackendEvent::Bitstream { run, active } => {
                 if let Some(current) = self
                     .current_run
@@ -1244,6 +1386,9 @@ impl Player {
                 }
             }
             BackendEvent::Error { run, error } => {
+                if self.rejoin_live(run, sample) {
+                    return;
+                }
                 let Some(current) = self
                     .current_run
                     .as_ref()
@@ -1483,7 +1628,7 @@ impl Player {
     fn complete_queue_metadata(
         &mut self,
         result: Result<Vec<(OccurrenceId, library::TrackView)>, String>,
-        _sample: &ClockSample,
+        sample: &ClockSample,
     ) {
         self.pending_hydration = None;
         match result {
@@ -1508,7 +1653,7 @@ impl Player {
         {
             self.begin_selected_run();
             if self.queue_transport == Some(TransportStatus::Paused) {
-                self.set_playing(false);
+                self.set_playing(false, sample);
             }
         } else {
             self.replan_next_if_changed();
@@ -1556,7 +1701,7 @@ impl Player {
             if !stop && self.queue_transport != Some(TransportStatus::Stopped) {
                 self.begin_selected_run();
                 if self.queue_transport == Some(TransportStatus::Paused) {
-                    self.set_playing(false);
+                    self.set_playing(false, sample);
                 }
             }
             self.current_media_changed = true;
@@ -1775,15 +1920,30 @@ impl Player {
         self.changed_queue(removing_current && previous.is_some(), true, sample);
     }
 
-    fn play_pause(&mut self) {
+    fn play_pause(&mut self, sample: &ClockSample) {
         let playing = self
             .current_run
             .as_ref()
             .is_some_and(|run| run.desired_playing);
-        self.set_playing(!playing)
+        self.set_playing(!playing, sample)
     }
 
-    fn set_playing(&mut self, desired_playing: bool) {
+    fn set_playing(&mut self, desired_playing: bool, sample: &ClockSample) {
+        if desired_playing {
+            self.live_rejoins = 0;
+            // A paused radio stream holds what it played when it paused. Playing joins the
+            // stream again, where it is now.
+            if let Some(run) = self.current_run.as_ref().filter(|run| {
+                run.live && run.backend_loaded && run.status == TransportStatus::Paused
+            }) {
+                let run = run.id;
+                self.dirty = true;
+                self.send_backend(BackendCommand::Stop { run });
+                self.finish_current(RunEndReason::Stopped, sample);
+                self.begin_selected_run();
+                return;
+            }
+        }
         if self.pending_queue.is_some() || self.pending_hydration.is_some() {
             self.queue_transport = Some(if desired_playing {
                 TransportStatus::Playing
@@ -1836,7 +1996,7 @@ impl Player {
                             run: run_id,
                             current: stream,
                             next,
-                            start_position_millis: self.sequence.progress_millis(),
+                            start_position_millis: self.start_position_millis(),
                             playback_rate: self.settings.playback_rate,
                         });
 
@@ -1987,7 +2147,7 @@ impl Player {
         else {
             return;
         };
-        if current.seekable == seekable {
+        if current.seekable == seekable || current.live {
             return;
         }
         current.seekable = seekable;
@@ -2140,7 +2300,7 @@ impl Player {
             run,
             current: stream,
             next,
-            start_position_millis: self.sequence.progress_millis(),
+            start_position_millis: self.start_position_millis(),
             playback_rate: self.settings.playback_rate,
         });
 
@@ -2224,10 +2384,12 @@ impl Player {
         let clock_changed = current.position_observed_at_millis != sample.monotonic_millis;
         current.position_observed_at_millis = sample.monotonic_millis;
         current.advance_clock(sample.monotonic_millis);
-        let playhead_millis = if current.duration_millis == 0 {
-            millis
-        } else {
-            millis.min(current.duration_millis)
+        // A station's song with a known beginning is followed by the clock, not by the time
+        // listened.
+        let playhead_millis = match current.song_place(sample.monotonic_millis) {
+            Some(place) => place,
+            None if current.duration_millis == 0 => millis,
+            None => millis.min(current.duration_millis),
         };
         let changed = self.sequence.progress_millis() != playhead_millis;
         if std::mem::take(&mut current.seeking) {
@@ -2249,7 +2411,7 @@ impl Player {
         else {
             return;
         };
-        if millis == 0 || current.duration_millis == millis {
+        if millis == 0 || current.duration_millis == millis || current.live {
             return;
         }
         current.duration_millis = millis;
@@ -2277,6 +2439,9 @@ impl Player {
         {
             return;
         }
+        if self.rejoin_live(run, sample) {
+            return;
+        }
         let desired_playing = self
             .current_run
             .as_ref()
@@ -2294,6 +2459,69 @@ impl Player {
             self.auto_dj_waiting_for_continuation = true;
             self.maybe_request_auto_dj();
         }
+    }
+
+    /// Records the song a radio station announced, as it ends or the station stops, once half
+    /// a minute of it was heard: it scrobbles as the scrobbling settings say. Nothing tells how
+    /// long the song is, so the time heard stands for it.
+    fn heard_song(&mut self, sample: &ClockSample) {
+        let Some(current) = self.current_run.as_mut().filter(|run| run.live) else {
+            return;
+        };
+        current.advance_clock(sample.monotonic_millis);
+        let Some((started_at, local_period, heard_before)) = current.song_heard_from.take() else {
+            return;
+        };
+        let heard = current.audible_millis.saturating_sub(heard_before);
+        let Some(song) = current.announced().filter(|_| heard >= 30_000) else {
+            return;
+        };
+        let listen = library::ListenWrite {
+            external_id: Some(format!("{}:{started_at}", current.play_id)),
+            media_uri: library::station_song_uri(&song.artist, &song.title),
+            title: song.title,
+            artist: song.artist,
+            album: String::new(),
+            duration_millis: heard as i64,
+            disc_number: None,
+            track_number: None,
+            year: None,
+            release_date: None,
+            source_format: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_release_track_id: None,
+            started_at,
+            local_period,
+            listened_millis: heard as i64,
+            skipped: false,
+        };
+        self.owner().record_activity(None, Box::new(listen));
+    }
+
+    /// A radio stream that ended or failed while it should play joins again: a station has no
+    /// end. Three joins in a row that were not heard for ten seconds give up, and the failure
+    /// shows.
+    fn rejoin_live(&mut self, run: RunId, sample: &ClockSample) -> bool {
+        let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|current| current.id == run && current.live && current.desired_playing)
+        else {
+            return false;
+        };
+        current.advance_clock(sample.monotonic_millis);
+        if current.audible_millis >= 10_000 {
+            self.live_rejoins = 0;
+        }
+        if self.live_rejoins >= 3 {
+            return false;
+        }
+        self.live_rejoins += 1;
+        self.dirty = true;
+        self.send_backend(BackendCommand::Stop { run });
+        self.finish_current(RunEndReason::Stopped, sample);
+        self.begin_selected_run();
+        true
     }
 
     fn accept_transitioned(&mut self, old_run: RunId, new_run: RunId, sample: &ClockSample) {
@@ -2390,7 +2618,7 @@ impl Player {
                     run: plan.next_run,
                     current: stream,
                     next: None,
-                    start_position_millis: self.sequence.progress_millis(),
+                    start_position_millis: self.start_position_millis(),
                     playback_rate: self.settings.playback_rate,
                 });
             }
@@ -2646,7 +2874,7 @@ impl Player {
         current.qualified = true;
         let key = current.row.track.track_key;
         if let Some(listen) = current.listen(false) {
-            self.owner().record_activity(key, Box::new(listen));
+            self.owner().record_activity(Some(key), Box::new(listen));
         }
         if let Some(current) = self.current_run.as_ref() {
             self.owner().report_source(self.source_report(
@@ -2669,6 +2897,7 @@ impl Player {
         };
         current.advance_clock(sample.monotonic_millis);
         self.qualify_current();
+        self.heard_song(sample);
         let Some(current) = self.current_run.take() else {
             return;
         };
@@ -2689,7 +2918,7 @@ impl Player {
                 && let Some(listen) = current.listen(true)
             {
                 self.owner()
-                    .record_activity(current.row.track.track_key, Box::new(listen));
+                    .record_activity(Some(current.row.track.track_key), Box::new(listen));
             }
         }
         if reason == RunEndReason::Completed {
@@ -2754,7 +2983,11 @@ impl Player {
         {
             return;
         }
-        let Some(seed) = self.sequence.selected() else {
+        let Some(seed) = self
+            .sequence
+            .selected()
+            .filter(|seed| library::station_stream(&seed.track.media_uri).is_none())
+        else {
             return;
         };
         let request = AutoDjRequest {
@@ -2805,6 +3038,123 @@ fn decided_transition(
 }
 
 impl Player {
+    /// The station's feed began `song`, `age_millis` ago by the station's clock. It is heard
+    /// already when the stream names it, as on tuning in; else once the stream does.
+    pub(super) fn station_song(
+        &mut self,
+        run: RunId,
+        song: &sources::ListenMoeSong,
+        age_millis: i64,
+        sample: &ClockSample,
+    ) {
+        let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|current| current.id == run && current.live)
+        else {
+            return;
+        };
+        let song = SongClock {
+            title: song.title.clone(),
+            artists: song.artists.clone(),
+            duration_millis: song.duration_millis,
+            began_millis: sample.monotonic_millis as i64 - age_millis,
+        };
+        if current
+            .stream
+            .title
+            .as_deref()
+            .is_some_and(|named| song.names(named))
+        {
+            current.song_clock = Some(song);
+            self.current_media_changed = true;
+            self.dirty = true;
+            self.follow_song(sample);
+        } else {
+            current.next_song = Some(song);
+        }
+    }
+
+    /// Puts the position at the place in the song that is heard, where that is known.
+    fn follow_song(&mut self, sample: &ClockSample) {
+        let Some(current) = self.current_run.as_mut() else {
+            return;
+        };
+        let Some(place) = current.song_place(sample.monotonic_millis) else {
+            return;
+        };
+        current.position_observed_at_millis = sample.monotonic_millis;
+        if self.sequence.progress_millis() != place {
+            self.sequence.set_progress_millis(place);
+            self.dirty = true;
+        }
+    }
+
+    /// The cover of the song `run` announces was found: its row shows it from now on.
+    pub(super) fn song_cover_found(&mut self, run: RunId, artist: &str, title: &str) {
+        let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|current| current.id == run && current.live && !current.song_cover)
+        else {
+            return;
+        };
+        let announced = current.stream.title.as_deref().and_then(|announced| {
+            playback::announced_song(announced, current.stream.artist.as_deref())
+        });
+        if announced.is_some_and(|(by, song)| by == artist && song == title) {
+            current.song_cover = true;
+            self.current_media_changed = true;
+            self.dirty = true;
+        }
+    }
+
+    /// The current row of a radio station, showing the song the stream announces: its title and
+    /// artist, with the station as the album. A stream that announces none shows the station.
+    fn live_row(&self, row: Arc<QueueRow>) -> Arc<QueueRow> {
+        let Some((title, artist, link, found, duration_millis)) = self
+            .current_run
+            .as_ref()
+            .filter(|run| run.live)
+            .and_then(|run| {
+                let stream = &run.stream;
+                let (artist, title) =
+                    playback::announced_song(stream.title.as_deref()?, stream.artist.as_deref())?;
+                // The feed names the song's artists as its lyrics and cover are found by.
+                let (artist, duration_millis) = match &run.song_clock {
+                    Some(song) if !song.artists.is_empty() => {
+                        (song.artists.join(", "), song.duration_millis)
+                    }
+                    Some(song) => (artist, song.duration_millis),
+                    None => (artist, 0),
+                };
+                Some((
+                    title,
+                    artist,
+                    stream.link.clone(),
+                    run.song_cover,
+                    duration_millis,
+                ))
+            })
+        else {
+            return row;
+        };
+        let mut row = row;
+        let shown = Arc::make_mut(&mut row);
+        shown.track.artwork_binding = library::station_song_artwork(
+            &artist,
+            &title,
+            link.as_deref(),
+            found,
+            shown.track.artwork_binding.as_deref(),
+        );
+        let station = std::mem::replace(&mut shown.track.metadata.title, title);
+        shown.track.metadata.artist = artist;
+        shown.track.metadata.album = station;
+        shown.track.metadata.duration_millis = duration_millis as i64;
+        row
+    }
+
     pub(super) fn view(&self) -> PlaybackView {
         let sequence = self.sequence();
         let settings = self.settings();
@@ -2854,7 +3204,22 @@ impl Player {
                         run: self.current_run(),
                         media_uri: entry.track.media_uri.clone(),
                     },
-                    row: projected_row(entry),
+                    row: self.live_row(projected_row(entry)),
+                    // The row says it is a station, also before it plays, as after a restart.
+                    live: library::station_stream(&entry.track.media_uri)
+                        .is_some()
+                        .then(|| {
+                            let stream = self.current_run.as_ref().map(|run| &run.stream);
+                            playback::LiveStream {
+                                station: entry.track.metadata.title.clone(),
+                                codec: stream.and_then(|stream| stream.codec.clone()),
+                                bitrate: stream.and_then(|stream| stream.bitrate),
+                                timed: self
+                                    .current_run
+                                    .as_ref()
+                                    .is_some_and(|run| run.song_clock.is_some()),
+                            }
+                        }),
                 }),
                 state: self.status(),
                 desired_playing: self.desired_playing(),
@@ -3021,7 +3386,7 @@ impl Player {
             SleepTimerDue::FadeOut { millis } => {
                 self.sleep_timer = None;
                 self.dirty = true;
-                self.sleep_pause(millis);
+                self.sleep_pause(millis, sample);
             }
         }
     }
@@ -3039,7 +3404,7 @@ impl Player {
         stop
     }
 
-    fn sleep_pause(&mut self, millis: u64) {
+    fn sleep_pause(&mut self, millis: u64, sample: &ClockSample) {
         // A receiver is paused the way its controls pause it.
         if self.external.is_some() {
             self.owner().send(Command::Pause);
@@ -3056,7 +3421,7 @@ impl Player {
             let run = run.id;
             self.send_backend(BackendCommand::FadeOut { run, millis });
         } else {
-            self.set_playing(false);
+            self.set_playing(false, sample);
         }
     }
 
@@ -3092,16 +3457,18 @@ impl Player {
                     != view.transport.current.as_ref().map(|media| &media.id)
                     || previous.transport.effective_state() != transport.state
             });
-            if state_changed {
-                self.owner().scrobbler.now_playing(
-                    self.current_run
-                        .as_ref()
-                        .filter(|run| {
-                            run.started_at_unix_seconds.is_some()
-                                && transport.state == TransportStatus::Playing
-                        })
-                        .map(|run| &run.row.track.metadata),
-                );
+            if state_changed || std::mem::take(&mut self.announced_changed) {
+                let playing = self.current_run.as_ref().filter(|run| {
+                    run.started_at_unix_seconds.is_some()
+                        && transport.state == TransportStatus::Playing
+                });
+                // A radio station's row names the station: the song it announces is what plays.
+                let announced = playing.and_then(RunContext::announced);
+                self.owner().scrobbler.now_playing(match playing {
+                    Some(run) if run.live => announced.as_ref(),
+                    Some(run) => Some(&run.row.track.metadata),
+                    None => None,
+                });
             }
             if let Some(current) = self
                 .current_run

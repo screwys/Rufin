@@ -31,6 +31,15 @@ pub enum SidebarPin {
         folder_id: String,
         smart: bool,
     },
+    /// A radio station, by the server that keeps it; None when Rufin does. With a channel,
+    /// that channel of it, which plays whatever the station's own stream is.
+    Station {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_id: Option<SourceId>,
+        station_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<String>,
+    },
 }
 
 fn is_false(value: &bool) -> bool {
@@ -272,6 +281,8 @@ impl Catalog {
                 SidebarPin::PlaylistFolder { folder_id, .. } => {
                     (Kind::PlaylistFolder, None, folder_id)
                 }
+                // Stations are no rows of the Catalog; `pinned_stations` reads them.
+                SidebarPin::Station { .. } => return None,
             };
             Some((kind, slot(source)?, object.as_str()))
         });

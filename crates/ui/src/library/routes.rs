@@ -264,6 +264,7 @@ impl CatalogUi {
             Route::Folders { path } => self.folders_route(path, read),
             Route::Home => self.home_route(std::sync::Arc::clone(&read.view)),
             Route::Search => return self.search_route(),
+            Route::Radio => return self.radio_route(),
         };
         mounted.with_view(view)
     }

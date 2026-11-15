@@ -63,7 +63,19 @@ internal fun PlayerIconButton(
 }
 
 private data class MiniMedia(val uri: String, val title: String, val subtitle: String,
-    val playing: Boolean, val duration: ULong)
+    val playing: Boolean, val duration: ULong, val live: Boolean)
+
+/** A player bar's second text row. A station has no seek row to say Live in: the row ends with it. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BarSubtitle(text: String, live: Boolean, style: androidx.compose.ui.text.TextStyle, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    if (!live) Text(text, modifier.basicMarquee(), maxLines = 1, style = style, color = color)
+    else Row(modifier, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (text.isNotBlank()) Text(text, Modifier.weight(1f, fill = false).basicMarquee(), maxLines = 1, style = style, color = color)
+        LiveMark(style)
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -77,7 +89,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
     val media by remember(player) { derivedStateOf {
         player.playback?.let { current -> current.transport.current?.id?.mediaUri?.let { uri ->
             MiniMedia(uri, player.currentItem?.metadata?.title.orEmpty(), player.currentItem?.metadata?.artist.orEmpty(),
-                current.transport.desiredPlaying, current.transport.durationMillis)
+                current.transport.desiredPlaying, current.transport.durationMillis, player.live)
         } }
     } }
     val current = media ?: return
@@ -111,7 +123,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 // The cover stays and cross-fades; the title slides with the finger inside its own faded area.
                 CoverCrossfade(artwork, Modifier.size(if (compact) 40.dp else if (tablet) 52.dp else 48.dp))
-                AnimatedContent(current.title to current.subtitle, Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)
+                AnimatedContent(Triple(current.title, current.subtitle, current.live), Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)
                     .trackSlide(offset.value),
                     transitionSpec = { (slideInHorizontally(tween(if (reduceMotion) 0 else 180)) { it / 3 } + fadeIn(tween(if (reduceMotion) 0 else 180))) togetherWith
                         (slideOutHorizontally(tween(if (reduceMotion) 0 else 180)) { -it / 3 } + fadeOut(tween(if (reduceMotion) 0 else 120))) },
@@ -119,8 +131,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(metadata.first, Modifier.fillMaxWidth().basicMarquee(), maxLines = 1,
                             fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
-                        Text(metadata.second, Modifier.fillMaxWidth().basicMarquee(), maxLines = 1,
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        BarSubtitle(metadata.second, metadata.third, MaterialTheme.typography.bodyMedium, Modifier.fillMaxWidth())
                     }
                 }
                 // Folded into the dock, the mini player keeps only Play.
@@ -128,16 +139,16 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
                     val favorite = player.favorite
                     PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                        "Favorite current track", player::favorite, selected = favorite)
+                        "Favorite current track", player::favorite, enabled = !current.live, selected = favorite)
                 }
                 if (foldable) {
                     PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
-                    PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous)
+                    PlayerIconButton("rufin-media-skip-backward-symbolic", "Previous Track", player::previous, enabled = !current.live)
                     BarPlay(player, current.playing)
-                    PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next)
+                    PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next, enabled = !current.live)
                     val favorite = player.favorite
                     PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                        "Favorite current track", player::favorite, selected = favorite)
+                        "Favorite current track", player::favorite, enabled = !current.live, selected = favorite)
                 } else IconButton(player::togglePlayback) {
                     if (player.refilling) RefillSpinner(34.dp)
                     RufinIcon(if (current.playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
@@ -186,7 +197,8 @@ private fun rememberTrackSwipe(player: PlayerConnection): Pair<Modifier, Animata
             distance += amount
             scope.launch { offset.snapTo(distance) }
         }, onDragEnd = {
-            if (distance < -threshold) player.next() else if (distance > threshold) player.previous()
+            // A station has no track either side.
+            if (!player.live) { if (distance < -threshold) player.next() else if (distance > threshold) player.previous() }
             settle()
         }, onDragCancel = { settle() })
     }
@@ -264,12 +276,11 @@ internal fun SidebarPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutpu
                 Column(Modifier.weight(1f).padding(start = 10.dp).trackSlide(offset.value)) {
                     Text(player.currentItem?.metadata?.title.orEmpty(), Modifier.basicMarquee(), maxLines = 1, fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium)
-                    Text(player.currentItem?.metadata?.artist.orEmpty(), Modifier.basicMarquee(), maxLines = 1,
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    BarSubtitle(player.currentItem?.metadata?.artist.orEmpty(), player.live, MaterialTheme.typography.bodySmall)
                 }
                 val favorite = player.favorite
                 PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                    "Favorite current track", player::favorite, selected = favorite)
+                    "Favorite current track", player::favorite, enabled = !player.live, selected = favorite)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
@@ -277,7 +288,7 @@ internal fun SidebarPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutpu
                     RufinIcon(if (playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
                         translate(if (playing) "Pause" else "Play"), Modifier.size(22.dp))
                 }
-                PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next)
+                PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next, enabled = !player.live)
             }
             if (duration > 0UL) Box(Modifier.padding(end = 4.dp, bottom = 2.dp)) {
                 MiniProgress(player, duration, player.playback?.transport?.state == io.github.screwys.rufin.shared.playback.TransportStatus.PLAYING)

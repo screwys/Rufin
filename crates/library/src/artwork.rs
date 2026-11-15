@@ -112,6 +112,20 @@ pub enum ArtworkImage {
         name: String,
         musicbrainz_id: Option<String>,
     },
+    /// A picture at an address: a radio station's logo, or the one a stream sends with a song.
+    Url {
+        url: String,
+    },
+    /// The cover of a song a radio stream announced, looked up by its artist and title.
+    Song {
+        artist: String,
+        title: String,
+    },
+    /// The picture a person chose for a radio station.
+    Station {
+        key: i64,
+        revision: String,
+    },
     Playlist {
         smart: bool,
         source_id: Option<String>,
@@ -153,6 +167,7 @@ impl ArtworkCandidate {
                 format!("native/{:032x}", md5(source_id.as_str()))
             }
             ArtworkImage::Playlist { .. } => "playlists".into(),
+            ArtworkImage::Station { .. } => "stations".into(),
             _ => "external".into(),
         };
         candidate.key = format!("{directory}/{:032x}", md5(candidate.stable_identity()));
@@ -184,6 +199,9 @@ impl ArtworkCandidate {
                 "artist\0{name}\0{}",
                 musicbrainz_id.as_deref().unwrap_or_default()
             ),
+            ArtworkImage::Url { url } => format!("url\0{url}"),
+            ArtworkImage::Song { artist, title } => format!("song\0{artist}\0{title}"),
+            ArtworkImage::Station { key, .. } => format!("station\0{key}"),
             ArtworkImage::Playlist {
                 smart,
                 source_id,
@@ -224,17 +242,22 @@ impl ArtworkCandidate {
                 identity
             }
             ArtworkImage::Artist { .. } => format!("{}\0\0", self.asset_identity()),
-            ArtworkImage::Playlist { revision, .. } => {
+            ArtworkImage::Playlist { revision, .. } | ArtworkImage::Station { revision, .. } => {
                 format!("{}\0{revision}", self.asset_identity())
             }
-            ArtworkImage::Album(_) => self.asset_identity(),
+            ArtworkImage::Album(_) | ArtworkImage::Url { .. } | ArtworkImage::Song { .. } => {
+                self.asset_identity()
+            }
         }
     }
 
     pub fn is_external(&self) -> bool {
         matches!(
             self.image,
-            ArtworkImage::Album(_) | ArtworkImage::Artist { .. }
+            ArtworkImage::Album(_)
+                | ArtworkImage::Artist { .. }
+                | ArtworkImage::Url { .. }
+                | ArtworkImage::Song { .. }
         )
     }
     pub fn source_id(&self) -> Option<&crate::SourceId> {
@@ -248,6 +271,115 @@ impl ArtworkCandidate {
     pub fn blur_hash(&self) -> Option<&str> {
         self.blur_hash.as_deref()
     }
+}
+
+/// Whether an address a stream sent beside a song names a picture.
+fn pictured(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    let path = url.path().to_ascii_lowercase();
+    matches!(url.scheme(), "http" | "https")
+        && [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+            .iter()
+            .any(|extension| path.ends_with(extension))
+}
+
+/// The first public picture address a station's binding names, for a service that loads the
+/// picture itself.
+pub fn station_picture_url(binding: &[u8]) -> Option<String> {
+    serde_json::from_slice::<Vec<ArtworkCandidate>>(binding)
+        .ok()?
+        .into_iter()
+        .find_map(|candidate| match candidate.image {
+            ArtworkImage::Url { url } if url.starts_with("https://") => Some(url),
+            _ => None,
+        })
+}
+
+/// The pictures of a radio station: the one chosen for it alone, else the server's, then the
+/// one its address names.
+pub fn station_artwork(
+    chosen: Option<(i64, &str)>,
+    native: Option<(&crate::SourceId, &str)>,
+    logo: Option<&str>,
+) -> Option<Vec<u8>> {
+    if let Some((key, revision)) = chosen {
+        return serde_json::to_vec(&[ArtworkCandidate::new(
+            ArtworkImage::Station {
+                key,
+                revision: revision.into(),
+            },
+            None,
+        )])
+        .ok();
+    }
+    let candidates = native
+        .map(|(source_id, item_id)| ArtworkImage::Native {
+            source_id: source_id.clone(),
+            item_id: item_id.to_string(),
+            tag: None,
+        })
+        .into_iter()
+        .chain(
+            logo.filter(|url| !url.is_empty())
+                .map(|url| ArtworkImage::Url { url: url.into() }),
+        )
+        .map(|image| ArtworkCandidate::new(image, None))
+        .collect::<Vec<_>>();
+    (!candidates.is_empty())
+        .then(|| serde_json::to_vec(&candidates).ok())
+        .flatten()
+}
+
+/// The cover of a song a station announced, looked up by artist and title.
+pub fn station_song_cover(artist: &str, title: &str) -> Option<Vec<u8>> {
+    let (artist, title) = (artist.trim(), title.trim());
+    if artist.is_empty() || title.is_empty() {
+        return None;
+    }
+    serde_json::to_vec(&[ArtworkCandidate::new(
+        ArtworkImage::Song {
+            artist: artist.into(),
+            title: title.into(),
+        },
+        None,
+    )])
+    .ok()
+}
+
+/// The pictures of a song a station announced: the one the stream sent with it, then its
+/// looked-up cover once that is `found`, then the station's own. Until the cover is found the
+/// station's picture shows whole, not as the blur of a picture still awaited.
+pub fn station_song_artwork(
+    artist: &str,
+    title: &str,
+    link: Option<&str>,
+    found: bool,
+    station: Option<&[u8]>,
+) -> Option<Vec<u8>> {
+    let mut candidates = link
+        .filter(|url| pictured(url))
+        .map(|url| ArtworkImage::Url { url: url.into() })
+        .into_iter()
+        .chain(
+            (found && !artist.trim().is_empty() && !title.trim().is_empty()).then(|| {
+                ArtworkImage::Song {
+                    artist: artist.trim().into(),
+                    title: title.trim().into(),
+                }
+            }),
+        )
+        .map(|image| ArtworkCandidate::new(image, None))
+        .collect::<Vec<_>>();
+    candidates.extend(
+        station
+            .and_then(|binding| serde_json::from_slice::<Vec<ArtworkCandidate>>(binding).ok())
+            .unwrap_or_default(),
+    );
+    (!candidates.is_empty())
+        .then(|| serde_json::to_vec(&candidates).ok())
+        .flatten()
 }
 
 pub(crate) fn playlist_binding(

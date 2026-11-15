@@ -29,7 +29,7 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
 
 use crate::string_error;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::features::follow;
 use crate::runtime::VisualizerPublication;
@@ -86,10 +86,17 @@ pub struct PlaybackOwner {
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
     rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
+    /// The songs the playing radio station announced.
+    heard: Mutex<crate::stations::Heard>,
+    /// The announced song whose cover was last looked for.
+    sought_cover: Mutex<Option<(String, String)>>,
+    /// The run whose station's song feed is followed, and the task that follows it.
+    station_feed: Mutex<Option<(playback::RunId, tokio::task::AbortHandle)>>,
 }
 
 enum PlaybackStoreWork {
-    Activity(library::TrackKey, Box<ListenWrite>),
+    /// A listen and the track it was of; a song a radio station announced has none.
+    Activity(Option<library::TrackKey>, Box<ListenWrite>),
     Flush(std::sync::mpsc::SyncSender<()>),
     Output {
         volume: f64,
@@ -270,6 +277,9 @@ impl PlaybackOwner {
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
+            heard: Mutex::default(),
+            sought_cover: Mutex::default(),
+            station_feed: Mutex::default(),
         });
         let weak = Arc::downgrade(&owner);
         // The queue restores after the Catalog loaded, so the first full pass has nothing to
@@ -474,7 +484,7 @@ impl PlaybackOwner {
         }
     }
 
-    fn record_activity(&self, key: library::TrackKey, activity: Box<ListenWrite>) {
+    fn record_activity(&self, key: Option<library::TrackKey>, activity: Box<ListenWrite>) {
         let _ = self
             .store_sender
             .try_send(PlaybackStoreWork::Activity(key, activity));
@@ -520,11 +530,11 @@ impl PlaybackOwner {
         });
     }
 
-    async fn store_activity(&self, current_track: library::TrackKey, listen: ListenWrite) {
+    async fn store_activity(&self, current_track: Option<library::TrackKey>, listen: ListenWrite) {
         let deliveries = self.scrobbler.listen_delivery_targets(&listen);
         if let Err(error) = self
             .catalog
-            .record_listen(&listen, Some(current_track), &deliveries)
+            .record_listen(&listen, current_track, &deliveries)
             .await
         {
             warn!(%error, "could not record Rufin Activity");
@@ -549,6 +559,29 @@ impl PlaybackOwner {
             )
         });
         self.runtime.spawn(async move {
+            // A radio station plays the stream its address leads to, whatever its source.
+            if let Some(address) = library::station_stream(&occurrence.track.media_uri) {
+                let result = crate::stations::resolve_stream(&address)
+                    .await
+                    .map(|stream| {
+                        PreparedStream::new(
+                            audio_processing::ResolvedStream::new(stream),
+                            Some(playback::TrackLoudness::default()),
+                        )
+                        .with_row(occurrence, None)
+                    })
+                    .map_err(|message| {
+                        playback::BackendFailure::with_kind(
+                            playback::FailureKind::Connection,
+                            message,
+                        )
+                    });
+                playback.post(move |player, sample| match result {
+                    Ok(stream) => player.stream_resolved(run, stream),
+                    Err(error) => player.stream_failed(run, error, sample),
+                });
+                return;
+            }
             let playable = match catalog.playable(occurrence.track.track_key).await {
                 Ok(Some(playable)) => Arc::new(playable),
                 Ok(None) => {
@@ -683,9 +716,106 @@ impl PlaybackOwner {
             .clone()
     }
 
+    /// The songs the playing radio station announced since it was tuned in, newest first.
+    pub(crate) fn heard(&self) -> Vec<crate::stations::HeardSong> {
+        crate::stations::Heard::songs(&self.heard)
+    }
+
+    /// Looks for the cover of the song a station announces, once a song, and tells the player
+    /// when it is in the cache: the row shows the station's picture until then.
+    fn seek_song_cover(&self, media: &playback::CurrentMedia) {
+        let metadata = &media.row.track.metadata;
+        let (Some(live), Some(run), Some(playback)) = (&media.live, media.id.run, self.active())
+        else {
+            return;
+        };
+        let song = (metadata.artist.clone(), metadata.title.clone());
+        if live.station == song.1 {
+            return;
+        }
+        let Some(binding) = library::station_song_cover(&song.0, &song.1) else {
+            return;
+        };
+        if self
+            .sought_cover
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .replace(song.clone())
+            .as_ref()
+            == Some(&song)
+        {
+            return;
+        }
+        let artwork = self.source.artwork().clone();
+        let request = artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 512)
+            .with_external(self.settings.load().ui.artwork_policy());
+        let playback = playback.downgrade();
+        self.runtime.spawn(async move {
+            if matches!(
+                artwork.load(request).finish().await,
+                artwork::ArtworkOutcome::Ready(_)
+            ) {
+                playback.post(move |player, _| player.song_cover_found(run, &song.0, &song.1));
+            }
+        });
+    }
+
+    /// Follows the song feed of the station that plays, where it has one, for as long as its
+    /// run lasts: the feed tells the player when each song began.
+    fn follow_station_feed(&self, media: Option<&playback::CurrentMedia>) {
+        let wanted = media
+            .filter(|media| media.live.is_some())
+            .and_then(|media| {
+                let stream = library::station_stream(&media.id.media_uri)?;
+                Some((media.id.run?, sources::listen_moe_feed(&stream)?))
+            });
+        let mut followed = self
+            .station_feed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if followed.as_ref().map(|(run, _)| *run) == wanted.map(|(run, _)| run) {
+            return;
+        }
+        if let Some((_, task)) = followed.take() {
+            task.abort();
+        }
+        let (Some((run, feed)), Some(playback)) = (wanted, self.active()) else {
+            return;
+        };
+        let playback = playback.downgrade();
+        let task = self.runtime.spawn(async move {
+            loop {
+                let player = playback.clone();
+                let ended = sources::listen_moe_songs(feed, move |song| {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_or(0, |now| now.as_millis() as i64);
+                    let age_millis = now - song.started_unix_millis;
+                    player.post(move |player, sample| {
+                        player.station_song(run, &song, age_millis, sample);
+                    });
+                    true
+                })
+                .await;
+                if let Err(error) = ended {
+                    tracing::debug!(%error, "a station's song feed ended");
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+        *followed = Some((run, task.abort_handle()));
+    }
+
     fn publish_current_media(&self, media: Option<Arc<playback::CurrentMedia>>) {
+        crate::stations::Heard::note(&self.heard, media.as_deref());
+        self.follow_station_feed(media.as_deref());
+        if let Some(media) = media.as_deref() {
+            self.seek_song_cover(media);
+        }
+        // A radio stream has no waveform to read.
         let waveform = media
             .as_ref()
+            .filter(|media| media.live.is_none())
             .map(|media| self.waveform_media(Arc::clone(media)));
         self.waveform.current_changed(waveform);
         self.lyrics.set_current(media);
@@ -1097,6 +1227,10 @@ where
         let kind = playback::FailureKind::Connection;
         playback::BackendFailure::with_kind(kind, kind.summary())
     };
+    // Only playback opens a radio station, which has no end to read to.
+    if library::station_stream(&request.media_uri).is_some() {
+        return Err(unavailable());
+    }
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;

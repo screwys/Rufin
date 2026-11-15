@@ -603,9 +603,14 @@ fn queue_duration_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnView
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
-        let text = rufin_core::settings::presentation::format_duration(
-            (row.track.metadata.duration_millis.max(0) / 1000) as u32,
-        );
+        // A radio station has no duration.
+        let text = if library::station_stream(&row.track.media_uri).is_some() {
+            tr("LIVE")
+        } else {
+            rufin_core::settings::presentation::format_duration(
+                (row.track.metadata.duration_millis.max(0) / 1000) as u32,
+            )
+        };
         label.label().set_text(&text);
     });
     factory.connect_unbind(|_, item| {

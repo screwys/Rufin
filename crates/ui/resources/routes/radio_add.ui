@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <!-- Add Station: one field. A name searches radio-browser.info; an address reads the
+       stream and offers it with its own name. -->
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Add Station</property>
+    <!-- The dialog grows with what the field finds. -->
+    <property name="follows-content-size">true</property>
+    <property name="focus-widget">entry</property>
+    <property name="child">
+      <object class="AdwToolbarView" id="toolbar">
+        <child type="top"><object class="AdwHeaderBar" id="header"/></child>
+        <property name="content">
+          <object class="GtkScrolledWindow">
+            <property name="hscrollbar-policy">never</property>
+            <property name="propagate-natural-height">true</property>
+            <property name="max-content-height">560</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">14</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">18</property>
+                <property name="margin-start">16</property>
+                <property name="margin-end">16</property>
+                <child>
+                  <object class="GtkSearchEntry" id="entry">
+                    <property name="placeholder-text" translatable="yes">Name or stream address</property>
+                    <property name="search-delay">350</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkListBox" id="results">
+                    <property name="visible">false</property>
+                    <property name="selection-mode">none</property>
+                    <style><class name="boxed-list"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="results_note">
+                    <property name="visible">false</property>
+                    <property name="label" translatable="yes">Results from radio-browser.info.</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <style><class name="caption"/><class name="dim-label"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkListBox" id="probed">
+                    <property name="visible">false</property>
+                    <property name="selection-mode">none</property>
+                    <style><class name="boxed-list"/></style>
+                    <child>
+                      <object class="AdwActionRow" id="stream">
+                        <property name="use-markup">false</property>
+                        <property name="title-lines">1</property>
+                        <property name="subtitle-lines">1</property>
+                        <property name="activatable">false</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="name">
+                        <property name="title" translatable="yes">Name</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="homepage">
+                        <property name="title" translatable="yes">Homepage</property>
+                        <property name="input-purpose">url</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="message">
+                    <property name="visible">false</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <property name="wrap-mode">word-char</property>
+                    <style><class name="muted"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="saved">
+                    <property name="visible">false</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <style><class name="caption"/><class name="dim-label"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="add">
+                    <property name="visible">false</property>
+                    <property name="label" translatable="yes">Add</property>
+                    <property name="halign">end</property>
+                    <style><class name="suggested-action"/></style>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

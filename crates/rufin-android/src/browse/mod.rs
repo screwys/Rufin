@@ -664,6 +664,19 @@ impl AndroidLibrary {
         shuffled: bool,
         page_title: Option<String>,
     ) -> Result<(), AndroidError> {
+        // A pinned station plays as the Radio page plays it, and a pinned channel as its chip.
+        if let Some(station) = &row.station {
+            let (source, playback) = (self.source.clone(), self.playback.clone());
+            let (key, channel) = (station.key, station.channel.clone());
+            return self
+                .runtime
+                .spawn(async move {
+                    rufin_core::stations::play(&source, &playback, key, None, channel).await
+                })
+                .await
+                .map_err(error)?
+                .map_err(error);
+        }
         let index = usize::try_from(index).map_err(error)?;
         let caption = row_caption(&row, view.as_deref(), page_title);
         let source = self.source.clone();

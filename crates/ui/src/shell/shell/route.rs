@@ -307,6 +307,21 @@ impl Shell {
         }
     }
 
+    /// Reads the Radio page again while it is the mounted one: the station on air, the songs
+    /// heard and the playing marks follow playback.
+    pub(crate) fn refresh_mounted_radio(&self) {
+        let refresh = self
+            .route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .filter(|entry| entry.route == Route::Radio)
+            .map(|entry| Rc::clone(&entry.view.catalog_refresh));
+        if let Some(refresh) = refresh {
+            refresh();
+        }
+    }
+
     pub(crate) fn navigate_current_route_items(
         &self,
         direction: gtk::DirectionType,
@@ -457,6 +472,13 @@ impl Shell {
             self.cancel_root_order_read();
             self.replace_mounted_route(route, selected, render_started, |catalog| {
                 catalog.search_route()
+            });
+            return;
+        }
+        if route == Route::Radio {
+            self.cancel_root_order_read();
+            self.replace_mounted_route(route, selected, render_started, |catalog| {
+                catalog.radio_route()
             });
             return;
         }

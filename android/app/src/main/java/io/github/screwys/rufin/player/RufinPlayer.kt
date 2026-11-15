@@ -105,9 +105,10 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
                 Player.COMMAND_GET_AUDIO_ATTRIBUTES,
                 Player.COMMAND_GET_VOLUME,
                 Player.COMMAND_SET_VOLUME,
-                Player.COMMAND_SET_REPEAT_MODE,
-                Player.COMMAND_SET_SHUFFLE_MODE,
             )
+            // A radio station plays alone and live: nothing to shuffle, repeat or go back to.
+            val live = current.transport.current?.live != null
+            if (!live) commands.addAll(Player.COMMAND_SET_REPEAT_MODE, Player.COMMAND_SET_SHUFFLE_MODE)
             if (current.transport.canSeek) commands.addAll(
                 Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
                 Player.COMMAND_SEEK_TO_DEFAULT_POSITION,
@@ -115,7 +116,7 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
                 Player.COMMAND_SEEK_FORWARD,
             )
             if (current.queue.canNext) commands.addAll(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            if ((current.transport.current != null)) commands.addAll(Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            if (current.transport.current != null && !live) commands.addAll(Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
         }
         val error = playbackError ?: commandError
         val state = State.Builder()

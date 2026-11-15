@@ -39,6 +39,9 @@ pub(crate) async fn upgrade(path: &Path) -> LibraryResult<Option<bool>> {
         if version < 63 {
             to_63(&mut *transaction).await?;
         }
+        if version < 64 {
+            to_64(&mut *transaction).await?;
+        }
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "PRAGMA user_version={STORE_VERSION}"
         )))
@@ -184,6 +187,34 @@ async fn to_63(connection: &mut SqliteConnection) -> LibraryResult<()> {
         DROP TABLE album_release_observations;
         ALTER TABLE albums DROP COLUMN release_lookup_identity;
         CREATE INDEX albums_release_identity_idx ON albums(release_identity) WHERE release_identity IS NOT NULL;",
+    )
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+/// Radio stations: a server's, and the ones Rufin keeps.
+async fn to_64(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    sqlx::raw_sql(
+        "CREATE TABLE stations (
+            station_key INTEGER PRIMARY KEY,
+            -- The server that keeps the station; NULL when Rufin does.
+            source_key INTEGER REFERENCES sources ON DELETE CASCADE,
+            object_id TEXT NOT NULL CHECK (object_id <> ''),
+            name TEXT NOT NULL,
+            stream_url TEXT NOT NULL CHECK (stream_url <> ''),
+            homepage TEXT NOT NULL DEFAULT '',
+            cover TEXT,
+            -- The address of its picture, where the search that found it gave one.
+            logo TEXT,
+            -- The picture a person chose for it.
+            artwork_bytes BLOB,
+            artwork_mime TEXT,
+            artwork_revision TEXT,
+            -- Its place among the stations of its source, as a person ordered them.
+            position INTEGER NOT NULL DEFAULT 0
+        ) STRICT;
+        CREATE INDEX stations_source_idx ON stations(source_key, object_id);",
     )
     .execute(connection)
     .await?;

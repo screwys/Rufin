@@ -1062,7 +1062,9 @@ fn build_dialog(
             },
             &editor_content,
             &submit,
-            move |owner| rufin_core::playlists::regenerate_smart_playlist_artwork(owner, key),
+            Some(Box::new(move |owner| {
+                rufin_core::playlists::regenerate_smart_playlist_artwork(owner, key)
+            })),
         );
         artwork.overlay.set_size_request(1, 1);
         artwork.overlay.set_halign(gtk::Align::Fill);

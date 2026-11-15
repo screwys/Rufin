@@ -42,9 +42,10 @@ internal val AndroidBrowseRow.playlist: PlaylistRow? get() = (playlistListRow as
 internal val AndroidBrowseRow.smartPlaylist: SmartPlaylistRow? get() = (playlistListRow as? PlaylistListRow.SmartPlaylist)?.v1
 internal val AndroidBrowseRow.playlistFolder: PlaylistFolderRow? get() = (playlistListRow as? PlaylistListRow.Folder)?.v1
 
-/** The track, album or artist the row shows, which it favorites, rates and edits. */
+/** The track, album or artist the row shows, which it favorites, rates and edits. A pinned station's
+ *  row is the item it plays as, which is none of them. */
 internal val AndroidBrowseRow.target: FavoriteTarget?
-    get() = when (val row = row) {
+    get() = if (station != null) null else when (val row = row) {
         is Row.Track -> FavoriteTarget.Track(row.v1.mediaUri)
         is Row.AlbumTrack -> FavoriteTarget.Track(row.track.mediaUri)
         is Row.Album -> FavoriteTarget.Album(row.v1.mediaUri)

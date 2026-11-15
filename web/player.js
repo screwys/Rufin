@@ -18,7 +18,7 @@ import {
 
 import { api, session, state } from "./connection.js";
 
-import { markCurrent, openLinks, setFavorite } from "./library.js";
+import { markCurrent, navigate, openLinks, setFavorite } from "./library.js";
 import { showQueueMenu } from "./queue.js";
 import { showSettings } from "./preferences.js";
 
@@ -33,6 +33,8 @@ let lyricsDocument = null;
 let activeLine = -1;
 
 let coverRequest = null;
+// The cover a radio station plays under, which follows the song it announces.
+let livePicture = null;
 // The ring around Play shows once a refill lasts half a second, as GTK's does; an ordinary
 // start or seek is over before then.
 let refillTimer = null;
@@ -117,6 +119,11 @@ function showPlayback(value) {
   if (!volumeEditing && !sendingVolume && !volumeRequest)
     $("volume").value = value?.volume ?? 1;
   updateVolumeIcon();
+  // A radio station has nowhere to skip to, nothing to order and no library track to favorite.
+  const live = !!value?.current?.live;
+  $("app").toggleAttribute("data-live", live);
+  for (const id of ["auto-dj", "shuffle", "previous", "next", "repeat", "random"]) $(id).disabled = live;
+  $("current-favorite").disabled = !track || live;
   $("seek").max = Math.max(1, value?.duration_ms || 0);
   $("seek").disabled = !track || !value.can_seek;
   $("duration").textContent = time(value?.duration_ms);
@@ -124,7 +131,6 @@ function showPlayback(value) {
   if (mediaChanged || state.currentRun !== (value?.current?.run ?? null)) {
     state.currentMediaUri = value?.current?.media_uri ?? null;
     state.currentRun = value?.current?.run ?? null;
-    $("current-favorite").disabled = !track;
     lyricsDocument = null;
     activeLine = -1;
     showLyrics({ state: "empty" });
@@ -135,7 +141,9 @@ function showPlayback(value) {
       });
   }
   // The cover belongs to the media, not to the run playing it.
-  if (mediaChanged) {
+  const picture = value?.current?.picture ?? null;
+  if (mediaChanged || picture !== livePicture) {
+    livePicture = picture;
     coverRequest?.abort();
     coverRequest = new AbortController();
     if (!track) {
@@ -148,12 +156,12 @@ function showPlayback(value) {
       run(async () => {
         const shown = await cover(
           $("mini-cover"),
-          { uri: track.uri, original: true },
+          picture ? { picture, original: true } : { uri: track.uri, original: true },
           signal,
           track.artwork_previews?.[0],
         );
         if (!shown && !signal.aborted)
-          $("mini-cover").replaceChildren(icon("rufin-symbolic"));
+          $("mini-cover").replaceChildren(icon(live ? "rufin-radio-station-symbolic" : "rufin-symbolic"));
       });
     }
   }
@@ -389,7 +397,10 @@ function init() {
     ["fullscreen-album", "album"],
   ]) {
     $(id).addEventListener("click", () => {
-      if (state.playback?.current?.track) openLinks(state.playback.current.track, field, $(id));
+      const current = state.playback?.current;
+      // A station's last row names it, and opens the page that shows it on air.
+      if (current?.live && field === "album") navigate("Radio");
+      else if (current?.track) openLinks(current.track, field, $(id));
     });
   }
   $("play-pause").addEventListener("click", () =>

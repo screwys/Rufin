@@ -20,6 +20,7 @@ impl StateGroups {
             ("playlist-order.jsonl", self.playlists),
             ("playlist-folders.jsonl", self.playlists),
             ("smart.jsonl", self.playlists),
+            ("stations.jsonl", self.playlists),
             ("user-state.jsonl", self.favorites),
             ("local-locators.jsonl", self.local_imports),
             ("activity.jsonl", self.activity),
@@ -87,6 +88,9 @@ impl Catalog {
             let mut output = private_file(&directory.join("smart.jsonl"))?;
             crate::smart_playlists::export_smart_playlists_jsonl_on(&mut transaction, &mut output)
                 .await?;
+            output.flush()?;
+            let mut output = private_file(&directory.join("stations.jsonl"))?;
+            crate::stations::export_on(&mut transaction, &mut output).await?;
             output.flush()?;
         }
         if contents.favorites {
@@ -157,6 +161,10 @@ impl Catalog {
             )
             .await?;
         }
+        // A backup made before Rufin kept radio stations has none.
+        if contents.playlists && directory.join("stations.jsonl").exists() {
+            crate::stations::import_on(write.connection().await?, open("stations.jsonl")?).await?;
+        }
         if contents.playlists && directory.join("playlist-folders.jsonl").exists() {
             crate::playlist_folders::import_on(
                 write.connection().await?,
@@ -223,7 +231,7 @@ async fn clear_groups(
     write.reload();
     let connection = write.connection().await?;
     if contents.playlists {
-        sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
+        sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;DELETE FROM stations WHERE source_key IS NULL;")
             .execute(&mut *connection)
             .await?;
     }

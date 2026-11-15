@@ -18,6 +18,7 @@ mod preferences;
 mod scrobbling;
 mod smart_playlists;
 mod source;
+mod stations;
 pub use controller::{Controller, ControllerStatus, controller_addresses};
 
 use axum::{
@@ -189,6 +190,7 @@ fn routes() -> Router<ProductHandles> {
         .merge(activity::routes())
         .merge(metadata::routes())
         .merge(smart_playlists::routes())
+        .merge(stations::routes())
 }
 
 async fn help() -> Result<Response<Body>, Error> {
@@ -298,12 +300,31 @@ async fn list_page(
     let token = page::token(products, list, parameters)?;
     let limit = number(parameters, "limit", default)?.min(cap);
     let read = pages.read(headers, &token);
+    // A stream that followed this page all along carries what committed meanwhile.
+    let followed = read.is_some_and(|read| read.2);
+    if token.route == rufin_core::route::Route::Radio {
+        let selected = products.source.selected_library();
+        // The stream follows the page before it reads, so it hears what plays from then on.
+        if let Some(read) = read {
+            pages.show(read, token.clone(), Reads::Radio(selected.clone()));
+        }
+        let mut opened = stations::open(products, selected, !followed).await?;
+        opened.missed = opened.missed.filter(|_| !followed);
+        return browser::page(
+            headers,
+            || stations::json(products, &token, &opened),
+            |csrf| browser::radio(products, &token, &opened, csrf),
+        );
+    }
     let mut opened = page::open(products, token, number(parameters, "offset", 0)?, limit).await?;
     if let Some(read) = read {
-        pages.show(read, &opened);
-        // A stream that followed this page all along carries what committed meanwhile.
-        opened.missed = opened.missed.filter(|_| !read.2);
+        pages.show(
+            read,
+            opened.token.clone(),
+            Reads::View(Arc::clone(&opened.view)),
+        );
     }
+    opened.missed = opened.missed.filter(|_| !followed);
     if opened.token.route == rufin_core::route::Route::Home {
         let block = parameters
             .get("block")
@@ -729,7 +750,8 @@ fn track_json(
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,
+        "station":library::station_stream(&track.media_uri).is_some()});
     let shown = library::Row::Track(library::TrackRow::from(track.clone()));
     page::links(products, scope, &shown, &mut row);
     let settings = products.settings.load();
@@ -739,6 +761,18 @@ fn track_json(
     }
     row
 }
+/// The cover a radio station plays under, the song's or its logo, which follows the song and
+/// not the row's URI; None for a track, whose URI names its cover.
+fn live_picture(current: &playback::CurrentMedia) -> Option<String> {
+    current.live.as_ref()?;
+    current
+        .row
+        .track
+        .artwork_binding
+        .as_deref()
+        .map(media::picture)
+}
+
 fn playback_json(
     products: &ProductHandles,
     state: Option<&playback::PlaybackView>,
@@ -757,7 +791,8 @@ fn playback_json(
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None)})),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None),
+            "live":current.live.is_some(),"picture":live_picture(current)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"refilling":state.transport.refilling(),"error":state.transport.error,
@@ -1085,7 +1120,34 @@ fn publication_json(
 #[derive(Clone, Default)]
 struct Pages(Arc<Mutex<HashMap<u64, (u64, Option<Shown>)>>>);
 
-type Shown = (page::PageToken, Arc<rufin_core::view::View>);
+type Shown = (page::PageToken, Reads);
+
+/// What answers a change for the page a stream shows: the View core opened for it, or for the
+/// Radio page, which reads no View, the library selected when it read.
+#[derive(Clone)]
+enum Reads {
+    View(Arc<rufin_core::view::View>),
+    Radio(Option<rufin_core::runtime::SelectedLibrary>),
+}
+
+impl Reads {
+    fn refresh(
+        &self,
+        products: &ProductHandles,
+        changed: &rufin_core::source::feed::Changed,
+    ) -> rufin_core::view::Refresh {
+        let current = products.source.selected_library();
+        match self {
+            Self::View(view) => view.refresh(current.as_ref(), changed),
+            Self::Radio(opened_with) => rufin_core::view::refresh_unread(
+                &rufin_core::route::Route::Radio,
+                opened_with.as_ref(),
+                current.as_ref(),
+                changed,
+            ),
+        }
+    }
+}
 
 impl Pages {
     /// Counts a read of `token` for the stream the headers name: the stream, the read's place
@@ -1108,20 +1170,20 @@ impl Pages {
         ))
     }
 
-    fn show(&self, (stream, place, _): (u64, u64, bool), opened: &page::Opened) {
+    fn show(&self, (stream, place, _): (u64, u64, bool), token: page::PageToken, page: Reads) {
         let mut pages = self.0.lock().expect("event pages");
         if let Some((reads, shown)) = pages.get_mut(&stream)
             && *reads == place
         {
-            *shown = Some((opened.token.clone(), Arc::clone(&opened.view)));
+            *shown = Some((token, page));
         }
     }
 
-    fn page(&self, stream: u64) -> Option<Arc<rufin_core::view::View>> {
+    fn page(&self, stream: u64) -> Option<Reads> {
         let pages = self.0.lock().expect("event pages");
         pages
             .get(&stream)
-            .and_then(|(_, shown)| Some(Arc::clone(&shown.as_ref()?.1)))
+            .and_then(|(_, shown)| Some(shown.as_ref()?.1.clone()))
     }
 }
 
@@ -1148,10 +1210,16 @@ async fn events(
     let catalog = products.source.changes();
     // The page the client shows when it connects; one that does not open has nothing to follow.
     let page = match page::token(&products, "page", &parameters) {
-        Ok(token) => page::open(&products, token, 0, 0).await.ok(),
+        Ok(token) if token.route == rufin_core::route::Route::Radio => {
+            let selected = products.source.selected_library();
+            Some((token, Reads::Radio(selected)))
+        }
+        Ok(token) => page::open(&products, token, 0, 0)
+            .await
+            .ok()
+            .map(|opened| (opened.token, Reads::View(opened.view))),
         Err(_) => None,
     };
-    let page = page.map(|opened| (opened.token, opened.view));
     pages.0.lock().expect("event pages").insert(id, (0, page));
     let stream = Stream { id, pages };
     let receivers = (
@@ -1197,20 +1265,35 @@ async fn events(
                 vec![value]
             } else {
                 tokio::select! {
-                    publication = playback.recv() => vec![playback_event_json(&products, publication.ok()?, &mut previous, false)],
+                    publication = playback.recv() => {
+                        let publication = publication.ok()?;
+                        let reread = matches!(stream.pages.page(stream.id), Some(Reads::Radio(_)))
+                            && on_air(previous.as_ref()) != on_air(publication.as_ref().map(|publication| &publication.view));
+                        let mut value = playback_event_json(&products, publication, &mut previous, false);
+                        if reread {
+                            value["page_refresh"] = json!("reread");
+                        }
+                        vec![value]
+                    },
                     changed = source.changed() => { changed.ok()?; vec![json!({"source":*source.borrow_and_update()})] },
                     changed = lyrics.changed() => { changed.ok()?; vec![json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)})] },
                     changed = appearance.changed() => { changed.ok()?; vec![json!({"appearance":*appearance.borrow_and_update()})] },
-                    // The pins, and the page when it reads in the saved order or lists.
+                    // The pins, and the page when it reads in the saved order or lists, or shows which
+                    // of its stations are pinned.
                     changed = sidebar.changed() => {
                         changed.ok()?;
                         let now = Arc::clone(&sidebar.borrow_and_update());
-                        let reread = stream.pages.page(stream.id).is_some_and(|view| view.settings_reread(&now.ui).is_some());
+                        let pinned = now.ui.sidebar != pins;
+                        let reread = match stream.pages.page(stream.id) {
+                            Some(Reads::View(view)) => view.settings_reread(&now.ui).is_some(),
+                            Some(Reads::Radio(_)) => pinned,
+                            None => false,
+                        };
                         let mut values = if reread { vec![json!({"page_refresh":"reread"})] } else { Vec::new() };
-                        if now.ui.sidebar != pins { pins = now.ui.sidebar.clone(); values.push(json!({"pins_changed":true})) }
+                        if pinned { pins = now.ui.sidebar.clone(); values.push(json!({"pins_changed":true})) }
                         values
                     },
-                    changed = catalog.next() => vec![changed_json(&products, stream.pages.page(stream.id).as_deref(), &changed?)],
+                    changed = catalog.next() => vec![changed_json(&products, stream.pages.page(stream.id).as_ref(), &changed?)],
                 }
             };
             Some((
@@ -1232,33 +1315,46 @@ async fn events(
     event_response(Body::new(StreamBody::new(stream)))
 }
 
+/// What of playback the Radio page shows: the item that plays, with the song a station
+/// announces, and whether it plays or is paused.
+fn on_air(
+    view: Option<&playback::PlaybackView>,
+) -> Option<(Option<&playback::CurrentMedia>, bool)> {
+    view.map(|view| {
+        (
+            view.transport.current.as_ref(),
+            view.transport.desired_playing,
+        )
+    })
+}
+
 /// The update frame of one catalog change: its flags and what it shows on the stream's page
 /// ([`show_changed`]).
 fn changed_json(
     products: &ProductHandles,
-    shown: Option<&rufin_core::view::View>,
+    shown: Option<&Reads>,
     changed: &rufin_core::source::feed::Changed,
 ) -> Value {
     let mut value = json!({
         "catalog_acquired": changed.all || !changed.sources.is_empty(),
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
     });
-    show_changed(products, &mut value, shown, changed);
+    let refresh = shown.map(|page| page.refresh(products, changed));
+    show_changed(&mut value, refresh, changed);
     value
 }
 
-/// What `changed` shows on `shown`, the page a client shows: whether it reads the page again
-/// (`page_refresh`: reread, or reopen in the selected source and music folder) and the
-/// favorites and ratings that changed, which the rows that show them patch in.
+/// What `changed` shows on the page a client shows, given the `refresh` it means for that
+/// page: whether it reads the page again (`page_refresh`: reread, or reopen in the selected
+/// source and music folder) and the favorites and ratings that changed, which the rows that
+/// show them patch in.
 fn show_changed(
-    products: &ProductHandles,
     value: &mut Value,
-    shown: Option<&rufin_core::view::View>,
+    refresh: Option<rufin_core::view::Refresh>,
     changed: &rufin_core::source::feed::Changed,
 ) {
     use rufin_core::view::Refresh;
-    let current = products.source.selected_library();
-    match shown.map(|view| view.refresh(current.as_ref(), changed)) {
+    match refresh {
         Some(Refresh::Reread) => value["page_refresh"] = json!("reread"),
         Some(Refresh::Reopen) => value["page_refresh"] = json!("reopen"),
         Some(Refresh::Nothing) | None => {}

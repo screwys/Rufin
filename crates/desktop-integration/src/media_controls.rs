@@ -357,8 +357,16 @@ mod freedesktop {
                     TransportStatus::Stopped | TransportStatus::Failed
                 )
         });
+        // A radio station is alone in the queue: it has no next or previous.
+        let live = playback.is_some_and(|playback| {
+            playback
+                .transport
+                .current
+                .as_ref()
+                .is_some_and(|media| media.live.is_some())
+        });
         let can_go_next = playback.is_some_and(|playback| {
-            has_current && (playback.queue.can_next || playback.controls.auto_dj_enabled)
+            has_current && !live && (playback.queue.can_next || playback.controls.auto_dj_enabled)
         });
         MprisDesiredState {
             run: playback
@@ -380,7 +388,7 @@ mod freedesktop {
             can_pause: has_active_run,
             can_seek: has_current && playback.is_some_and(|playback| playback.transport.can_seek),
             can_go_next,
-            can_go_previous: has_current,
+            can_go_previous: has_current && !live,
             position: playback
                 .filter(|playback| playback.transport.current.is_some())
                 .map(|playback| mpris_time(playback.transport.position_millis)),
@@ -487,6 +495,7 @@ mod freedesktop {
                 library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
             let current = CurrentMedia {
                 stream: None,
+                live: None,
                 id: CurrentMediaId {
                     run: Some(RunId::new(run)),
                     media_uri,
@@ -806,7 +815,9 @@ mod windows {
                 playback.transport.state,
                 TransportStatus::Stopped | TransportStatus::Failed
             );
-        let can_next = playback.queue.can_next || playback.controls.auto_dj_enabled;
+        // A radio station is alone in the queue: it has no next or previous.
+        let live = media.live.is_some();
+        let can_next = !live && (playback.queue.can_next || playback.controls.auto_dj_enabled);
         Some(WindowsMediaState {
             title: media.row.track.metadata.title.clone(),
             artist: media.row.track.metadata.artist.clone(),
@@ -828,7 +839,7 @@ mod windows {
             can_pause: has_active_run,
             can_stop: has_active_run,
             can_next,
-            can_previous: true,
+            can_previous: !live,
         })
     }
 

@@ -58,7 +58,7 @@ private class PlaylistEditorState(
     var name by mutableStateOf(initialName)
     private var savedName = initialName
     var files by mutableStateOf<PlaylistFileSettings?>(null)
-    var artwork by mutableStateOf<PlaylistArtworkEditing?>(null)
+    val picture = PictureEdit()
     var public by mutableStateOf<Boolean?>(null)
     private var savedPublic: Boolean? = null
     var autoRefresh by mutableStateOf(true)
@@ -68,14 +68,10 @@ private class PlaylistEditorState(
     var busy by mutableStateOf(false)
     var failure by mutableStateOf<Throwable?>(null)
     var conflict by mutableStateOf(false)
-    var preview by mutableStateOf<PlayerArtwork?>(null)
-    var removed by mutableStateOf(false)
-    private var image: ImageBytes? = null
-    val hasImage get() = image != null || !removed && artwork?.binding != null
 
     suspend fun load() {
         files = library.playlistFileSettings(key)
-        artwork = library.playlistArtworkEditing(key)
+        picture.editing = library.playlistArtworkEditing(key)
         savedPublic = if (files?.canLink == true) null else library.playlistPublic(key)
         public = savedPublic
         files?.link?.let { link ->
@@ -102,22 +98,15 @@ private class PlaylistEditorState(
 
     suspend fun save() {
         val source = model.sourceOwner ?: error(translate("The connection no longer exists"))
-        val artworkChange = if (removed) ArtworkChange.Remove else image?.let { ArtworkChange.Replace(it) }
         if (files?.link != null) library.updatePlaylistFileOptions(key, autoRefresh, autoSave, pathMode)
-        updatePlaylist(source, key, name.trim().takeIf { it != savedName }, public?.takeIf { it != savedPublic }, artworkChange)
-        image?.destroy()
-        image = null
-        removed = false
-        preview = null
+        updatePlaylist(source, key, name.trim().takeIf { it != savedName }, public?.takeIf { it != savedPublic }, picture.change)
+        picture.clear()
         savedName = name.trim()
         name = savedName
     }
 
     suspend fun refresh() {
-        image?.destroy()
-        image = null
-        removed = false
-        preview = null
+        picture.clear()
         name = library.playlistName(key)
         savedName = name
         load()
@@ -132,7 +121,34 @@ private class PlaylistEditorState(
         }
     }
 
-    suspend fun setImage(value: ImageBytes) {
+    fun regenerate() = action { library.regeneratePlaylistArtwork(key)?.let { picture.set(it) } }
+
+    suspend fun fileAction(action: String, force: Boolean = false) {
+        when (action) {
+            "save" -> library.savePlaylistFile(key, force)
+            "reload" -> library.reloadPlaylistFile(key, force)
+            "unlink" -> library.unlinkPlaylistFile(key)
+            "delete" -> library.deletePlaylistFile(key)
+        }
+        if (action != "delete") refresh()
+    }
+}
+
+/** A picture as its editor changes it, a playlist's or a radio station's: the image chosen for it, or
+ *  its removal, until Apply saves it. */
+internal class PictureEdit {
+    /** The picture chosen before, and the one there is without it. */
+    var editing by mutableStateOf<PlaylistArtworkEditing?>(null)
+    var preview by mutableStateOf<PlayerArtwork?>(null)
+        private set
+    var removed by mutableStateOf(false)
+        private set
+    private var image: ImageBytes? = null
+    val hasImage get() = image != null || !removed && editing?.binding != null
+    /** What Apply passes on: the image chosen, the removal of the one there was, or nothing. */
+    val change get() = if (removed) ArtworkChange.Remove else image?.let { ArtworkChange.Replace(it) }
+
+    suspend fun set(value: ImageBytes) {
         try {
             val decoded = decodePlayerArtwork(value.bytes(), 1024)
             image?.destroy()
@@ -145,26 +161,66 @@ private class PlaylistEditorState(
         }
     }
 
-    fun removeImage() {
+    fun remove() {
         image?.destroy()
         image = null
         preview = null
         removed = true
     }
 
-    fun regenerate() = action { library.regeneratePlaylistArtwork(key)?.let { setImage(it) } }
-
-    suspend fun fileAction(action: String, force: Boolean = false) {
-        when (action) {
-            "save" -> library.savePlaylistFile(key, force)
-            "reload" -> library.reloadPlaylistFile(key, force)
-            "unlink" -> library.unlinkPlaylistFile(key)
-            "delete" -> library.deletePlaylistFile(key)
-        }
-        if (action != "delete") refresh()
+    /** Forgets the choice, once it is saved or its editor closes. */
+    fun clear() {
+        image?.destroy()
+        image = null
+        preview = null
+        removed = false
     }
+}
 
-    fun close() { image?.destroy(); image = null }
+/** Opens the image picker. The image picked is read up to Rufin's artwork limit and prepared as every
+ *  cover Rufin stores, then is the picture's choice; `act` is the editor's action, which shows its
+ *  progress and its failure. */
+@Composable
+internal fun rememberPictureChooser(library: AndroidLibrary, picture: PictureEdit, act: (suspend () -> Unit) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) act {
+            val bytes = withContext(Dispatchers.IO) {
+                val limit = library.playlistArtworkLimit().toInt()
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var remaining = limit + 1
+                    while (remaining > 0) {
+                        val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        remaining -= count
+                    }
+                    output.toByteArray()
+                } ?: error(translate("Could not read artwork"))
+            }
+            picture.set(library.preparePlaylistArtwork(bytes))
+        }
+    }
+    return { launcher.launch(arrayOf("image/*")) }
+}
+
+/** A picture's editor: the picture as Apply would leave it, drawn by `cover`, then Add image and the
+ *  editor's other buttons. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PictureEditor(picture: PictureEdit, enabled: Boolean, onChoose: () -> Unit,
+    cover: @Composable (ByteArray?) -> Unit, buttons: @Composable () -> Unit) {
+    val editing = picture.editing ?: return
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        if (picture.preview != null) Artwork(Cover(picture.preview), Modifier.size(220.dp).clip(CoverShape))
+        else cover(if (picture.removed || editing.binding == null) editing.automaticBinding else editing.binding)
+    }
+    if (editing.writable) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onChoose, enabled = enabled) { Text(translate("Add image")) }
+        buttons()
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -183,28 +239,9 @@ internal fun PlaylistEditor(
     var sourcePath by remember { mutableStateOf("playlist.m3u8") }
     var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(state) { state.action { state.load() } }
-    DisposableEffect(state) { onDispose { state.close() } }
+    DisposableEffect(state) { onDispose { state.picture.clear() } }
 
-    val chooseImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) state.action {
-            val bytes = withContext(Dispatchers.IO) {
-                val limit = library.playlistArtworkLimit().toInt()
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val output = ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    var remaining = limit + 1
-                    while (remaining > 0) {
-                        val count = input.read(buffer, 0, minOf(buffer.size, remaining))
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        remaining -= count
-                    }
-                    output.toByteArray()
-                } ?: error(translate("Could not read artwork"))
-            }
-            state.setImage(library.preparePlaylistArtwork(bytes))
-        }
-    }
+    val chooseImage = rememberPictureChooser(library, state.picture, state::action)
     val chooseFile = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val uri = result.data?.data
         if (result.resultCode == Activity.RESULT_OK && uri != null) state.action {
@@ -265,17 +302,9 @@ internal fun PlaylistEditor(
                     state.failure?.let { ErrorNotice(it) }
                     if (state.files == null && !state.busy) TextButton({ state.action { state.load() } }) { Text(translate("Retry")) }
                     OutlinedTextField(state.name, { state.name = it }, Modifier.fillMaxWidth(), label = { Text(translate("Playlist name")) }, singleLine = true, enabled = !state.busy, colors = settingsTextFieldColors())
-                    state.artwork?.let { artwork ->
-                        val bindings = listOfNotNull(if (state.removed || artwork.binding == null) artwork.automaticBinding else artwork.binding)
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            if (state.preview != null) Artwork(Cover(state.preview), Modifier.size(220.dp).clip(CoverShape))
-                            else PlaylistCover(bindings, player)
-                        }
-                        if (artwork.writable) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton({ chooseImage.launch(arrayOf("image/*")) }, enabled = !state.busy) { Text(translate("Add image")) }
-                            TextButton(state::regenerate, enabled = !state.busy) { Text(translate("Regenerate")) }
-                            TextButton(state::removeImage, enabled = !state.busy && state.hasImage) { Text(translate("Delete")) }
-                        }
+                    PictureEditor(state.picture, !state.busy, chooseImage, cover = { PlaylistCover(listOfNotNull(it), player) }) {
+                        TextButton(state::regenerate, enabled = !state.busy) { Text(translate("Regenerate")) }
+                        TextButton(state.picture::remove, enabled = !state.busy && state.picture.hasImage) { Text(translate("Delete")) }
                     }
                     state.public?.let { public ->
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {

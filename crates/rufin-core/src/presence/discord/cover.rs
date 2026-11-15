@@ -14,10 +14,14 @@ pub(super) fn start(requests: ArtworkRequests) {
             while let Some(request) = requests.recv() {
                 let queued_millis = request.queued_for().as_millis();
                 let started = Instant::now();
-                let result = metadata_lookup::public_album_cover_url(
-                    &request.key.album,
-                    &request.key.lookups,
-                );
+                let result = match &request.key.cover {
+                    super::Cover::Album(album) => {
+                        metadata_lookup::public_album_cover_url(album, &request.key.lookups)
+                    }
+                    super::Cover::Song { artist, title } => {
+                        metadata_lookup::public_song_cover_url(artist, title, &request.key.lookups)
+                    }
+                };
                 let lookup_millis = started.elapsed().as_millis();
                 let total_millis = queued_millis.saturating_add(lookup_millis);
                 if total_millis >= SLOW_LOOKUP_MILLIS {

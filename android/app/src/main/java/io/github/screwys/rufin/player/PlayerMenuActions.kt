@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -54,10 +55,11 @@ internal fun PlayerMenuActions(player: PlayerConnection, onRandom: () -> Unit, o
     val (timer, text) = rememberSleepTimer(player)
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-            PlayerMenuTile("rufin-mix-symbolic", translate("Mix"), Modifier.weight(1f), onClick = onRandom)
+            // A station plays alone: Mix and Auto DJ have no queue to fill.
+            PlayerMenuTile("rufin-mix-symbolic", translate("Mix"), Modifier.weight(1f), enabled = !player.live, onClick = onRandom)
             PlayerMenuTile("rufin-sleep-timer-symbolic", text?.short?.ifEmpty { null } ?: translate("Sleep timer"),
                 Modifier.weight(1f), active = timer != null, onClick = onSleepTimer)
-            PlayerMenuTile("rufin-auto-dj-symbolic", translate("Auto DJ"), Modifier.weight(1f), active = autoDj,
+            PlayerMenuTile("rufin-auto-dj-symbolic", translate("Auto DJ"), Modifier.weight(1f), active = autoDj, enabled = !player.live,
                 onClick = player::autoDj, onLongClick = onAutoDjSettings, longClickLabel = translate("Settings"))
         }
         HorizontalDivider(Modifier.padding(top = 4.dp, bottom = 8.dp))
@@ -86,12 +88,12 @@ internal fun SleepTimerSheet(player: PlayerConnection, onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PlayerMenuTile(icon: String, label: String, modifier: Modifier, active: Boolean = false,
+private fun PlayerMenuTile(icon: String, label: String, modifier: Modifier, active: Boolean = false, enabled: Boolean = true,
     onClick: () -> Unit, onLongClick: (() -> Unit)? = null, longClickLabel: String? = null) {
     val tint by animateColorAsState(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         tween(if (LocalReduceMotion.current) 0 else 180), label = "playerMenuTile")
-    Surface(modifier.clip(RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick,
-        onLongClickLabel = longClickLabel), color = Color.Transparent, contentColor = tint) {
+    Surface(modifier.alpha(if (enabled) 1f else .38f).clip(RoundedCornerShape(16.dp)).combinedClickable(enabled = enabled, onClick = onClick,
+        onLongClick = onLongClick, onLongClickLabel = longClickLabel), color = Color.Transparent, contentColor = tint) {
         Column(Modifier.padding(vertical = 10.dp, horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             RufinIcon(icon, null, Modifier.size(26.dp), tint = tint)

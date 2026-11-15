@@ -441,4 +441,4 @@ function init() {
   }));
 }
 
-export { init, openMetadata };
+export { init, openMetadata, readFile };

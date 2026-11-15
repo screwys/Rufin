@@ -37,11 +37,9 @@ import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.sources.SourceSelector
-import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.CoverShape
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
-import io.github.screwys.rufin.ui.rememberArtwork
 
 /** What the sidebar opens: a route, a saved entry, a page of the ☰ menu, or the source pages. */
 internal class SidebarActions(
@@ -62,6 +60,7 @@ internal fun Sidebar(model: RufinConnection, browse: BrowseConnection, player: P
     var menu by remember { mutableStateOf(false) }
     var sourceMenu by remember { mutableStateOf(false) }
     val rows = saved.pages.collectAsLazyPagingItems()
+    val phone = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
     LazyColumn(modifier.fillMaxHeight().widthIn(max = 320.dp), contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 16.dp)) {
         actions.search?.let { search -> item {
             Surface(search, Modifier.fillMaxWidth().padding(bottom = 6.dp).height(44.dp), shape = RoundedCornerShape(22.dp),
@@ -108,7 +107,8 @@ internal fun Sidebar(model: RufinConnection, browse: BrowseConnection, player: P
                     manage = { actions.more(MoreDestination.Library) }, add = actions.addSource, width = rowWidth.takeIf { it > 0.dp })
             }
         }
-        items(sidebarRoutes(browse), key = { it.id }) { route ->
+        // A phone has Radio on its bottom bar.
+        items(sidebarRoutes(browse).filter { it.id != "Radio" || !phone }, key = { it.id }) { route ->
             val selected = browse.section == AppSection.Browse && browse.rootId == route.id
             NavigationDrawerItem(label = { Text(route.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, selected = selected,
                 onClick = { actions.route(route.id) },
@@ -131,10 +131,9 @@ internal fun sidebarRoutes(browse: BrowseConnection) = browse.configuredRoutes.f
 
 @Composable
 private fun SavedRow(item: BrowseItem, player: PlayerConnection, open: () -> Unit) {
-    val artwork = rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { 36.dp.roundToPx() })
     Row(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = open).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Artwork(artwork, Modifier.size(36.dp).clip(CoverShape))
+        io.github.screwys.rufin.browse.PinCover(item, player, 36.dp)
         Column(Modifier.weight(1f)) {
             Text(item.row.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium)
@@ -151,7 +150,6 @@ private fun SavedRow(item: BrowseItem, player: PlayerConnection, open: () -> Uni
 internal fun SidebarRail(browse: BrowseConnection, player: PlayerConnection, saved: BrowsePage, expand: () -> Unit,
     route: (String) -> Unit, search: () -> Unit, onSaved: () -> Unit, openSaved: (BrowseItem) -> Unit) {
     val rows = saved.pages.collectAsLazyPagingItems()
-    val pixels = with(LocalDensity.current) { 48.dp.roundToPx() }
     Surface(Modifier.fillMaxHeight().width(84.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.statusBarsPadding().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             PlayerIconButton("rufin-open-menu-symbolic", "Expand sidebar", expand)
@@ -172,8 +170,10 @@ internal fun SidebarRail(browse: BrowseConnection, player: PlayerConnection, sav
                 item { RailItem("rufin-bookmark-symbolic", translate("Saved"), browse.section == AppSection.Pins, onSaved) }
                 items(rows.itemCount) { index ->
                     rows[index]?.let { item ->
-                        Artwork(rememberArtwork(item.row.artworkIdentity, player, pixels), Modifier.size(48.dp).clip(CoverShape)
-                            .clickable(onClickLabel = item.row.title) { openSaved(item) }.semantics { contentDescription = item.row.title })
+                        Box(Modifier.clip(CoverShape).clickable(onClickLabel = item.row.title) { openSaved(item) }
+                            .semantics { contentDescription = item.row.title }) {
+                            io.github.screwys.rufin.browse.PinCover(item, player, 48.dp)
+                        }
                     }
                 }
             }

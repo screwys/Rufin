@@ -1,9 +1,12 @@
 import { api, session } from "./connection.js";
 import { navigate, opened, bindCards, cardCover } from "./library.js";
 import { sourceIcon } from "./sources.js";
+import { showMenu } from "./menus.js";
+import { play as playStation } from "./radio.js";
 import {
   $,
   button,
+  cover,
   el,
   icon,
   run,
@@ -42,8 +45,10 @@ function move(moved, target) {
   return api("/pins", "PATCH", { moved, target });
 }
 
+// A station has no page: it plays.
 function open(item) {
-  navigate(item.page);
+  if (item.kind === "station") return playStation(item, item.channel);
+  return navigate(item.page);
 }
 
 function render() {
@@ -57,22 +62,37 @@ function render() {
   for (const item of items) {
     const row = el("div", "pin-row");
     row.dataset.pin = JSON.stringify(item.pin);
+    const station = item.kind === "station";
     row.dataset.kind = item.kind;
-    row.dataset.row = JSON.stringify(item);
+    // A station is no row of the library: its menu is its pin alone.
+    if (station)
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        if (item.menu.pin) showMenu([pinAction(item.menu.pin)], row, event);
+      });
+    else row.dataset.row = JSON.stringify(item);
     const title = item.title || item.name;
     const openButton = button(title, () => open(item), null, "pin-open");
     const artwork = el("span", "pin-cover");
-    artwork.append(icon("rufin-symbolic"));
+    artwork.append(icon(station ? "rufin-radio-station-symbolic" : "rufin-symbolic"));
     const label = el("span", "pin-label");
     const metadata = el("span", "pin-metadata");
-    const durationLabel = el("span", "pin-duration", item.duration_text);
-    durationLabel.title = item.duration_text;
-    metadata.append(
-      icon("rufin-tracks-symbolic"),
-      document.createTextNode(String(item.track_count)),
-      icon("rufin-preferences-system-time-symbolic"),
-      durationLabel,
-    );
+    if (station) {
+      // Its genres stand where a collection's tracks and length do.
+      const genres = item.genres.join(", ");
+      const genresLabel = el("span", "pin-duration", genres);
+      genresLabel.title = genres;
+      if (genres) metadata.append(icon("rufin-tag-outline-symbolic"), genresLabel);
+    } else {
+      const durationLabel = el("span", "pin-duration", item.duration_text);
+      durationLabel.title = item.duration_text;
+      metadata.append(
+        icon("rufin-tracks-symbolic"),
+        document.createTextNode(String(item.track_count)),
+        icon("rufin-preferences-system-time-symbolic"),
+        durationLabel,
+      );
+    }
     if (item.badge) {
       const badge = item.badge.kind
         ? sourceIcon(item.badge.kind)
@@ -138,7 +158,9 @@ function render() {
     });
     list.append(row);
     const query = cardCover(item.kind, item);
-    if (query) run(() => coverGroup(artwork, query, item.artwork_count || 1, signal, item.artwork_previews));
+    if (station) {
+      if (item.picture) run(() => cover(artwork, { picture: item.picture }, signal, item.artwork_previews?.[0]));
+    } else if (query) run(() => coverGroup(artwork, query, item.artwork_count || 1, signal, item.artwork_previews));
     // A playlist folder's picture is its preview.
     else if (item.artwork_previews?.[0]) artwork.replaceChildren(Object.assign(el("img"), { alt: "", src: item.artwork_previews[0] }));
   }

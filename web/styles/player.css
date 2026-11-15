@@ -462,7 +462,7 @@
   position: relative;
   grid-template-columns: minmax(0, 1fr) auto;
 }
-#app[data-bar="compact"] :is(#auto-dj, #shuffle, #repeat, #random-buttons, .seek-row time) {
+#app[data-bar="compact"] :is(#auto-dj, #shuffle, #repeat, #random-buttons, .seek-row time, .seek-row .live-mark) {
   display: none;
 }
 #app[data-bar="compact"] .transport-buttons {
@@ -524,7 +524,7 @@
 #app[data-seek-hidden] .seek-row {
   justify-content: center;
 }
-#app[data-seek-hidden] .seek-row :is(time, #seek) {
+#app[data-seek-hidden] .seek-row :is(time, #seek, .live-mark) {
   display: none;
 }
 /* The extras at the ends of the controls layout's seek bar, small enough to keep its height. */
@@ -823,6 +823,71 @@ button.lyric-line:hover {
   width: 24px;
   height: 24px;
   padding: 4px;
+}
+
+/* The album's row, which a radio station ends with Live where the bar shows no times. */
+.player-album-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.player-album-row .metadata-link {
+  min-width: 0;
+}
+.player-album-row .metadata-link:empty {
+  display: none;
+}
+#player-live {
+  line-height: 18px;
+  color: var(--muted);
+}
+/* A station's name follows the radio icon; both open the Radio page. */
+#app[data-live] #player-album::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  vertical-align: -2px;
+  background: currentColor;
+  mask: url("/icons/rufin-radio-station-symbolic.svg") center / contain no-repeat;
+}
+
+/* While a radio station plays: Live where the duration was, and a full seek bar that shows no
+   position. */
+.live-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.live-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red, #e01b24);
+}
+.seek-row .live-mark {
+  font-size: 12px;
+  font-weight: 600;
+}
+#app:not([data-live]) :is(#seek-live, #player-live),
+#app:not([data-bar="compact"]) #player-live,
+#app[data-live] :is(#duration, #player-menu) {
+  display: none;
+}
+#app[data-live] #seek {
+  --seek-track: var(--blue);
+  cursor: default;
+}
+#app[data-live] #seek::-webkit-slider-thumb {
+  visibility: hidden;
+}
+#app[data-live] #seek::-moz-range-thumb {
+  visibility: hidden;
 }
 
 .player-track .metadata-link {

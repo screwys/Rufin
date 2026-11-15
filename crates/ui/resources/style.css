@@ -3072,3 +3072,187 @@ button.menu-preview-entry:not(.menu-preview-shown) label {
   border-radius: 50%;
   background-color: var(--success-color);
 }
+
+/* Radio. A station without a picture shows the radio icon on the fallback tile. */
+.cover-tile.cover-fallback.station-cover {
+  background-image: -gtk-icontheme("rufin-radio-station-symbolic");
+  background-size: 50% 50%;
+}
+
+/* The red dot before Live. */
+.live-dot {
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 50%;
+  background-color: var(--error-color);
+}
+
+/* The channel that plays, beside the station's name. */
+.radio-channel-badge {
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.radio-on-air-artist {
+  font-size: 14px;
+  opacity: 0.84;
+}
+
+/* Beside the names Heard sits on the band, in its white; under the buttons, in the page's
+   own text colours. */
+.radio-heard-side {
+  padding-left: 18px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.radio-heard-side:dir(rtl) {
+  padding-left: 0;
+  padding-right: 18px;
+  border-left: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.radio-heard-side .radio-heard-caption,
+.radio-heard-side .radio-heard-time,
+.radio-heard-side .radio-heard-artist {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.radio-heard-below {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--window-fg-color) 12%, transparent);
+}
+
+.radio-heard-caption,
+.radio-heard-time,
+.radio-heard-artist {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--window-fg-color) 78%, transparent);
+}
+
+.radio-heard-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* A station's card: a click plays it, so it answers the pointer as a button does. */
+.station-grid > flowboxchild {
+  padding: 0;
+  background: none;
+}
+
+/* The card has a fill of its own on every theme's page. */
+.station-card {
+  padding: 10px;
+  background-color: color-mix(in srgb, var(--window-fg-color) 8%, var(--shell-panel-bg-color));
+}
+
+.station-grid > flowboxchild:hover > .station-card {
+  background-image: image(color-mix(in srgb, currentColor 4%, transparent));
+}
+
+.station-grid > flowboxchild:active > .station-card {
+  background-image: image(color-mix(in srgb, currentColor 8%, transparent));
+}
+
+.station-card-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.station-card-genres {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--window-fg-color) 62%, transparent);
+}
+
+.station-card-description {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--window-fg-color) 84%, transparent);
+}
+
+.station-card-manage {
+  opacity: 0;
+}
+
+.station-grid > flowboxchild:hover .station-card-manage,
+.station-grid > flowboxchild:focus-within .station-card-manage {
+  opacity: 1;
+}
+
+/* The handle a station is dragged by, filled as the buttons beside it. */
+.station-card-drag {
+  padding: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+}
+
+.station-card-drag:hover {
+  background: color-mix(in srgb, var(--window-fg-color) 16%, transparent);
+}
+
+/* The card that is being dragged to another place. */
+.station-grid > flowboxchild.station-dragging > .station-card {
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
+}
+
+.station-grid > flowboxchild.station-dragging .station-card-manage {
+  opacity: 1;
+}
+
+button.detail-round.station-card-button {
+  min-width: 30px;
+  min-height: 30px;
+}
+
+/* The chip of the channel that plays takes the accent. */
+button.detail-genre-chip.station-chip-playing {
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+}
+
+/* A found station that is added already. */
+.station-added {
+  padding: 5px 12px;
+  border-radius: 9px;
+  font-weight: 700;
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-bg-color) 20%, transparent);
+}
+
+/* A station plays: Live stands where the duration was, and beside the station where the
+   bar shows no times. The seek bar is full and takes no pointer. */
+label.player-live {
+  padding-left: 12px;
+  font-weight: 600;
+  color: var(--window-fg-color);
+  background-image: radial-gradient(circle, var(--error-color) 3px, transparent 3.5px);
+  background-size: 7px 7px;
+  background-repeat: no-repeat;
+  background-position: left center;
+}
+
+label.player-live:dir(rtl) {
+  padding-left: 0;
+  padding-right: 12px;
+  background-position: right center;
+}
+
+/* Beside the station, Live reads as the row it ends. */
+label.player-live.player-primary {
+  font-weight: inherit;
+  color: color-mix(in srgb, var(--window-fg-color) 90%, var(--window-bg-color));
+}
+
+scale.player-progress.player-live:disabled {
+  opacity: 1;
+  filter: none;
+}
+
+scale.player-progress.player-live slider {
+  opacity: 0;
+}

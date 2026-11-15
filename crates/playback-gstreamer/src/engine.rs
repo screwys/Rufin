@@ -139,6 +139,7 @@ fn telemetry_key(event: &BackendEvent) -> Option<(RunId, TelemetryKind)> {
         | BackendEvent::Ended { .. }
         | BackendEvent::Transitioned { .. }
         | BackendEvent::Bitstream { .. }
+        | BackendEvent::StreamInfo { .. }
         | BackendEvent::NextNeeded { .. }
         | BackendEvent::NextPreparationFailed { .. }
         | BackendEvent::AudioApplied { .. }
@@ -2013,6 +2014,11 @@ impl GstEngine {
             }
             MessageView::Tag(tag) if self.is_active_slot(slot) => {
                 self.log_stream_diagnostics(slot, &tag.tags());
+                if let Some(run) = self.run_for_slot(slot)
+                    && let Some(info) = stream_info(&tag.tags())
+                {
+                    push_event(&self.events, BackendEvent::StreamInfo { run, info });
+                }
             }
             MessageView::DurationChanged(_) if self.is_active_slot(slot) => {
                 if !self.seek_busy()
@@ -3484,6 +3490,34 @@ fn crossfade_start_remaining_millis(crossfade_millis: u64, playback_rate: f64) -
     ((crossfade_millis as f64) * sanitize_playback_rate(playback_rate))
         .round()
         .clamp(0.0, u64::MAX as f64) as u64
+}
+
+/// What a tag message says of the stream: the song a radio stream announces, the address it
+/// sends with it, and its codec and bitrate. None when it names none of them.
+fn stream_info(tags: &gst::TagListRef) -> Option<playback::StreamInfo> {
+    let text = |value: &str| Some(value.trim().to_string()).filter(|value| !value.is_empty());
+    let info = playback::StreamInfo {
+        title: tags
+            .get::<gst::tags::Title>()
+            .and_then(|value| text(value.get())),
+        artist: tags
+            .get::<gst::tags::Artist>()
+            .and_then(|value| text(value.get())),
+        link: tags
+            .get::<gst::tags::Homepage>()
+            .and_then(|value| text(value.get())),
+        codec: tags
+            .get::<gst::tags::AudioCodec>()
+            .and_then(|value| text(value.get())),
+        // The measured bitrate moves by a few bits a second; rounded to kbps it holds still.
+        bitrate: tags
+            .get::<gst::tags::NominalBitrate>()
+            .map(|value| value.get())
+            .or_else(|| tags.get::<gst::tags::Bitrate>().map(|value| value.get()))
+            .map(|bitrate| (bitrate + 500) / 1000 * 1000)
+            .filter(|bitrate| *bitrate > 0),
+    };
+    (info != playback::StreamInfo::default()).then_some(info)
 }
 
 pub(super) fn push_event(events: &Arc<Mutex<EventMailbox>>, event: BackendEvent) {

@@ -60,6 +60,18 @@ pub fn now_playing_labels(
     let Some(media) = media else {
         return Vec::new();
     };
+    // A radio station has one label: how its stream is encoded.
+    if let Some(live) = &media.live {
+        return crate::stations::format(
+            live,
+            media
+                .stream
+                .as_ref()
+                .and_then(|stream| stream.format.as_deref()),
+        )
+        .into_iter()
+        .collect();
+    }
     let mut labels = Vec::new();
     let original = audio_source_label(
         media.row.track.metadata.source_format.as_deref(),

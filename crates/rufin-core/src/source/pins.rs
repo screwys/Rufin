@@ -4,25 +4,46 @@ use sources::SourceId;
 use super::SourceOwner;
 use super::feed::Notice;
 
+/// What a pin shows: a collection's row, or a radio station.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pinned {
+    Row(Box<Row>),
+    Station(Box<crate::stations::Station>),
+}
+
 impl SourceOwner {
-    /// Rows of the pins the Catalog still holds, in pin order, counted as their pages read them
-    /// in the selection: smart playlists and their folders evaluated now, and the selected music
-    /// folder narrowing only its own source's pins.
+    /// What the pins the Store still holds show, in pin order. Collections are counted as their
+    /// pages read them in the selection: smart playlists and their folders evaluated now, and
+    /// the selected music folder narrowing only its own source's pins.
     pub async fn pin_rows(
         &self,
         pins: &[SidebarPin],
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(SidebarPin, Row)>> {
+    ) -> LibraryResult<Vec<(SidebarPin, Pinned)>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
         let folder = self
             .selected_library()
             .and_then(|selected| selected.music_folder_key);
-        self.shared
-            .catalog
+        let catalog = &self.shared.catalog;
+        let mut rows = catalog
             .pin_rows(pins, now, folder, cancellation)
-            .await
+            .await?
+            .into_iter()
+            .peekable();
+        let mut stations = catalog.pinned_stations(pins).await?.into_iter().peekable();
+        Ok(pins
+            .iter()
+            .filter_map(|pin| {
+                if let Some((pin, row)) = rows.next_if(|(shown, _)| shown == pin) {
+                    return Some((pin, Pinned::Row(Box::new(row))));
+                }
+                let (pin, row) = stations.next_if(|(shown, _)| shown == pin)?;
+                let station = crate::stations::pinned(self, &pin, &row);
+                Some((pin, Pinned::Station(Box::new(station))))
+            })
+            .collect())
     }
 
     /// Pins every playlist of a remote source once, after its first successful refresh.

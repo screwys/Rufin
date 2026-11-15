@@ -1,0 +1,15 @@
+{
+  "name": "Indie Pop Rocks!",
+  "description": "New and classic indie pop, from SomaFM.",
+  "homepage": "https://somafm.com/indiepop/",
+  "genres": [
+    "Indie pop"
+  ],
+  "logo": "https://somafm.com/logos/256/indiepop256.png",
+  "channels": [
+    {
+      "name": "Indie Pop Rocks!",
+      "stream": "https://ice1.somafm.com/indiepop-128-mp3"
+    }
+  ]
+}

@@ -662,7 +662,11 @@ impl SubsonicSource {
 
     /// A call that changes the server. With formPost its fields go in the body, so a long list
     /// of ids fits.
-    async fn change(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<Value> {
+    pub(super) async fn change(
+        &self,
+        method: &str,
+        extra: &[(&str, String)],
+    ) -> SourceResult<Value> {
         if self.extension_version("formPost").await.unwrap_or_default() == 0 {
             return self.get_json(method, extra).await;
         }
@@ -1395,7 +1399,11 @@ impl SubsonicSource {
             .map(|response: SubsonicApiResponse| response.body)
     }
 
-    async fn get_unit(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<()> {
+    pub(super) async fn get_unit(
+        &self,
+        method: &str,
+        extra: &[(&str, String)],
+    ) -> SourceResult<()> {
         let url = self.authenticated_url(method, extra)?;
         subsonic_json(self.client.get(url)).await.map(|_| ())
     }

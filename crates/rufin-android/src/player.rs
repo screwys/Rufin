@@ -174,6 +174,10 @@ impl AndroidPlayer {
                     DetailLinks, metadata_links, track_artist_links,
                 };
                 use rufin_core::settings::LibraryField;
+                // A radio station is no track of the library: its row names the song it announces.
+                if library::station_stream(&media_uri).is_some() {
+                    return Ok(None);
+                }
                 let cancellation = library::ReadCancellation::new();
                 let (artists, album, source_id) = match library::source_entity_parts(&media_uri) {
                     Some((source, kind, _)) if kind == "album" || kind == "artist" => {

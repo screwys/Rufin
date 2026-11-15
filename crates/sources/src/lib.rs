@@ -25,7 +25,9 @@ mod source;
 
 mod file;
 mod jellyfin_emby;
+mod listen_moe;
 pub use jellyfin_emby::ServerKind;
+pub use listen_moe::{ListenMoeSong, listen_moe_feed, listen_moe_songs};
 mod remote_http;
 mod remote_json;
 mod subsonic;

@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 63;
+pub(crate) const STORE_VERSION: i64 = 64;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 63;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 64;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -414,6 +414,26 @@ CREATE TABLE playlist_folder_smart_playlists (
     PRIMARY KEY(smart_playlist_key, folder_key)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX playlist_folder_smart_playlists_folder_idx ON playlist_folder_smart_playlists(folder_key);
+
+CREATE TABLE stations (
+    station_key INTEGER PRIMARY KEY,
+    -- The server that keeps the station; NULL when Rufin does.
+    source_key INTEGER REFERENCES sources ON DELETE CASCADE,
+    object_id TEXT NOT NULL CHECK (object_id <> ''),
+    name TEXT NOT NULL,
+    stream_url TEXT NOT NULL CHECK (stream_url <> ''),
+    homepage TEXT NOT NULL DEFAULT '',
+    cover TEXT,
+    -- The address of its picture, where the search that found it gave one.
+    logo TEXT,
+    -- The picture a person chose for it.
+    artwork_bytes BLOB,
+    artwork_mime TEXT,
+    artwork_revision TEXT,
+    -- Its place among the stations of its source, as a person ordered them.
+    position INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX stations_source_idx ON stations(source_key, object_id);
 
 CREATE TABLE queue_contexts (
     context_key INTEGER PRIMARY KEY,

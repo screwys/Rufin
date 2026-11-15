@@ -94,6 +94,8 @@ pub enum Scope {
     },
     /// Playlist folders.
     Folders,
+    /// Radio stations were added, changed or removed.
+    Stations,
     /// The saved queue or its playback state; `entries` when its entries or their order
     /// changed.
     Queue {

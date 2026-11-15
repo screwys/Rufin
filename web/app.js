@@ -13,6 +13,7 @@ import { init as equalizer } from "./equalizer.js";
 import { init as preferences } from "./preferences.js";
 import { init as metadata } from "./metadata.js";
 import { init as smartPlaylists } from "./smart-playlists.js";
+import { init as radio } from "./radio.js";
 
 ui();
 library();
@@ -29,3 +30,4 @@ equalizer();
 preferences();
 metadata();
 smartPlaylists();
+radio();

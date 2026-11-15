@@ -1362,6 +1362,7 @@ mod playback_refresh_tests {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "track", title);
         CurrentMedia {
+            live: None,
             stream: Some(playback::CurrentStream {
                 local: true,
                 format: Some("audio/flac".into()),

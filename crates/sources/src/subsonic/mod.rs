@@ -19,6 +19,7 @@ mod client;
 mod item;
 mod navidrome;
 mod refresh;
+mod stations;
 
 use crate::remote_json as json;
 use client::*;

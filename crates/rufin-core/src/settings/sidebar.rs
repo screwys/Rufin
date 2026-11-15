@@ -23,13 +23,14 @@ pub enum SidebarRouteItem {
     Playlists,
     SmartPlaylists,
     History,
+    Radio,
 }
 impl SidebarRouteItem {
     pub fn from_stable_id(stable_id: &str) -> Option<Self> {
         serde_json::from_value(serde_json::Value::String(stable_id.to_owned())).ok()
     }
 
-    pub fn all() -> [Self; 13] {
+    pub fn all() -> [Self; 14] {
         [
             Self::Home,
             Self::Search,
@@ -40,6 +41,7 @@ impl SidebarRouteItem {
             Self::AlbumArtists,
             Self::Genres,
             Self::Moods,
+            Self::Radio,
             Self::History,
             Self::Folders,
             Self::Playlists,
@@ -93,6 +95,14 @@ impl SidebarSettings {
                         | SidebarPin::PlaylistFolder { smart: true, .. }
                 )
             })
+    }
+
+    pub fn pins_show_stations(&self) -> bool {
+        self.pins_visible
+            && self
+                .pins
+                .iter()
+                .any(|pin| matches!(pin, SidebarPin::Station { .. }))
     }
 
     pub fn set_route_visible(&mut self, item: SidebarRouteItem, visible: bool) -> bool {

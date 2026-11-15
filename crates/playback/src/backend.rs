@@ -188,6 +188,18 @@ impl From<PlaybackSettings> for BackendAudioSettings {
     }
 }
 
+/// What a stream's tags say; a field the tags did not carry is None.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StreamInfo {
+    /// The song a radio stream announces, often as "Artist - Title".
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    /// The address a stream sends beside the title: its page, or a picture of the song.
+    pub link: Option<String>,
+    pub codec: Option<String>,
+    pub bitrate: Option<u32>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum BackendState {
     #[default]
@@ -317,6 +329,11 @@ pub enum BackendEvent {
     Bitstream {
         run: RunId,
         active: bool,
+    },
+    /// The stream's tags named what it plays or how it is encoded.
+    StreamInfo {
+        run: RunId,
+        info: StreamInfo,
     },
     NextNeeded {
         run: RunId,

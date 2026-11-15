@@ -786,16 +786,19 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
 
 /** Year, tracks, duration and the like in a pill, divided by |: the showcase's and the detail headers' one
  *  look. On the band it is dark so it reads on any cover; on the page it is a light tint of the page's text.
- *  Each fact is (icon, label, value). */
+ *  Each fact is (icon, label, value); `first` stands before them, for a fact that is not an icon and a
+ *  value: the Radio page's Live. */
 @Composable
-internal fun FactsPill(facts: List<Triple<String, String, String>>, modifier: Modifier = Modifier, onBand: Boolean = true) {
+internal fun FactsPill(facts: List<Triple<String, String, String>>, modifier: Modifier = Modifier, onBand: Boolean = true,
+    first: (@Composable () -> Unit)? = null) {
     val text = if (onBand) OnBand else MaterialTheme.colorScheme.onSurface
     Surface(modifier, shape = RoundedCornerShape(50), color = if (onBand) Color.Black.copy(alpha = .28f) else text.copy(alpha = .1f), contentColor = text) {
         // The facts slide inside the pill when they are wider than the room.
         Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp).rufinMarquee(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            first?.invoke()
             facts.forEachIndexed { index, (icon, label, value) ->
-                if (index > 0) Text("|", style = MaterialTheme.typography.labelSmall, color = text.copy(alpha = .45f))
+                if (index > 0 || first != null) Text("|", style = MaterialTheme.typography.labelSmall, color = text.copy(alpha = .45f))
                 SummaryFact(icon, label, value)
             }
         }

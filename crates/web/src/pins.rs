@@ -1,6 +1,7 @@
 use super::*;
 use library::{PlaylistListRow, ReadCancellation, Row};
 use rufin_core::settings::SidebarPin;
+use rufin_core::source::Pinned;
 
 fn artwork_revision<'a>(bindings: impl IntoIterator<Item = &'a [u8]>) -> String {
     use std::hash::{Hash, Hasher};
@@ -29,7 +30,19 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     // A pin opens its page in the selection, as on GTK: a pin of another source reads whole.
     let scope = page::PageToken::selected(&products);
     let mut items = Vec::new();
-    for (pin, row) in rows {
+    for (pin, shown) in rows {
+        let row = match shown {
+            Pinned::Row(row) => *row,
+            // A station has no page and no row: it is listed as the Radio page lists it.
+            Pinned::Station(station) => {
+                let mut item = stations::station_json(&products, &station);
+                item["kind"] = json!("station");
+                item["menu"] = json!(rufin_core::menu::pinned_station(&settings, &pin));
+                item["pin"] = json!(pin);
+                items.push(item);
+                continue;
+            }
+        };
         let mut item = browser::row_data(
             &products,
             &row,

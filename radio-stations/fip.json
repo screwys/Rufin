@@ -1,0 +1,31 @@
+{
+  "name": "FIP",
+  "description": "French public radio with an eclectic mix and little talk.",
+  "homepage": "https://www.radiofrance.fr/fip",
+  "genres": [
+    "Eclectic"
+  ],
+  "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/FIP_logo_2021.svg/960px-FIP_logo_2021.svg.png",
+  "channels": [
+    {
+      "name": "FIP",
+      "stream": "https://icecast.radiofrance.fr/fip-hifi.aac"
+    },
+    {
+      "name": "Rock",
+      "stream": "https://icecast.radiofrance.fr/fiprock-hifi.aac"
+    },
+    {
+      "name": "Jazz",
+      "stream": "https://icecast.radiofrance.fr/fipjazz-hifi.aac"
+    },
+    {
+      "name": "Groove",
+      "stream": "https://icecast.radiofrance.fr/fipgroove-hifi.aac"
+    },
+    {
+      "name": "Monde",
+      "stream": "https://icecast.radiofrance.fr/fipworld-hifi.aac"
+    }
+  ]
+}

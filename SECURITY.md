@@ -2,7 +2,7 @@
 
 ## Security Stance
 
-Rufin is officially supported as APK, Flatpak, Fedora RPM, nixpkgs/scoop/brew/AUR packages, and Windows/MacOS executables. Data security is taken seriously within the expectations of a music player. If you find a security or privacy issue, you can email to me@screwy.dev. You can also encrypt it with my [public key](https://screwy.dev/pgp.asc) if your mail client does not find the key automatically.
+Rufin is officially supported as APK, Flatpak, Fedora RPM, nixpkgs/scoop/brew/AUR packages, and Windows/MacOS executables. Data security is taken seriously within the expectations of a music player. If you find a security or privacy issue, you can email to me@screwy.dev. You can also encrypt it with my [public key](https://screwy.dev/screwy.txt) if your mail client does not find the key automatically.
 
 Rust dependencies are checked with cargo-deny, including advisories, license policy and source policy. Dependency updates are held for 7 days before our own Renovate bot opens them.
 
@@ -56,6 +56,18 @@ Local .lrc files are read from disk and do not use the network. Server lyrics co
 
 Rufin's own external lyric lookup uses the providers above. Private mode disables Rufin external lyric lookup, while cached lyrics including previously fetched from external services still work.
 
+### Radio
+
+A radio station plays from its own stream address, so the station sees your connection while it plays. Stations of a Navidrome or OpenSubsonic server are read from and saved on that server. Private mode keeps both working.
+
+The Add Station search sends the name you type to [radio-browser.info](https://radio-browser.info). Private mode turns the search off; a station can still be added by its stream address.
+
+The stations Rufin suggests are the files in [`radio-stations/`](radio-stations): each names its stream, homepage and picture addresses. A suggested station's picture is loaded when the Radio page shows it; nothing else of a station is contacted until you play it.
+
+While a LISTEN.moe station plays, Rufin also reads LISTEN.moe's song feed, which says when each song began to time the lyrics.
+
+Station pictures are loaded from the address the station's file or radio-browser.info names, and kept in the artwork cache. The cover of a song a station announces is looked up by artist and title through the Metadata services above, and its lyrics through the Lyrics services. These follow the same toggles and private mode as other covers and lyrics.
+
 ### Scrobbling
 
 Last.fm, Libre.fm and ListenBrainz are only used after authorization or configuration. Private mode disables playback reporting to these services.
@@ -76,4 +88,4 @@ Rufin itself does not have any way to collect telemetry. The services it talks t
 
 ## Logs
 
-Logs are privacy-conscious by default, you may still want to review them before sharing. They stay on-device, and are not uploaded to somewhere automatically. 
+Logs are privacy-conscious by default, you may still want to review them before sharing. They stay on-device, and are not uploaded to somewhere automatically.

@@ -17,7 +17,9 @@ pub use images::{
     ArtworkQuery, ArtworkResult, download_artwork, lookup_artist_image, search_artwork,
 };
 
-pub use cover::{lookup_album_cover, public_album_cover_url};
+pub use cover::{
+    lookup_album_cover, lookup_song_cover, public_album_cover_url, public_song_cover_url,
+};
 pub use musicbrainz::{
     MetadataCandidate, MetadataLookup, MetadataMatchKind, lookup_metadata, lookup_release_types,
     metadata_identity, search_metadata,

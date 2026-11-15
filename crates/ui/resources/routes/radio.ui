@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <!-- The Radio page: the station on air, then the stations and the suggested ones as cards.
+       Rust sets the header's shape, the grids' columns and everything a station gives. -->
+  <object class="GtkBox" id="content">
+    <property name="orientation">vertical</property>
+    <property name="spacing">14</property>
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="width-request">1</property>
+    <property name="margin-bottom">14</property>
+    <style><class name="route-content"/></style>
+    <child>
+      <!-- The station on air, shaped as the detail showcase: a band of the picture's colours with
+           the picture over its lower edge, the names on the band, and the facts, genres and
+           buttons under it. Rust sets the showcase's sizes for the width. -->
+      <object class="GtkOverlay" id="on_air">
+        <property name="hexpand">true</property>
+        <style><class name="detail-showcase"/><class name="radio-on-air"/></style>
+        <property name="child">
+          <object class="GtkDrawingArea" id="band">
+            <property name="valign">start</property>
+            <property name="hexpand">true</property>
+            <style><class name="detail-band"/></style>
+          </object>
+        </property>
+        <child type="overlay">
+          <object class="GtkBox" id="on_air_body">
+            <property name="orientation">vertical</property>
+            <property name="hexpand">true</property>
+            <property name="valign">start</property>
+            <property name="width-request">1</property>
+            <layout><property name="measure">true</property></layout>
+            <child>
+            <object class="GtkBox" id="on_air_top">
+            <property name="hexpand">true</property>
+            <property name="width-request">1</property>
+            <child>
+              <object class="GtkBox" id="on_air_cover">
+                <property name="halign">start</property>
+                <property name="valign">start</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="on_air_text">
+                <property name="orientation">vertical</property>
+                <property name="hexpand">true</property>
+                <property name="valign">start</property>
+                <property name="width-request">1</property>
+                <child>
+                  <object class="GtkBox" id="on_air_heading">
+                    <property name="orientation">vertical</property>
+                    <property name="hexpand">true</property>
+                    <child>
+                      <object class="GtkBox" id="on_air_names">
+                        <style><class name="detail-on-band"/></style>
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">4</property>
+                        <property name="valign">end</property>
+                        <property name="vexpand">true</property>
+                        <property name="hexpand">true</property>
+                        <property name="width-request">1</property>
+                        <child>
+                          <object class="GtkBox" id="on_air_name_row">
+                            <property name="spacing">10</property>
+                            <child>
+                              <object class="GtkLabel" id="on_air_name">
+                                <property name="xalign">0</property>
+                                <property name="ellipsize">end</property>
+                                <property name="single-line-mode">true</property>
+                                <property name="width-chars">1</property>
+                                <style><class name="detail-title"/></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="on_air_channel">
+                                <property name="visible">false</property>
+                                <property name="valign">center</property>
+                                <property name="ellipsize">end</property>
+                                <style><class name="radio-channel-badge"/></style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="on_air_song">
+                            <property name="xalign">0</property>
+                            <property name="ellipsize">end</property>
+                            <property name="single-line-mode">true</property>
+                            <property name="width-chars">1</property>
+                            <style><class name="detail-artist"/></style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="on_air_artist">
+                            <property name="xalign">0</property>
+                            <property name="ellipsize">end</property>
+                            <property name="single-line-mode">true</property>
+                            <property name="width-chars">1</property>
+                            <style><class name="radio-on-air-artist"/></style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="on_air_lower">
+                    <property name="orientation">vertical</property>
+                    <property name="hexpand">true</property>
+                    <property name="width-request">1</property>
+                    <child>
+                      <object class="GtkBox" id="on_air_main">
+                        <property name="orientation">vertical</property>
+                        <property name="hexpand">true</property>
+                        <property name="valign">start</property>
+                        <property name="width-request">1</property>
+                        <child>
+                          <!-- The genres, as the showcase's chips; the row keeps its height without any. The
+                               facts sit in the buttons' row, between Pause and the homepage. -->
+                          <object class="GtkBox" id="on_air_genres">
+                            <property name="spacing">6</property>
+                            <property name="halign">start</property>
+                            <property name="height-request">26</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox" id="on_air_actions">
+                            <property name="spacing">8</property>
+                            <property name="halign">start</property>
+                            <property name="margin-top">14</property>
+                            <style><class name="detail-showcase-actions"/></style>
+                            <child>
+                              <object class="GtkButton" id="on_air_toggle">
+                                <style><class name="detail-pill"/><class name="detail-pill-primary"/></style>
+                                <property name="child">
+                                  <object class="GtkBox">
+                                    <property name="spacing">7</property>
+                                    <property name="halign">center</property>
+                                    <child><object class="GtkImage" id="on_air_toggle_icon"/></child>
+                                    <child><object class="GtkLabel" id="on_air_toggle_text"/></child>
+                                  </object>
+                                </property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkBox" id="on_air_facts">
+                                <property name="spacing">12</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="detail-summary-row"/>
+                                  <class name="detail-facts-boxed"/>
+                                </style>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="spacing">6</property>
+                                    <child>
+                                      <object class="GtkBox">
+                                        <property name="valign">center</property>
+                                        <style><class name="live-dot"/></style>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel">
+                                        <property name="label" translatable="yes">LIVE</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkBox" id="on_air_format_fact">
+                                    <property name="spacing">5</property>
+                                    <style><class name="detail-fact-follows"/></style>
+                                    <child>
+                                      <object class="GtkImage">
+                                        <property name="icon-name">rufin-sound-symbolic</property>
+                                        <property name="pixel-size">14</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="on_air_format">
+                                        <property name="xalign">0</property>
+                                        <property name="ellipsize">end</property>
+                                        <property name="width-chars">1</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="on_air_homepage">
+                                <property name="visible">false</property>
+                                <property name="icon-name">rufin-external-link-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Open homepage</property>
+                                <accessibility><property name="label" translatable="yes">Open homepage</property></accessibility>
+                                <style><class name="detail-round"/></style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <!-- Heard keeps a fixed number of rows, so the header keeps its height. -->
+                      <object class="GtkBox" id="heard">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <property name="valign">start</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label" translatable="yes">Heard</property>
+                            <property name="xalign">0</property>
+                            <style><class name="caption-heading"/><class name="radio-heard-caption"/></style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox" id="heard_rows">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">8</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">8</property>
+        <property name="hexpand">true</property>
+        <property name="width-request">1</property>
+        <style><class name="track-toolbar"/></style>
+        <child>
+          <object class="GtkLabel">
+            <property name="label" translatable="yes">Stations</property>
+            <property name="xalign">0</property>
+            <style><class name="section-heading"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="hexpand">true</property>
+            <property name="width-request">1</property>
+            <child>
+              <object class="GtkSearchEntry" id="filter">
+                <property name="visible">false</property>
+                <property name="hexpand">true</property>
+                <property name="halign">end</property>
+                <property name="valign">center</property>
+                <property name="max-width-chars">28</property>
+                <property name="placeholder-text" translatable="yes">Search</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="add">
+            <property name="icon-name">rufin-list-add-symbolic</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Add Station</property>
+            <accessibility><property name="label" translatable="yes">Add Station</property></accessibility>
+            <style><class name="library-toolbar-icon-button"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkToggleButton" id="filter_toggle">
+            <property name="icon-name">rufin-search-symbolic</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Search</property>
+            <accessibility><property name="label" translatable="yes">Search</property></accessibility>
+            <style><class name="library-toolbar-icon-button"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkFlowBox" id="stations">
+        <property name="homogeneous">false</property>
+        <property name="selection-mode">none</property>
+        <property name="activate-on-single-click">true</property>
+        <property name="column-spacing">10</property>
+        <property name="row-spacing">10</property>
+        <property name="valign">start</property>
+        <style><class name="station-grid"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="suggested_heading">
+        <property name="visible">false</property>
+        <property name="label" translatable="yes">Suggested</property>
+        <property name="xalign">0</property>
+        <property name="margin-top">4</property>
+        <style><class name="section-heading"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkFlowBox" id="suggested">
+        <property name="homogeneous">false</property>
+        <property name="selection-mode">none</property>
+        <property name="activate-on-single-click">true</property>
+        <property name="column-spacing">10</property>
+        <property name="row-spacing">10</property>
+        <property name="valign">start</property>
+        <style><class name="station-grid"/></style>
+      </object>
+    </child>
+  </object>
+</interface>

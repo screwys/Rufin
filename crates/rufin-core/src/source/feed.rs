@@ -44,6 +44,8 @@ pub struct Changed {
     /// The lyrics Lyrics Search finds changed: a track's shown lyrics, or a source's whose
     /// lyrics were downloaded.
     pub lyrics: bool,
+    /// Radio stations were added, changed or removed.
+    pub stations: bool,
 }
 
 impl Changed {
@@ -60,6 +62,7 @@ impl Changed {
         self.scope |= later.scope;
         self.pins |= later.pins;
         self.lyrics |= later.lyrics;
+        self.stations |= later.stations;
     }
 }
 
@@ -190,6 +193,7 @@ impl Pending {
                     self.changed.downloads.extend(tracks.iter().cloned())
                 }
                 Scope::Lyrics { .. } => self.changed.lyrics = true,
+                Scope::Stations => self.changed.stations = true,
                 Scope::Rekey { .. }
                 | Scope::Queue { .. }
                 | Scope::Held { .. }

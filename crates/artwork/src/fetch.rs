@@ -53,6 +53,14 @@ impl FetchContext {
                         .unwrap_or(FetchOutcome::Missing)
                 })
                 .map_err(|error| error.to_string()),
+            library::ArtworkImage::Station { .. } => runtime
+                .block_on(self.catalog.station_picture(&candidate.image))
+                .map(|bytes| {
+                    bytes
+                        .map(FetchOutcome::Ready)
+                        .unwrap_or(FetchOutcome::Missing)
+                })
+                .map_err(|error| error.to_string()),
             library::ArtworkImage::Artist {
                 name,
                 musicbrainz_id,
@@ -134,6 +142,24 @@ impl FetchContext {
                     })
                     .or_else(source_result)
             }
+            library::ArtworkImage::Url { url } => match metadata_lookup::download_artwork(url) {
+                Ok(bytes) => Ok(FetchOutcome::Ready(bytes)),
+                Err(_) => Ok(FetchOutcome::Missing),
+            },
+            library::ArtworkImage::Song { artist, title } => metadata_lookup::lookup_song_cover(
+                artist,
+                title,
+                match size {
+                    ImageSize::Original => None,
+                    ImageSize::Thumbnail(size) => Some(size),
+                },
+                &policy.lookups,
+            )
+            .map(|bytes| {
+                bytes
+                    .map(FetchOutcome::Ready)
+                    .unwrap_or(FetchOutcome::Missing)
+            }),
             library::ArtworkImage::Album(album) => metadata_lookup::lookup_album_cover(
                 album,
                 match size {

@@ -80,6 +80,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         } == true
     }
     val currentId get() = playback?.transport?.current?.id
+    /** A radio station plays: nothing to seek, skip, shuffle, repeat or favorite. */
+    val live by derivedStateOf { playback?.transport?.current?.live != null }
     var metadataLinks by mutableStateOf<AndroidPlayerMetadata?>(null)
         private set
     var outputChoices by mutableStateOf<List<RemoteOutput>>(emptyList())

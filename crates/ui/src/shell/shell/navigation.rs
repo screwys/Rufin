@@ -23,6 +23,7 @@ use rufin_core::playback::QueuePlacement;
 use rufin_core::playlists::smart_playlist_display_name;
 use rufin_core::route::{CollectionCategory, Route};
 use rufin_core::settings::{SidebarPin, SidebarRouteItem};
+use rufin_core::source::Pinned;
 use tracing::warn;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};
@@ -150,6 +151,7 @@ impl Shell {
         let current = self.settings.current.borrow().clone();
         if previous.sidebar != current.sidebar {
             self.rebuild_sidebar_navigation();
+            self.refresh_mounted_radio();
         }
         if previous.appearance != current.appearance
             || previous.application.reduce_motion != current.application.reduce_motion
@@ -174,6 +176,7 @@ impl Shell {
     }
 
     pub(crate) fn set_sidebar_pin(self: &Rc<Self>, pin: SidebarPin, pinned: bool) {
+        let station = matches!(pin, SidebarPin::Station { .. });
         if self
             .settings
             .update_app_settings("Pins setting", |settings| {
@@ -182,6 +185,10 @@ impl Shell {
             .is_some()
         {
             request_sidebar_pins(self);
+            // The Radio page's cards show whether their stations are pinned.
+            if station {
+                self.refresh_mounted_radio();
+            }
         }
     }
 
@@ -527,49 +534,127 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
 #[derive(Clone, PartialEq)]
 struct SidebarPinItem {
     pin: SidebarPin,
-    row: library::Row,
+    shown: Pinned,
+}
+
+/// What a pinned collection's row shows.
+fn pinned_collection(row: &library::Row) -> library::CollectionShown<'_> {
+    row.collection()
+        .expect("pin_rows returns pinned collections only")
 }
 
 impl SidebarPinItem {
     fn stored_pin(&self) -> SidebarPin {
         self.pin.clone()
     }
-    /// What the pinned collection's row shows.
-    fn summary(&self) -> library::CollectionShown<'_> {
-        self.row
-            .collection()
-            .expect("pin_rows returns pinned collections only")
+    /// The pinned collection's row; a station has none.
+    fn row(&self) -> Option<&library::Row> {
+        match &self.shown {
+            Pinned::Row(row) => Some(row),
+            Pinned::Station(_) => None,
+        }
     }
-    fn key(&self) -> i64 {
-        self.summary().key
+    fn name(&self) -> &str {
+        match &self.shown {
+            Pinned::Row(row) => pinned_collection(row).name,
+            Pinned::Station(station) => &station.name,
+        }
     }
     fn title(&self) -> String {
-        let name = self.summary().name;
+        let name = self.name();
         if let SidebarPin::SmartPlaylist { playlist_id } = &self.pin {
             smart_playlist_display_name(playlist_id, name)
         } else {
             name.to_owned()
         }
     }
-    fn track_count(&self) -> u32 {
-        self.summary().track_count.clamp(0, u32::MAX as i64) as u32
+    /// A collection's tracks and its length in seconds.
+    fn totals(&self) -> Option<(u32, u32)> {
+        let shown = pinned_collection(self.row()?);
+        Some((
+            shown.track_count.clamp(0, u32::MAX as i64) as u32,
+            (shown.duration_millis.max(0) / 1000).min(u32::MAX as i64) as u32,
+        ))
     }
-    fn duration_seconds(&self) -> u32 {
-        (self.summary().duration_millis.max(0) / 1000).min(u32::MAX as i64) as u32
+    /// A station's genres on one line.
+    fn genres(&self) -> String {
+        match &self.shown {
+            Pinned::Row(_) => String::new(),
+            Pinned::Station(station) => station.genres.join(", "),
+        }
     }
-    fn route(&self) -> Route {
-        Route::of_row(&self.row).expect("pin_rows returns pinned collections only")
+    /// The page a collection opens; a station has none.
+    fn route(&self) -> Option<Route> {
+        Some(Route::of_row(self.row()?).expect("pin_rows returns pinned collections only"))
+    }
+    /// The row's widget name. A collection's ends in its context id, which plays match.
+    fn widget_name(&self) -> String {
+        match &self.shown {
+            Pinned::Row(_) => self
+                .route()
+                .as_ref()
+                .and_then(sidebar_pin_route_key)
+                .expect("a sidebar pin always has a detail route"),
+            Pinned::Station(station) => {
+                format!(
+                    "sidebar-pin-station-key:{}:{}",
+                    station.key.unwrap_or_default(),
+                    station.channel.as_deref().unwrap_or_default()
+                )
+            }
+        }
+    }
+    /// Opens a collection's page; a station has none, so it plays.
+    fn activate(&self, shell: &Rc<Shell>) {
+        match &self.shown {
+            Pinned::Row(_) => {
+                if let Some(route) = self.route() {
+                    shell.navigate(route);
+                }
+            }
+            Pinned::Station(station) => {
+                crate::library::play_station(shell, station.key, None, station.channel.clone());
+            }
+        }
     }
     /// What the pin plays, as core decides for its row.
     fn playback_target(&self) -> Option<PlayTarget> {
-        PlayTarget::of_row(&self.row)
+        PlayTarget::of_row(self.row()?)
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
-        self.summary()
-            .artwork
-            .into_iter()
-            .map(ArtworkBinding::opaque)
-            .collect()
+        match &self.shown {
+            Pinned::Row(row) => pinned_collection(row)
+                .artwork
+                .into_iter()
+                .map(ArtworkBinding::opaque)
+                .collect(),
+            Pinned::Station(station) => station
+                .artwork_binding
+                .as_deref()
+                .map(ArtworkBinding::opaque)
+                .into_iter()
+                .collect(),
+        }
+    }
+    /// The pin's picture: a collection's cover or mosaic, a station's logo.
+    fn cover(&self, shell: &Rc<Shell>, size: i32) -> gtk::Widget {
+        match &self.shown {
+            Pinned::Row(_) => shell
+                .artwork
+                .cover_group_projection_for_artwork(
+                    &self.artwork(),
+                    size,
+                    size,
+                    matches!(&self.pin, SidebarPin::Genre { .. }),
+                )
+                .widget(),
+            Pinned::Station(station) => {
+                let tile =
+                    crate::library::station_cover(shell, station.artwork_binding.as_deref(), size);
+                tile.area.set_valign(gtk::Align::Center);
+                tile.area.upcast()
+            }
+        }
     }
     fn present_context_menu(
         &self,
@@ -577,6 +662,15 @@ impl SidebarPinItem {
         shell: &Rc<Shell>,
         position: Option<(f64, f64)>,
     ) {
+        if let Pinned::Station(_) = &self.shown {
+            crate::menus::media_menus::present_station_pin_menu(
+                target,
+                shell,
+                self.pin.clone(),
+                position,
+            );
+            return;
+        }
         // The pin's row as committed changes keep it, not as the widget was built with.
         let row = shell
             .navigation
@@ -584,7 +678,7 @@ impl SidebarPinItem {
             .borrow()
             .iter()
             .find(|item| item.pin == self.pin)
-            .map(|item| item.row.clone());
+            .and_then(|item| item.row().cloned());
         if let Some(row) = row {
             crate::menus::media_menus::present_row_menu(target, shell, row, None, position);
         }
@@ -685,7 +779,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         };
         let mut indexed = rows
             .into_iter()
-            .map(|(pin, row)| (pin.clone(), SidebarPinItem { pin, row }))
+            .map(|(pin, shown)| (pin.clone(), SidebarPinItem { pin, shown }))
             .collect::<HashMap<_, _>>();
         let items = current
             .settings
@@ -710,13 +804,17 @@ fn sidebar_pin_publication_is_current(expected_generation: u64, current_generati
 /// Shows a committed change in the pins' rows, which their menus act on.
 pub(crate) fn show_pin_changes(shell: &Shell, changed: &rufin_core::source::feed::Changed) {
     let mut items = shell.navigation.pin_items.borrow_mut();
-    let rows = items.iter().map(|item| &item.row).collect::<Vec<_>>();
+    let (indices, rows): (Vec<_>, Vec<_>) = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| Some((index, item.row()?)))
+        .unzip();
     let shown = shell
         .navigation
         .pin_changes
         .show(&shell.products.source, &rows, changed, None);
     for (index, row) in shown.states {
-        items[index].row = row;
+        items[indices[index]].shown = Pinned::Row(Box::new(row));
     }
 }
 
@@ -745,28 +843,26 @@ fn reorder_current_sidebar_pin_projection(
         let Some(target_index) = items.iter().position(|item| item.stored_pin() == *target) else {
             return;
         };
-        let target_key = sidebar_pin_route_key(&items[target_index].route());
-        let moved_key = sidebar_pin_route_key(&moved_item.route());
+        let target_key = items[target_index].widget_name();
+        let moved_key = moved_item.widget_name();
         items.insert(target_index + usize::from(after), moved_item);
         (moved_key, target_key)
     };
     if let Some(identity) = shell.navigation.pin_identity.borrow_mut().as_mut() {
         *identity = desired;
     }
-    if let (Some(moved_key), Some(target_key)) = (moved_key, target_key) {
-        reorder_sidebar_pin_widget(
-            &shell.navigation_view.normal_nav_pins,
-            &moved_key,
-            &target_key,
-            after,
-        );
-        reorder_sidebar_pin_widget(
-            &shell.navigation_view.compact_nav,
-            &moved_key,
-            &target_key,
-            after,
-        );
-    }
+    reorder_sidebar_pin_widget(
+        &shell.navigation_view.normal_nav_pins,
+        &moved_key,
+        &target_key,
+        after,
+    );
+    reorder_sidebar_pin_widget(
+        &shell.navigation_view.compact_nav,
+        &moved_key,
+        &target_key,
+        after,
+    );
 }
 
 fn reorder_sidebar_pin_widget(
@@ -805,16 +901,18 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .pin_items
         .borrow()
         .iter()
-        .filter_map(|item| sidebar_pin_route_key(&item.route()).map(|key| (key, item.clone())))
+        .map(|item| (item.widget_name(), item.clone()))
         .collect::<HashMap<_, _>>();
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
-            previous.artwork() != item.artwork() || previous.summary().name != item.summary().name
+            previous.artwork() != item.artwork()
+                || previous.name() != item.name()
+                || previous.genres() != item.genres()
         })
     };
     let desired_keys = items
         .iter()
-        .filter_map(|item| sidebar_pin_route_key(&item.route()))
+        .map(SidebarPinItem::widget_name)
         .collect::<Vec<_>>();
 
     let normal = &shell.navigation_view.normal_nav_pins;
@@ -832,9 +930,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
     remove_obsolete_pin_widgets(normal, &normal_widgets, &desired_keys);
     let mut previous = Some(heading);
     for item in items {
-        let Some(key) = sidebar_pin_route_key(&item.route()) else {
-            continue;
-        };
+        let key = item.widget_name();
         let widget = normal_widgets
             .remove(&key)
             .filter(|widget| {
@@ -860,9 +956,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
     remove_obsolete_pin_widgets(compact, &compact_widgets, &desired_keys);
     let mut previous = compact_pin_anchor(compact);
     for item in items {
-        let Some(key) = sidebar_pin_route_key(&item.route()) else {
-            continue;
-        };
+        let key = item.widget_name();
         let widget = compact_widgets
             .remove(&key)
             .filter(|widget| {
@@ -916,12 +1010,16 @@ fn remove_sidebar_pin_widgets(container: &gtk::Box) {
 }
 
 fn update_sidebar_pin_widget_metadata(widget: &gtk::Widget, item: &SidebarPinItem) {
+    // A station's row is built again when what it shows changes.
+    let Some((track_count, duration_seconds)) = item.totals() else {
+        return;
+    };
     let labels = [
         ("sidebar-pin-title", item.title()),
-        ("sidebar-pin-track-count", item.track_count().to_string()),
+        ("sidebar-pin-track-count", track_count.to_string()),
         (
             "sidebar-pin-duration",
-            format_duration_units(item.duration_seconds()),
+            format_duration_units(duration_seconds),
         ),
     ];
     if let Some(metadata) = descendant_with_class(widget, "sidebar-pin-metadata") {
@@ -969,21 +1067,13 @@ fn compact_pin_anchor(container: &gtk::Box) -> Option<gtk::Widget> {
 }
 
 fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
-    let route = pin.route();
     let title = pin.title();
-    let track_count = pin.track_count();
-    let duration_seconds = pin.duration_seconds();
-    let artwork = pin.artwork();
     let row = gtk::Overlay::new();
     row.add_css_class("nav-button");
     row.add_css_class(SIDEBAR_PIN_ROW_CLASS);
     row.add_css_class(CONTEXT_MENU_HOVER_OWNER_CLASS);
     row.set_overflow(gtk::Overflow::Hidden);
-    row.set_widget_name(
-        sidebar_pin_route_key(&route)
-            .as_deref()
-            .expect("a sidebar pin always has a detail route"),
-    );
+    row.set_widget_name(&pin.widget_name());
     row.set_hexpand(true);
     row.set_width_request(1);
 
@@ -997,15 +1087,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     content.set_hexpand(true);
     content.set_width_request(1);
-    let cover = shell
-        .artwork
-        .cover_group_projection_for_artwork(
-            &artwork,
-            SIDEBAR_PIN_COVER_SIZE,
-            SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin.pin, SidebarPin::Genre { .. }),
-        )
-        .widget();
+    let cover = pin.cover(shell, SIDEBAR_PIN_COVER_SIZE);
     cover.set_can_target(false);
     content.append(&cover);
 
@@ -1025,7 +1107,14 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     }
     title_row.append(&title_label);
     identity.append(&title_row);
-    let metadata = sidebar_pin_metadata(track_count, duration_seconds);
+    let metadata = match pin.totals() {
+        Some((track_count, duration_seconds)) => {
+            Some(sidebar_pin_metadata(track_count, duration_seconds))
+        }
+        None => Some(pin.genres())
+            .filter(|genres| !genres.is_empty())
+            .map(|genres| sidebar_pin_genres(&genres)),
+    };
     let source_label = {
         let configured = shell.source.configured.borrow();
         let source_id = match &pin.pin {
@@ -1044,7 +1133,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             )
         })
     };
-    if let Some((icon, name)) = source_label {
+    if let (Some(metadata), Some((icon, name))) = (&metadata, source_label) {
         let source = gtk::Image::from_icon_name(icon);
         source.set_pixel_size(crate::widgets::source_labels::source_icon_pixel_size(
             icon, 12,
@@ -1053,14 +1142,17 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
         source.update_property(&[gtk::accessible::Property::Label(&name)]);
         metadata.append(&source);
     }
-    identity.append(&metadata);
+    if let Some(metadata) = &metadata {
+        identity.append(metadata);
+    }
     content.append(&identity);
     activate.set_child(Some(&content));
 
     let navigation_shell = Rc::downgrade(shell);
+    let opened = pin.clone();
     activate.connect_clicked(move |_| {
         if let Some(shell) = navigation_shell.upgrade() {
-            shell.navigate(route.clone());
+            opened.activate(&shell);
         }
     });
     if let Some(target) = pin.playback_target() {
@@ -1093,16 +1185,12 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
 }
 
 fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
-    let route = pin.route();
     let title = pin.title();
-    let artwork = pin.artwork();
-    let route_key =
-        sidebar_pin_route_key(&route).expect("a compact sidebar pin always has a detail route");
     let row = gtk::Overlay::new();
     row.add_css_class("nav-button");
     row.add_css_class(SIDEBAR_PIN_ROW_CLASS);
     row.add_css_class("compact-sidebar-pin");
-    row.set_widget_name(&route_key);
+    row.set_widget_name(&pin.widget_name());
     row.set_halign(gtk::Align::Center);
     row.set_overflow(gtk::Overflow::Hidden);
     row.set_tooltip_text(Some(&title));
@@ -1112,21 +1200,14 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     activate.add_css_class("compact-sidebar-pin-activate");
     activate.set_tooltip_text(Some(&title));
     activate.update_property(&[gtk::accessible::Property::Label(&title)]);
-    let cover = shell
-        .artwork
-        .cover_group_projection_for_artwork(
-            &artwork,
-            COMPACT_SIDEBAR_PIN_COVER_SIZE,
-            COMPACT_SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin.pin, SidebarPin::Genre { .. }),
-        )
-        .widget();
+    let cover = pin.cover(shell, COMPACT_SIDEBAR_PIN_COVER_SIZE);
     cover.set_can_target(false);
     activate.set_child(Some(&cover));
     let navigation_shell = Rc::downgrade(shell);
+    let opened = pin.clone();
     activate.connect_clicked(move |_| {
         if let Some(shell) = navigation_shell.upgrade() {
-            shell.navigate(route.clone());
+            opened.activate(&shell);
         }
     });
     if let Some(target) = pin.playback_target() {
@@ -1223,6 +1304,10 @@ fn install_sidebar_pin_drag(
 }
 
 fn sidebar_pin_drag_variant(pin: &SidebarPin) -> glib::Variant {
+    let channel = match pin {
+        SidebarPin::Station { channel, .. } => channel.clone(),
+        _ => None,
+    };
     let (kind, source_id, object_id, album_artist) = match pin {
         SidebarPin::Album {
             source_id,
@@ -1243,20 +1328,26 @@ fn sidebar_pin_drag_variant(pin: &SidebarPin) -> glib::Variant {
         } => (3, source_id.as_ref(), playlist_id, false),
         SidebarPin::SmartPlaylist { playlist_id } => (4, None, playlist_id, false),
         SidebarPin::PlaylistFolder { folder_id, smart } => (5, None, folder_id, *smart),
+        SidebarPin::Station {
+            source_id,
+            station_id,
+            ..
+        } => (6, source_id.as_ref(), station_id, false),
     };
     (
         kind,
         source_id.map(ToString::to_string),
         object_id.clone(),
         album_artist,
+        channel,
     )
         .to_variant()
 }
 
 fn sidebar_pin_from_drag_value(value: &glib::Value) -> Option<SidebarPin> {
     let variant = value.get::<glib::Variant>().ok()?;
-    let (kind, source_id, object_id, album_artist) =
-        variant.get::<(u8, Option<String>, String, bool)>()?;
+    let (kind, source_id, object_id, album_artist, channel) =
+        variant.get::<(u8, Option<String>, String, bool, Option<String>)>()?;
     let source_id = source_id.map(sources::SourceId::new);
     match kind {
         0 => Some(SidebarPin::Album {
@@ -1283,6 +1374,11 @@ fn sidebar_pin_from_drag_value(value: &glib::Value) -> Option<SidebarPin> {
             folder_id: object_id,
             smart: album_artist,
         }),
+        6 => Some(SidebarPin::Station {
+            source_id,
+            station_id: object_id,
+            channel,
+        }),
         _ => None,
     }
 }
@@ -1292,8 +1388,11 @@ fn install_playlist_pin_drop(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
+    let Some(shown) = pin.row().map(pinned_collection) else {
+        return;
+    };
     if let SidebarPin::PlaylistFolder { .. } = &pin.pin {
-        let folder_key = library::PlaylistFolderKey::from_raw(pin.key());
+        let folder_key = library::PlaylistFolderKey::from_raw(shown.key);
         let menus = Rc::downgrade(&shell);
         let drop = gtk::DropTarget::new(
             glib::BoxedAnyObject::static_type(),
@@ -1326,8 +1425,8 @@ fn install_playlist_pin_drop(
     if !matches!(pin.pin, SidebarPin::Playlist { .. }) {
         return;
     }
-    let playlist_key = library::PlaylistKey::from_raw(pin.key());
-    let playlist_name = pin.summary().name.to_owned();
+    let playlist_key = library::PlaylistKey::from_raw(shown.key);
+    let playlist_name = shown.name.to_owned();
     let drop_target = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,
@@ -1381,13 +1480,56 @@ fn install_sidebar_pin_double_click(
     target.add_controller(click);
 }
 
-fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
+/// The line under a pin's title.
+fn sidebar_pin_metadata_line() -> gtk::Box {
     let metadata = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     metadata.add_css_class("sidebar-pin-metadata");
     metadata.set_hexpand(true);
     metadata.set_width_request(1);
     metadata.set_valign(gtk::Align::Center);
     metadata.set_overflow(gtk::Overflow::Hidden);
+    metadata
+}
+
+/// An icon and the text it stands for, which ends in an ellipsis where the line ends.
+fn sidebar_pin_metadata_text(icon_name: &str, text: &str, class: &str) -> gtk::Box {
+    let item = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+    item.add_css_class("sidebar-pin-metadata-item");
+    item.set_width_request(1);
+    item.set_valign(gtk::Align::Center);
+    item.set_overflow(gtk::Overflow::Hidden);
+
+    let icon = gtk::Image::from_icon_name(icon_name);
+    icon.add_css_class("sidebar-pin-metadata-icon");
+    icon.set_pixel_size(12);
+    icon.set_size_request(12, 12);
+    icon.set_valign(gtk::Align::Center);
+    item.append(&icon);
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("sidebar-pin-metadata-label");
+    label.add_css_class(class);
+    label.set_width_request(1);
+    label.set_xalign(0.0);
+    label.set_valign(gtk::Align::Center);
+    label.set_yalign(0.5);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    item.append(&label);
+    item
+}
+
+/// A pinned station's genres, where a collection shows its tracks and length.
+fn sidebar_pin_genres(genres: &str) -> gtk::Box {
+    let metadata = sidebar_pin_metadata_line();
+    metadata.append(&sidebar_pin_metadata_text(
+        "rufin-tag-outline-symbolic",
+        genres,
+        "sidebar-pin-genres",
+    ));
+    metadata
+}
+
+fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
+    let metadata = sidebar_pin_metadata_line();
 
     let track_metadata = gtk::Box::new(gtk::Orientation::Horizontal, 3);
     track_metadata.add_css_class("sidebar-pin-metadata-item");
@@ -1407,28 +1549,11 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     track_metadata.append(&tracks);
     metadata.append(&track_metadata);
 
-    let duration_metadata = gtk::Box::new(gtk::Orientation::Horizontal, 3);
-    duration_metadata.add_css_class("sidebar-pin-metadata-item");
-    duration_metadata.set_width_request(1);
-    duration_metadata.set_valign(gtk::Align::Center);
-    duration_metadata.set_overflow(gtk::Overflow::Hidden);
-
-    let duration_icon = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
-    duration_icon.add_css_class("sidebar-pin-metadata-icon");
-    duration_icon.set_pixel_size(12);
-    duration_icon.set_size_request(12, 12);
-    duration_icon.set_valign(gtk::Align::Center);
-    duration_metadata.append(&duration_icon);
-    let duration = gtk::Label::new(Some(&format_duration_units(duration_seconds)));
-    duration.add_css_class("sidebar-pin-metadata-label");
-    duration.add_css_class("sidebar-pin-duration");
-    duration.set_width_request(1);
-    duration.set_xalign(0.0);
-    duration.set_valign(gtk::Align::Center);
-    duration.set_yalign(0.5);
-    duration.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    duration_metadata.append(&duration);
-    metadata.append(&duration_metadata);
+    metadata.append(&sidebar_pin_metadata_text(
+        "rufin-preferences-system-time-symbolic",
+        &format_duration_units(duration_seconds),
+        "sidebar-pin-duration",
+    ));
     metadata
 }
 
@@ -1550,6 +1675,7 @@ fn sidebar_route_css_class(item: rufin_core::settings::SidebarRouteItem) -> &'st
         SidebarRouteItem::Folders => "nav-route-folders",
         SidebarRouteItem::Playlists => "nav-route-playlists",
         SidebarRouteItem::SmartPlaylists => "nav-route-smart-playlists",
+        SidebarRouteItem::Radio => "nav-route-radio",
     }
 }
 

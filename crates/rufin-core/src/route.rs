@@ -69,6 +69,8 @@ pub enum Route {
         key: library::PlaylistFolderKey,
         smart: bool,
     },
+    /// Radio stations.
+    Radio,
 }
 
 impl Route {
@@ -206,6 +208,7 @@ impl SidebarRouteDescriptor {
             SidebarRouteItem::Folders => SidebarRouteDescriptor::new("Folders", msgid("Folders"), "rufin-folders-symbolic", Some("rufin-folders-selected-symbolic"), Route::Folders { path: Vec::new() }),
             SidebarRouteItem::Playlists => SidebarRouteDescriptor::new("Playlists", msgid("Playlists"), "rufin-playlists-symbolic", None, Route::Playlists),
             SidebarRouteItem::SmartPlaylists => SidebarRouteDescriptor::new("SmartPlaylists", msgid("Smart Playlists"), "rufin-smart-playlists-symbolic", None, Route::SmartPlaylists),
+            SidebarRouteItem::Radio => SidebarRouteDescriptor::new("Radio", msgid("Radio"), "rufin-radio-station-symbolic", None, Route::Radio),
         }
     }
 

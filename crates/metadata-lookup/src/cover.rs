@@ -79,6 +79,62 @@ pub fn lookup_album_cover(
     missing_or_errors(failures)
 }
 
+/// Finds the cover of a song by its artist and title, for a song a radio stream announced:
+/// the providers in the policy's order, until one has a cover. MusicBrainz names the releases
+/// the recording is on and the Cover Art Archive has their fronts; Last.fm names the album.
+pub fn lookup_song_cover(
+    artist: &str,
+    title: &str,
+    size: Option<u32>,
+    policy: &LookupPolicy,
+) -> Result<Option<Vec<u8>>, String> {
+    let client = client()?;
+    let mut failures = Vec::new();
+    for provider in &policy.covers {
+        match provider {
+            CoverProvider::MusicBrainz => {
+                match crate::musicbrainz::search_song_release_ids(artist, title) {
+                    Ok((groups, releases)) => {
+                        for (root, ids) in [(RELEASE_GROUP_URL, groups), (RELEASE_URL, releases)] {
+                            if let Some(bytes) =
+                                download_identities(client, root, ids, size, &mut failures)
+                            {
+                                return Ok(Some(bytes));
+                            }
+                        }
+                    }
+                    Err(error) => failures.push(error),
+                }
+            }
+            CoverProvider::LastFm => {
+                let url = Url::parse_with_params(
+                    LASTFM_API_URL,
+                    &[
+                        ("method", "track.getInfo"),
+                        ("api_key", policy.lastfm_api_key.as_str()),
+                        ("artist", artist),
+                        ("track", title),
+                        ("format", "json"),
+                        ("autocorrect", "1"),
+                    ],
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|url| lastfm_image_url(client, url, "/track/album/image"));
+                match url {
+                    Ok(Some(url)) => match download(client, &url, "song cover") {
+                        Ok(Some(bytes)) => return Ok(Some(bytes)),
+                        Ok(None) => {}
+                        Err(error) => failures.push(error),
+                    },
+                    Ok(None) => {}
+                    Err(error) => failures.push(error),
+                }
+            }
+        }
+    }
+    missing_or_errors(failures)
+}
+
 /// Finds a public cover URL for Discord, which cannot use Rufin's cached bytes: the album's
 /// Cover Art Archive listing, then the providers that answer with a URL, in order.
 pub fn public_album_cover_url(
@@ -93,26 +149,8 @@ pub fn public_album_cover_url(
         let Some(id) = id else {
             continue;
         };
-        let url = Url::parse(&format!("{root}/{id}")).map_err(|error| error.to_string())?;
-        match fetch_optional_json(client()?, url, "Cover Art Archive listing") {
-            Ok(Some(listing)) => {
-                if let Some(url) = listing
-                    .get("images")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter(|image| image.get("front").and_then(Value::as_bool) == Some(true))
-                    .find_map(|image| {
-                        image
-                            .pointer("/thumbnails/250")
-                            .or_else(|| image.get("image"))
-                            .and_then(Value::as_str)
-                            .filter(|url| !url.is_empty())
-                    })
-                {
-                    return Ok(Some(url.to_string()));
-                }
-            }
+        match listed_front_url(root, id) {
+            Ok(Some(url)) => return Ok(Some(url)),
             Ok(None) => {}
             Err(error) => failures.push(error),
         }
@@ -129,6 +167,80 @@ pub fn public_album_cover_url(
                 Ok(Some(url)) => return Ok(Some(url)),
                 Ok(None) => {}
                 Err(error) => failures.push(error),
+            }
+        }
+    }
+    missing_or_errors(failures)
+}
+
+/// The address of the front cover the Cover Art Archive lists for a release or release group.
+fn listed_front_url(root: &str, id: &str) -> Result<Option<String>, String> {
+    let url = Url::parse(&format!("{root}/{id}")).map_err(|error| error.to_string())?;
+    Ok(
+        fetch_optional_json(client()?, url, "Cover Art Archive listing")?.and_then(|listing| {
+            listing
+                .get("images")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|image| image.get("front").and_then(Value::as_bool) == Some(true))
+                .find_map(|image| {
+                    image
+                        .pointer("/thumbnails/250")
+                        .or_else(|| image.get("image"))
+                        .and_then(Value::as_str)
+                        .filter(|url| !url.is_empty())
+                        .map(str::to_string)
+                })
+        }),
+    )
+}
+
+/// Finds a public cover URL for a song a radio stream announced, as `lookup_song_cover` finds
+/// its bytes: Discord shows the cover Rufin shows.
+pub fn public_song_cover_url(
+    artist: &str,
+    title: &str,
+    policy: &LookupPolicy,
+) -> Result<Option<String>, String> {
+    let mut failures = Vec::new();
+    for provider in &policy.covers {
+        match provider {
+            CoverProvider::MusicBrainz => {
+                match crate::musicbrainz::search_song_release_ids(artist, title) {
+                    Ok((groups, releases)) => {
+                        for (root, ids) in [(RELEASE_GROUP_URL, groups), (RELEASE_URL, releases)] {
+                            for id in ids {
+                                match listed_front_url(root, &id) {
+                                    Ok(Some(url)) => return Ok(Some(url)),
+                                    Ok(None) => {}
+                                    Err(error) => failures.push(error),
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => failures.push(error),
+                }
+            }
+            CoverProvider::LastFm => {
+                let url = Url::parse_with_params(
+                    LASTFM_API_URL,
+                    &[
+                        ("method", "track.getInfo"),
+                        ("api_key", policy.lastfm_api_key.as_str()),
+                        ("artist", artist),
+                        ("track", title),
+                        ("format", "json"),
+                        ("autocorrect", "1"),
+                    ],
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|url| lastfm_image_url(client()?, url, "/track/album/image"));
+                match url {
+                    Ok(Some(url)) => return Ok(Some(url)),
+                    Ok(None) => {}
+                    Err(error) => failures.push(error),
+                }
             }
         }
     }
@@ -173,18 +285,20 @@ fn lastfm_url(
         ],
     )
     .map_err(|error| error.to_string())?;
-    lastfm_image_url(client, url)
+    lastfm_image_url(client, url, "/album/image")
 }
 
+/// The largest picture Last.fm lists at `pointer` of its answer.
 fn lastfm_image_url(
     client: &reqwest::blocking::Client,
     url: Url,
+    pointer: &str,
 ) -> Result<Option<String>, String> {
-    let Some(value) = fetch_optional_json(client, url, "Last.fm album lookup")? else {
+    let Some(value) = fetch_optional_json(client, url, "Last.fm cover lookup")? else {
         return Ok(None);
     };
     let images = value
-        .pointer("/album/image")
+        .pointer(pointer)
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
@@ -319,13 +433,13 @@ mod tests {
     fn lastfm_not_found_is_missing_but_server_failures_remain_errors() {
         let (not_found, server) = serve_status("404 Not Found");
         assert_eq!(
-            lastfm_image_url(client().expect("HTTP client"), not_found),
+            lastfm_image_url(client().expect("HTTP client"), not_found, "/album/image"),
             Ok(None)
         );
         server.join().expect("404 metadata server");
 
         let (server_error, server) = serve_status("500 Internal Server Error");
-        let error = lastfm_image_url(client().expect("HTTP client"), server_error)
+        let error = lastfm_image_url(client().expect("HTTP client"), server_error, "/album/image")
             .expect_err("server failure must remain visible");
         assert!(error.contains("status 500"));
         server.join().expect("500 metadata server");

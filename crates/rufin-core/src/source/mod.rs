@@ -11,6 +11,7 @@ mod outbox;
 mod pins;
 pub mod search;
 pub use integrations::FileIntegration;
+pub use pins::Pinned;
 
 use crate::string_error;
 use std::collections::HashMap;

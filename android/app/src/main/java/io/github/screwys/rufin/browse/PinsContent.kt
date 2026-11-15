@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import io.github.screwys.rufin.radio.StationGenres
+import io.github.screwys.rufin.radio.StationLogo
 import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.ui.draw.clip
 import io.github.screwys.rufin.ui.Artwork
@@ -33,6 +35,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -84,13 +87,11 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
                     val target = (index + rowsMoved).coerceIn(0, pins.lastIndex)
                     if (target != index) browse.movePins(listOf(pin), pins[target])
                 }
-                else BrowseSwipeActions(item, true) {
+                // A station has no page: a tap plays it, and no swipe acts on it.
+                else BrowseSwipeActions(item, item.row.station == null) {
                     ListItem(headlineContent = { BrowseTitle(page.shown(item), player = player) },
                         supportingContent = { PinFacts(item, model) },
-                        leadingContent = {
-                            val artwork = rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
-                            Artwork(artwork, Modifier.size(50.dp).clip(CoverShape))
-                        },
+                        leadingContent = { PinCover(item, player, 50.dp) },
                         trailingContent = { PlayerIconButton("rufin-view-more-symbolic", "More", { action = item }) },
                         modifier = Modifier.combinedClickable(onClick = { browse.open(item) }, onLongClick = { action = item }))
                 }
@@ -112,10 +113,23 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
     metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(model, item) { metadata = null } }
 }
 
+/** A pin's picture: a collection's cover, a station's logo. */
+@Composable
+internal fun PinCover(item: BrowseItem, player: PlayerConnection, size: Dp) {
+    val station = item.row.station
+    if (station != null) StationLogo(station.artworkBinding, player, size)
+    else Artwork(rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { size.roundToPx() }),
+        Modifier.size(size).clip(CoverShape))
+}
+
 /** A pin's facts, as GTK's sidebar shows them: its tracks and length, and where a playlist lives
- *  (its source, or Rufin for a smart playlist). */
+ *  (its source, or Rufin for a smart playlist). A station shows its genres there. */
 @Composable
 internal fun PinFacts(item: BrowseItem, model: RufinConnection) {
+    item.row.station?.let { station ->
+        StationGenres(station.genres)
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         SummaryFact("rufin-tracks-symbolic", "Tracks", item.row.trackCount.toString())
         SummaryFact("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
@@ -130,7 +144,6 @@ internal fun PinFacts(item: BrowseItem, model: RufinConnection) {
 @Composable
 private fun PinSelectRow(item: BrowseItem, player: PlayerConnection, picked: Boolean, onToggle: () -> Unit, onMoved: (Int) -> Unit) {
     val density = LocalDensity.current
-    val artwork = rememberArtwork(item.row.artworkIdentity, player, with(density) { 50.dp.roundToPx() })
     var drag by remember { mutableFloatStateOf(0f) }
     val rowHeight = with(density) { 72.dp.toPx() }
     Row(Modifier.fillMaxWidth().height(72.dp).graphicsLayer { translationY = drag }
@@ -138,7 +151,7 @@ private fun PinSelectRow(item: BrowseItem, player: PlayerConnection, picked: Boo
         .clickable(onClick = onToggle).padding(start = 16.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         SelectionMark(picked)
-        Artwork(artwork, Modifier.size(50.dp).clip(CoverShape))
+        PinCover(item, player, 50.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             BrowseTitle(item, player = player)
             PinFacts(item, player.model)

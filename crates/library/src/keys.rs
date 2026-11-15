@@ -56,6 +56,23 @@ pub(crate) fn source_entity_prefix(source: &SourceId, entity_kind: &str) -> Stri
     format!("rufin:source/{entity_kind}/{}/", encode(source.as_str()))
 }
 
+/// The address a queue row has for a radio station's stream. It marks the row as a live
+/// stream, which a plain stream address would not.
+pub fn station_media_uri(stream_url: &str) -> String {
+    format!("rufin:station/{}", encode(stream_url))
+}
+
+/// The stream a station row plays; None for any other row.
+pub fn station_stream(uri: &str) -> Option<String> {
+    decode(uri.strip_prefix("rufin:station/")?)
+}
+
+/// The address a listen of a song a radio station announced is recorded under. No track has
+/// it: the song counts as heard and scrobbles, and no library track or station gains a play.
+pub fn station_song_uri(artist: &str, title: &str) -> String {
+    format!("rufin:station-song/{}/{}", encode(artist), encode(title))
+}
+
 pub fn source_entity_parts(uri: &str) -> Option<(SourceId, String, String)> {
     let mut parts = uri.strip_prefix("rufin:source/")?.split('/');
     let kind = parts.next()?;

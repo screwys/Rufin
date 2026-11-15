@@ -1,0 +1,469 @@
+/* The Radio page: the station on air as a showcase, then the stations and the suggested ones
+   as cards. The header keeps its logo beside its text at every width, as Home's showcase, and
+   its height whatever plays: the song's rows and Heard's slots hold their room while empty. */
+.radio-on-air {
+  margin-bottom: 22px;
+}
+.radio-on-air > form {
+  --inset: 24px;
+}
+
+.radio-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  margin: 0;
+}
+.radio-name .detail-title {
+  min-width: 0;
+  max-width: 100%;
+}
+/* On the band, which is always dark. */
+.radio-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.18);
+}
+.radio-song,
+.radio-artist {
+  flex: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.radio-song {
+  height: 24px;
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 24px;
+}
+.radio-artist {
+  height: 22px;
+  line-height: 22px;
+  opacity: 0.85;
+}
+
+.radio-on-air .detail-facts > .live-mark {
+  font-weight: 600;
+}
+/* The genres' row holds its room without a genre; its chips open nothing. */
+.radio-on-air .detail-genres {
+  height: 26px;
+}
+.radio-on-air .detail-genre-chip,
+.radio-on-air .detail-genre-chip:hover {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  box-shadow: none;
+}
+.radio-on-air .detail-actions {
+  margin-top: 14px;
+  align-items: center;
+}
+/* The facts sit in the buttons' row, between Pause and the homepage. */
+.radio-on-air .detail-actions > .radio-facts {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  justify-content: center;
+}
+
+/* Heard: under the header, two slots. Its second color is the showcase's own for its facts. */
+.radio-heard {
+  --heard-second: color-mix(in srgb, var(--text) 78%, transparent);
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-top: 16px;
+  padding-top: 12px;
+  box-shadow: inset 0 1px var(--border-color, var(--line));
+}
+.radio-heard h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.radio-heard ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radio-heard li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  height: 42px;
+}
+.radio-heard li:nth-child(n + 3) {
+  display: none;
+}
+.radio-heard time {
+  flex: none;
+  min-width: 44px;
+  font-size: 13px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.radio-heard li > span {
+  display: grid;
+  min-width: 0;
+}
+.radio-heard :is(b, i) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-style: normal;
+}
+.radio-heard b {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+.radio-heard i {
+  font-size: 13px;
+  line-height: 20px;
+}
+.radio-heard :is(h3, time, i, .radio-heard-none) {
+  color: var(--heard-second);
+}
+
+/* Narrow: the logo stays on the band with the name and the song beside it, and the rest
+   takes the full width under the band. */
+@container (max-width: 559px) {
+  .radio-on-air.home-showcase > form {
+    --inset: 16px;
+    --gap: 16px;
+    --cover: clamp(112px, 30cqw, 164px);
+    --cover-top: 16px;
+    --band: calc(var(--cover) + 32px);
+  }
+  .radio-on-air .detail-text {
+    display: contents;
+  }
+  .radio-on-air .detail-heading {
+    justify-content: center;
+    height: var(--band);
+    min-height: 0;
+  }
+  .radio-on-air :is(.detail-below, .detail-actions) {
+    grid-column: 1 / -1;
+  }
+  .radio-on-air .detail-below {
+    margin-top: 12px;
+  }
+}
+
+/* With room beside the text, Heard sits on the band at the side, three slots, which end
+   above the band's edge: its text is the band's white. */
+@container (min-width: 840px) {
+  .radio-on-air .detail-body {
+    grid-template-columns: var(--cover) minmax(0, 1fr) 240px;
+  }
+  .radio-heard {
+    --heard-second: rgba(255, 255, 255, 0.8);
+    grid-column: auto;
+    align-self: start;
+    margin-top: 16px;
+    padding: 0 0 0 18px;
+    color: rgba(255, 255, 255, 0.92);
+    box-shadow: inset 1px 0 rgba(255, 255, 255, 0.16);
+  }
+  .radio-heard li:nth-child(n + 3) {
+    display: flex;
+  }
+}
+
+.radio-section {
+  margin-bottom: 24px;
+}
+.radio-heading {
+  gap: 8px;
+}
+.radio-heading h2 {
+  margin-right: auto;
+}
+#station-filter {
+  flex: 0 1 280px;
+  min-width: 0;
+  padding: 6px 11px;
+}
+.radio-heading .icon-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.radio-heading .icon-button:hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.radio-heading .icon-button[aria-expanded="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+}
+.radio-heading .icon {
+  width: 16px;
+  height: 16px;
+}
+/* A station's card plays it wherever it is clicked: its name's button reaches over the whole
+   card, under the card's other buttons. */
+.station-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 10px;
+}
+.station-card {
+  position: relative;
+  min-width: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 8%, var(--sidebar));
+}
+.station-card:hover {
+  background: color-mix(in srgb, var(--text) 12%, var(--sidebar));
+}
+.station-card > form {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px;
+}
+.station-card .cover {
+  flex: none;
+  width: 72px;
+}
+.station-text {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.station-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+.station-name {
+  flex: 1;
+  display: block;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: none;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.station-name:hover {
+  background: none;
+}
+.station-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.station-card.playing .station-name {
+  color: var(--accent);
+}
+.station-end {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.station-end:hover {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+.station-end .icon {
+  width: 15px;
+  height: 15px;
+}
+/* The handle, the pin, Edit and Delete, at the card's top right while the pointer or the focus
+   is in the card, and always where nothing hovers. */
+.station-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+}
+.station-tools .station-end,
+.station-tools .station-end:hover {
+  background: color-mix(in srgb, var(--text) 20%, var(--bg));
+}
+.station-tools .station-end:hover {
+  background: color-mix(in srgb, var(--text) 28%, var(--bg));
+}
+.station-card:is(:hover, :focus-within) .station-tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+.station-card:is(:hover, :focus-within) .station-title:has(.station-tools) {
+  padding-right: 102px;
+}
+.station-card:is(:hover, :focus-within) .station-title:has([data-action="station-pin"]) {
+  padding-right: 138px;
+}
+@media (hover: none) {
+  .station-tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .station-title:has(.station-tools) {
+    padding-right: 102px;
+  }
+  .station-title:has([data-action="station-pin"]) {
+    padding-right: 138px;
+  }
+}
+/* The handle moves its card among the added stations; where it would land shows as the queue
+   shows a drop, at the side it lands on. */
+.station-grip {
+  cursor: grab;
+  touch-action: none;
+}
+.station-card.station-moving {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+@media (hover: none) {
+  .station-card:has(.station-tools) {
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+.station-genres {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.station-card .station-genres {
+  margin-top: -4px;
+}
+.station-genres .icon {
+  width: 13px;
+  height: 13px;
+}
+.station-genres > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.station-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text) 84%, transparent);
+}
+.station-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.station-channel {
+  position: relative;
+  height: 24px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.station-channel:hover {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+.station-channel[aria-current="true"] {
+  color: var(--accent-foreground, white);
+  background: var(--blue);
+}
+
+/* Add Station: a field over boxed rows. */
+.station-dialog form {
+  display: grid;
+  gap: 12px;
+}
+.station-dialog .pref-group,
+.station-dialog p.pref-note {
+  margin: 0;
+}
+/* The danger color, drawn toward the text so that it reads on either theme. */
+.station-dialog .failed {
+  color: color-mix(in srgb, var(--destructive, #e01b24) 72%, var(--text));
+}
+.station-dialog .pref-row .cover {
+  flex: none;
+  width: 36px;
+  border-radius: 6px;
+}
+.station-dialog .pref-label > :is(span, small) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* A field in a boxed row is filled apart from its row. */
+.station-dialog .pref-row input {
+  background: var(--bg);
+}
+.station-result-add,
+.station-added {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.station-result-add {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.station-result-add:hover {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+.station-added {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+}
+.station-added .icon {
+  width: 14px;
+  height: 14px;
+}
+.station-dialog .dialog-actions {
+  margin-top: 0;
+}
+/* Edit Station, in Edit Playlist's shape: the picture and its buttons over the fields. */
+#station-edit-picture {
+  flex: none;
+  width: 160px;
+}

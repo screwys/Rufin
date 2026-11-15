@@ -75,6 +75,8 @@ mod search;
 mod selection;
 pub use selection::MemberSelection;
 mod smart_playlists;
+mod stations;
+pub use stations::{StationRow, StationWrite};
 mod source_kind;
 pub use source_kind::SourceKind;
 mod storage;
@@ -92,6 +94,7 @@ pub use activity_import::ActivityImportReport;
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
     authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,
+    station_artwork, station_picture_url, station_song_artwork, station_song_cover,
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
@@ -117,7 +120,7 @@ pub use keys::{
     SourceId, SourceKey, TrackKey, cue_media_parts, cue_media_uri, document_access_uri,
     document_fragment_parts, document_locator_fragment, document_locator_parts, document_media_id,
     document_media_uri, file_media_path, normalize_direct_media_uri, source_entity_parts,
-    source_entity_uri, source_id_for_uri,
+    source_entity_uri, source_id_for_uri, station_media_uri, station_song_uri, station_stream,
 };
 pub use local::{
     Downloads, FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite, LocalLocatorWrite,
