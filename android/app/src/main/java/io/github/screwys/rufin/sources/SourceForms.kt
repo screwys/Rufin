@@ -83,6 +83,13 @@ internal fun SourceSwitch(label: String, checked: Boolean, change: (Boolean) -> 
 }
 
 @Composable
+internal fun SourceStreamSettings(setup: SourceSetupConnection) {
+    SettingsGroup(translate("Stream quality")) {
+        io.github.screwys.rufin.downloads.AudioQualityControls(setup.form.streamQuality, !setup.working, follows = true, change = setup::setStreamQuality)
+    }
+}
+
+@Composable
 internal fun SourceRatingSettings(setup: SourceSetupConnection) {
     SettingsGroup(translate("Library")) {
         SourceSwitch("Enable partial star ratings", setup.form.halfStars, setup::setHalfStars, !setup.working)

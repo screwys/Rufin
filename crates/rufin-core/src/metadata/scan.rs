@@ -2,7 +2,7 @@ use super::review::LookupProgress;
 use super::{EditSession, MetadataCandidate, MetadataEditor};
 use audio_processing::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 use library::ReadCancellation;
-use playback::{StreamQuality, StreamRequest};
+use playback::{AudioQuality, StreamRequest};
 use sources::SourceMetadataError as Error;
 use std::sync::{
     Arc,
@@ -112,7 +112,7 @@ impl MetadataEditor {
         let owner = self.source.clone();
         let stream = crate::playback::prepare_stream(
             &playable,
-            StreamRequest::new(uri, StreamQuality::Original),
+            StreamRequest::new(uri, AudioQuality::Original),
             local.as_ref(),
             Some(self.source.downloads()),
             move |id| async move { owner.open_client(id).await },

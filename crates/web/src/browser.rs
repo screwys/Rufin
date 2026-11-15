@@ -358,8 +358,90 @@ struct Head<'a> {
     facts: Vec<(&'static str, String)>,
     /// Each genre's name and the page it opens.
     genres: Vec<(String, String)>,
+    /// The links in the band's corner; Home's header has none.
+    links: Vec<HeadLink>,
     /// The band's gradient stops, from the cover's preview.
     band: String,
+}
+
+/// A link in a detail header's corner: an external site, or a playlist's source.
+struct HeadLink {
+    title: String,
+    /// Its picture's address.
+    image: String,
+    /// A playlist's source without a page of its own only shows its picture.
+    url: Option<String>,
+}
+
+/// The address of the picture core names `icon`: a site's or a source's.
+fn link_image(icon: &str) -> Option<String> {
+    match icon
+        .strip_prefix("io.github.screwys.Rufin.")?
+        .split_once('.')?
+    {
+        ("external", site) => Some(format!("/site-icons/{site}")),
+        ("source", "opensubsonic") => Some("/source-icons/subsonic".to_owned()),
+        ("source", kind) => Some(format!("/source-icons/{kind}")),
+        _ => None,
+    }
+}
+
+/// The links `header`'s page shows, as GTK's: an album's and an artist's external sites, and a
+/// playlist's source. A folder is no link a browser can open.
+fn head_links(
+    products: &ProductHandles,
+    settings: &rufin_core::settings::app::Settings,
+    header: &library::Header,
+) -> Vec<HeadLink> {
+    use rufin_core::detail_links::{self, DetailLink};
+    let sites = &settings.application.external_site_links;
+    let source = |uri: &str| {
+        library::source_entity_parts(uri)
+            .and_then(|(source_id, _, _)| products.source.configuration(&source_id))
+    };
+    let shown = |links: Vec<DetailLink>| {
+        links
+            .into_iter()
+            .filter_map(|link| {
+                Some(HeadLink {
+                    image: link_image(link.icon_name)?,
+                    title: localization::tr(link.title),
+                    url: Some(link.url?),
+                })
+            })
+            .collect()
+    };
+    match header {
+        library::Header::Album(album) => shown(detail_links::album_external_links(
+            sites,
+            source(&album.row.media_uri).as_ref(),
+            album,
+        )),
+        library::Header::Artist(artist) => shown(detail_links::artist_external_links(
+            sites,
+            source(&artist.row.media_uri).as_ref(),
+            artist,
+        )),
+        library::Header::Playlist(playlist) => playlist
+            .source_id
+            .as_ref()
+            .and_then(|id| {
+                products
+                    .source
+                    .configuration(&sources::SourceId::new(id.clone()))
+            })
+            .and_then(|source| {
+                let icon = rufin_core::runtime::source::source_kind_icon_name(&source.kind)?;
+                Some(HeadLink {
+                    image: link_image(icon)?,
+                    url: source.detail_web_url("playlist", &playlist.object_id).ok(),
+                    title: source.name,
+                })
+            })
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 impl<'a> Head<'a> {
@@ -370,6 +452,7 @@ impl<'a> Head<'a> {
         row: Row,
         title: Option<String>,
         home: bool,
+        links: Vec<HeadLink>,
         form: &'a Form,
     ) -> Self {
         use library::GenreKey;
@@ -451,6 +534,7 @@ impl<'a> Head<'a> {
             home,
             facts,
             genres,
+            links,
             band,
         }
     }
@@ -494,6 +578,7 @@ pub(super) fn showcase(
                 Row::Album(showcase.current.album.clone()),
                 Some(showcase.current.title.clone()),
                 true,
+                Vec::new(),
                 form,
             )
         }),
@@ -581,6 +666,7 @@ pub(super) fn library(
                 header_row(header),
                 Some(page::title(products, token, Some(header))),
                 false,
+                head_links(products, &settings, header),
                 form,
             )
         }),
@@ -696,6 +782,7 @@ pub(super) fn home(
                             Row::Album(showcase.current.album.clone()),
                             Some(showcase.current.title.clone()),
                             true,
+                            Vec::new(),
                             form,
                         )),
                         rows: Vec::new(),
@@ -807,16 +894,15 @@ impl<'a> StationCard<'a> {
 struct OnAir<'a> {
     station: StationCard<'a>,
     channel: Option<&'a str>,
-    /// The song the stream announces and its artist, each in a row that stays when it is empty.
+    /// The song the stream announces and its artist; empty without one.
     title: &'a str,
     artist: &'a str,
     format: Option<&'a str>,
     playing: bool,
     /// The station is the queue's item; else the header's Play plays it.
     tuned: bool,
-    /// The slots of Heard, as many as the widest header lists: the songs heard, newest first,
-    /// then the slots that wait for one.
-    heard: [Option<&'a rufin_core::stations::HeardSong>; 3],
+    /// The songs heard before the one that plays, newest first.
+    heard: Vec<&'a rufin_core::stations::HeardSong>,
     /// The band's gradient stops, from the logo's preview.
     band: String,
 }
@@ -896,7 +982,13 @@ pub(super) fn radio(
             format: air.format.as_deref(),
             playing: air.playing,
             tuned: air.tuned,
-            heard: std::array::from_fn(|slot| air.heard.get(slot)),
+            heard: {
+                let now = air
+                    .heard
+                    .first()
+                    .is_some_and(|song| air.title.as_deref() == Some(song.title.as_str()));
+                air.heard.iter().skip(usize::from(now)).collect()
+            },
             band: band(products, &settings, air.station.artwork_binding.as_deref()),
         }),
         sections: vec![
@@ -966,6 +1058,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/translations.js", get(translations))
         .route("/icons/{name}", get(icon))
         .route("/source-icons/{kind}", get(source_icon))
+        .route("/site-icons/{site}", get(site_icon))
         .route("/{file}", get(web_file))
         .route("/styles/{file}", get(web_file))
         .route(
@@ -1024,6 +1117,29 @@ async fn source_icon(
         "plex" => png!("plex"),
         "emby" => png!("emby"),
         _ => return Err(error(StatusCode::NOT_FOUND, "Source icon not found")),
+    })
+}
+
+async fn site_icon(
+    axum::extract::Path(site): axum::extract::Path<String>,
+) -> Result<Response<Body>, Error> {
+    macro_rules! png {
+        ($name:literal) => {
+            asset(
+                "image/png",
+                include_bytes!(concat!(
+                    "../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.external.",
+                    $name,
+                    ".png"
+                ))
+                .as_slice(),
+            )
+        };
+    }
+    Ok(match site.as_str() {
+        "lastfm" => png!("lastfm"),
+        "musicbrainz" => png!("musicbrainz"),
+        _ => return Err(error(StatusCode::NOT_FOUND, "Site icon not found")),
     })
 }
 

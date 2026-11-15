@@ -1,13 +1,41 @@
-/* The Radio page: the station on air as a showcase, then the stations and the suggested ones
-   as cards. The header keeps its logo beside its text at every width, as Home's showcase, and
-   its height whatever plays: the song's rows and Heard's slots hold their room while empty. */
+/* The Radio page: the station on air as one card in its picture's colours, then the stations
+   and the suggested ones as cards. In the card the picture has the names, the facts and the
+   buttons beside it, and the songs heard before under them, or at their side when it is wide. */
 .radio-on-air {
+  container-type: inline-size;
   margin-bottom: 22px;
 }
-.radio-on-air > form {
-  --inset: 24px;
+.radio-card {
+  padding: 16px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  background-image:
+    linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.3)),
+    linear-gradient(135deg, var(--band-start), var(--band-middle) 58%, var(--band-end));
 }
-
+/* The text ends where the picture does; when genres open it grows down past the picture,
+   which keeps its place. */
+.radio-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: 16px;
+}
+.radio-logo {
+  align-self: start;
+}
+.radio-logo {
+  width: clamp(120px, 34cqw, 150px);
+}
+.radio-logo .cover {
+  width: 100%;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+.radio-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .radio-name {
   display: flex;
   flex-wrap: wrap;
@@ -19,8 +47,8 @@
 .radio-name .detail-title {
   min-width: 0;
   max-width: 100%;
+  font-size: 22px;
 }
-/* On the band, which is always dark. */
 .radio-badge {
   flex: none;
   display: inline-flex;
@@ -34,69 +62,62 @@
 }
 .radio-song,
 .radio-artist {
-  flex: none;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .radio-song {
-  height: 24px;
-  margin-top: 2px;
+  margin-top: 4px;
   font-size: 16px;
   font-weight: 650;
-  line-height: 24px;
 }
 .radio-artist {
-  height: 22px;
-  line-height: 22px;
+  font-size: 14px;
   opacity: 0.85;
 }
-
+.radio-on-air .detail-meta {
+  margin-top: 8px;
+  padding-bottom: 0;
+}
 .radio-on-air .detail-facts > .live-mark {
   font-weight: 600;
 }
-/* The genres' row holds its room without a genre; its chips open nothing. */
-.radio-on-air .detail-genres {
-  height: 26px;
-}
-.radio-on-air .detail-genre-chip,
-.radio-on-air .detail-genre-chip:hover {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  background: color-mix(in srgb, var(--text) 10%, transparent);
-  box-shadow: none;
-}
 .radio-on-air .detail-actions {
-  margin-top: 14px;
   align-items: center;
+  margin-top: 12px;
 }
-/* The facts sit in the buttons' row, between Pause and the homepage. */
-.radio-on-air .detail-actions > .radio-facts {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-top: 0;
-  justify-content: center;
+.radio-on-air .detail-round {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.17);
+}
+.radio-on-air .detail-round:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+/* A saved station's bookmark is filled; its button keeps the others' fill. */
+.radio-on-air .detail-round[aria-pressed="true"] {
+  color: white;
+  background: rgba(255, 255, 255, 0.17);
+}
+.radio-on-air .detail-round[aria-pressed="true"]:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
-/* Heard: under the header, two slots. Its second color is the showcase's own for its facts. */
+/* Heard: the earlier songs, one line each. */
 .radio-heard {
-  --heard-second: color-mix(in srgb, var(--text) 78%, transparent);
-  grid-column: 1 / -1;
   min-width: 0;
-  margin-top: 16px;
+  margin-top: 14px;
   padding-top: 12px;
-  box-shadow: inset 0 1px var(--border-color, var(--line));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.16);
 }
 .radio-heard h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 18px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
 }
 .radio-heard ol {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -104,86 +125,68 @@
 .radio-heard li {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  height: 42px;
-}
-.radio-heard li:nth-child(n + 3) {
-  display: none;
+  height: 28px;
+  font-size: 14px;
+  white-space: nowrap;
 }
 .radio-heard time {
   flex: none;
-  min-width: 44px;
-  font-size: 13px;
-  line-height: 22px;
+  width: 40px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-}
-.radio-heard li > span {
-  display: grid;
-  min-width: 0;
-}
-.radio-heard :is(b, i) {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-style: normal;
+  color: rgba(255, 255, 255, 0.6);
 }
 .radio-heard b {
-  font-size: 14px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 500;
-  line-height: 22px;
+  text-overflow: ellipsis;
+  color: rgba(255, 255, 255, 0.86);
 }
 .radio-heard i {
-  font-size: 13px;
-  line-height: 20px;
-}
-.radio-heard :is(h3, time, i, .radio-heard-none) {
-  color: var(--heard-second);
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  color: rgba(255, 255, 255, 0.62);
 }
 
-/* Narrow: the logo stays on the band with the name and the song beside it, and the rest
-   takes the full width under the band. */
-@container (max-width: 559px) {
-  .radio-on-air.home-showcase > form {
-    --inset: 16px;
-    --gap: 16px;
-    --cover: clamp(112px, 30cqw, 164px);
-    --cover-top: 16px;
-    --band: calc(var(--cover) + 32px);
+@container (min-width: 700px) {
+  .radio-card {
+    padding: 20px;
   }
-  .radio-on-air .detail-text {
-    display: contents;
+  .radio-card:has(.radio-heard) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+    align-items: center;
+    gap: 24px;
   }
-  .radio-on-air .detail-heading {
-    justify-content: center;
-    height: var(--band);
-    min-height: 0;
+  .radio-top {
+    gap: 24px;
   }
-  .radio-on-air :is(.detail-below, .detail-actions) {
-    grid-column: 1 / -1;
+  .radio-logo {
+    width: 164px;
   }
-  .radio-on-air .detail-below {
+  .radio-name .detail-title {
+    font-size: 32px;
+  }
+  .radio-song {
+    font-size: 18px;
+  }
+  .radio-artist {
+    font-size: 15px;
+  }
+  .radio-on-air .detail-meta {
     margin-top: 12px;
   }
-}
-
-/* With room beside the text, Heard sits on the band at the side, three slots, which end
-   above the band's edge: its text is the band's white. */
-@container (min-width: 840px) {
-  .radio-on-air .detail-body {
-    grid-template-columns: var(--cover) minmax(0, 1fr) 240px;
-  }
   .radio-heard {
-    --heard-second: rgba(255, 255, 255, 0.8);
-    grid-column: auto;
-    align-self: start;
-    margin-top: 16px;
-    padding: 0 0 0 18px;
-    color: rgba(255, 255, 255, 0.92);
+    margin: 0;
+    padding: 0 0 0 24px;
     box-shadow: inset 1px 0 rgba(255, 255, 255, 0.16);
-  }
-  .radio-heard li:nth-child(n + 3) {
-    display: flex;
   }
 }
 

@@ -9,7 +9,7 @@ import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceSummary
-import io.github.screwys.rufin.shared.sources.DownloadQuality
+import io.github.screwys.rufin.shared.library.AudioQuality
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -100,7 +100,7 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
     fun rule(source: String, rule: DownloadRule, enabled: Boolean, deleteDownloads: Boolean = false) = model.runAction {
         withSource { it.setDownloadRule(source, rule, enabled, deleteDownloads) }; refreshSources()
     }
-    fun quality(source: String, quality: DownloadQuality) = model.runAction { withSettings { it.setDownloadQuality(source, quality) }; refreshSources() }
+    fun quality(source: String, quality: AudioQuality) = model.runAction { withSettings { it.setDownloadQuality(source, quality) }; refreshSources() }
     fun directory(source: String, uri: String?) = model.runAction {
         withSettings { it.setDownloadLocation(source, uri?.let { value -> DownloadDirectory.Document(value) }) }
         refreshSources()

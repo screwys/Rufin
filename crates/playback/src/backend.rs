@@ -1,5 +1,5 @@
 use crate::{
-    LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, StreamQuality, VolumeScale,
+    AudioQuality, LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, VolumeScale,
 };
 use audio_processing::ResolvedStream;
 use library::LoudnessMeasurement;
@@ -13,7 +13,9 @@ use thiserror::Error;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StreamRequest {
     pub media_uri: String,
-    pub quality: StreamQuality,
+    /// What the source is asked for. The player leaves it to its owner, which knows the
+    /// quality chosen for the track's source.
+    pub quality: AudioQuality,
     #[serde(default)]
     pub session_identifier: Option<String>,
     /// A local copy that failed to open or decode; the stream comes from the next candidate.
@@ -26,10 +28,10 @@ pub struct StreamRequest {
 
 impl StreamRequest {
     pub fn original(media_uri: impl Into<String>) -> Self {
-        Self::new(media_uri, StreamQuality::Original)
+        Self::new(media_uri, AudioQuality::Original)
     }
 
-    pub fn new(media_uri: impl Into<String>, quality: StreamQuality) -> Self {
+    pub fn new(media_uri: impl Into<String>, quality: AudioQuality) -> Self {
         Self {
             media_uri: media_uri.into(),
             quality,

@@ -1,3 +1,4 @@
+pub use library::AudioQuality;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_EBU_R128_TARGET_LUFS: f64 = -23.0;
@@ -11,24 +12,10 @@ pub const DEFAULT_PLAYBACK_RATE: f64 = 1.0;
 pub const DEFAULT_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MIN_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MAX_AUTO_DJ_REFILL_THRESHOLD: u8 = 10;
+pub const DEFAULT_AUTO_DJ_REFILL_COUNT: u8 = 5;
+pub const MIN_AUTO_DJ_REFILL_COUNT: u8 = 1;
+pub const MAX_AUTO_DJ_REFILL_COUNT: u8 = 20;
 const PERCEPTUAL_DB_RANGE: f64 = 50.0;
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum StreamQuality {
-    #[default]
-    Original,
-    MaxBitrateKbps(u32),
-}
-
-impl StreamQuality {
-    pub const fn max_bitrate_kbps(self) -> Option<u32> {
-        match self {
-            Self::Original => None,
-            Self::MaxBitrateKbps(kbps) => Some(kbps),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
@@ -106,7 +93,7 @@ macro_rules! playback_preference_fields {
                 #[serde(default)]
                 write_ebu_r128_tags: bool = false => set_write_ebu_r128_tags;
                 #[serde(default)]
-                stream_quality: StreamQuality = StreamQuality::Original => set_stream_quality;
+                stream_quality: AudioQuality = AudioQuality::Original => set_stream_quality;
                 #[serde(default, skip_serializing_if = "Option::is_none")]
                 audio_output: Option<String> = None;
                 #[serde(default = "default_playback_rate")]

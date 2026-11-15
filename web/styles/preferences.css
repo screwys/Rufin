@@ -307,7 +307,7 @@ button.pref-row:hover {
 .pref-quality {
   display: block;
 }
-.pref-quality .download-quality-controls {
+.pref-quality .audio-quality-controls {
   display: grid;
   gap: 4px;
 }
@@ -368,6 +368,11 @@ a.pref-row:hover {
 /* Customization: its tabs, as GTK's inline view switcher. */
 .segmented.pref-tabs {
   margin: 12px 0 0;
+}
+/* A tab that is one group has no title to set it off from the tabs. */
+.pref-tabs ~ .pref-group,
+.pref-tabs ~ [data-tabs] > p.pref-note:first-child {
+  margin-top: 12px;
 }
 /* Customization › Menus: the item menu, each entry showing or hiding itself. */
 .menu-preview {

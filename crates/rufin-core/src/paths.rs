@@ -47,7 +47,7 @@ const STORE_DIRECTORY: &str = "store";
 const STORE_FILE: &str = "rufin-library.sqlite";
 // Releases up to 0.16 kept their Store here; it is imported once and left for a downgrade.
 const RELEASED_STORE_FILE: &str = "rufin-store.sqlite";
-const SETTINGS_FILE: &str = "settings.json";
+const SETTINGS_FILE: &str = "rufin.toml";
 const ARTWORK_DIRECTORY: &str = "covers";
 const PLAYBACK_DIRECTORY: &str = "playback";
 const DOWNLOADS_DIRECTORY: &str = "downloads";

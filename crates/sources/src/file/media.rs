@@ -82,6 +82,9 @@ pub(crate) enum MediaRead {
     Accepted(Box<ScannedTrack>),
     Rejected,
     Unreadable,
+    /// An online-only cloud file, which a read would download: it is not opened, and the
+    /// Store keeps what it holds of it.
+    Deferred,
 }
 
 #[derive(Default)]

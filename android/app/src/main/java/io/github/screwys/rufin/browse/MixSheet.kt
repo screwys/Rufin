@@ -29,7 +29,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.CancellationException
-import io.github.screwys.rufin.shared.rufin_core.RandomPlaySettings
+import io.github.screwys.rufin.shared.rufin_core.MixSettings
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.library.PlayedFilter
 
@@ -40,9 +40,9 @@ private val mixYears = 1850..2050
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit) {
+internal fun MixSheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit) {
     val library = browse.library
-    var settings by remember { mutableStateOf<RandomPlaySettings?>(null) }
+    var settings by remember { mutableStateOf<MixSettings?>(null) }
     var albums by remember { mutableStateOf(false) }
     // Tracks and albums each keep their own count; the row shows the chosen unit's.
     var limit by remember { mutableStateOf(mixCounts.first) }
@@ -56,7 +56,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     LaunchedEffect(library) {
         try {
             if (library == null) return@LaunchedEffect
-            val saved = model.connectedService().runtime.value!!.getOrThrow().settings().use { it.randomPreferences() }
+            val saved = model.connectedService().runtime.value!!.getOrThrow().settings().use { it.mixPreferences() }
             settings = saved
             albums = saved.albums
             limit = saved.limit.coerceIn(mixCounts)
@@ -69,7 +69,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     }
     LaunchedEffect(library, settings) {
         settings?.let { raw ->
-            try { genreTitle = library?.randomGenreTitle(raw).orEmpty() }
+            try { genreTitle = library?.mixGenreTitle(raw).orEmpty() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { model.runAction { throw error } }
         }
@@ -79,7 +79,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
             val saved = settings!!.copy(albums = albums, limit = limit, albumLimit = albumLimit,
                 minYear = minYear, maxYear = maxYear, playedFilter = filter)
             model.connectedService().playRequest {
-                val empty = library?.randomPlay(saved, placement) != false
+                val empty = library?.mix(saved, placement) != false
                 if (!empty) onDismiss() else error(translate("No matching tracks found"))
             }
         }
@@ -144,9 +144,9 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
             }
         }
     }
-    if (genres) RandomGenreSheet(model, browse, { genres = false }) { route ->
+    if (genres) MixGenreSheet(model, browse, { genres = false }) { route ->
         model.runAction {
-            settings = settings?.copy(genre = library?.randomGenre(route))
+            settings = settings?.copy(genre = library?.mixGenre(route))
             genres = false
         }
     }
@@ -200,7 +200,7 @@ private fun MixYearsDialog(minYear: UShort?, maxYear: UShort?, dismiss: () -> Un
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit,
+private fun MixGenreSheet(model: RufinConnection, browse: BrowseConnection, onDismiss: () -> Unit,
     select: (Route?) -> Unit,
 ) {
     var filter by remember { mutableStateOf("") }

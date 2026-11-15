@@ -504,7 +504,7 @@ fn latin(name: &str) -> bool {
 fn folded(text: &str) -> String {
     let mut lower = String::with_capacity(text.len());
     for character in text.chars() {
-        crate::lyrics_search::fold(character, &mut lower);
+        names::fold(character, &mut lower);
     }
     lower
 }

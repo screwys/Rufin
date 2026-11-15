@@ -15,13 +15,11 @@ use tracing::warn;
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::route_layout::{
-    DETAIL_SHOWCASE_STACKED_WIDTH as STACKED_WIDTH, detail_showcase_cover_size,
+    DETAIL_SHOWCASE_NARROW_WIDTH as NARROW_WIDTH, detail_showcase_cover_size,
 };
 use crate::menus::media_menus::{CollectionPlay, row_favorite};
 use crate::widgets::artwork::{ArtworkTile, CoverGroupProjection};
-use crate::widgets::cover_controls::{
-    cover_hover_controls_with_favorite, cover_hover_min_width, showcase_cover_overlay,
-};
+use crate::widgets::cover_controls::{cover_hover_controls_with_favorite, showcase_cover_overlay};
 use crate::widgets::interactions::ContextMenuOpen;
 use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::localization::bind_label_text_with;
@@ -30,7 +28,6 @@ use rufin_core::route::Route;
 
 /// From this width titles take their largest size.
 const LARGE_WIDTH: i32 = 840;
-const GENRE_SPACING: i32 = 6;
 const STEP_BUTTON_SIZE: i32 = 34;
 
 mod showcase_imp {
@@ -66,9 +63,11 @@ mod showcase_imp {
         #[template_child]
         pub detail: TemplateChild<gtk::Label>,
         #[template_child]
-        pub below: TemplateChild<gtk::Box>,
+        pub meta: TemplateChild<AllocationOwner>,
         #[template_child]
-        pub facts: TemplateChild<gtk::Box>,
+        pub meta_line: TemplateChild<adw::WrapBox>,
+        #[template_child]
+        pub genre_more: TemplateChild<gtk::Button>,
         #[template_child]
         pub facts_fade: TemplateChild<crate::widgets::edge_fade::TextFade>,
         #[template_child]
@@ -97,14 +96,6 @@ mod showcase_imp {
         pub summary_label_2: TemplateChild<gtk::Label>,
         #[template_child]
         pub external_links: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub genres: TemplateChild<AllocationOwner>,
-        #[template_child]
-        pub genre_row: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub genre_overflow: TemplateChild<gtk::MenuButton>,
-        #[template_child]
-        pub genre_overflow_list: TemplateChild<gtk::Box>,
         #[template_child]
         pub actions: TemplateChild<gtk::Box>,
         #[template_child]
@@ -138,6 +129,10 @@ mod showcase_imp {
         pub band_stops: Cell<[[u8; 3]; 3]>,
         /// The shape and width last laid out, to fit the text again when it changes.
         pub fitted: Cell<Option<(ShowcaseShape, i32)>>,
+        /// Whether the line starts with facts: a summary's, or an artist's counts.
+        pub has_facts: Cell<bool>,
+        /// The facts and the genres as one line.
+        pub(crate) meta_fit: std::cell::OnceCell<Rc<MetaLine>>,
     }
 
     #[glib::object_subclass]
@@ -174,9 +169,9 @@ glib::wrapper! {
 /// How a header lays out: Home's, a detail page's or an artist sub-page's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShowcaseShape {
-    /// Facts and genres under the band; the cover takes its own row when narrow.
+    /// A detail page's, with its genres and links.
     Detail,
-    /// Facts on the band and the buttons beside the cover, at every width.
+    /// Home's, with room at the sides for ‹ ›.
     Home,
     /// The band alone.
     Plain,
@@ -191,8 +186,6 @@ impl ShowcaseShape {
 
 /// A header's geometry at one width.
 pub(crate) struct ShowcaseLayout {
-    /// The cover in its own row, centred, with the text under it.
-    pub(crate) stacked: bool,
     pub(crate) band: i32,
     pub(crate) cover: i32,
     /// The cover's top edge below the band's.
@@ -205,7 +198,7 @@ pub(crate) struct ShowcaseLayout {
 
 impl ShowcaseLayout {
     pub(crate) fn of(shape: ShowcaseShape, width: i32) -> Self {
-        let narrow = width < STACKED_WIDTH;
+        let narrow = width < NARROW_WIDTH;
         let size_class = if narrow {
             "detail-showcase-small"
         } else if width < LARGE_WIDTH {
@@ -213,36 +206,22 @@ impl ShowcaseLayout {
         } else {
             "detail-showcase-large"
         };
-        let (stacked, band, cover, cover_top, inset, gap) = match (shape, narrow) {
-            (ShowcaseShape::Detail, false) => {
-                (false, 196, detail_showcase_cover_size(width), 68, 24, 28)
-            }
-            (ShowcaseShape::Detail, true) => {
-                (true, 136, detail_showcase_cover_size(width), 24, 16, 22)
-            }
-            // Home leaves room at the sides for ‹ ›.
+        let (band, cover, cover_top, inset, gap) = match (shape, narrow) {
+            (ShowcaseShape::Detail, false) => (196, detail_showcase_cover_size(width), 68, 24, 28),
             (ShowcaseShape::Home, false) => (
-                false,
                 196,
-                150 + (width - STACKED_WIDTH).min(200) * 46 / 200,
+                150 + (width - NARROW_WIDTH).min(200) * 46 / 200,
                 52,
                 48,
                 28,
             ),
-            (ShowcaseShape::Home, true) => (
-                false,
-                150,
-                // Never narrower than its hover controls.
-                ((width - 32) * 3 / 10).clamp(cover_hover_min_width(), 150),
-                38,
-                16,
-                16,
-            ),
-            (ShowcaseShape::Plain, false) => (false, 120, 0, 0, 24, 0),
-            (ShowcaseShape::Plain, true) => (false, 104, 0, 0, 16, 0),
+            (ShowcaseShape::Detail | ShowcaseShape::Home, true) => {
+                (150, detail_showcase_cover_size(width), 38, 16, 16)
+            }
+            (ShowcaseShape::Plain, false) => (120, 0, 0, 24, 0),
+            (ShowcaseShape::Plain, true) => (104, 0, 0, 16, 0),
         };
         Self {
-            stacked,
             band,
             cover,
             cover_top,
@@ -250,6 +229,160 @@ impl ShowcaseLayout {
             gap,
             size_class,
         }
+    }
+}
+
+/// The facts and the genres as one line. The genres that do not fit it wait behind +n (› when
+/// none fits), which opens them onto further lines; ‹ closes them again.
+pub(crate) struct MetaLine {
+    owner: AllocationOwner,
+    line: adw::WrapBox,
+    lead: gtk::Widget,
+    more: gtk::Button,
+    /// Each chip with the width it last showed with: a hidden chip measures nothing.
+    chips: RefCell<Vec<(gtk::Widget, i32)>>,
+    /// What `more` shows, and its width when it last showed.
+    face: RefCell<String>,
+    more_width: Cell<i32>,
+    open: Cell<bool>,
+}
+
+const SHOW_GENRES_ICON: &str = "rufin-go-next-symbolic";
+const HIDE_GENRES_ICON: &str = "rufin-go-previous-symbolic";
+
+impl MetaLine {
+    /// Binds the line in `owner`, which `lead` starts and `more` ends. `resized` runs after +n
+    /// opened or closed the genres.
+    pub(crate) fn bind(
+        owner: &AllocationOwner,
+        line: &adw::WrapBox,
+        lead: &impl IsA<gtk::Widget>,
+        more: &gtk::Button,
+        resized: impl Fn() + 'static,
+    ) -> Rc<Self> {
+        let meta = Rc::new(Self {
+            owner: owner.clone(),
+            line: line.clone(),
+            lead: lead.clone().upcast(),
+            more: more.clone(),
+            chips: RefCell::new(Vec::new()),
+            face: RefCell::new(String::new()),
+            more_width: Cell::new(0),
+            open: Cell::new(false),
+        });
+        let weak = Rc::downgrade(&meta);
+        owner.set_width_callback(Some(Rc::new(move |width| {
+            if let Some(meta) = weak.upgrade() {
+                meta.fit(width);
+            }
+        })));
+        let weak = Rc::downgrade(&meta);
+        more.connect_clicked(move |_| {
+            let Some(meta) = weak.upgrade() else {
+                return;
+            };
+            meta.open.set(!meta.open.get());
+            meta.owner.queue_resize();
+            resized();
+        });
+        meta
+    }
+
+    /// Shows `chips` after the facts, closed to one line.
+    pub(crate) fn set_chips(&self, chips: impl IntoIterator<Item = gtk::Widget>) {
+        for (chip, _) in self.chips.take() {
+            self.line.remove(&chip);
+        }
+        let mut previous = self.lead.clone();
+        let chips = chips
+            .into_iter()
+            .map(|chip| {
+                self.line.insert_child_after(&chip, Some(&previous));
+                previous = chip.clone();
+                (chip, 0)
+            })
+            .collect();
+        self.chips.replace(chips);
+        self.open.set(false);
+        self.owner.queue_resize();
+    }
+
+    pub(crate) fn has_chips(&self) -> bool {
+        !self.chips.borrow().is_empty()
+    }
+
+    fn fit(&self, width: i32) {
+        let natural = |widget: &gtk::Widget| widget.measure(gtk::Orientation::Horizontal, -1).1;
+        let spacing = self.line.child_spacing();
+        let mut chips = self.chips.borrow_mut();
+        for (chip, shown) in chips.iter_mut() {
+            if chip.is_visible() {
+                *shown = natural(chip);
+            }
+        }
+        let lead = if self.lead.is_visible() {
+            natural(&self.lead).min(width) + spacing
+        } else {
+            0
+        };
+        let fits = |count: usize, reserve: i32| {
+            let chips: i32 = chips[..count]
+                .iter()
+                .map(|(_, shown)| shown + spacing)
+                .sum();
+            lead + chips + reserve <= width + spacing
+        };
+        let all = fits(chips.len(), 0);
+        if all {
+            self.open.set(false);
+        }
+        let open = self.open.get();
+        // Closed, the line stays one line: the facts give way to +n. Open, it wraps.
+        self.line.set_wrap_policy(if open {
+            adw::WrapPolicy::Natural
+        } else {
+            adw::WrapPolicy::Minimum
+        });
+        let count = if all || open {
+            chips.len()
+        } else {
+            if self.more_width.get() == 0 {
+                self.show_more(&format!("+{}", chips.len()));
+                self.more.set_visible(true);
+            }
+            if self.more.is_visible() {
+                self.more_width.set(natural(self.more.upcast_ref()));
+            }
+            let reserve = self.more_width.get() + spacing;
+            (0..chips.len())
+                .rev()
+                .find(|count| fits(*count, reserve))
+                .unwrap_or(0)
+        };
+        for (index, (chip, _)) in chips.iter().enumerate() {
+            chip.set_visible(index < count);
+        }
+        if open {
+            self.show_more(HIDE_GENRES_ICON);
+        } else if count == 0 {
+            self.show_more(SHOW_GENRES_ICON);
+        } else if !all {
+            self.show_more(&format!("+{}", chips.len() - count));
+        }
+        self.more.set_visible(!all);
+    }
+
+    /// Shows `face` on `more`: a count as its text, anything else as its icon.
+    fn show_more(&self, face: &str) {
+        if *self.face.borrow() == face {
+            return;
+        }
+        if face.starts_with('+') {
+            self.more.set_label(face);
+        } else {
+            self.more.set_icon_name(face);
+        }
+        self.face.replace(face.to_owned());
     }
 }
 
@@ -299,6 +432,19 @@ impl DetailShowcaseView {
         crate::widgets::text_slide::install(&imp.detail_slide, &imp.detail_viewport, &*imp.detail);
         // The facts slide as the title does when they are wider than the room.
         crate::widgets::text_slide::install(&imp.facts_slide, &imp.facts_viewport, &*imp.summary);
+        let weak = view.downgrade();
+        let meta = MetaLine::bind(
+            &imp.meta,
+            &imp.meta_line,
+            &*imp.facts_fade,
+            &imp.genre_more,
+            move || {
+                if let Some(view) = weak.upgrade() {
+                    view.refit();
+                }
+            },
+        );
+        let _ = imp.meta_fit.set(meta);
         imp.band_stops
             .set(rufin_core::artwork::showcase_band(&[], 0, 0, 0));
         let weak = view.downgrade();
@@ -356,6 +502,8 @@ impl DetailShowcaseView {
         // Buttons (an artist's counts) carry their own boxes; the row around them takes none.
         self.imp().facts_fade.remove_css_class("detail-facts-boxed");
         self.imp().summary.append(child);
+        self.imp().has_facts.set(true);
+        self.refit();
     }
 
     pub fn replace_summary(&self, values: &[(&str, String)]) {
@@ -400,6 +548,7 @@ impl DetailShowcaseView {
         } else {
             imp.facts_fade.remove_css_class("detail-facts-boxed");
         }
+        imp.has_facts.set(shown_before);
         self.refit();
     }
 
@@ -415,87 +564,43 @@ impl DetailShowcaseView {
         }
     }
 
-    /// Ends the facts row with `links`: the external sites, or the playlist's source.
+    /// Shows `links` in the band's corner: the external sites, or the playlist's source.
     pub fn replace_external_links(&self, links: Option<gtk::Widget>) {
         let host = &self.imp().external_links;
         while let Some(child) = host.first_child() {
             host.remove(&child);
         }
+        host.set_visible(links.is_some());
         if let Some(links) = links {
             host.append(&links);
         }
     }
 
-    /// Shows `genres` as chips that fill the width; those that do not fit go under +n.
+    /// Shows `genres` as chips after the facts; those that do not fit their line go under +n.
     pub(crate) fn set_genres<'a>(
         &self,
         shell: &Rc<CatalogUi>,
         genres: impl IntoIterator<Item = (&'a str, library::GenreKey)>,
     ) {
-        let imp = self.imp();
-        imp.genres.set_width_callback(None);
-        while let Some(child) = imp.genre_row.first_child() {
-            if child == *imp.genre_overflow {
-                break;
-            }
-            imp.genre_row.remove(&child);
-        }
-        while let Some(child) = imp.genre_overflow_list.first_child() {
-            imp.genre_overflow_list.remove(&child);
-        }
-        let mut chips = Vec::new();
-        for (name, key) in genres
+        let chips = genres
             .into_iter()
             .map(|(name, key)| (name.trim(), key))
             .filter(|(name, _)| !name.is_empty())
-        {
-            let chip = genre_chip(name);
-            let shell = Rc::downgrade(shell);
-            chip.connect_clicked(move |_| {
-                if let Some(shell) = shell.upgrade() {
-                    shell.open_route(Route::GenreDetail(key));
-                }
-            });
-            imp.genre_overflow_list.append(&chip);
-            chips.push(chip);
-        }
-        imp.genres.set_visible(!chips.is_empty());
-        let overflow = imp.genre_overflow.get();
-        let row = imp.genre_row.get();
-        let popup = imp.genre_overflow_list.get();
-        imp.genres.set_width_callback(Some(Rc::new(move |width| {
-            let widths: Vec<_> = chips
-                .iter()
-                .map(|chip| chip.measure(gtk::Orientation::Horizontal, -1).1 + GENRE_SPACING)
-                .collect();
-            let fits = |count: usize, reserve: i32| {
-                widths[..count].iter().sum::<i32>() + reserve <= width + GENRE_SPACING
-            };
-            let count = if fits(chips.len(), 0) {
-                chips.len()
-            } else {
-                overflow.set_label(&format!("+{}", chips.len()));
-                let reserve = overflow.measure(gtk::Orientation::Horizontal, -1).1 + GENRE_SPACING;
-                (0..chips.len())
-                    .rev()
-                    .find(|count| fits(*count, reserve))
-                    .unwrap_or(0)
-            };
-            for (parent, shown) in [(&row, &chips[..count]), (&popup, &chips[count..])] {
-                let mut previous = None;
-                for chip in shown {
-                    if chip.parent().as_ref() != Some(parent.upcast_ref()) {
-                        if let Some(old) = chip.parent().and_downcast::<gtk::Box>() {
-                            old.remove(chip);
-                        }
-                        parent.insert_child_after(chip, previous);
+            .map(|(name, key)| {
+                let chip = genre_chip(name);
+                let shell = Rc::downgrade(shell);
+                chip.connect_clicked(move |_| {
+                    if let Some(shell) = shell.upgrade() {
+                        shell.open_route(Route::GenreDetail(key));
                     }
-                    previous = Some(chip);
-                }
-            }
-            overflow.set_label(&format!("+{}", chips.len() - count));
-            overflow.set_visible(count < chips.len());
-        })));
+                });
+                chip.upcast()
+            })
+            .collect::<Vec<gtk::Widget>>();
+        if let Some(meta) = self.imp().meta_fit.get() {
+            meta.set_chips(chips);
+        }
+        self.refit();
     }
 
     /// Mounts the header for `row`: its cover with the hover controls, its buttons, and its
@@ -553,9 +658,6 @@ impl DetailShowcaseView {
         ));
         self.bind_actions(shell, play, menu, download);
         self.show_row(row);
-        if shape == ShowcaseShape::Home {
-            self.place_facts_on_band();
-        }
         self.present(shape, initial_width, Some(cover))
     }
 
@@ -563,7 +665,6 @@ impl DetailShowcaseView {
     pub fn mount_plain(&self, initial_width: i32) -> gtk::Widget {
         let imp = self.imp();
         imp.cover_host.set_visible(false);
-        imp.below.set_visible(false);
         imp.actions.set_visible(false);
         self.present(ShowcaseShape::Plain, initial_width, None)
     }
@@ -615,7 +716,7 @@ impl DetailShowcaseView {
         }
     }
 
-    /// Beside the cover: the band tall enough that the title, its line and the facts end above its
+    /// The band tall enough that the title, its line, the facts and the genres end above its
     /// edge.
     fn fit_text(&self, layout: &ShowcaseLayout, width: i32) {
         let imp = self.imp();
@@ -750,16 +851,6 @@ impl DetailShowcaseView {
         Some((imp.shell.borrow().upgrade()?, imp.row.borrow().clone()?))
     }
 
-    /// Home's facts sit on the band, under the title, with nothing under the band.
-    fn place_facts_on_band(&self) {
-        let imp = self.imp();
-        imp.below.remove(&*imp.facts);
-        imp.names.append(&*imp.facts);
-        imp.facts.set_margin_top(6);
-        imp.facts_fade.add_css_class("detail-facts-pill");
-        imp.below.set_visible(false);
-    }
-
     fn present(
         &self,
         shape: ShowcaseShape,
@@ -796,67 +887,23 @@ impl DetailShowcaseView {
             }
         }
         imp.band.set_height_request(layout.band);
-        // Beside the cover, the title sits on the band, which is always dark; under the cover, the
-        // title and its line are centred on it.
-        if layout.stacked {
-            imp.names.remove_css_class("detail-on-band");
-        } else {
-            imp.names.add_css_class("detail-on-band");
-        }
-        let text_align = if layout.stacked { 0.5 } else { 0.0 };
-        imp.title.set_xalign(text_align);
-        imp.detail.set_xalign(text_align);
-        // Under it the facts, links, genres and buttons are centred too.
-        let along = if layout.stacked {
-            gtk::Align::Center
-        } else {
-            gtk::Align::Start
-        };
-        imp.facts.set_halign(if layout.stacked {
-            gtk::Align::Center
-        } else {
-            gtk::Align::Fill
-        });
-        imp.external_links.set_hexpand(!layout.stacked);
-        imp.genre_row.set_halign(along);
-        imp.actions.set_halign(along);
-        imp.detail.set_halign(along);
-        imp.body.set_orientation(if layout.stacked {
-            gtk::Orientation::Vertical
-        } else {
-            gtk::Orientation::Horizontal
-        });
+        let has_facts = imp.has_facts.get();
+        let has_genres = imp.meta_fit.get().is_some_and(|meta| meta.has_chips());
+        imp.facts_fade.set_visible(has_facts);
+        imp.meta
+            .set_visible(shape != ShowcaseShape::Plain && (has_facts || has_genres));
         imp.cover_host.set_margin_top(layout.cover_top);
-        imp.cover_host.set_halign(if layout.stacked {
-            gtk::Align::Center
-        } else {
-            gtk::Align::Start
-        });
-        // Beside the cover the title ends just above the band's edge, and the rest starts
-        // just under it.
-        imp.heading
-            .set_height_request(if layout.stacked { -1 } else { layout.band - 12 });
-        imp.below
-            .set_margin_top(if layout.stacked { 10 } else { 24 });
-        imp.actions
-            .set_margin_top(if imp.below.is_visible() { 18 } else { 24 });
+        // The names end just above the band's edge, and the buttons start just under it.
+        imp.heading.set_height_request(layout.band - 12);
         let step_top = (layout.band - STEP_BUTTON_SIZE) / 2;
         imp.step_previous.set_margin_top(step_top);
         imp.step_next.set_margin_top(step_top);
-        // Room under a cover that sits beside the text, so its shadow is not cut.
+        // Room under a cover that hangs over the band's edge, so its shadow is not cut.
         imp.body
-            .set_margin_bottom(if layout.stacked || layout.cover == 0 {
-                0
-            } else {
-                28
-            });
+            .set_margin_bottom(if layout.cover != 0 { 28 } else { 0 });
         // Play, then Radio, give up their labels while the buttons do not fit their room, so the
         // row stays one row with ⋯ in view.
-        let room = if layout.stacked {
-            width - 2 * layout.inset
-        } else {
-            width - 2 * layout.inset - layout.cover - layout.gap
-        };
+        let room = width - 2 * layout.inset - layout.cover - layout.gap;
         let pills = [
             (&*imp.play, &*imp.play_text, &imp.labelled_play),
             (&*imp.radio, &*imp.radio_text, &imp.labelled_radio),
@@ -902,9 +949,7 @@ impl DetailShowcaseView {
         imp.play
             .set_tooltip_text((!play_labelled).then_some(tooltip.as_str()));
         imp.fitted.set(Some((shape, width)));
-        if !layout.stacked {
-            self.fit_text(layout, width);
-        }
+        self.fit_text(layout, width);
     }
 }
 

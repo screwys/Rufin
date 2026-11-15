@@ -51,9 +51,11 @@ impl LookupCache {
         self.cache_used.load(Ordering::Relaxed)
     }
 
+    /// The cached answer under `key`, else what `fetch` answers, kept for `days`.
     pub(crate) fn fetch<T: Serialize + DeserializeOwned>(
         &self,
         key: &str,
+        days: i64,
         fetch: impl FnOnce() -> Result<T, String>,
     ) -> Result<Option<T>, String> {
         if self.mode != CacheMode::Refresh {
@@ -77,7 +79,7 @@ impl LookupCache {
         self.runtime
             .block_on(
                 self.catalog
-                    .write_metadata_lookup_cache(key, &payload, cache_time()),
+                    .write_metadata_lookup_cache(key, &payload, cache_time(), days),
             )
             .map_err(|e| e.to_string())?;
         Ok(Some(value))

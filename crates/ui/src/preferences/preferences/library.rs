@@ -414,15 +414,13 @@ fn source_downloads_group(
 
     let quality_shell = Rc::clone(shell);
     let quality_source_id = server.id.clone();
-    for row in
-        crate::preferences::download_quality::rows(download_settings.quality, move |quality, _| {
-            quality_shell
-                .settings
-                .update_app_settings("download quality", |settings| {
-                    settings.set_download_quality(quality_source_id.clone(), quality)
-                });
-        })
-    {
+    for row in crate::preferences::audio_quality::rows(download_settings.quality, move |quality| {
+        quality_shell
+            .settings
+            .update_app_settings("download quality", |settings| {
+                settings.set_download_quality(quality_source_id.clone(), quality)
+            });
+    }) {
         downloads_group.add(&row);
     }
     downloaded_badge.set_active(
@@ -1188,7 +1186,7 @@ fn download_queue_item_subtitle(job: &rufin_core::downloads::DownloadQueueItem) 
         DownloadQueueState::WaitingForConnection => tr("Waiting for connection"),
         DownloadQueueState::NeedsAttention => tr("Needs attention"),
     };
-    let quality = crate::preferences::download_quality::label(job.quality);
+    let quality = crate::preferences::audio_quality::label(job.quality);
     format!("{state} · {progress} · {quality}")
 }
 

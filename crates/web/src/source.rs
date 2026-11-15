@@ -10,6 +10,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
         .route("/api/downloads", post(download))
         .route("/api/downloads/quality", post(download_quality))
+        .route("/api/stream/quality", post(stream_quality))
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
         .route("/api/sources/local", post(add))
@@ -70,42 +71,54 @@ async fn download(
     Ok(accepted())
 }
 
-/// A download quality as its control shows it: the quality and which of its parts it offers.
-fn quality_view(quality: sources::DownloadQuality) -> Value {
-    json!({"value":quality,"bitrate":rufin_core::downloads::download_quality_shows_bitrate(quality),"channels":rufin_core::downloads::download_quality_shows_channels(quality)})
+/// A download or stream quality as its control shows it: the quality, none when it follows the
+/// one set for every source, and which of its parts it offers.
+pub(super) fn quality_view(quality: Option<sources::AudioQuality>) -> Value {
+    use rufin_core::downloads::{audio_quality_shows_bitrate, audio_quality_shows_channels};
+    json!({"value":quality,"bitrate":quality.is_some_and(audio_quality_shows_bitrate),"channels":quality.is_some_and(audio_quality_shows_channels)})
+}
+
+/// A whole quality, or one change to the saved one, so edits sent one after another hold.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum QualityEdit {
+    /// The quality set for every source.
+    Default,
+    Quality(sources::AudioQuality),
+    Codec(Option<library::AudioCodec>),
+    BitrateKbps(u32),
+    Channels(library::AudioChannels),
+}
+
+impl QualityEdit {
+    fn apply(self, saved: sources::AudioQuality) -> Option<sources::AudioQuality> {
+        use rufin_core::downloads::{
+            audio_quality_with_bitrate, audio_quality_with_channels, audio_quality_with_codec,
+        };
+        Some(match self {
+            Self::Default => return None,
+            Self::Quality(quality) => quality,
+            Self::Codec(codec) => audio_quality_with_codec(saved, codec),
+            Self::BitrateKbps(kbps) => audio_quality_with_bitrate(saved, kbps),
+            Self::Channels(channels) => audio_quality_with_channels(saved, channels),
+        })
+    }
 }
 
 async fn download_quality(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
-    /// A whole quality, or one change to the saved one, so edits sent one after another hold.
-    #[derive(Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum Edit {
-        Quality(sources::DownloadQuality),
-        Codec(Option<library::AudioCodec>),
-        BitrateKbps(u32),
-        Channels(library::AudioChannels),
-    }
     #[derive(Deserialize)]
     struct Input {
         source: sources::SourceId,
-        edit: Edit,
+        edit: QualityEdit,
     }
     let input: Input = body(request).await?;
-    use rufin_core::downloads::{
-        download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
-    };
-    let mut quality = sources::DownloadQuality::Original;
+    let mut quality = sources::AudioQuality::Original;
     let edit = |ui: &mut rufin_core::settings::Settings| {
         let saved = ui.download_settings(&input.source).quality;
-        quality = match input.edit {
-            Edit::Quality(quality) => quality,
-            Edit::Codec(codec) => download_quality_with_codec(saved, codec),
-            Edit::BitrateKbps(kbps) => download_quality_with_bitrate(saved, kbps),
-            Edit::Channels(channels) => download_quality_with_channels(saved, channels),
-        };
+        quality = input.edit.apply(saved).unwrap_or_default();
         ui.set_download_quality(input.source.clone(), quality);
         Ok(())
     };
@@ -113,7 +126,42 @@ async fn download_quality(
     settings.update_preferences(edit).map_err(bad_request)?;
     Ok(json_response(
         StatusCode::ACCEPTED,
-        json!({"accepted":true,"quality":quality,"download_quality":quality_view(quality)}),
+        json!({"accepted":true,"quality":quality,"download_quality":quality_view(Some(quality))}),
+    ))
+}
+
+/// The quality streams are asked for: the one for every source, or one source's own.
+async fn stream_quality(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        source: Option<sources::SourceId>,
+        edit: QualityEdit,
+    }
+    let input: Input = body(request).await?;
+    let mut quality = None;
+    let edit = |ui: &mut rufin_core::settings::Settings| {
+        let general = ui.playback.stream_quality;
+        match input.source {
+            Some(source) => {
+                let saved = ui.download_settings(&source).stream_quality;
+                quality = input.edit.apply(saved.unwrap_or(general));
+                ui.set_source_stream_quality(source, quality);
+            }
+            None => {
+                ui.playback.stream_quality = input.edit.apply(general).unwrap_or_default();
+                quality = Some(ui.playback.stream_quality);
+            }
+        }
+        Ok(())
+    };
+    let settings = &products.settings;
+    settings.update_preferences(edit).map_err(bad_request)?;
+    Ok(json_response(
+        StatusCode::ACCEPTED,
+        json!({"accepted":true,"stream_quality":quality_view(quality)}),
     ))
 }
 
@@ -191,7 +239,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             "selected": configured.selected_source_id,
             "library": selected.as_ref().and_then(|source|source.music_folder_object_id.clone()),
             "libraries": selected.as_ref().map(|source|source.music_folders.iter().map(|folder|json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>()).unwrap_or_default(),
-            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"owns_playlists":s.owns_playlists,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality,"download_quality":quality_view(products.settings.download_settings(s.id.clone()).quality)})).collect::<Vec<_>>()
+            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"owns_playlists":s.owns_playlists,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality,"download_quality":quality_view(Some(products.settings.download_settings(s.id.clone()).quality)),"stream_quality":(!s.file_library).then(|| quality_view(products.settings.download_settings(s.id.clone()).stream_quality))})).collect::<Vec<_>>()
         }),
     ))
 }

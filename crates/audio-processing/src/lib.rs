@@ -12,7 +12,7 @@ pub use fingerprint::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 mod loudness;
 mod media_input;
 mod payload_hash;
-pub use media_input::{ResolvedStream, StreamWindow};
+pub use media_input::{ResolvedStream, StreamWindow, TimeSeek};
 pub use payload_hash::payload_hash;
 #[cfg(target_os = "macos")]
 mod tls;

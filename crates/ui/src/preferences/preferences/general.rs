@@ -1,6 +1,7 @@
 pub const NORMALIZATION_SCOPE_TITLE: &str = localization::msgid("Normalization scope");
 pub const NORMALIZATION_TITLE: &str = localization::msgid("Loudness normalization");
 pub const VOLUME_SCALE_TITLE: &str = localization::msgid("Volume scale");
+pub const SAME_ARTIST_TITLE: &str = localization::msgid("Same artist");
 pub const STREAM_QUALITY_TITLE: &str = localization::msgid("Stream quality");
 use crate::player::equalizer::EqualizerSurface;
 use crate::player::outputs::audio_output_dropdown;
@@ -8,17 +9,17 @@ use crate::player::playback_settings::{
     playback_rate_row, preserve_pitch_row, transition_rows, volume_scale_from_index,
     volume_scale_index,
 };
-use crate::widgets::forms::{controlled_selection_row, quality_selection_row, selection_row};
+use crate::widgets::forms::{controlled_selection_row, selection_row};
 use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
 use std::{cell::Cell, rc::Rc};
 
 use crate::shell::shell::Shell;
 use adw::prelude::*;
 use localization::tr;
-use playback::StreamQuality;
 use playback::{
-    LoudnessNormalization, LoudnessNormalizationScope, MAX_AUTO_DJ_REFILL_THRESHOLD,
-    MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_THRESHOLD, MIN_EBU_R128_TARGET_LUFS,
+    LoudnessNormalization, LoudnessNormalizationScope, MAX_AUTO_DJ_REFILL_COUNT,
+    MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_COUNT,
+    MIN_AUTO_DJ_REFILL_THRESHOLD, MIN_EBU_R128_TARGET_LUFS,
 };
 fn selected_source_is_local(shell: &Shell) -> bool {
     let configured = shell.source.configured.borrow();
@@ -32,11 +33,10 @@ fn selected_source_is_local(shell: &Shell) -> bool {
         .is_some_and(|source| source.kind == sources::LOCAL_SOURCE_ID)
 }
 
-pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
+pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
     let resource = "preferences/playback.ui";
     let builder = crate::ui_resource::builder(resource);
-    let page: adw::PreferencesPage =
-        crate::ui_resource::object(&builder, resource, "playback_page");
+    let page: gtk::Box = crate::ui_resource::object(&builder, resource, "playback_page");
 
     let app_settings = shell.settings.current.borrow().clone();
     let settings = app_settings.playback.clone();
@@ -44,10 +44,17 @@ pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         transition_group: adw::PreferencesGroup,
         audio_fade_row: adw::SwitchRow,
         skip_unplayable_row: adw::SwitchRow,
+        auto_dj_group: adw::PreferencesGroup,
+        server_recommendations_row: adw::SwitchRow,
+        similar_artists_row: adw::SwitchRow,
         refill_row: adw::ActionRow,
         refill: gtk::SpinButton,
+        refill_count_row: adw::ActionRow,
+        refill_count: gtk::SpinButton,
+        skip_low_rated_row: adw::SwitchRow,
         clear_queue_row: adw::SwitchRow,
         audio_group: adw::PreferencesGroup,
+        stream_quality_group: adw::PreferencesGroup,
         ebu_target_row: adw::ActionRow,
         ebu_target: gtk::Scale,
         write_ebu_tags_row: adw::SwitchRow,
@@ -102,7 +109,76 @@ pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             });
     });
     refill_row.set_activatable_widget(Some(&refill));
-    transition_group.add(&refill_row);
+
+    // The choice shows where a configured server recommends; unset reads as off.
+    server_recommendations_row.set_active(app_settings.uses_server_recommendations());
+    server_recommendations_row.set_visible(
+        rufin_core::runtime::source::shows_server_recommendations(
+            shell.source.configured.borrow().sources.clone(),
+        ),
+    );
+    let server_shell = Rc::clone(shell);
+    server_recommendations_row.connect_active_notify(move |row| {
+        server_shell.settings.set_app_setting(
+            "Auto DJ setting",
+            Some(row.is_active()),
+            |settings| &mut settings.application.server_recommendations,
+        );
+    });
+    auto_dj_group.add(&server_recommendations_row);
+    shell.settings.bind_switch(
+        &similar_artists_row,
+        "Auto DJ setting",
+        |settings| &mut settings.application.auto_dj_similar_artists,
+        |_| {},
+    );
+    auto_dj_group.add(&similar_artists_row);
+    auto_dj_group.add(&refill_row);
+    refill_count.set_range(
+        f64::from(MIN_AUTO_DJ_REFILL_COUNT),
+        f64::from(MAX_AUTO_DJ_REFILL_COUNT),
+    );
+    refill_count.set_increments(1.0, 5.0);
+    refill_count.set_value(f64::from(app_settings.application.auto_dj_refill_count));
+    let refill_count_shell = Rc::clone(shell);
+    refill_count.connect_value_changed(move |spin| {
+        let count = spin.value().round() as u8;
+        refill_count_shell
+            .settings
+            .set_app_setting("Auto DJ setting", count, |settings| {
+                &mut settings.application.auto_dj_refill_count
+            });
+    });
+    refill_count_row.set_activatable_widget(Some(&refill_count));
+    auto_dj_group.add(&refill_count_row);
+    let same_artist_shell = Rc::clone(shell);
+    let same_artist = [
+        library::SameArtist::Few,
+        library::SameArtist::Some,
+        library::SameArtist::Many,
+    ];
+    auto_dj_group.add(&selection_row(
+        &tr(SAME_ARTIST_TITLE),
+        &[tr("Few"), tr("Some"), tr("Many")],
+        same_artist
+            .iter()
+            .position(|share| *share == app_settings.application.auto_dj_same_artist)
+            .unwrap_or(1) as u32,
+        move |selected| {
+            same_artist_shell.settings.set_app_setting(
+                "Auto DJ setting",
+                same_artist[selected as usize],
+                |settings| &mut settings.application.auto_dj_same_artist,
+            );
+        },
+    ));
+    shell.settings.bind_switch(
+        &skip_low_rated_row,
+        "Auto DJ setting",
+        |settings| &mut settings.application.auto_dj_skip_low_rated,
+        |_| {},
+    );
+    auto_dj_group.add(&skip_low_rated_row);
 
     shell.settings.bind_switch(
         &clear_queue_row,
@@ -276,25 +352,15 @@ pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     audio_group.add(&volume_scale_row);
 
     let quality_shell = Rc::clone(shell);
-    let quality_row = quality_selection_row(
-        &tr(STREAM_QUALITY_TITLE),
-        &[
-            StreamQuality::Original,
-            StreamQuality::MaxBitrateKbps(320),
-            StreamQuality::MaxBitrateKbps(256),
-            StreamQuality::MaxBitrateKbps(192),
-            StreamQuality::MaxBitrateKbps(128),
-        ],
-        stream_quality_index(settings.stream_quality),
-        move |selected| {
+    let quality_rows =
+        crate::preferences::audio_quality::rows(settings.stream_quality, move |quality| {
             quality_shell
                 .player_ui
-                .update_playback_settings(|settings| {
-                    settings.stream_quality = stream_quality_from_index(selected);
-                });
-        },
-    );
-    audio_group.add(&quality_row);
+                .update_playback_settings(|settings| settings.stream_quality = quality);
+        });
+    for row in &quality_rows {
+        stream_quality_group.add(row);
+    }
 
     let output_dropdown = audio_output_dropdown(&shell, 220);
     output_row.add_suffix(&output_dropdown);
@@ -340,25 +406,5 @@ pub fn loudness_scope_from_index(index: u32) -> LoudnessNormalizationScope {
     match index {
         0 => LoudnessNormalizationScope::Track,
         _ => LoudnessNormalizationScope::Album,
-    }
-}
-
-pub fn stream_quality_index(quality: StreamQuality) -> u32 {
-    match quality {
-        StreamQuality::Original => 0,
-        StreamQuality::MaxBitrateKbps(320) => 1,
-        StreamQuality::MaxBitrateKbps(256) => 2,
-        StreamQuality::MaxBitrateKbps(192) => 3,
-        StreamQuality::MaxBitrateKbps(128) => 4,
-        StreamQuality::MaxBitrateKbps(_) => 0,
-    }
-}
-pub fn stream_quality_from_index(index: u32) -> StreamQuality {
-    match index {
-        1 => StreamQuality::MaxBitrateKbps(320),
-        2 => StreamQuality::MaxBitrateKbps(256),
-        3 => StreamQuality::MaxBitrateKbps(192),
-        4 => StreamQuality::MaxBitrateKbps(128),
-        _ => StreamQuality::Original,
     }
 }

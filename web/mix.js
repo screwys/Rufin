@@ -21,20 +21,20 @@ let limits = [100, 10];
 let played = "All";
 
 /** The unit's two choices, tracks and albums; its value is the index of the one chosen. */
-const units = () => $("random-form").elements["random-unit"];
+const units = () => $("mix-form").elements["mix-unit"];
 
 function showUnit() {
   const albums = units().value === "1";
-  $("random-count").value = limits[Number(albums)];
+  $("mix-count").value = limits[Number(albums)];
   // The first text names tracks; the others name albums and how they play.
-  [...$("random-count-label").children].forEach((text, index) => {
+  [...$("mix-count-label").children].forEach((text, index) => {
     text.hidden = albums === (index === 0);
   });
 }
 
 function choosePlayed(value) {
   played = value;
-  for (const chip of $("random-played").children)
+  for (const chip of $("mix-played").children)
     chip.setAttribute("aria-pressed", String(chip.value === value));
 }
 
@@ -47,30 +47,30 @@ function year(id) {
 
 function chooseGenre(row) {
   selectedGenre = row;
-  $("random-genre").firstElementChild.textContent = row?.name || tr("Any");
+  $("mix-genre").firstElementChild.textContent = row?.name || tr("Any");
   if ($("genre-menu").matches(":popover-open")) $("genre-menu").hidePopover();
 }
 
-async function loadRandom(reset = false) {
+async function loadMix(reset = false) {
   if (!state.source) return;
   const requestedSource = state.source,
     request = ++genreRequest,
     offset = genreOffset;
   const result = await api(
-    `/random?${new URLSearchParams({ source: state.source, ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}), q: $("genre-search").value, offset, total: offset === 0 })}`,
+    `/mix?${new URLSearchParams({ source: state.source, ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}), q: $("genre-search").value, offset, total: offset === 0 })}`,
   );
   if (request !== genreRequest || state.source !== requestedSource) return;
   if (result.total !== null) genreTotal = result.total;
-  if (reset || state.randomSource !== state.source) {
+  if (reset || state.mixSource !== state.source) {
     const settings = result.settings;
     limits = [settings.limit, settings.album_limit];
     units().value = Number(settings.albums);
     showUnit();
-    $("random-min-year").value = settings.min_year ?? "";
-    $("random-max-year").value = settings.max_year ?? "";
+    $("mix-min-year").value = settings.min_year ?? "";
+    $("mix-max-year").value = settings.max_year ?? "";
     choosePlayed(settings.played_filter);
     chooseGenre(result.selected_genre);
-    state.randomSource = state.source;
+    state.mixSource = state.source;
   }
   const window = $("genre-window");
   const focused = document.activeElement?.dataset.genreId;
@@ -93,23 +93,23 @@ async function loadRandom(reset = false) {
   }
 }
 
-async function openRandom() {
+async function openMix() {
   if (!state.source) return;
   genreOffset = 0;
   $("genre-search").value = "";
-  await loadRandom(state.randomSource !== state.source);
-  openPopup($("random-dialog"), $("random"), "center");
+  await loadMix(state.mixSource !== state.source);
+  openPopup($("mix-dialog"), $("mix"), "center");
   units()[Number(units().value)].focus();
 }
 
-async function playRandom(mode = "replace") {
-  const result = await api("/queue/random", "POST", {
+async function playMix(mode = "replace") {
+  const result = await api("/queue/mix", "POST", {
     source: state.source,
     folder: state.selectedLibrary,
     albums: units().value === "1",
-    count: Number($("random-count").value),
-    min_year: year("random-min-year"),
-    max_year: year("random-max-year"),
+    count: Number($("mix-count").value),
+    min_year: year("mix-min-year"),
+    max_year: year("mix-max-year"),
     genre: selectedGenre?.id ?? null,
     played,
     mode,
@@ -118,48 +118,48 @@ async function playRandom(mode = "replace") {
 }
 
 function init() {
-  $("random-form").addEventListener("click", (event) => {
+  $("mix-form").addEventListener("click", (event) => {
     const step = event.target.closest("[data-step]");
     if (!step) return;
-    $("random-count").stepUp(Number(step.dataset.step));
+    $("mix-count").stepUp(Number(step.dataset.step));
   });
   // Each unit keeps its own count.
   for (const unit of units())
     unit.addEventListener("change", () => {
-      limits[1 - Number(units().value)] = Number($("random-count").value);
+      limits[1 - Number(units().value)] = Number($("mix-count").value);
       showUnit();
     });
-  $("random-played").addEventListener("click", (event) => {
+  $("mix-played").addEventListener("click", (event) => {
     const chip = event.target.closest("button");
     if (chip) choosePlayed(chip.value);
   });
-  $("random").addEventListener("click", () => run(openRandom));
-  $("random").addEventListener("contextmenu", (event) => {
+  $("mix").addEventListener("click", () => run(openMix));
+  $("mix").addEventListener("contextmenu", (event) => {
     event.preventDefault();
-    run(openRandom);
+    run(openMix);
   });
-  $("random-form").addEventListener("submit", (event) => {
+  $("mix-form").addEventListener("submit", (event) => {
     event.preventDefault();
     run(async () => {
-      await playRandom(event.submitter.value);
-      $("random-dialog").hidePopover();
+      await playMix(event.submitter.value);
+      $("mix-dialog").hidePopover();
     });
   });
-  $("random-genre").addEventListener("click", () =>
+  $("mix-genre").addEventListener("click", () =>
     run(async () => {
       genreOffset = 0;
       $("genre-search").value = "";
       $("genre-options").scrollTop = 0;
-      await loadRandom();
+      await loadMix();
       $("any-genre").replaceChildren(document.createTextNode(tr("Any")));
       $("any-genre").setAttribute("aria-selected", String(!selectedGenre));
       if (!selectedGenre) $("any-genre").append(icon("rufin-object-select-symbolic"));
-      openPopup($("genre-menu"), $("random-genre"));
+      openPopup($("genre-menu"), $("mix-genre"));
       $("genre-search").focus();
     }),
   );
   $("genre-menu").addEventListener("toggle", (event) =>
-    $("random-genre").setAttribute(
+    $("mix-genre").setAttribute(
       "aria-expanded",
       String(event.newState === "open"),
     ),
@@ -170,7 +170,7 @@ function init() {
     genreTimer = setTimeout(() => {
       genreOffset = 0;
       $("genre-options").scrollTop = 0;
-      run(() => loadRandom());
+      run(() => loadMix());
     }, 150);
   });
   $("genre-options").addEventListener("scroll", () => {
@@ -181,7 +181,7 @@ function init() {
     if (offset === genreOffset) return;
     genreOffset = offset;
     clearTimeout(genreTimer);
-    genreTimer = setTimeout(() => run(() => loadRandom()), 60);
+    genreTimer = setTimeout(() => run(() => loadMix()), 60);
   });
 }
 

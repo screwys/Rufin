@@ -36,12 +36,16 @@ const HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 fn redact(url: &mut reqwest::Url) {
     url.set_query(None);
 }
+/// How long plex.tv may take to list a server's connections before the saved list is used.
+const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PlexSourceConfig {
     pub version: u32,
     pub server_id: String,
     pub profile_id: String,
+    /// The connection chosen at setup, which requests use while no other is found: `local`,
+    /// `relay` and `require_valid_certificate` describe it.
     pub base_url: String,
     pub address_override: Option<String>,
     pub local: bool,
@@ -52,9 +56,6 @@ pub(crate) struct PlexSourceConfig {
     pub require_valid_certificate: bool,
 }
 impl PlexSourceConfig {
-    fn trust_invalid_certificate(&self) -> bool {
-        self.trust_invalid_cert && !self.require_valid_certificate
-    }
     pub(crate) fn from_configuration(configuration: &SourceConfiguration) -> SourceResult<Self> {
         let config: Self = crate::config::decode_provider_payload(configuration)?;
         crate::config::require_payload_version(config.version, 1)?;
@@ -65,19 +66,36 @@ impl PlexSourceConfig {
 pub struct PlexSource {
     pub(crate) login: Arc<tokio::sync::Mutex<PlexLogin>>,
     config: PlexSourceConfig,
+    /// The connection requests use now.
+    connection: crate::address::Chosen<PlexConnection>,
+    /// Set once a connection was chosen in this run. A saved source's first request waits
+    /// for that: the saved connection may be another network's.
+    chosen: tokio::sync::OnceCell<()>,
+    /// Follows the certificate setting.
     client: Client,
+    /// Accepts only a valid certificate, for the connections that must present one.
+    strict_client: Client,
     media_client: Client,
 }
 impl PlexSource {
     fn new(config: PlexSourceConfig, login: PlexLogin) -> SourceResult<Self> {
-        let client = remote_http::build_client(
-            config.trust_invalid_certificate(),
-            RemoteTimeouts {
-                connect: Duration::from_secs(10),
-                request: Duration::from_secs(60),
-            },
-            HTTP,
-        )?;
+        let timeouts = RemoteTimeouts {
+            connect: Duration::from_secs(10),
+            request: Duration::from_secs(60),
+        };
+        let strict_client = remote_http::build_client(false, timeouts, HTTP)?;
+        let client = if config.trust_invalid_cert {
+            remote_http::build_client(true, timeouts, HTTP)?
+        } else {
+            strict_client.clone()
+        };
+        let connection = crate::address::Chosen::new(PlexConnection {
+            address: reqwest::Url::parse(&config.base_url)
+                .map_err(|error| SourceError::InvalidConfig(error.to_string()))?,
+            local: config.local,
+            relay: config.relay,
+            require_valid_certificate: config.require_valid_certificate,
+        });
         let media_client = remote_http::build_url_client(
             config.trust_invalid_cert,
             RemoteTimeouts {
@@ -88,19 +106,96 @@ impl PlexSource {
         )?;
         Ok(Self {
             config,
+            connection,
+            chosen: tokio::sync::OnceCell::new_with(Some(())),
             client,
+            strict_client,
             media_client,
             login: Arc::new(tokio::sync::Mutex::new(login)),
         })
     }
+
+    /// Uses the best of the server's connections that answers now: those plex.tv lists, or the
+    /// saved ones while plex.tv does not answer. An address typed for the server stays.
+    /// Returns whether the connection changed.
+    pub(crate) async fn select_address(&self) -> bool {
+        if self.chosen.initialized() {
+            return self.choose_connection().await;
+        }
+        // The choice a first request waits for is this one.
+        let mut moved = false;
+        self.chosen
+            .get_or_init(async || moved = self.choose_connection().await)
+            .await;
+        moved
+    }
+
+    async fn choose_connection(&self) -> bool {
+        if self
+            .config
+            .address_override
+            .as_deref()
+            .is_some_and(|address| !address.trim().is_empty())
+        {
+            return false;
+        }
+        self.connection
+            .choose(async || {
+                let profile = &self.config.profile_id;
+                let login = self.login.lock().await.for_setup();
+                let listed =
+                    tokio::time::timeout(LIST_TIMEOUT, login.listed_servers(profile, &[])).await;
+                let login = match listed {
+                    Ok(Ok((servers, tokens))) => {
+                        let mut login = self.login.lock().await;
+                        if let Err(error) = login.remember_servers(profile, &servers, tokens) {
+                            tracing::warn!(%error, "Plex connections were not saved");
+                        }
+                        login.for_setup()
+                    }
+                    _ => login,
+                };
+                let server = login.server(&self.config.server_id)?;
+                login
+                    .select_connection(profile, &server, None, self.config.trust_invalid_cert)
+                    .await
+                    .ok()
+            })
+            .await
+    }
+
+    /// The connection requests use now, once one was chosen in this run.
+    async fn connection(&self) -> PlexConnection {
+        self.chosen
+            .get_or_init(async || {
+                self.choose_connection().await;
+            })
+            .await;
+        self.connection.current()
+    }
+
+    /// The client a connection's requests use.
+    fn client(&self, connection: &PlexConnection) -> &Client {
+        if connection.require_valid_certificate {
+            &self.strict_client
+        } else {
+            &self.client
+        }
+    }
+
+    /// Whether a connection's stream may present an invalid certificate.
+    fn trust_invalid_certificate(&self, connection: &PlexConnection) -> bool {
+        self.config.trust_invalid_cert && !connection.require_valid_certificate
+    }
+
     async fn request(
         &self,
         method: Method,
         path: &str,
         params: &[(&str, String)],
     ) -> SourceResult<RequestBuilder> {
-        let base = reqwest::Url::parse(&self.config.base_url)
-            .map_err(|error| SourceError::InvalidConfig(error.to_string()))?;
+        let connection = self.connection().await;
+        let base = &connection.address;
         let url = base
             .join(path)
             .map_err(|error| SourceError::InvalidConfig(error.to_string()))?;
@@ -112,7 +207,7 @@ impl PlexSource {
         let login = self.login.lock().await;
         Ok(login
             .server_request(
-                &self.client,
+                self.client(&connection),
                 method,
                 url.as_str(),
                 &self.config.profile_id,
@@ -219,12 +314,14 @@ pub(crate) fn open(
     configuration: &SourceConfiguration,
     credential: Option<String>,
 ) -> SourceResult<PlexSource> {
-    PlexSource::new(
+    let mut source = PlexSource::new(
         PlexSourceConfig::from_configuration(configuration)?,
         PlexLogin::decode(
             &credential.ok_or_else(|| SourceError::Auth("Saved Plex login is missing".into()))?,
         )?,
-    )
+    )?;
+    source.chosen = tokio::sync::OnceCell::new();
+    Ok(source)
 }
 pub(crate) async fn edit(
     current: SourceConfiguration,
@@ -239,7 +336,6 @@ pub(crate) async fn edit(
     )?;
     if input.address_override != config.address_override
         || input.trust_invalid_cert != config.trust_invalid_cert
-        || (config.relay && input.address_override.is_none())
     {
         let server = login
             .servers(&config.profile_id, &[])

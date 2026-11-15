@@ -6,6 +6,17 @@ pub struct StreamWindow {
     pub end_millis: u64,
 }
 
+/// How an HTTP input that cannot seek in its bytes starts again at a source time.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimeSeek {
+    /// `start_ms` and an optional `end_ms`.
+    Millis,
+    /// The named query parameter, in 100 ns ticks.
+    Ticks(&'static str),
+    /// The named query parameter, in whole seconds.
+    Seconds(&'static str),
+}
+
 #[derive(Clone)]
 pub struct ResolvedStream {
     pub local_input: bool,
@@ -15,7 +26,7 @@ pub struct ResolvedStream {
     redacted_uri: String,
     trust_invalid_certificate: bool,
     window: Option<StreamWindow>,
-    time_seek: bool,
+    time_seek: Option<TimeSeek>,
     time_offset_millis: Option<u64>,
     resource: Option<std::sync::Arc<dyn Send + Sync>>,
 }
@@ -46,7 +57,7 @@ impl ResolvedStream {
             uri,
             trust_invalid_certificate: false,
             window: None,
-            time_seek: false,
+            time_seek: None,
             time_offset_millis: None,
             resource: None,
             content_type: None,
@@ -62,7 +73,7 @@ impl ResolvedStream {
             redacted_uri: redacted_uri.into(),
             trust_invalid_certificate: false,
             window: None,
-            time_seek: false,
+            time_seek: None,
             time_offset_millis: None,
             resource: None,
             content_type: None,
@@ -110,14 +121,14 @@ impl ResolvedStream {
         self
     }
 
-    /// The HTTP input accepts source-time start_ms and optional end_ms bounds.
-    pub fn with_time_seek(mut self) -> Self {
-        self.time_seek = true;
+    /// The HTTP input starts at a source time when asked this way.
+    pub fn with_time_seek(mut self, time_seek: TimeSeek) -> Self {
+        self.time_seek = Some(time_seek);
         self
     }
 
     pub fn time_seekable(&self) -> bool {
-        self.time_seek
+        self.time_seek.is_some()
     }
     pub fn time_offset_millis(&self) -> Option<u64> {
         self.time_offset_millis
@@ -125,22 +136,27 @@ impl ResolvedStream {
 
     pub fn reopened_at(&self, logical_millis: u64) -> Result<Self, url::ParseError> {
         let mut stream = self.clone();
-        if !self.time_seek {
+        let Some(time_seek) = self.time_seek else {
             return Ok(stream);
-        }
+        };
         let start = self.start_millis().saturating_add(logical_millis);
         let start = self.end_millis().map_or(start, |end| start.min(end));
+        let (name, start, value) = match time_seek {
+            TimeSeek::Millis => ("start_ms", start, start),
+            TimeSeek::Ticks(name) => (name, start, start.saturating_mul(10_000)),
+            TimeSeek::Seconds(name) => (name, start / 1000 * 1000, start / 1000),
+        };
         let mut uri = url::Url::parse(self.uri())?;
         let pairs = uri
             .query_pairs()
-            .filter(|(key, _)| key != "start_ms" && key != "end_ms")
+            .filter(|(key, _)| key != name && key != "end_ms")
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect::<Vec<_>>();
         uri.set_query(None);
         uri.query_pairs_mut()
             .extend_pairs(pairs)
-            .append_pair("start_ms", &start.to_string());
-        if let Some(end) = self.end_millis() {
+            .append_pair(name, &value.to_string());
+        if let Some(end) = self.end_millis().filter(|_| time_seek == TimeSeek::Millis) {
             uri.query_pairs_mut()
                 .append_pair("end_ms", &end.to_string());
         }

@@ -423,15 +423,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .map_or(0, |counts| counts.1),
         0
     );
-    let malformed = root.path().join("truncated.wma");
-    let mut bytes = vec![
-        0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce,
-        0x6c,
-    ];
-    bytes.extend_from_slice(&1_000_u64.to_le_bytes());
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-    bytes.extend_from_slice(&[1, 2]);
-    fs::write(&malformed, bytes).unwrap();
+    // No type is found for these bytes. A header that a demuxer accepts and then fails on is
+    // no use here: decodebin drops an error the demuxer posts while it is still being plugged,
+    // and discovery then waits out its timeout and reports the file unreadable.
+    let malformed = root.path().join("malformed.wma");
+    fs::write(&malformed, [0x01, 0xfe].repeat(15)).unwrap();
     source
         .acquire_catalog(
             &catalog,
@@ -1135,8 +1131,149 @@ async fn local_refresh_after_a_deleted_album_track_removes_it() {
     refresh().await.expect("later refresh");
 }
 
-// An offline rename is paired by inode; Windows exposes no file identity to pair it by.
+/// The media files a source holds, as paths under `root`.
 #[cfg(unix)]
+async fn stored_media(catalog: &Catalog, source: &str, root: &Path) -> Vec<String> {
+    stored_files(catalog, source)
+        .await
+        .into_iter()
+        .filter(|file| file.kind == library::LocalFileKind::Media)
+        .map(|file| {
+            Path::new(&file.path)
+                .strip_prefix(root)
+                .expect("a path under the root")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_walk_follows_links_out_of_the_folder_once_and_skips_what_it_cannot_use() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let base = tempfile::tempdir().unwrap();
+    let base = fs::canonicalize(base.path()).unwrap();
+    let root = base.join("Music");
+    let album = root.join("Album");
+    let outside = base.join("Outside");
+    fs::create_dir_all(&album).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    write_tagged_wav(&album.join("1 first.wav"), "First", "Artist", "Album", "Rock").unwrap();
+    write_tagged_wav(&outside.join("2 second.wav"), "Second", "Artist", "Other", "Rock").unwrap();
+    symlink(&outside, root.join("Linked")).unwrap();
+    // A second way to the same place, a way back into the folder, loops, and a dead end.
+    symlink(&outside, root.join("Linked again")).unwrap();
+    symlink(&album, root.join("Inside")).unwrap();
+    symlink(&root, album.join("Up")).unwrap();
+    symlink(&root, outside.join("Back")).unwrap();
+    symlink(base.join("Nowhere"), root.join("Broken")).unwrap();
+    // A system folder is left out, and a folder that denies access fails nothing.
+    let lost = root.join("lost+found");
+    fs::create_dir(&lost).unwrap();
+    write_tagged_wav(&lost.join("9 lost.wav"), "Lost", "Artist", "Album", "Rock").unwrap();
+    let denied = root.join("Denied");
+    fs::create_dir(&denied).unwrap();
+    fs::set_permissions(&denied, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let store = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(store.path().join("library.sqlite"))
+        .await
+        .unwrap();
+    let connected = Source::connect(
+        SourceId::new("local-links"),
+        SourceSetup::Local {
+            roots: vec![root.clone()],
+        },
+        "",
+    )
+    .await
+    .unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    let refresh = async || {
+        source
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sources::Refresh::Changed,
+            )
+            .await
+    };
+    refresh().await.expect("a walk with links");
+    assert_eq!(
+        stored_media(&catalog, "local-links", &root).await,
+        ["Album/1 first.wav", "Linked/2 second.wav"]
+    );
+
+    // A change the watcher of the linked folder reports by its real path, and one a watcher
+    // of the root reports through the link.
+    write_tagged_wav(&outside.join("3 third.wav"), "Third", "Artist", "Other", "Rock").unwrap();
+    write_tagged_wav(&outside.join("4 fourth.wav"), "Fourth", "Artist", "Other", "Rock").unwrap();
+    apply_paths(
+        &source,
+        &catalog,
+        vec![
+            outside.join("3 third.wav"),
+            root.join("Linked").join("4 fourth.wav"),
+            // A path through a link the walk does not follow is the real file's.
+            root.join("Inside").join("1 first.wav"),
+        ],
+        None,
+    )
+    .await
+    .expect("live changes under a link");
+    assert_eq!(
+        stored_media(&catalog, "local-links", &root).await,
+        [
+            "Album/1 first.wav",
+            "Linked/2 second.wav",
+            "Linked/3 third.wav",
+            "Linked/4 fourth.wav"
+        ]
+    );
+
+    // The other link takes over once the first is gone, and the tracks keep their identity.
+    let database = store.path().join("library.sqlite");
+    let listed = async || {
+        let mut stored = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new().filename(&database),
+        )
+        .await
+        .unwrap();
+        sqlx::query_scalar::<_, String>(
+            "SELECT media_uri FROM tracks WHERE indexed=1 ORDER BY media_uri",
+        )
+        .fetch_all(&mut stored)
+        .await
+        .unwrap()
+    };
+    let before = listed().await;
+    assert_eq!(before.len(), 4);
+    fs::remove_file(root.join("Linked")).unwrap();
+    refresh().await.expect("a walk after a link went");
+    assert_eq!(
+        stored_media(&catalog, "local-links", &root).await,
+        [
+            "Album/1 first.wav",
+            "Linked again/2 second.wav",
+            "Linked again/3 third.wav",
+            "Linked again/4 fourth.wav"
+        ]
+    );
+    assert_eq!(listed().await, before);
+    fs::set_permissions(&denied, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[tokio::test]
 async fn a_moved_folder_larger_than_a_write_keeps_every_track_identity() {
     let root = tempfile::tempdir().unwrap();
@@ -2110,8 +2247,6 @@ async fn apply_paths(
         .await
 }
 
-// An offline rename is paired by inode; Windows exposes no file identity to pair it by.
-#[cfg(unix)]
 #[tokio::test]
 async fn cue_folder_rename_keeps_favorites() {
     let root = tempfile::tempdir().expect("music root");

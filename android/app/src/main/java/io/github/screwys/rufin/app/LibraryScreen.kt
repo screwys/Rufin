@@ -58,7 +58,7 @@ import io.github.screwys.rufin.sources.SourceSetupScreen
 import io.github.screwys.rufin.sources.SourceWelcome
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import io.github.screwys.rufin.browse.RandomPlaySheet
+import io.github.screwys.rufin.browse.MixSheet
 import io.github.screwys.rufin.browse.BrowseGestureSettings
 import io.github.screwys.rufin.browse.SearchContent
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
@@ -256,7 +256,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var sortPage by remember { mutableStateOf<BrowsePage?>(null) }
     // The route shows as a list beside the page picked from it.
     var splitShown by remember { mutableStateOf(false) }
-    var random by rememberSaveable { mutableStateOf(false) }
+    var mix by rememberSaveable { mutableStateOf(false) }
     var sleepTimer by rememberSaveable { mutableStateOf(false) }
     val radio = remember { RadioState() }
     var menu by remember { mutableStateOf<BrowseItem?>(null) }
@@ -625,7 +625,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                 Text(label("Home"), Modifier.weight(1f).padding(start = if (tabs) 2.dp else 16.dp), maxLines = 1,
                                     style = MaterialTheme.typography.titleLarge)
                                 if (width == ShellWidth.Tv && hasMedia) NowPlayingChip(player) { fullPlayer = true }
-                                PlayerIconButton("rufin-mix-symbolic", "Mix", { random = true })
+                                PlayerIconButton("rufin-mix-symbolic", "Mix", { mix = true })
                                 queueToggle()
                             }
                         } else Column(Modifier.fillMaxSize()) {
@@ -729,14 +729,14 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage, beside = splitShown && sortPage != null && sortPage === rootPages[browse.rootId])
-    if (random) RandomPlaySheet(model, browse) { random = false }
+    if (mix) MixSheet(model, browse) { mix = false }
     if (sleepTimer) SleepTimerSheet(player) { sleepTimer = false }
     (playerMenu ?: menu)?.let { item ->
         val close = { menu = null; playerMenu = null }
         BrowseMenuSheet(model, browse, item, player, close, { playlist = item; close() }, { metadata = item; close() },
             onNavigate = { route, title, _ -> close(); fullPlayer = false; browse.section = AppSection.Browse; browse.openRoute(route, title) },
             top = if (playerMenu == null) null else { {
-                PlayerMenuActions(player, onRandom = { close(); random = true }, onSleepTimer = { close(); sleepTimer = true },
+                PlayerMenuActions(player, onMix = { close(); mix = true }, onSleepTimer = { close(); sleepTimer = true },
                     onAutoDjSettings = { close(); fullPlayer = false; openMore(MoreDestination.Playback) })
             } })
     }
@@ -758,7 +758,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     if (createFolder) PlaylistFolderNameDialog(model, { createFolder = false })
     if (createSmartPlaylist) SmartPlaylistEditor(model, browse, { createSmartPlaylist = false }, folder = playlistFolder?.key)
     metadata?.row?.metadataItem?.let { item -> MetadataEditorScreen(model, item) { metadata = null } }
-    if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !random) {
+    if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !mix) {
         ConnectPairingPrompt(model) { openMore(MoreDestination.Connect) }
     }
     if (sources) Dialog(onDismissRequest = { model.closeSourceSetup(); sources = false },
@@ -960,7 +960,7 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
             Surface(Modifier.fillMaxSize().padding(top = if (plain) barHeight else 0.dp)) {
                 CompositionLocalProvider(LocalRowSwipes provides true, LocalOverlayBarHeight provides barHeight,
                     LocalDetailBand provides bandColor, LocalFinding provides state.finding,
-                    LocalOpenFind provides { state.finding = true }, LocalBesideList provides beside) {
+                    LocalOpenFind provides { state.finding = true }) {
                     BrowsePageContent(model, browse, player, location, location.options, active, onMenu, onPlaylist, {}, owner = page)
                 }
             }
@@ -992,6 +992,12 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
                     Text(summary?.row?.title ?: location.title, Modifier.padding(start = 4.dp), maxLines = 1,
                         overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                 }
+            }
+            // The page's links ride in the bar's row and leave with its header.
+            if (!state.finding && !past && summary != null) LocalContext.current.let { context ->
+                DetailLinks(location.route, summary, player, { link -> model.runAction {
+                    openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
+                } }, Modifier.graphicsLayer { translationY = -state.offset })
             }
             if (state.finding) { if (browse.filter.isNotEmpty()) PlayerIconButton("rufin-window-close-symbolic", "Clear", { browse.filter = "" }) }
             else if (past && !plain && page != null) PlayerIconButton("rufin-media-playback-start-symbolic", "Play",
@@ -1155,9 +1161,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
             DetailContent(summary, page, rows, player, page.releaseGroups,
                 onOpen, onMenu, { item, placement, shuffled -> page.play(placement, shuffled, item.row.title) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, summary.row.title) },
-                onLink = { link -> model.runAction {
-                    openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
-                } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
+                onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
                 onDownload = { browse.download(it, remove = it.row.downloaded) })
             return@Column
         }

@@ -63,7 +63,10 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
                 val setup = runtime.source()
                 bridge = setup
                 providers = listOf("local" to "Local", "jellyfin" to "Jellyfin", "emby" to "Emby", "plex" to "Plex", "navidrome" to "Navidrome", "subsonic" to "OpenSubsonic", "webdav" to "WebDAV", "smb" to "SMB / Samba").map { (kind, title) -> kind to translate(title) }
-                sourceId?.let { form.load(withContext(Dispatchers.IO) { setup.editable(it) } ?: error(translate("Source is no longer available"))) }
+                sourceId?.let { id ->
+                    form.load(withContext(Dispatchers.IO) { setup.editable(id) } ?: error(translate("Source is no longer available")))
+                    form.streamQuality = withContext(Dispatchers.IO) { runtime.settings().use { it.downloadSettings(id).streamQuality } }
+                }
                 ready = true
                 // Where the network needs no prompt, the list opens with what is on it.
                 if (sourceId == null && service.hasLocalNetworkAccess()) find(model.sources?.sources?.isEmpty() == true)
@@ -100,6 +103,13 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val source = model.connectedService().runtime.value!!.getOrThrow().source()
         try { source.setHalfStars(id, enabled); form.halfStars = enabled }
         finally { source.destroy() }
+    }
+    fun setStreamQuality(quality: io.github.screwys.rufin.shared.library.AudioQuality?) = model.runAction {
+        val id = sourceId ?: return@runAction
+        withContext(Dispatchers.IO) {
+            model.connectedService().runtime.value!!.getOrThrow().settings().use { it.setSourceStreamQuality(id, quality) }
+        }
+        form.streamQuality = quality
     }
     fun selectProvider(kind: String, server: FoundServer? = null) {
         cancelAuthorization()
@@ -203,8 +213,8 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val session = auth
         if (authorized && session != null) {
             val input = when (form.kind) {
-                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.instantMix, form.optional(form.localUrl))
-                "emby" -> SourceAuthorizationInput.Emby(selectedServer, form.instantMix)
+                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.optional(form.localUrl))
+                "emby" -> SourceAuthorizationInput.Emby(selectedServer)
                 "plex" -> SourceAuthorizationInput.Plex(selectedServer, form.url.trim().takeIf(String::isNotEmpty), form.trustInvalidCertificate)
                 "webdav" -> SourceAuthorizationInput.Files(form.fileSettings(), form.fileCredentialsEdit())
                 else -> error(translate("Select Source"))

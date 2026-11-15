@@ -154,7 +154,6 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                             }
                             SourceChoices(setup.choices, setup.selectedServer) { setup.selectedServer = it }
                         }
-                        SourceSwitch("Use Instant Mix for recommendations", form.instantMix, { form.instantMix = it }, !setup.working)
                         if (form.kind == "jellyfin" || form.manualEmby) SourceSwitch("Verify server certificate", !form.trustInvalidCertificate, { form.trustInvalidCertificate = !it }, !setup.working)
                     } }
                     "navidrome", "subsonic" -> item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -165,6 +164,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     "plex" -> item { PlexSourceForm(setup, sourceId != null, browser) }
                     "webdav", "smb" -> item { FileSourceForm(setup, sourceId != null, browser) }
                 }
+                if (form.encodes) item { SourceStreamSettings(setup) }
                 if (form.offersHalfStarSetting) item { SourceRatingSettings(setup) }
                 item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     setup.code?.let { code -> Text(code, style = MaterialTheme.typography.headlineLarge) }

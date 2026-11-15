@@ -56,6 +56,9 @@ pub(crate) fn read_media(
     if crate::file::media::excluded_from_audio_scan(&path) {
         return MediaRead::Rejected;
     }
+    if super::online_only(&path) {
+        return MediaRead::Deferred;
+    }
     let mut file = match fs::File::open(&path) {
         Ok(file) => file,
         Err(_) => return MediaRead::Unreadable,

@@ -55,6 +55,10 @@ pub struct CurrentMedia {
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LiveStream {
     pub station: String,
+    /// The other names the station's feed gives the announced song's title, and the names
+    /// its artists go by, each by itself: what its lyrics are also looked up by.
+    pub also_titled: Vec<String>,
+    pub also_credited: Vec<String>,
     pub codec: Option<String>,
     /// Bits per second.
     pub bitrate: Option<u32>,
