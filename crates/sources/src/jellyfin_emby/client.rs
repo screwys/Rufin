@@ -450,92 +450,35 @@ impl JellyfinEmbySource {
     pub(crate) async fn resolve_stream(
         &self,
         track_object_id: &str,
-        quality: StreamQuality,
+        encoding: Option<library::AudioEncoding>,
         session_identifier: Option<&str>,
     ) -> SourceResult<ResolvedStream> {
         if self.kind == ServerKind::Emby {
             return self
-                .emby_stream(track_object_id, quality, session_identifier)
+                .emby_stream(track_object_id, encoding, session_identifier)
                 .await;
         }
-        let stream = stream_descriptor(
-            &self.base_url(),
-            &self.user_id,
-            &self.device_id,
-            &self.access_token,
-            self.trust_invalid_cert,
-            track_object_id,
-            quality,
-        )?;
-        let mut url =
-            Url::parse(stream.uri()).map_err(|error| SourceError::Other(error.to_string()))?;
-        if let Some(session) = session_identifier {
-            url.query_pairs_mut().append_pair("PlaySessionId", session);
+        match encoding {
+            Some(encoding) => {
+                self.jellyfin_transcode(track_object_id, encoding, session_identifier)
+            }
+            None => self.jellyfin_original(track_object_id, session_identifier),
         }
-        Ok(ResolvedStream::new(url.to_string())
-            .with_content_type(stream.content_type)
-            .with_trust_invalid_certificate(self.trust_invalid_cert)
-            .with_transcoding(quality != StreamQuality::Original))
     }
 
     pub(crate) async fn resolve_download(
         &self,
         track: &str,
-        quality: crate::DownloadQuality,
+        quality: crate::AudioQuality,
         channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
         if self.kind == ServerKind::Jellyfin {
             return self.jellyfin_download(track, quality, channels);
         }
         let encoding = quality.encoding();
-        let stream = self
-            .emby_stream(track, StreamQuality::Original, None)
-            .await?;
-        let Some(encoding) = encoding else {
-            return Ok(crate::ResolvedDownload::ready(stream, None));
-        };
-        let container = match encoding.codec {
-            library::AudioCodec::Opus | library::AudioCodec::Vorbis => "ogg",
-            _ => encoding.codec.name(),
-        };
-        let mut url =
-            Url::parse(stream.uri()).map_err(|error| SourceError::Other(error.to_string()))?;
-        url.set_path(&format!(
-            "{}/Audio/{}/stream.{container}",
-            self.base_url().path().trim_end_matches('/'),
-            raw_item_id(track)
-        ));
-        let session = url
-            .query_pairs()
-            .find(|(key, _)| key == "PlaySessionId")
-            .map(|(_, value)| value.into_owned())
-            .expect("Emby streams have a session");
-        let pairs = url
-            .query_pairs()
-            .filter(|(key, _)| key != "Static")
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect::<Vec<_>>();
-        url.set_query(None);
-        url.query_pairs_mut()
-            .extend_pairs(pairs)
-            .append_pair("Static", "false")
-            .append_pair("AudioCodec", encoding.codec.name());
-        if encoding.codec != library::AudioCodec::Flac
-            && let Some(rate) = encoding.bitrate_kbps
-        {
-            url.query_pairs_mut()
-                .append_pair("AudioBitRate", &rate.saturating_mul(1000).to_string());
-        }
-        if encoding.stereo() {
-            url.query_pairs_mut().append_pair("MaxAudioChannels", "2");
-        }
-        let stream = ResolvedStream::new(url.to_string())
-            .with_trust_invalid_certificate(self.trust_invalid_cert)
-            .with_content_type(Some(encoding.codec.content_type().into()))
-            .with_transcoding(true);
         Ok(crate::ResolvedDownload::ready(
-            self.hold_emby_transcode(stream, &session).await?,
-            Some(encoding.codec),
+            self.emby_stream(track, encoding, None).await?,
+            encoding.map(|encoding| encoding.codec),
         ))
     }
 
@@ -1172,7 +1115,7 @@ impl PlaybackReportDto {
 
 #[cfg(test)]
 mod tests {
-    use super::{playlist_entry, stream_descriptor};
+    use super::playlist_entry;
     use crate::jellyfin_emby::item::{album_from_item, track_from_item};
     use crate::jellyfin_emby::{JellyfinEmbySource, JellyfinEmbySourceConfig};
     use serde_json::Value;
@@ -1474,24 +1417,6 @@ mod tests {
             let item: Value = serde_json::from_value(item).expect("playlist item");
             assert!(playlist_entry(crate::ServerKind::Jellyfin, &item).is_none());
         }
-    }
-
-    #[test]
-    fn playback_stream_keeps_authentication_out_of_diagnostics() {
-        let stream = stream_descriptor(
-            &reqwest::Url::parse("https://music.example/jellyfin/").expect("base URL"),
-            "user-one",
-            "device-one",
-            "secret-token",
-            false,
-            "track-one",
-            playback::StreamQuality::Original,
-        )
-        .expect("stream descriptor");
-
-        assert!(stream.uri().contains("secret-token"));
-        assert!(!stream.redacted_uri().contains("secret-token"));
-        assert!(stream.redacted_uri().contains("ApiKey=%3Credacted%3E"));
     }
 
     #[tokio::test]

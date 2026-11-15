@@ -12,7 +12,7 @@ use item::{
     primary_image_ref, track_from_item,
 };
 use lyrics::{LyricsBundle, LyricsDocument, LyricsLine, LyricsOrigin, LyricsRole};
-use playback::{QueueRepeatMode, SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{QueueRepeatMode, SourceReportFact, SourceReportPhase};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use serde_json::Value;
@@ -35,7 +35,6 @@ type PlaylistId = String;
 
 pub(crate) use client::normalize_base_url;
 use client::*;
-use jellyfin::*;
 
 const CLIENT_NAME: &str = "Rufin";
 const DEVICE_NAME: &str = "Rufin";

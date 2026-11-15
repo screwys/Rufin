@@ -62,6 +62,11 @@
                   <object class="AdwPreferencesGroup" id="audio_group">
                   </object>
                 </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="stream_quality_group">
+                    <property name="title" translatable="yes">Stream quality</property>
+                  </object>
+                </child>
               </object>
             </property>
           </object>

@@ -1525,7 +1525,13 @@ impl GstEngine {
                 .reopened_at(position_millis)
                 .map_err(|error| error.to_string())?;
         }
-        let start_millis = SourceClock::from_stream(&item.stream).physical_seek(position_millis);
+        // A reopened source begins where its server starts it; one that starts on whole
+        // seconds begins a little before the position, with nothing in between to seek over.
+        let start_millis = if item.stream.time_offset_millis().is_some() {
+            0
+        } else {
+            SourceClock::from_stream(&item.stream).physical_seek(position_millis)
+        };
         let run = item.run;
         let active = bitstream.is_some();
         let needs_preroll_seek = start_millis > 0

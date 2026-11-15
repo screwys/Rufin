@@ -9,7 +9,7 @@ use lyrics::{
     LyricsAgent, LyricsAgentRole, LyricsBundle, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine, LyricsOrigin, LyricsRole,
 };
-use playback::{SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{SourceReportFact, SourceReportPhase};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

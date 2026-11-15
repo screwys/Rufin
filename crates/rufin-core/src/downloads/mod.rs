@@ -12,7 +12,7 @@ use async_channel::{Receiver, Sender};
 use audio_processing::ResolvedStream;
 use library::{Catalog, Change, FolderKey, Scope, SourceKey, TrackKey};
 use serde::{Deserialize, Serialize};
-use sources::{DownloadQuality, ResolvedDownload};
+use sources::{AudioQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
@@ -21,9 +21,9 @@ use crate::settings::{SettingsFile, StoredSettings};
 
 mod quality;
 pub use quality::{
-    DEFAULT_DOWNLOAD_BITRATE, DOWNLOAD_BITRATES, download_bitrates, download_quality_shows_bitrate,
-    download_quality_shows_channels, download_quality_with_bitrate, download_quality_with_channels,
-    download_quality_with_codec,
+    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_bitrates, audio_codec_label,
+    audio_quality_shows_bitrate, audio_quality_shows_channels, audio_quality_with_bitrate,
+    audio_quality_with_channels, audio_quality_with_codec,
 };
 mod storage;
 mod track_download;
@@ -137,8 +137,7 @@ enum DownloadOwner {
 struct DownloadJob {
     id: String,
     subject: DownloadSubject,
-    #[serde(deserialize_with = "quality::deserialize")]
-    quality: DownloadQuality,
+    quality: AudioQuality,
     #[serde(default)]
     completed: Vec<String>,
     remaining: VecDeque<String>,
@@ -177,8 +176,7 @@ enum ReleasedDownloadOwner {
 struct ReleasedDownloadJob {
     id: String,
     subject: ReleasedDownloadSubject,
-    #[serde(deserialize_with = "quality::deserialize")]
-    quality: DownloadQuality,
+    quality: AudioQuality,
     #[serde(rename = "total_tracks")]
     _total_tracks: usize,
     #[serde(default)]
@@ -528,7 +526,7 @@ struct ActiveDownload {
     backing: Option<String>,
     subject: DownloadSubject,
     paths: DownloadPaths,
-    quality: DownloadQuality,
+    quality: AudioQuality,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     /// The transfer, which returns where the audio goes.
     task: tokio::task::JoinHandle<Result<DownloadAudio, DownloadFailure>>,
@@ -608,10 +606,13 @@ pub struct SourceDownloadSettings {
     #[serde(flatten)]
     pub rules: DownloadRules,
     #[serde(default)]
-    #[serde(deserialize_with = "quality::deserialize")]
-    pub quality: DownloadQuality,
+    pub quality: AudioQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<DownloadDirectory>,
+    /// The quality this source's streams are asked for, in place of the one for every source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "bindings", uniffi(default = None))]
+    pub stream_quality: Option<AudioQuality>,
 }
 
 impl SourceDownloadSettings {
@@ -619,15 +620,17 @@ impl SourceDownloadSettings {
         Self {
             source_id,
             rules: DownloadRules::default(),
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             directory: None,
+            stream_quality: None,
         }
     }
 
     pub fn is_default(&self) -> bool {
         self.rules.is_empty()
-            && self.quality == DownloadQuality::Original
+            && self.quality == AudioQuality::Original
             && self.directory.is_none()
+            && self.stream_quality.is_none()
     }
 }
 
@@ -829,7 +832,7 @@ pub struct DownloadQueueItem {
     pub source_id: Option<SourceId>,
     pub subject: DownloadSubject,
     pub preview_uris: Vec<String>,
-    pub quality: DownloadQuality,
+    pub quality: AudioQuality,
     pub completed_tracks: DownloadCount,
     pub total_tracks: DownloadCount,
     pub state: DownloadQueueState,
@@ -1216,7 +1219,7 @@ impl Actor {
                     }
                     let quality = source_id
                         .as_ref()
-                        .map_or(DownloadQuality::Original, |source_id| {
+                        .map_or(AudioQuality::Original, |source_id| {
                             self.settings_for(source_id).quality
                         });
                     if let Some(feedback) = self
@@ -1646,7 +1649,7 @@ impl Actor {
         source_id: Option<&SourceId>,
         media_uri: &str,
         owner: &DownloadOwner,
-        quality: DownloadQuality,
+        quality: AudioQuality,
     ) -> Result<bool, String> {
         let encoding = library::media_encoding_key(quality.encoding());
         let previous =
@@ -1727,7 +1730,7 @@ impl Actor {
         &mut self,
         source_id: Option<SourceId>,
         subject: DownloadSubject,
-        quality: DownloadQuality,
+        quality: AudioQuality,
         media_uris: Vec<String>,
     ) -> Option<DownloadFeedback> {
         let mut seen = HashSet::new();
@@ -1822,7 +1825,7 @@ impl Actor {
         &mut self,
         source_id: SourceId,
         rule: DownloadRule,
-        quality: DownloadQuality,
+        quality: AudioQuality,
         media_uris: Vec<String>,
         active: &mut Vec<ActiveDownload>,
     ) {
@@ -2163,7 +2166,7 @@ impl Actor {
                                     playable.as_ref().map_err(|_| {
                                         download_source_failure(SourceError::NotFound)
                                     })?,
-                                    DownloadQuality::Original,
+                                    AudioQuality::Original,
                                 )
                                 .await
                                 .map_err(download_source_failure)?;
@@ -2211,7 +2214,7 @@ impl Actor {
         Option<SourceId>,
         String,
         DownloadSubject,
-        DownloadQuality,
+        AudioQuality,
         String,
     )> {
         for (source_id, jobs) in &self.jobs {
@@ -2323,7 +2326,7 @@ impl Actor {
         media_uri: &str,
         subject: &DownloadSubject,
         paths: &DownloadPaths,
-        quality: DownloadQuality,
+        quality: AudioQuality,
     ) -> Result<DownloadPaths, DownloadFailure> {
         let mut file = library::DownloadFile {
             media_uri: media_uri.into(),
@@ -3197,7 +3200,7 @@ mod tests {
                     Some("Track".to_owned()),
                     std::slice::from_ref(&media_uri),
                 ),
-                quality: DownloadQuality::Original,
+                quality: AudioQuality::Original,
                 completed: Vec::new(),
                 remaining: vec![media_uri.clone(), direct.clone()].into(),
                 state: DownloadQueueState::Queued,
@@ -3239,7 +3242,7 @@ mod tests {
         assert!(http.audio_part.exists());
         let mut actor = actor_for_test(root.path(), catalog, &source_id, source);
         let mut settings = SourceDownloadSettings::for_source(source_id.clone());
-        settings.quality = DownloadQuality::Transcoded(library::AudioEncoding {
+        settings.quality = AudioQuality::Transcoded(library::AudioEncoding {
             codec: library::AudioCodec::Opus,
             bitrate_kbps: Some(64),
             channels: library::AudioChannels::Preserve,
@@ -3267,7 +3270,7 @@ mod tests {
         let record = ReleasedDownloadRecord {
             version: RECORD_VERSION,
             media_uri: media_uri.clone(),
-            quality: Some(DownloadQuality::Original),
+            quality: Some(AudioQuality::Original),
             owners: HashSet::from([DownloadOwner::Retained]),
             audio: RecordedAudio::Native {
                 storage_root: None,
@@ -3367,7 +3370,7 @@ mod tests {
             backing: None,
             subject: job.subject,
             paths: paths.clone(),
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             cancellation: None,
             task: tokio::spawn(std::future::pending()),
         };
@@ -3442,7 +3445,7 @@ mod tests {
             .enqueue(
                 Some(source.clone()),
                 subject.clone(),
-                DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
+                AudioQuality::Transcoded(library::AudioEncoding::mp3()),
                 vec![uri.clone()],
             )
             .await;
@@ -3457,7 +3460,7 @@ mod tests {
             backing: None,
             subject,
             paths: paths.clone(),
-            quality: DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
+            quality: AudioQuality::Transcoded(library::AudioEncoding::mp3()),
             cancellation: None,
             task: tokio::spawn(std::future::pending()),
         };
@@ -3536,7 +3539,7 @@ mod tests {
                     backing: None,
                     subject: job.subject,
                     paths,
-                    quality: DownloadQuality::Original,
+                    quality: AudioQuality::Original,
                     cancellation: None,
                     task: tokio::spawn(std::future::pending()),
                 };
@@ -3757,7 +3760,7 @@ mod tests {
                 Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             completed: Vec::new(),
             remaining: vec![media_uri].into(),
             state: DownloadQueueState::Downloading,
@@ -3791,7 +3794,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths,
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             cancellation: Some(cancel),
             task,
         }];
@@ -3833,7 +3836,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths,
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             cancellation: Some(cancel),
             task,
         }];
@@ -3900,7 +3903,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             cancellation: Some(cancel),
             task,
         }];
@@ -3934,7 +3937,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),
-            quality: DownloadQuality::Original,
+            quality: AudioQuality::Original,
             cancellation: None,
             task: tokio::spawn(std::future::pending()),
         };

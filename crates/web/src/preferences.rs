@@ -103,6 +103,7 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         })
         .collect::<Vec<_>>();
     let (themes, theme_errors) = themes(&settings);
+    let stream_quality = super::source::quality_view(Some(settings.playback.stream_quality));
     drop(settings);
     let blocks = products
         .settings
@@ -123,7 +124,7 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         products.source.list_sources().sources,
     );
     Ok(
-        json!({"values": values, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
+        json!({"values": values, "stream_quality": stream_quality, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
     )
 }
 

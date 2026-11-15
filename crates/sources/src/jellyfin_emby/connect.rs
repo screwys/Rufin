@@ -503,7 +503,7 @@ mod tests {
             "reopened-token"
         );
         let stream = source
-            .emby_stream("emby:track:track", StreamQuality::Original, None)
+            .emby_stream("emby:track:track", None, None)
             .await
             .unwrap();
         assert!(stream.uri().contains("reopened-token"));
