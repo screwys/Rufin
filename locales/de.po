@@ -426,6 +426,11 @@ msgid "Add Source"
 msgstr "Quelle hinzufügen"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Titel hinzufügen"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Ordner hinzufügen"
@@ -493,6 +498,11 @@ msgstr "Zu Ordner hinzufügen"
 msgid "Add to library"
 msgstr "Zur Bibliothek hinzufügen"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Zu Favoriten hinzufügen"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Neue Titel hinzufügen, wenn weniger als dieser Wert verbleibt"
 
@@ -500,6 +510,11 @@ msgid "Add"
 msgstr "Hinzufügen"
 
 msgid "Added to"
+msgstr "Hinzugefügt zu"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Hinzugefügt zu"
 
 msgid "Album Artists"
@@ -1368,6 +1383,11 @@ msgstr "Dezember {year}"
 msgid "Decrease"
 msgstr "Verringern"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Standard"
+
 msgid "Default"
 msgstr "Standard"
 
@@ -1378,6 +1398,11 @@ msgstr "Voreinstellung löschen"
 
 msgid "Delete Playlist"
 msgstr "Playlist löschen"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Geräteeinladung"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1396,6 +1421,9 @@ msgstr "Playlist-Datei löschen"
 
 msgid "Delete preset"
 msgstr "Voreinstellung löschen"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1626,6 +1654,11 @@ msgstr "Smart-Playlist bearbeiten"
 
 msgid "Edit Source"
 msgstr "Quelle bearbeiten"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "Metadaten bearbeiten"
 
 msgid "Edit lyrics"
 msgstr "Liedtexte bearbeiten"
@@ -2067,6 +2100,9 @@ msgstr "Gast-/öffentlicher Zugriff"
 msgid "Halo"
 msgstr "Halo"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Höhe (%)"
 
@@ -2105,6 +2141,11 @@ msgid "Home blocks"
 msgstr "Startseiten-Bereiche"
 
 msgid "Home"
+msgstr "Übersicht"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Übersicht"
 
 msgid "Hour"
@@ -2253,6 +2294,9 @@ msgstr "Finde dein ListenBrainz-Benutzer-Token"
 
 msgid "LED spectrum"
 msgstr "LED-Spektrum"
+
+msgid "LIVE"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2724,6 +2768,11 @@ msgstr "Stummgeschaltet"
 msgid "My music"
 msgstr "Meine Musik"
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Adresse auswählen"
+
 msgid "Name"
 msgstr "Name"
 
@@ -3051,6 +3100,11 @@ msgstr "Benutzerdefinierten Design-Ordner öffnen"
 
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
+
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Bestätigungsseite öffnen"
 
 msgid "Open on Emby"
 msgstr "In Emby öffnen"
@@ -3660,6 +3714,11 @@ msgstr "Aus Ordner entfernen"
 msgid "Remove group"
 msgstr "Regel entfernen"
 
+#, fuzzy
+#| msgid "Remove device"
+msgid "Remove image"
+msgstr "Gerät entfernen"
+
 msgid "Remove rule"
 msgstr "Regel entfernen"
 
@@ -3749,6 +3808,9 @@ msgstr "Player-Layout wiederherstellen"
 
 msgid "Restore"
 msgstr "Wiederherstellen"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 msgid "Results per section"
 msgstr "Ergebnisse pro Bereich"
@@ -3953,6 +4015,11 @@ msgstr "Sucheinstellungen"
 
 msgid "Search queue"
 msgstr "Warteschlange durchsuchen"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Erneut suchen"
 
 #, fuzzy
 #| msgid "Search artwork"
@@ -4424,6 +4491,14 @@ msgstr "Wird gestartet …"
 msgid "Static"
 msgstr "Automatisch"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automatisch"
+
 msgid "Status display"
 msgstr "Statusanzeige"
 
@@ -4446,6 +4521,11 @@ msgstr "Speicher"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
+
+#, fuzzy
+#| msgid "Relay address"
+msgid "Stream address"
+msgstr "Relay-Adresse"
 
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
@@ -5056,6 +5136,11 @@ msgstr "kbps"
 
 msgid "not in the last"
 msgstr ""
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Fenster"
 
 msgid "of these rules"
 msgstr ""

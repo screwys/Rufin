@@ -402,6 +402,11 @@ msgid "Add Source"
 msgstr "Pievienot avotu"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Pievienot nosaukumu"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Pievienot mapi"
@@ -481,6 +486,11 @@ msgstr "Pievienot mapi"
 msgid "Add to library"
 msgstr "Pievienot mūzikas bibliotēku"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Pievienot izlasei"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Pievienot dziesmas, kad paliek mazāk par šo skaitu"
 
@@ -488,6 +498,11 @@ msgid "Add"
 msgstr "Pievienot"
 
 msgid "Added to"
+msgstr "Pievienots"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Pievienots"
 
 msgid "Album Artists"
@@ -1506,6 +1521,11 @@ msgstr ""
 msgid "Decrease"
 msgstr "Samazināt"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Noklusējums"
+
 msgid "Default"
 msgstr "Noklusējums"
 
@@ -1516,6 +1536,11 @@ msgstr "Ielīmēt iepriekš iestatīto"
 
 msgid "Delete Playlist"
 msgstr "Dzēst atskaņošanas sarakstu"
+
+#, fuzzy
+#| msgid "Release notifications"
+msgid "Delete Station"
+msgstr "Jaunu izdevumu paziņojumi"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1538,6 +1563,9 @@ msgstr "Dzēst atskaņošanas saraksta failu"
 #| msgid "Paste preset"
 msgid "Delete preset"
 msgstr "Ielīmēt iepriekš iestatīto"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1802,6 +1830,11 @@ msgstr "Rediģēt viedo atskaņošanas sarakstu"
 
 msgid "Edit Source"
 msgstr "Rediģēt avotu"
+
+#, fuzzy
+#| msgid "Edit Mapping"
+msgid "Edit Station"
+msgstr "Rediģēt kartējumu"
 
 msgid "Edit lyrics"
 msgstr "Rediģēt tekstus"
@@ -2297,6 +2330,9 @@ msgstr "Viesis / publiska piekļuve"
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2335,6 +2371,11 @@ msgid "Home blocks"
 msgstr "Sākuma bloki"
 
 msgid "Home"
+msgstr "Sākums"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Sākums"
 
 msgid "Hour"
@@ -2498,6 +2539,9 @@ msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
 #| msgid "Spectrum line"
 msgid "LED spectrum"
 msgstr "Spektra līnija"
+
+msgid "LIVE"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -3004,6 +3048,11 @@ msgstr "Skaņa izslēgta"
 msgid "My music"
 msgstr "Mana mūzika"
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Izvēlēties adresi"
+
 msgid "Name"
 msgstr "Nosaukums"
 
@@ -3358,6 +3407,11 @@ msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
+
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Atvērt apstiprināšanas lapu"
 
 msgid "Open on Emby"
 msgstr "Atvērt Emby"
@@ -4022,6 +4076,11 @@ msgstr "Dzēst mapi"
 msgid "Remove group"
 msgstr "Noņemt noteikumu"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove image"
+msgstr "Dzēst mapi"
+
 msgid "Remove rule"
 msgstr "Noņemt noteikumu"
 
@@ -4124,6 +4183,9 @@ msgstr "Atjaunot atskaņotāja izkārtojumu"
 
 msgid "Restore"
 msgstr "Atjaunot"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 #, fuzzy
 #| msgid "Refresh section"
@@ -4348,6 +4410,11 @@ msgstr "Meklēšanas iestatījumi"
 
 msgid "Search queue"
 msgstr "Meklēt rindā"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Meklēt vēlreiz"
 
 #, fuzzy
 #| msgid "Show artwork"
@@ -4864,6 +4931,14 @@ msgstr "Sākas..."
 msgid "Static"
 msgstr "Automātisks"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automātisks"
+
 msgid "Status display"
 msgstr "Statuss"
 
@@ -4888,6 +4963,11 @@ msgstr "Slēptā krātuve"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr "Saglabāt aprēķināto skaļumu atbalstītajos lokālajos mūzikas failos"
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Stream address"
+msgstr "Izvēlēties adresi"
 
 msgid "Stream quality"
 msgstr "Straumes kvalitāte"
@@ -5558,6 +5638,11 @@ msgstr "kbit/s"
 
 msgid "not in the last"
 msgstr ""
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Logs"
 
 msgid "of these rules"
 msgstr ""
@@ -6659,9 +6744,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Does MusicBrainz and Cover Art Archive lookups"
 #~ msgstr "Veic MusicBrainz un Cover Art Archive meklējumus"
-
-#~ msgid "Edit Mapping"
-#~ msgstr "Rediģēt kartējumu"
 
 #~ msgid "Found {count} Jellyfin server"
 #~ msgid_plural "Found {count} Jellyfin servers"

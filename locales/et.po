@@ -420,6 +420,11 @@ msgid "Add Source"
 msgstr "Lisa allikas"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Lisa pealkiri"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Lisa kaust"
@@ -487,6 +492,11 @@ msgstr "Lisa kausta"
 msgid "Add to library"
 msgstr "Lisa meediumikogusse"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Lisa lemmikuks"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Kui jäänud alla antud piiri lugusid, siis lisa neid juurde"
 
@@ -494,6 +504,11 @@ msgid "Add"
 msgstr "Lisa"
 
 msgid "Added to"
+msgstr "Lisatud asukohta"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Lisatud asukohta"
 
 msgid "Album Artists"
@@ -1362,6 +1377,11 @@ msgstr "Detsember {year}"
 msgid "Decrease"
 msgstr "Vähenda"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Vaikimisi"
+
 msgid "Default"
 msgstr "Vaikimisi"
 
@@ -1372,6 +1392,11 @@ msgstr "Kustuta eelseadistus"
 
 msgid "Delete Playlist"
 msgstr "Kustuta esitusloend"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Seadme kutse"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1390,6 +1415,9 @@ msgstr "Kustuta esitusloendi fail"
 
 msgid "Delete preset"
 msgstr "Kustuta eelseadistus"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1620,6 +1648,11 @@ msgstr "Muuda nutikat esitusloendit"
 
 msgid "Edit Source"
 msgstr "Muuda allikat"
+
+#, fuzzy
+#| msgid "Edit Mapping"
+msgid "Edit Station"
+msgstr "Muuda vastendust"
 
 msgid "Edit lyrics"
 msgstr "Muuda laulusõnu"
@@ -2056,6 +2089,9 @@ msgstr "Avalik ligipääs, sh külalistele"
 msgid "Halo"
 msgstr "Halonähtus"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Kõrgus (%)"
 
@@ -2094,6 +2130,11 @@ msgid "Home blocks"
 msgstr "Avalehe plokid"
 
 msgid "Home"
+msgstr "Avaleht"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Avaleht"
 
 msgid "Hour"
@@ -2242,6 +2283,9 @@ msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
 
 msgid "LED spectrum"
 msgstr "LED-spekter"
+
+msgid "LIVE"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2708,6 +2752,11 @@ msgstr "Summutatud"
 msgid "My music"
 msgstr "Minu muusika"
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Vali aadress"
+
 msgid "Name"
 msgstr "Nimi"
 
@@ -3030,6 +3079,11 @@ msgstr "Ava sinu loodud kujunduste kaust"
 
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
+
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Ava kinnitamise leht"
 
 msgid "Open on Emby"
 msgstr "Ava Emby teenuses"
@@ -3638,6 +3692,11 @@ msgstr "Eemalda kaustast"
 msgid "Remove group"
 msgstr "Eemalda reegel"
 
+#, fuzzy
+#| msgid "Remove device"
+msgid "Remove image"
+msgstr "Eemalda seade"
+
 msgid "Remove rule"
 msgstr "Eemalda reegel"
 
@@ -3726,6 +3785,9 @@ msgstr "Taasta pleieri paigutus"
 
 msgid "Restore"
 msgstr "Taasta"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 msgid "Results per section"
 msgstr "Tulemusi alajaotuse kohta"
@@ -3929,6 +3991,11 @@ msgstr "Otsingu eelistused"
 
 msgid "Search queue"
 msgstr "Otsi esitusjärjekorrast"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Otsi uuesti"
 
 #, fuzzy
 #| msgid "Search artwork"
@@ -4400,6 +4467,14 @@ msgstr "Käivitan…"
 msgid "Static"
 msgstr "Automaatne"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automaatne"
+
 msgid "Status display"
 msgstr "Oleku kuvamine"
 
@@ -4423,6 +4498,11 @@ msgstr "Andmeruum"
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 "Salvesta arvutatud valjus toetatud muusikafailidesse kohalikus meediumikogus"
+
+#, fuzzy
+#| msgid "Relay address"
+msgid "Stream address"
+msgstr "Edastuse aadress"
 
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
@@ -5034,6 +5114,11 @@ msgstr "kbps"
 
 msgid "not in the last"
 msgstr ""
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Aken"
 
 msgid "of these rules"
 msgstr ""
@@ -6105,9 +6190,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Does MusicBrainz and Cover Art Archive lookups"
 #~ msgstr "Otsingud MusicBrainzi ja Cover Art Archive'i teenustesse"
-
-#~ msgid "Edit Mapping"
-#~ msgstr "Muuda vastendust"
 
 #~ msgid "Found {count} Jellyfin server"
 #~ msgid_plural "Found {count} Jellyfin servers"

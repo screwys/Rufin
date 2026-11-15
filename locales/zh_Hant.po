@@ -358,6 +358,11 @@ msgid "Add Source"
 msgstr "新增來源"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "新增標題"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "新增資料夾"
@@ -437,6 +442,11 @@ msgstr "新增資料夾"
 msgid "Add to library"
 msgstr "加入播放清單"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "加入最愛"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "當剩餘的曲目數量少於此時新增曲目"
 
@@ -444,6 +454,11 @@ msgid "Add"
 msgstr "新增"
 
 msgid "Added to"
+msgstr "已加入"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "已加入"
 
 msgid "Album Artists"
@@ -1504,6 +1519,11 @@ msgstr "減少"
 
 #, fuzzy
 #| msgid "Restore Default"
+msgid "Default channel"
+msgstr "回復預設值"
+
+#, fuzzy
+#| msgid "Restore Default"
 msgid "Default"
 msgstr "回復預設值"
 
@@ -1513,6 +1533,11 @@ msgid "Delete Permanently?"
 msgstr "預設集"
 
 msgid "Delete Playlist"
+msgstr "刪除播放清單"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete Station"
 msgstr "刪除播放清單"
 
 #, python-brace-format
@@ -1538,6 +1563,9 @@ msgstr "刪除播放清單"
 #| msgid "Preset"
 msgid "Delete preset"
 msgstr "預設集"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1802,6 +1830,11 @@ msgstr "智慧播放清單"
 #| msgid "Add a new source"
 msgid "Edit Source"
 msgstr "新增來源"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "編輯元資料"
 
 #, fuzzy
 #| msgid "No lyrics"
@@ -2304,6 +2337,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2340,6 +2376,11 @@ msgid "Home blocks"
 msgstr ""
 
 msgid "Home"
+msgstr "首頁"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "首頁"
 
 msgid "Hour"
@@ -2494,6 +2535,9 @@ msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr "尋找您的 ListenBrainz 使用者憑證"
 
 msgid "LED spectrum"
+msgstr ""
+
+msgid "LIVE"
 msgstr ""
 
 msgid "LRCLIB"
@@ -3001,6 +3045,11 @@ msgstr "已靜音"
 msgid "My music"
 msgstr ""
 
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Name or stream address"
+msgstr "定位資料夾"
+
 msgid "Name"
 msgstr "名稱"
 
@@ -3376,6 +3425,9 @@ msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
+
+msgid "Open homepage"
+msgstr ""
 
 #, fuzzy
 #| msgid "Open on Last.fm"
@@ -4072,6 +4124,11 @@ msgstr "移除資料夾"
 msgid "Remove group"
 msgstr "移除規則"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove image"
+msgstr "移除資料夾"
+
 msgid "Remove rule"
 msgstr "移除規則"
 
@@ -4178,6 +4235,9 @@ msgstr ""
 
 msgid "Restore"
 msgstr "復原"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 #, fuzzy
 #| msgid "Refresh section"
@@ -4408,6 +4468,11 @@ msgstr "搜尋偏好設定"
 
 msgid "Search queue"
 msgstr "搜尋佇列"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "重新搜尋"
 
 #, fuzzy
 #| msgid "Search Lyrics"
@@ -4930,6 +4995,14 @@ msgstr "正在儲存..."
 msgid "Static"
 msgstr "自動"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "自動"
+
 msgid "Status display"
 msgstr ""
 
@@ -4954,6 +5027,11 @@ msgstr "私密儲存空間"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Stream address"
+msgstr "定位資料夾"
 
 msgid "Stream quality"
 msgstr "串流品質"
@@ -5605,6 +5683,11 @@ msgstr "kbps"
 
 msgid "not in the last"
 msgstr ""
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "視窗"
 
 msgid "of these rules"
 msgstr ""

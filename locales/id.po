@@ -424,6 +424,11 @@ msgid "Add Source"
 msgstr "Tambah sumber"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Tambahkan judul"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Tambah folder"
@@ -491,6 +496,11 @@ msgstr "Tambahkan ke folder"
 msgid "Add to library"
 msgstr "Tambahkan ke pustaka"
 
+#, fuzzy
+#| msgid "Add to Saved"
+msgid "Add to {saved_on}"
+msgstr "Tambahkan ke Tersimpan"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Tambah lagu jika sisa antrean kurang dari jumlah ini"
 
@@ -498,6 +508,11 @@ msgid "Add"
 msgstr "Tambah"
 
 msgid "Added to"
+msgstr "Ditambahkan ke"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Ditambahkan ke"
 
 msgid "Album Artists"
@@ -1367,6 +1382,11 @@ msgstr "Desember {year}"
 msgid "Decrease"
 msgstr "Kurangi"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Bawaan"
+
 msgid "Default"
 msgstr "Bawaan"
 
@@ -1377,6 +1397,11 @@ msgstr "Hapus preset"
 
 msgid "Delete Playlist"
 msgstr "Hapus Playlist"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Undangan perangkat"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1395,6 +1420,9 @@ msgstr "Hapus file playlist"
 
 msgid "Delete preset"
 msgstr "Hapus preset"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1626,6 +1654,10 @@ msgstr "Edit Playlist Pintar"
 
 msgid "Edit Source"
 msgstr "Edit Sumber"
+
+#, fuzzy
+msgid "Edit Station"
+msgstr "Edit metadata"
 
 msgid "Edit lyrics"
 msgstr "Edit lirik"
@@ -2075,6 +2107,9 @@ msgstr "Akses tamu / publik"
 msgid "Halo"
 msgstr "Halo"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Tinggi (%)"
 
@@ -2111,6 +2146,11 @@ msgid "Home blocks"
 msgstr "Blok Beranda"
 
 msgid "Home"
+msgstr "Beranda"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Beranda"
 
 msgid "Hour"
@@ -2259,6 +2299,9 @@ msgstr "Temukan token pengguna ListenBrainz Anda"
 
 msgid "LED spectrum"
 msgstr "Spektrum LED"
+
+msgid "LIVE"
+msgstr ""
 
 #, fuzzy
 msgid "LRCLIB"
@@ -2706,6 +2749,11 @@ msgstr ""
 msgid "My music"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Pilih alamat"
+
 msgid "Name"
 msgstr ""
 
@@ -3016,6 +3064,9 @@ msgid "Open custom themes folder"
 msgstr ""
 
 msgid "Open fullscreen player"
+msgstr ""
+
+msgid "Open homepage"
 msgstr ""
 
 msgid "Open on Emby"
@@ -3603,6 +3654,11 @@ msgstr ""
 msgid "Remove group"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose Server"
+msgid "Remove image"
+msgstr "Pilih server"
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3690,6 +3746,9 @@ msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
+msgstr ""
+
+msgid "Results from radio-browser.info."
 msgstr ""
 
 msgid "Results per section"
@@ -3890,6 +3949,9 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
+msgstr ""
+
+msgid "Search stations"
 msgstr ""
 
 msgid "Search this network"
@@ -4333,6 +4395,14 @@ msgstr ""
 msgid "Static"
 msgstr ""
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Integrations"
+msgid "Stations"
+msgstr "Integrasi"
+
 msgid "Status display"
 msgstr ""
 
@@ -4353,6 +4423,11 @@ msgstr ""
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Alternate addresses"
+msgid "Stream address"
+msgstr "Alamat alternatif"
 
 msgid "Stream quality"
 msgstr ""
@@ -4938,6 +5013,9 @@ msgstr ""
 #| msgid "Finish the last track"
 msgid "not in the last"
 msgstr "Selesaikan lagu terakhir"
+
+msgid "now"
+msgstr ""
 
 msgid "of these rules"
 msgstr ""

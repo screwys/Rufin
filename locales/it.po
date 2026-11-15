@@ -389,6 +389,11 @@ msgid "Add Source"
 msgstr "Aggiungi Sorgente"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Aggiungi un titolo"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Aggiungi cartella"
@@ -467,6 +472,11 @@ msgid "Add to library"
 msgstr "Aggiungi alla Playlist"
 
 #, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Aggiungi ai Preferiti"
+
+#, fuzzy
 msgid "Add tracks when fewer than this many remain"
 msgstr "Aggiungi tracce quando ne rimangono meno di questo numero"
 
@@ -474,6 +484,11 @@ msgid "Add"
 msgstr "Aggiungi"
 
 msgid "Added to"
+msgstr "Aggiunto a"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Aggiunto a"
 
 msgid "Album Artists"
@@ -1463,6 +1478,11 @@ msgstr ""
 msgid "Decrease"
 msgstr "Decrementa"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Predefinito"
+
 msgid "Default"
 msgstr "Predefinito"
 
@@ -1472,6 +1492,11 @@ msgid "Delete Permanently?"
 msgstr "Cancella Playlist"
 
 msgid "Delete Playlist"
+msgstr "Cancella Playlist"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete Station"
 msgstr "Cancella Playlist"
 
 #, python-brace-format
@@ -1497,6 +1522,9 @@ msgstr "Cancella Playlist"
 #| msgid "Delete Playlist"
 msgid "Delete preset"
 msgstr "Cancella Playlist"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1748,6 +1776,9 @@ msgid "Edit Smart Playlist"
 msgstr ""
 
 msgid "Edit Source"
+msgstr ""
+
+msgid "Edit Station"
 msgstr ""
 
 msgid "Edit lyrics"
@@ -2199,6 +2230,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2235,6 +2269,9 @@ msgid "Home blocks"
 msgstr ""
 
 msgid "Home"
+msgstr ""
+
+msgid "Homepage"
 msgstr ""
 
 msgid "Hour"
@@ -2388,6 +2425,9 @@ msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr ""
 
 msgid "LED spectrum"
+msgstr ""
+
+msgid "LIVE"
 msgstr ""
 
 msgid "LRCLIB"
@@ -2848,6 +2888,11 @@ msgstr ""
 msgid "My music"
 msgstr ""
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Seleziona un indirizzo"
+
 msgid "Name"
 msgstr ""
 
@@ -3169,6 +3214,9 @@ msgid "Open custom themes folder"
 msgstr ""
 
 msgid "Open fullscreen player"
+msgstr ""
+
+msgid "Open homepage"
 msgstr ""
 
 msgid "Open on Emby"
@@ -3778,6 +3826,11 @@ msgstr "Aggiungi cartella"
 msgid "Remove group"
 msgstr "Aggiungi cartella"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Remove image"
+msgstr "Aggiungi cartella"
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3873,6 +3926,9 @@ msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
+msgstr ""
+
+msgid "Results from radio-browser.info."
 msgstr ""
 
 msgid "Results per section"
@@ -4078,6 +4134,9 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
+msgstr ""
+
+msgid "Search stations"
 msgstr ""
 
 #, fuzzy
@@ -4536,6 +4595,14 @@ msgstr ""
 msgid "Static"
 msgstr "Automatico"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automatico"
+
 msgid "Status display"
 msgstr ""
 
@@ -4558,6 +4625,11 @@ msgstr ""
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Stream address"
+msgstr "Seleziona un indirizzo"
 
 msgid "Stream quality"
 msgstr ""
@@ -5174,6 +5246,9 @@ msgid "kbps"
 msgstr ""
 
 msgid "not in the last"
+msgstr ""
+
+msgid "now"
 msgstr ""
 
 msgid "of these rules"

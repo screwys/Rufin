@@ -364,6 +364,11 @@ msgid "Add Source"
 msgstr "Lisää lähde"
 
 #, fuzzy
+#| msgid "Add to Pins"
+msgid "Add Station"
+msgstr "Lisää kiinnityksiin"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Lisää kansio"
@@ -441,6 +446,11 @@ msgstr "Lisää kansio"
 msgid "Add to library"
 msgstr "Lisää soittolistaan"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Lisää suosikkeihin"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 
@@ -448,6 +458,9 @@ msgid "Add"
 msgstr "Lisää"
 
 msgid "Added to"
+msgstr ""
+
+msgid "Added"
 msgstr ""
 
 msgid "Album Artists"
@@ -1473,6 +1486,11 @@ msgstr ""
 msgid "Decrease"
 msgstr ""
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Oletus"
+
 msgid "Default"
 msgstr "Oletus"
 
@@ -1483,6 +1501,11 @@ msgstr "Liitä esiasetus"
 
 msgid "Delete Playlist"
 msgstr "Poista soittolista"
+
+#, fuzzy
+#| msgid "Release notifications"
+msgid "Delete Station"
+msgstr "Julkaisuilmoitukset"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1507,6 +1530,9 @@ msgstr "Poista soittolista"
 #| msgid "Paste preset"
 msgid "Delete preset"
 msgstr "Liitä esiasetus"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1771,6 +1797,11 @@ msgstr "Muokkaa älykästä soittolistaa"
 #| msgid "Add Source"
 msgid "Edit Source"
 msgstr "Lisää lähde"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "Muokkaa metatietoja"
 
 msgid "Edit lyrics"
 msgstr "Muokkaa sanoituksia"
@@ -2259,6 +2290,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2297,6 +2331,11 @@ msgid "Home blocks"
 msgstr "Kotilohkot"
 
 msgid "Home"
+msgstr "Koti"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Koti"
 
 msgid "Hour"
@@ -2454,6 +2493,9 @@ msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr ""
 
 msgid "LED spectrum"
+msgstr ""
+
+msgid "LIVE"
 msgstr ""
 
 msgid "LRCLIB"
@@ -2956,6 +2998,11 @@ msgstr "Mykistetty"
 msgid "My music"
 msgstr "Oma musiikki"
 
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Name or stream address"
+msgstr "Valitse kansio"
+
 msgid "Name"
 msgstr "Nimi"
 
@@ -3319,6 +3366,9 @@ msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Avaa koko näytön soitin"
+
+msgid "Open homepage"
+msgstr ""
 
 msgid "Open on Emby"
 msgstr "Avaa Embyssä"
@@ -4003,6 +4053,11 @@ msgstr "Poista paikallinen kansio"
 msgid "Remove group"
 msgstr "Poista sääntö"
 
+#, fuzzy
+#| msgid "Remove rule"
+msgid "Remove image"
+msgstr "Poista sääntö"
+
 msgid "Remove rule"
 msgstr "Poista sääntö"
 
@@ -4106,6 +4161,9 @@ msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
+msgstr ""
+
+msgid "Results from radio-browser.info."
 msgstr ""
 
 #, fuzzy
@@ -4336,6 +4394,11 @@ msgstr ""
 
 msgid "Search queue"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Hae uudelleen"
 
 #, fuzzy
 #| msgid "Show artwork"
@@ -4859,6 +4922,14 @@ msgstr "Tallennetaan..."
 msgid "Static"
 msgstr "Automaattinen"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automaattinen"
+
 msgid "Status display"
 msgstr ""
 
@@ -4883,6 +4954,11 @@ msgstr "Salaisuuden tallennustila"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Stream address"
+msgstr "Valitse kansio"
 
 msgid "Stream quality"
 msgstr "Suoratoiston laatu"
@@ -5550,6 +5626,11 @@ msgstr "kbps"
 msgid "not in the last"
 msgstr ""
 
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Ikkuna"
+
 msgid "of these rules"
 msgstr ""
 
@@ -5896,9 +5977,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~| msgid "Search Lyrics"
 #~ msgid "Search tracks"
 #~ msgstr "Hae sanoituksia"
-
-#~ msgid "Add to Pins"
-#~ msgstr "Lisää kiinnityksiin"
 
 #~ msgid "Remove from Pins"
 #~ msgstr "Poista kiinnityksistä"

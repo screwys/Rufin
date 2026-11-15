@@ -419,6 +419,11 @@ msgid "Add Source"
 msgstr "Добавить источник"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Добавить название"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Добавить папку"
@@ -484,6 +489,11 @@ msgstr "Добавить в папку"
 msgid "Add to library"
 msgstr "Добавить в библиотеку"
 
+#, fuzzy
+#| msgid "Add to Saved"
+msgid "Add to {saved_on}"
+msgstr "Добавить в сохраненные"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 "Добавлять треки, когда их количество опустится ниже указанного значения"
@@ -492,6 +502,11 @@ msgid "Add"
 msgstr "Добавить"
 
 msgid "Added to"
+msgstr "Добавлено в"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Добавлено в"
 
 msgid "Album Artists"
@@ -1351,6 +1366,11 @@ msgstr "Декабрь {year}"
 msgid "Decrease"
 msgstr "Уменьшить"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "По умолчанию"
+
 msgid "Default"
 msgstr "По умолчанию"
 
@@ -1359,6 +1379,11 @@ msgstr "Удалить безвозвратно?"
 
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Приглашение устройства"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1375,6 +1400,9 @@ msgstr "Удалить файл плейлиста"
 
 msgid "Delete preset"
 msgstr "Удалить пресет"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1603,6 +1631,11 @@ msgstr "Редактировать умный плейлист"
 
 msgid "Edit Source"
 msgstr "Редактировать источник"
+
+#, fuzzy
+#| msgid "Edit Mapping"
+msgid "Edit Station"
+msgstr "Редактировать соответствия"
 
 msgid "Edit lyrics"
 msgstr "Редактировать текст песни"
@@ -2039,6 +2072,9 @@ msgstr "Гостевой / публичный доступ"
 msgid "Halo"
 msgstr "Halo"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Высота (%)"
 
@@ -2075,6 +2111,11 @@ msgid "Home blocks"
 msgstr "Основные блоки"
 
 msgid "Home"
+msgstr "Главная"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Главная"
 
 msgid "Hour"
@@ -2224,6 +2265,9 @@ msgstr "Найдите свой токен пользователя ListenBrainz
 
 msgid "LED spectrum"
 msgstr "LED спектр"
+
+msgid "LIVE"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2689,6 +2733,11 @@ msgstr "Звук выключен"
 msgid "My music"
 msgstr "Моя музыка"
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Выбрать адрес"
+
 msgid "Name"
 msgstr "Имя"
 
@@ -3005,6 +3054,11 @@ msgstr "Открыть папку настраиваемых тем"
 
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
+
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Открыть страницу подтверждения"
 
 msgid "Open on Emby"
 msgstr "Открыть в Emby"
@@ -3610,6 +3664,11 @@ msgstr "Удалить из папки"
 msgid "Remove group"
 msgstr "Удалить правило"
 
+#, fuzzy
+#| msgid "Remove device"
+msgid "Remove image"
+msgstr "Удалить устройство"
+
 msgid "Remove rule"
 msgstr "Удалить правило"
 
@@ -3698,6 +3757,9 @@ msgstr "Восстановить макет плеера"
 
 msgid "Restore"
 msgstr "Восстановить"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 msgid "Results per section"
 msgstr "Результаты по разделам"
@@ -3904,6 +3966,11 @@ msgstr "Параметры поиска"
 
 msgid "Search queue"
 msgstr "Поиск в очереди воспроизведения"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Повторить поиск"
 
 msgid "Search this network"
 msgstr "Поиск в этой сети"
@@ -4363,6 +4430,14 @@ msgstr "Запуск..."
 msgid "Static"
 msgstr "Статический"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Static"
+msgid "Stations"
+msgstr "Статический"
+
 msgid "Status display"
 msgstr "Отображение статуса"
 
@@ -4387,6 +4462,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 "Сохранять рассчитанную громкость в поддерживаемых локальных музыкальных "
 "файлах"
+
+#, fuzzy
+#| msgid "Relay address"
+msgid "Stream address"
+msgstr "Адрес ретранслятора"
 
 msgid "Stream quality"
 msgstr "Качество потока"
@@ -4982,6 +5062,11 @@ msgstr "кбит/с"
 #| msgid "Finish the last track"
 msgid "not in the last"
 msgstr "Завершить последний трек"
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Окно"
 
 msgid "of these rules"
 msgstr ""
@@ -5947,9 +6032,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Does MusicBrainz and Cover Art Archive lookups"
 #~ msgstr "Выполняет поиск в базах данных MusicBrainz и Cover Art Archive"
-
-#~ msgid "Edit Mapping"
-#~ msgstr "Редактировать соответствия"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Введите локальный префикс."

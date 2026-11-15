@@ -327,6 +327,9 @@ msgstr ""
 msgid "Add Source"
 msgstr ""
 
+msgid "Add Station"
+msgstr ""
+
 msgid "Add WebDAV folder"
 msgstr ""
 
@@ -387,6 +390,9 @@ msgstr ""
 msgid "Add to library"
 msgstr ""
 
+msgid "Add to {saved_on}"
+msgstr ""
+
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 
@@ -394,6 +400,9 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to"
+msgstr ""
+
+msgid "Added"
 msgstr ""
 
 msgid "Album Artists"
@@ -1229,6 +1238,9 @@ msgstr ""
 msgid "Decrease"
 msgstr ""
 
+msgid "Default channel"
+msgstr ""
+
 msgid "Default"
 msgstr ""
 
@@ -1236,6 +1248,9 @@ msgid "Delete Permanently?"
 msgstr ""
 
 msgid "Delete Playlist"
+msgstr ""
+
+msgid "Delete Station"
 msgstr ""
 
 #, python-brace-format
@@ -1252,6 +1267,9 @@ msgid "Delete playlist file"
 msgstr ""
 
 msgid "Delete preset"
+msgstr ""
+
+msgid "Delete this station?"
 msgstr ""
 
 msgid "Delete {count} playlist?"
@@ -1472,6 +1490,9 @@ msgid "Edit Smart Playlist"
 msgstr ""
 
 msgid "Edit Source"
+msgstr ""
+
+msgid "Edit Station"
 msgstr ""
 
 msgid "Edit lyrics"
@@ -1897,6 +1918,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -1931,6 +1955,9 @@ msgid "Home blocks"
 msgstr ""
 
 msgid "Home"
+msgstr ""
+
+msgid "Homepage"
 msgstr ""
 
 msgid "Hour"
@@ -2063,6 +2090,9 @@ msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr ""
 
 msgid "LED spectrum"
+msgstr ""
+
+msgid "LIVE"
 msgstr ""
 
 msgid "LRCLIB"
@@ -2493,6 +2523,9 @@ msgstr ""
 msgid "My music"
 msgstr ""
 
+msgid "Name or stream address"
+msgstr ""
+
 msgid "Name"
 msgstr ""
 
@@ -2800,6 +2833,9 @@ msgid "Open custom themes folder"
 msgstr ""
 
 msgid "Open fullscreen player"
+msgstr ""
+
+msgid "Open homepage"
 msgstr ""
 
 msgid "Open on Emby"
@@ -3381,6 +3417,9 @@ msgstr ""
 msgid "Remove group"
 msgstr ""
 
+msgid "Remove image"
+msgstr ""
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3466,6 +3505,9 @@ msgid "Restore player layout"
 msgstr ""
 
 msgid "Restore"
+msgstr ""
+
+msgid "Results from radio-browser.info."
 msgstr ""
 
 msgid "Results per section"
@@ -3663,6 +3705,9 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
+msgstr ""
+
+msgid "Search stations"
 msgstr ""
 
 msgid "Search this network"
@@ -4094,6 +4139,12 @@ msgstr ""
 msgid "Static"
 msgstr ""
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+msgid "Stations"
+msgstr ""
+
 msgid "Status display"
 msgstr ""
 
@@ -4113,6 +4164,9 @@ msgid "Storage"
 msgstr ""
 
 msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
+msgid "Stream address"
 msgstr ""
 
 msgid "Stream quality"
@@ -4686,6 +4740,9 @@ msgid "kbps"
 msgstr ""
 
 msgid "not in the last"
+msgstr ""
+
+msgid "now"
 msgstr ""
 
 msgid "of these rules"

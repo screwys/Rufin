@@ -371,6 +371,11 @@ msgid "Add Source"
 msgstr "Zdroje"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Přidat název"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Přidat složku"
@@ -450,6 +455,11 @@ msgstr "Přidat složku"
 msgid "Add to library"
 msgstr "Přidat do playlistu"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Přidat do oblíbených"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Přidat skladby, pokud jich zbývá méně než tento počet"
 
@@ -457,6 +467,11 @@ msgid "Add"
 msgstr "Přidat"
 
 msgid "Added to"
+msgstr "Přidáno do"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Přidáno do"
 
 msgid "Album Artists"
@@ -1539,6 +1554,11 @@ msgstr "Snížit"
 
 #, fuzzy
 #| msgid "Restore Default"
+msgid "Default channel"
+msgstr "Obnovit výchozí"
+
+#, fuzzy
+#| msgid "Restore Default"
 msgid "Default"
 msgstr "Obnovit výchozí"
 
@@ -1549,6 +1569,11 @@ msgstr "Předvolba"
 
 msgid "Delete Playlist"
 msgstr "Smazat playlist"
+
+#, fuzzy
+#| msgid "Release notifications"
+msgid "Delete Station"
+msgstr "Notifikace vydání"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1573,6 +1598,9 @@ msgstr "Smazat playlist"
 #| msgid "Preset"
 msgid "Delete preset"
 msgstr "Předvolba"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1847,6 +1875,11 @@ msgstr "Chytrý Playlist"
 #| msgid "Sources"
 msgid "Edit Source"
 msgstr "Zdroje"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "Upravit metadata"
 
 #, fuzzy
 #| msgid "Hide lyrics"
@@ -2355,6 +2388,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2393,6 +2429,11 @@ msgid "Home blocks"
 msgstr "Bloky domovské stránky"
 
 msgid "Home"
+msgstr "Domovská stránka"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Domovská stránka"
 
 msgid "Hour"
@@ -2557,6 +2598,9 @@ msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr "Najděte svůj uživatelský token ListenBrainz"
 
 msgid "LED spectrum"
+msgstr ""
+
+msgid "LIVE"
 msgstr ""
 
 msgid "LRCLIB"
@@ -3074,6 +3118,11 @@ msgstr "Ztlumeno"
 msgid "My music"
 msgstr ""
 
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Name or stream address"
+msgstr "Vyhledat složku"
+
 msgid "Name"
 msgstr "Jméno"
 
@@ -3456,6 +3505,9 @@ msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
+
+msgid "Open homepage"
+msgstr ""
 
 #, fuzzy
 #| msgid "Open on Last.fm"
@@ -4168,6 +4220,11 @@ msgstr "Odebrat složku"
 msgid "Remove group"
 msgstr "Odebrat pravidlo"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove image"
+msgstr "Odebrat složku"
+
 msgid "Remove rule"
 msgstr "Odebrat pravidlo"
 
@@ -4274,6 +4331,9 @@ msgstr ""
 
 msgid "Restore"
 msgstr "Obnovit"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 #, fuzzy
 #| msgid "Refresh section"
@@ -4516,6 +4576,11 @@ msgstr "Možnosti vyhledávání"
 
 msgid "Search queue"
 msgstr "Fronta vyhledávání"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Hledat znovu"
 
 #, fuzzy
 #| msgid "Search Lyrics"
@@ -5052,6 +5117,14 @@ msgstr "Ukládání..."
 msgid "Static"
 msgstr "Automatické aktualizace"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Stations"
+msgstr "Automatické aktualizace"
+
 msgid "Status display"
 msgstr "Zobrazení stavu"
 
@@ -5076,6 +5149,11 @@ msgstr "Tajné úložiště"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Stream address"
+msgstr "Vyhledat složku"
 
 msgid "Stream quality"
 msgstr "Kvalita streamu"
@@ -5749,6 +5827,11 @@ msgstr "kbps"
 
 msgid "not in the last"
 msgstr ""
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Okno"
 
 msgid "of these rules"
 msgstr ""

@@ -421,6 +421,11 @@ msgid "Add Source"
 msgstr "Ajouter une source"
 
 #, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Ajouter un titre"
+
+#, fuzzy
 #| msgid "Add folder"
 msgid "Add WebDAV folder"
 msgstr "Ajouter un dossier"
@@ -488,6 +493,11 @@ msgstr "Ajouter au dossier"
 msgid "Add to library"
 msgstr "Ajouter à la bibliothèque"
 
+#, fuzzy
+#| msgid "Add to Saved"
+msgid "Add to {saved_on}"
+msgstr "Ajouter aux éléments enregistrés"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Ajouter des morceaux lorsqu’il en reste moins que ce nombre"
 
@@ -495,6 +505,11 @@ msgid "Add"
 msgstr "Ajouter"
 
 msgid "Added to"
+msgstr "Ajouté à"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Ajouté à"
 
 msgid "Album Artists"
@@ -1356,6 +1371,11 @@ msgstr "Décembre {year}"
 msgid "Decrease"
 msgstr "Diminuer"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Par défaut"
+
 msgid "Default"
 msgstr "Par défaut"
 
@@ -1366,6 +1386,11 @@ msgstr "Supprimer le préréglage"
 
 msgid "Delete Playlist"
 msgstr "Supprimer la playlist"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Invitation de l'appareil"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1384,6 +1409,9 @@ msgstr "Supprimer le fichier de playlist"
 
 msgid "Delete preset"
 msgstr "Supprimer le préréglage"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1612,6 +1640,11 @@ msgstr "Modifier la playlist intelligente"
 
 msgid "Edit Source"
 msgstr "Modifier la source"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "Modifier les métadonnées"
 
 msgid "Edit lyrics"
 msgstr "Modifier les paroles"
@@ -2048,6 +2081,9 @@ msgstr "Accès invité / public"
 msgid "Halo"
 msgstr "Halo"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Hauteur (%)"
 
@@ -2084,6 +2120,11 @@ msgid "Home blocks"
 msgstr "Blocs d’accueil"
 
 msgid "Home"
+msgstr "Accueil"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Accueil"
 
 msgid "Hour"
@@ -2231,6 +2272,9 @@ msgstr "Trouver votre jeton utilisateur ListenBrainz"
 
 msgid "LED spectrum"
 msgstr "Spectre LED"
+
+msgid "LIVE"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2700,6 +2744,11 @@ msgstr "Son coupé"
 msgid "My music"
 msgstr "Ma musique"
 
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Choisissez une adresse"
+
 msgid "Name"
 msgstr "Nom"
 
@@ -3018,6 +3067,11 @@ msgstr "Ouvrir le dossier des thèmes personnalisés"
 
 msgid "Open fullscreen player"
 msgstr "Ouvrir le lecteur en plein écran"
+
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Ouvrir la page d’approbation"
 
 msgid "Open on Emby"
 msgstr "Ouvrir dans Emby"
@@ -3622,6 +3676,11 @@ msgstr "Retirer du dossier"
 msgid "Remove group"
 msgstr "Supprimer la règle"
 
+#, fuzzy
+#| msgid "Remove device"
+msgid "Remove image"
+msgstr "Retirer l'appareil"
+
 msgid "Remove rule"
 msgstr "Supprimer la règle"
 
@@ -3711,6 +3770,9 @@ msgstr "Restaurer la disposition du lecteur"
 
 msgid "Restore"
 msgstr "Restaurer"
+
+msgid "Results from radio-browser.info."
+msgstr ""
 
 msgid "Results per section"
 msgstr "Résultats par section"
@@ -3917,6 +3979,11 @@ msgstr "Rechercher dans les préférences"
 
 msgid "Search queue"
 msgstr "Rechercher dans la file d’attente"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Rechercher à nouveau"
 
 msgid "Search this network"
 msgstr "Recherche sur ce réseau"
@@ -4377,6 +4444,14 @@ msgstr "Démarrage..."
 msgid "Static"
 msgstr "Statique"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Static"
+msgid "Stations"
+msgstr "Statique"
+
 msgid "Status display"
 msgstr "Affichage de l’état"
 
@@ -4401,6 +4476,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 "Stocker le volume sonore calculé dans les fichiers de musique Local pris en "
 "charge"
+
+#, fuzzy
+#| msgid "Relay address"
+msgid "Stream address"
+msgstr "Adresse de relais"
 
 msgid "Stream quality"
 msgstr "Qualité du flux"
@@ -4995,6 +5075,11 @@ msgstr "kbps"
 #| msgid "Finish the last track"
 msgid "not in the last"
 msgstr "Terminer le dernier morceau"
+
+#, fuzzy
+#| msgid "Window"
+msgid "now"
+msgstr "Fenêtre"
 
 msgid "of these rules"
 msgstr ""
