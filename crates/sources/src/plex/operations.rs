@@ -10,8 +10,7 @@ impl PlexSource {
     ) -> SourceResult<crate::ImageBytes> {
         let request = match size {
             crate::ImageSize::Original => {
-                let base = reqwest::Url::parse(&self.config.base_url)
-                    .map_err(|error| SourceError::InvalidConfig(error.to_string()))?;
+                let base = self.connection().await.address;
                 let url = base
                     .join(&image.item_id)
                     .map_err(|_| SourceError::InvalidRequest("invalid Plex image URL"))?;

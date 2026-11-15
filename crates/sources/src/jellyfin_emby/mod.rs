@@ -493,8 +493,9 @@ impl JellyfinEmbySource {
         self.address.current()
     }
 
-    /// Uses the local address while this same server answers there.
-    pub(crate) async fn select_address(&self) {
+    /// Uses the local address while this same server answers there. Returns whether the
+    /// address changed.
+    pub(crate) async fn select_address(&self) -> bool {
         self.address
             .select(async |local| {
                 let Ok(url) = self
@@ -517,7 +518,7 @@ impl JellyfinEmbySource {
                     Err(_) => false,
                 }
             })
-            .await;
+            .await
     }
 }
 

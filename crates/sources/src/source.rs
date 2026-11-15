@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::{DownloadQuality, ResolvedDownload};
@@ -804,6 +804,10 @@ pub struct Source {
     partial: Mutex<HashSet<String>>,
     /// When the server last failed to connect, while that stands.
     unreachable: Mutex<Option<std::time::Instant>>,
+    /// How many times the server's address was chosen.
+    chosen: AtomicU64,
+    /// Held while a failed request chooses the address again, once for those failing together.
+    choosing: tokio::sync::Mutex<()>,
     pub implementation: Implementation,
 }
 
@@ -932,6 +936,8 @@ impl Source {
             retired: AtomicBool::new(false),
             partial: Mutex::default(),
             unreachable: Mutex::default(),
+            chosen: AtomicU64::new(0),
+            choosing: tokio::sync::Mutex::default(),
             implementation,
         }
     }
@@ -951,25 +957,39 @@ impl Source {
                 *unreachable = Some(std::time::Instant::now());
             }
         }
+        let chosen = self.chosen.load(Ordering::SeqCst);
         let result = request.await;
-        let mut unreachable = self
-            .unreachable
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         match &result {
-            Ok(_) => *unreachable = None,
-            Err(SourceError::Network(_)) => *unreachable = Some(std::time::Instant::now()),
+            Ok(_) => self.set_unreachable(None),
+            Err(SourceError::Network(_)) => self.failed(chosen).await,
             Err(_) => {}
         }
         result
     }
 
-    /// The device joined or left a network: the server may answer again, at another address.
-    pub async fn network_changed(&self) {
+    /// A request found no server at the address chosen as `chosen`. The address is chosen
+    /// again, once for the requests that failed together, and the server is unreachable when
+    /// no choice since that request began moved it.
+    async fn failed(&self, chosen: u64) {
+        let _choosing = self.choosing.lock().await;
+        if self.chosen.load(Ordering::SeqCst) != chosen {
+            return;
+        }
+        if !self.select_address().await && self.chosen.load(Ordering::SeqCst) == chosen + 1 {
+            self.set_unreachable(Some(std::time::Instant::now()));
+        }
+    }
+
+    fn set_unreachable(&self, since: Option<std::time::Instant>) {
         *self
             .unreachable
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = since;
+    }
+
+    /// The device joined or left a network: the server may answer again, at another address.
+    pub async fn network_changed(&self) {
+        self.set_unreachable(None);
         self.select_address().await;
     }
 
@@ -1173,17 +1193,20 @@ impl Source {
         Ok(Self::new(configuration.source_id, implementation))
     }
 
-    /// Chooses again between the server's local and public addresses, as when the network
-    /// changed.
-    pub async fn select_address(&self) {
-        match &self.implementation {
+    /// Chooses again among the server's addresses, as when the network changed. Returns
+    /// whether the address changed; the server may answer at a new one.
+    pub async fn select_address(&self) -> bool {
+        let moved = match &self.implementation {
             Implementation::JellyfinEmby(source) => source.select_address().await,
             Implementation::OpenSubsonic(source) => source.select_address().await,
-            Implementation::Plex(_)
-            | Implementation::Local(_)
-            | Implementation::Files(_)
-            | Implementation::Peer(_) => {}
+            Implementation::Plex(source) => source.select_address().await,
+            Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => false,
+        };
+        if moved {
+            self.set_unreachable(None);
         }
+        self.chosen.fetch_add(1, Ordering::SeqCst);
+        moved
     }
 
     pub fn retire(&self) {

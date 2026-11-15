@@ -115,6 +115,8 @@ impl PlexSource {
             .build()
             .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
         let mut url = request.url().clone();
+        let connection = self.connection().await;
+        let client = self.client(&connection);
         let login = self.login.lock().await;
         url.query_pairs_mut()
             .append_pair(
@@ -130,10 +132,9 @@ impl PlexSource {
         }
         let mut stream = ResolvedStream::new(url.to_string())
             .with_content_type(content_type)
-            .with_trust_invalid_certificate(self.config.trust_invalid_certificate());
+            .with_trust_invalid_certificate(self.trust_invalid_certificate(&connection));
         if let Some((_, session)) = params.iter().find(|(key, _)| *key == "session") {
-            let mut ping = reqwest::Url::parse(&self.config.base_url)
-                .map_err(|error| SourceError::InvalidConfig(error.to_string()))?
+            let mut ping = url
                 .join("/video/:/transcode/universal/ping")
                 .map_err(|error| SourceError::InvalidConfig(error.to_string()))?;
             ping.query_pairs_mut().append_pair("session", session);
@@ -141,7 +142,7 @@ impl PlexSource {
             stop.set_path("/video/:/transcode/universal/stop");
             let ping = login
                 .server_request(
-                    &self.client,
+                    client,
                     Method::GET,
                     ping.as_str(),
                     &self.config.profile_id,
@@ -151,7 +152,7 @@ impl PlexSource {
                 .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
             let stop = login
                 .server_request(
-                    &self.client,
+                    client,
                     Method::GET,
                     stop.as_str(),
                     &self.config.profile_id,
@@ -160,7 +161,7 @@ impl PlexSource {
                 .build()
                 .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
             let (release, released) = tokio::sync::oneshot::channel();
-            let client = self.client.clone();
+            let client = client.clone();
             tokio::spawn(async move {
                 tokio::pin!(released);
                 loop {
@@ -185,7 +186,7 @@ impl PlexSource {
         quality: crate::DownloadQuality,
         channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
-        if self.config.relay {
+        if self.connection().await.relay {
             return Err(SourceError::Other(
                 "Plex downloads require a direct server connection; Relay cannot download files"
                     .into(),
@@ -579,7 +580,10 @@ mod tests {
             .resolve_download("plex:track:track", crate::DownloadQuality::Original, None)
             .await
             .unwrap();
-        source.config.relay = true;
+        source.connection = crate::address::Chosen::new(PlexConnection {
+            relay: true,
+            ..source.connection.current()
+        });
         assert!(
             source
                 .resolve_download("plex:track:track", crate::DownloadQuality::Original, None)
