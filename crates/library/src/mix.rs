@@ -1,4 +1,4 @@
-//! Picks tracks or whole albums at random from the resident Catalog, as Random Play asks.
+//! Picks tracks or whole albums at random from the resident Catalog, as Mix asks.
 
 use std::collections::HashSet;
 

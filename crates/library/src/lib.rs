@@ -67,8 +67,8 @@ pub mod rank;
 mod waveform;
 pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
+mod mix;
 mod radio;
-mod random;
 mod scroll_sections;
 pub use scroll_sections::ScrollSection;
 mod schema;
@@ -129,6 +129,7 @@ pub use local::{
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
+pub use mix::{PlayedFilter, RandomCriteria, RandomPick};
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,
@@ -145,7 +146,6 @@ pub use queue::{
     QueueUpdate, shuffle_order,
 };
 pub use radio::{RadioSeed, RadioTaste, SameArtist, SimilarArtist};
-pub use random::{PlayedFilter, RandomCriteria, RandomPick};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistCopy,

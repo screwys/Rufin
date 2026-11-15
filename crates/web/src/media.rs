@@ -218,7 +218,7 @@ async fn random_settings(
     )
     .await?;
     let offset = number(&parameters, "offset", 0)?;
-    let (total, rows) = rufin_core::random::random_genres(
+    let (total, rows) = rufin_core::mix::random_genres(
         &products.library,
         &selected,
         parameters.get("q").map(String::as_str).unwrap_or(""),
@@ -229,7 +229,7 @@ async fn random_settings(
     .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
     let selected_genre =
-        rufin_core::random::saved_random_genre(&products.library, &settings, &selected)
+        rufin_core::mix::saved_random_genre(&products.library, &settings, &selected)
             .await
             .map_err(internal)?
             .map(|row| json!({"id":row.key,"name":row.name}));
@@ -317,7 +317,7 @@ async fn random(
         },
     };
     let empty =
-        rufin_core::random::queue_random(&products.library, &selected, request, &products.playback)
+        rufin_core::mix::queue_random(&products.library, &selected, request, &products.playback)
             .await
             .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"empty":empty})))

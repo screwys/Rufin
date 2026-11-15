@@ -397,7 +397,7 @@ impl AndroidLibrary {
         let genre = self
             .runtime
             .spawn(async move {
-                rufin_core::random::saved_random_genre(&catalog, &settings, &selected).await
+                rufin_core::mix::saved_random_genre(&catalog, &settings, &selected).await
             })
             .await
             .map_err(error)?
@@ -417,7 +417,7 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        rufin_core::random::play_saved_random(&self.playback, settings, placement)
+        rufin_core::mix::play_saved_random(&self.playback, settings, placement)
             .await
             .map_err(error)
     }

@@ -1,4 +1,4 @@
-//! Random Play: what the saved settings pick in the selected library.
+//! Mix: what the saved settings pick in the selected library.
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::playback::{RandomPlayRequest, random_u64};
 use crate::runtime::SelectedLibrary;
 use crate::settings::RandomPlaySettings;
 
-/// Plays the saved Random Play settings in the selected library. True means nothing matched.
+/// Plays the saved Mix settings in the selected library. True means nothing matched.
 pub async fn play_saved_random(
     queue: &Arc<crate::playback::PlaybackOwner>,
     settings: RandomPlaySettings,
@@ -44,13 +44,13 @@ pub async fn play_saved_random(
         .map_err(|error| error.to_string())?
 }
 
-/// The source and music folder Random Play reads in `selected`: it is query-built, so the
+/// The source and music folder Mix reads in `selected`: it is query-built, so the
 /// folder narrows it (decisions.md, 2026-11-06).
 fn random_library(selected: &SelectedLibrary) -> (SourceKey, Option<library::FolderKey>) {
     (selected.source_key, selected.music_folder_key)
 }
 
-/// The genres Random Play offers in `selected` whose names hold `filter`, and how many there
+/// The genres Mix offers in `selected` whose names hold `filter`, and how many there
 /// are.
 pub async fn random_genres(
     catalog: &Catalog,
@@ -65,7 +65,7 @@ pub async fn random_genres(
         .await
 }
 
-/// Finds the saved Random Play genre when it was saved for `selected`: a source and one of
+/// Finds the saved Mix genre when it was saved for `selected`: a source and one of
 /// its music folders.
 pub async fn saved_random_genre(
     catalog: &Catalog,

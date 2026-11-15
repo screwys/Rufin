@@ -478,8 +478,8 @@ impl Catalog {
         for (slot, track) in eligible() {
             if let Some(score) = score(slot, track) {
                 best = best.max(score);
-                let chance = ((crate::random::splitmix(&mut random) >> 11) as f64 + 1.0)
-                    / (1_u64 << 53) as f64;
+                let chance =
+                    ((crate::mix::splitmix(&mut random) >> 11) as f64 + 1.0) / (1_u64 << 53) as f64;
                 related.push((chance.ln() / score, score, track));
             }
         }
@@ -553,12 +553,12 @@ impl Catalog {
         }
         if chosen.len() < requested {
             let wanted = requested - chosen.len();
-            let fill = crate::random::sampled(
+            let fill = crate::mix::sampled(
                 eligible()
                     .map(|(_, track)| track)
                     .filter(|track| !chosen.iter().any(|taken| taken.key == track.key)),
                 wanted,
-                crate::random::splitmix(&mut random),
+                crate::mix::splitmix(&mut random),
             );
             chosen.extend(fill);
         }
