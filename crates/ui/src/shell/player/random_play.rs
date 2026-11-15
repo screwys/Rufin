@@ -45,7 +45,7 @@ pub(crate) fn present_mix_popover(anchor: &gtk::Button, shell: &Rc<Shell>) {
     let reading = selected.clone();
     let runtime = shell.products.runtime.clone();
     let task = runtime.spawn(async move {
-        rufin_core::radio::random_genres(
+        rufin_core::mix::random_genres(
             &catalog,
             &reading,
             "",
@@ -258,7 +258,7 @@ fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlac
     let queue = shell.products.playback.clone();
     let feedback = Rc::clone(&shell.control_feedback);
     glib::spawn_future_local(async move {
-        match rufin_core::radio::play_saved_random(&queue, settings, placement).await {
+        match rufin_core::mix::play_saved_random(&queue, settings, placement).await {
             Ok(true) => {
                 let resource = "player/random_play.ui";
                 let builder = crate::ui_resource::builder(resource);
