@@ -162,10 +162,8 @@ impl AndroidReading {
 #[derive(uniffi::Enum)]
 pub enum AndroidHomeSectionKind {
     Showcase,
-    /// Album cards.
+    /// Tracks, albums and artists.
     Rows,
-    /// Tracks, which Home shows as rows in columns of three.
-    Tracks,
     Genres,
 }
 
@@ -176,6 +174,12 @@ pub struct AndroidHomeSection {
     pub title: String,
     pub kind: AndroidHomeSectionKind,
     pub rows: Vec<AndroidBrowseRow>,
+    /// The rows each of its columns stacks, and whether a column is one card.
+    pub column_rows: u32,
+    pub cards: bool,
+    /// Home's Size and Spacing.
+    pub size: rufin_core::settings::layout::DisplaySize,
+    pub spacing: rufin_core::settings::layout::DisplaySize,
 }
 
 /// What a detail page's header shows besides its row: its pictures, credited artists, label

@@ -156,7 +156,7 @@ function showProviders() {
     const write = (next) => set(path, next);
     listRows(host, rows.map((provider, index) => {
       const visible = index < shown.length;
-      return { ...provider, visible, up: visible && index > 0, down: visible && index + 1 < shown.length };
+      return { ...provider, visible, movable: visible, up: visible && index > 0, down: visible && index + 1 < shown.length };
     }), (entry, change) => {
       const next = shown.filter((key) => key !== (change.source || entry.key));
       if ("visible" in change) write(change.visible ? [...next, entry.key] : next);

@@ -162,6 +162,11 @@ impl Shell {
         if previous.layout != current.layout {
             self.update_layout();
         }
+        if previous.application.home_blocks != current.application.home_blocks
+            || previous.application.home != current.application.home
+        {
+            self.refresh_mounted_home();
+        }
         if previous.application.private_mode != current.application.private_mode {
             self.refresh_tray();
             self.reconcile_mounted_route();

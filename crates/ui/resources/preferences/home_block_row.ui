@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="AdwPreferencesRow" id="block_row">
+    <property name="activatable">false</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <child>
+          <object class="GtkBox">
+            <property name="spacing">6</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="height-request">50</property>
+            <child>
+              <object class="GtkImage" id="drag">
+                <property name="icon-name">rufin-list-drag-handle-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Drag to reorder</property>
+                <property name="margin-end">6</property>
+                <style><class name="dim-label" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="title">
+                <property name="xalign">0</property>
+                <property name="hexpand">true</property>
+                <property name="ellipsize">end</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="up">
+                <property name="icon-name">rufin-go-up-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Move up</property>
+                <property name="valign">center</property>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="down">
+                <property name="icon-name">rufin-go-down-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Move down</property>
+                <property name="valign">center</property>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="visible">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkRevealer" id="options">
+            <property name="child">
+              <object class="AdwWrapBox">
+                <property name="margin-start">40</property>
+                <property name="margin-end">12</property>
+                <property name="margin-bottom">12</property>
+                <property name="child-spacing">24</property>
+                <property name="line-spacing">8</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkLabel" id="items_label">
+                        <property name="label" translatable="yes">Items</property>
+                        <style><class name="dim-label" /></style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSpinButton" id="items">
+                        <property name="valign">center</property>
+                        <property name="numeric">true</property>
+                        <property name="width-chars">2</property>
+                        <accessibility>
+                          <relation name="labelled-by">items_label</relation>
+                        </accessibility>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkLabel" id="rows_label">
+                        <property name="label" translatable="yes">Rows</property>
+                        <style><class name="dim-label" /></style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwToggleGroup" id="rows">
+                        <property name="valign">center</property>
+                        <property name="tooltip-text" translatable="yes">One row shows albums and artists as cards</property>
+                        <accessibility>
+                          <relation name="labelled-by">rows_label</relation>
+                        </accessibility>
+                        <child><object class="AdwToggle"><property name="label" translatable="yes">Automatic</property></object></child>
+                        <child><object class="AdwToggle"><property name="label">1</property></object></child>
+                        <child><object class="AdwToggle"><property name="label">2</property></object></child>
+                        <child><object class="AdwToggle"><property name="label">3</property></object></child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

@@ -1029,6 +1029,8 @@ fn add_download_queue(
                 .move_job(source, id.into(), movement);
             true
         });
+        // The place a dragged download lands shows as a line, as in the queue.
+        crate::widgets::media_drag::style_order_drop_target(&target, true, |_| true);
         row.add_controller(target);
         item.set_child(Some(&row));
         let weak = weak_shell.clone();

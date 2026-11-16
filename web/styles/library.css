@@ -940,6 +940,11 @@ button.detail-genre-chip:hover {
 /* A Home section's entries scroll sideways in one row, the next ones peeking in at the edge.
    The padding leaves room for the rows' hover, which reaches past their covers and text. */
 .home-row {
+  --home-card: 160px;
+  --home-card-gap: 10px;
+  --home-column: 300px;
+  --home-column-gap: 20px;
+  --home-cover: 52px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
   scroll-padding-inline: 6px;
@@ -957,13 +962,31 @@ button.detail-genre-chip:hover {
   grid-template-columns: none;
   padding: 0;
 }
+.home-row[data-size="compact"] {
+  --home-card: 128px;
+  --home-column: 260px;
+  --home-cover: 40px;
+}
+.home-row[data-size="large"] {
+  --home-card: 200px;
+  --home-column: 340px;
+  --home-cover: 64px;
+}
+.home-row[data-spacing="compact"] {
+  --home-card-gap: 4px;
+  --home-column-gap: 12px;
+}
+.home-row[data-spacing="large"] {
+  --home-card-gap: 18px;
+  --home-column-gap: 28px;
+}
 .home-row .album-grid {
-  grid-auto-columns: 160px;
-  gap: 10px;
+  grid-auto-columns: var(--home-card);
+  gap: var(--home-card-gap);
 }
 .home-row .row-columns {
-  grid-auto-columns: 300px;
-  column-gap: 20px;
+  grid-auto-columns: var(--home-column);
+  column-gap: var(--home-column-gap);
 }
 .home-row .album-grid > *,
 .home-row .row-columns > * {
@@ -987,13 +1010,13 @@ button.detail-genre-chip:hover {
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
-  height: 64px;
+  height: calc(var(--home-cover, 52px) + 12px);
   padding: 6px;
   background: none;
   text-align: left;
 }
 .column-row .cover {
-  width: 52px;
+  width: var(--home-cover, 52px);
   flex: none;
 }
 .column-row .cover-open > span {

@@ -1313,6 +1313,7 @@ impl<T: Copy + PartialEq + 'static> ProviderGroup<T> {
                     visible_sensitive: true,
                     up_sensitive: visible && index > 0,
                     down_sensitive: visible && index + 1 < shown,
+                    movable: visible,
                     drag_id: (self.key)(item).to_string(),
                 },
                 on_visible,

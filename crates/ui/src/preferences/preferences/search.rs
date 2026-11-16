@@ -118,36 +118,25 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
     ] {
         add(&mut items, Page::Playback, tr(title), "", "", None);
     }
-    // Sidebar items and Home blocks are edited in their own dialogs; their rows open them.
-    for (target, titles) in [
-        (
-            tr("Sidebar items"),
-            std::iter::once(tr("Saved"))
-                .chain(
-                    rufin_core::settings::SidebarRouteItem::all()
-                        .iter()
-                        .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title)),
-                )
-                .collect::<Vec<_>>(),
-        ),
-        (
-            tr("Home blocks"),
-            rufin_core::settings::HomeBlockKind::all()
-                .iter()
-                .map(|item| tr(rufin_core::settings::presentation::home_block_title(*item)))
-                .collect(),
-        ),
-    ] {
-        for title in titles {
-            add(
-                &mut items,
-                Page::Customization,
-                title,
-                "",
-                &target,
-                Some(target.clone()),
-            );
-        }
+    for item in rufin_core::settings::SidebarRouteItem::all() {
+        add(
+            &mut items,
+            Page::Customization,
+            tr(rufin_core::route::sidebar_route_descriptor(item).title),
+            "",
+            &tr("Sidebar items"),
+            None,
+        );
+    }
+    for block in rufin_core::settings::HomeBlockKind::all() {
+        add(
+            &mut items,
+            Page::Customization,
+            tr(rufin_core::settings::presentation::home_block_title(block)),
+            "",
+            &tr("Blocks"),
+            None,
+        );
     }
     for title in super::customization::MENU_ENTRIES
         .iter()

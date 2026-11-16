@@ -110,8 +110,8 @@ pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
     });
     refill_row.set_activatable_widget(Some(&refill));
 
-    // The choice shows where a configured server recommends; unset reads as off.
-    server_recommendations_row.set_active(app_settings.uses_server_recommendations());
+    // The choice shows where a configured server recommends; unset reads as on.
+    server_recommendations_row.set_active(app_settings.overrides_server_recommendations());
     server_recommendations_row.set_visible(
         rufin_core::runtime::source::shows_server_recommendations(
             shell.source.configured.borrow().sources.clone(),
@@ -122,7 +122,7 @@ pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
         server_shell.settings.set_app_setting(
             "Auto DJ setting",
             Some(row.is_active()),
-            |settings| &mut settings.application.server_recommendations,
+            |settings| &mut settings.application.override_server_recommendations,
         );
     });
     auto_dj_group.add(&server_recommendations_row);

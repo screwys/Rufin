@@ -172,9 +172,9 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
                 PlaybackTab.AutoDj -> {
                     preferences.applicationSettings?.let { application ->
                         SettingsGroup(description = translate("What Auto DJ and radio pick")) {
-                            // The choice shows where a configured server recommends; unset reads as off.
-                            if (showsServerRecommendations(sources)) SettingsSwitch(translate("Use server recommendations"), application.serverRecommendations == true,
-                                summary = translate("Play the server's own picks; Rufin's fill in where it has too few")) { preferences.changePreference { setServerRecommendations(it) } }
+                            // The choice shows where a configured server recommends; unset reads as on.
+                            if (showsServerRecommendations(sources)) SettingsSwitch(translate("Override server recommendations"), application.overrideServerRecommendations != false,
+                                summary = translate("Play Rufin's picks instead of the server's own")) { preferences.changePreference { setOverrideServerRecommendations(it) } }
                             SettingsSwitch(translate("Similar artists from ListenBrainz"), application.autoDjSimilarArtists,
                                 summary = translate("Look up the artists that listeners play alongside the current one")) { preferences.changePreference { setAutoDjSimilarArtists(it) } }
                             SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(),
