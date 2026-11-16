@@ -263,7 +263,7 @@
         <div data-tabs="playback-tab" data-tab="auto-dj" hidden>
         <p class="pref-note">{{ localization::tr("What Auto DJ and radio pick") }}</p>
         <div class="pref-group">
-          <label class="pref-row" id="pref-server-recommendations"><span class="pref-label"><span>{{ localization::tr("Use server recommendations") }}</span><small>{{ localization::tr("Play the server's own picks; Rufin's fill in where it has too few") }}</small></span><input type="checkbox" role="switch" data-setting="/server_recommendations" /></label>
+          <label class="pref-row" id="pref-server-recommendations"><span class="pref-label"><span>{{ localization::tr("Override server recommendations") }}</span><small>{{ localization::tr("Play Rufin's picks instead of the server's own") }}</small></span><input type="checkbox" role="switch" data-setting="/override_server_recommendations" /></label>
           {% call m::switch("/auto_dj_similar_artists", localization::tr("Similar artists from ListenBrainz"), localization::tr("Look up the artists that listeners play alongside the current one")) %}{% endcall %}
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Auto DJ refill threshold") }}</span><small>{{ localization::tr("Add tracks when fewer than this many remain") }}</small></span><input type="number" min="1" max="10" step="1" data-setting="/auto_dj_refill_threshold" /></label>
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Tracks per refill") }}</span></span><input type="number" min="1" max="20" step="1" data-setting="/auto_dj_refill_count" /></label>

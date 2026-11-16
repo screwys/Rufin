@@ -63,7 +63,7 @@ const SETTINGS: &[&str] = &[
     "/playback/stream_quality",
     "/auto_dj_refill_threshold",
     "/auto_dj_refill_count",
-    "/server_recommendations",
+    "/override_server_recommendations",
     "/auto_dj_similar_artists",
     "/auto_dj_same_artist",
     "/auto_dj_skip_low_rated",
