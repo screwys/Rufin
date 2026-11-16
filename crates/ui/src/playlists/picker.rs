@@ -583,9 +583,9 @@ fn replace_picker_rows(
         let row = PlaylistPickerRowView::new();
         let check = row.imp().check.get();
         let bindings = playlist_artwork(&playlist);
-        let cover = artwork.cover_group_projection_for_artwork(&bindings, 48, 48, false);
-        cover.set_animated(true);
-        let cover = cover.widget();
+        let cover = artwork
+            .cover_group_projection_for_artwork(&bindings, 48, 48, false)
+            .widget();
         cover.add_css_class("context-playlist-cover");
         row.imp().cover_host.append(&cover);
         row.imp().title.set_label(&playlist.name);

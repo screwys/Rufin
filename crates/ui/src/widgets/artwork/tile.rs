@@ -357,8 +357,8 @@ impl ArtworkTile {
         }
     }
 
-    /// Lets the tile play animated artwork, such as a GIF playlist cover. Animated artwork is
-    /// fetched at its original size, since servers re-encode resized covers as still images.
+    /// Lets the tile play an animated cover. It then asks for the original image, which is the
+    /// one known to keep its animation on every source.
     pub fn set_animated(&self, animated: bool) {
         if self.animated.replace(animated) != animated {
             self.refresh_bound_artwork_size();

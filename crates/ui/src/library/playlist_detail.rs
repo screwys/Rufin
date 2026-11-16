@@ -323,7 +323,6 @@ impl CatalogUi {
             detail_showcase_cover_size(i32::MAX),
             false,
         );
-        cover.set_animated(true);
         cover.widget().add_css_class("playlist-detail-cover");
         let showcase_view = DetailShowcaseView::new(owner.name());
         showcase_view.replace_summary(&owner.summary());

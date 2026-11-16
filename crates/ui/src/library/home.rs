@@ -1004,7 +1004,6 @@ fn home_row_widget(
         cover_size,
         matches!(row, library::Row::Tag(_)),
     );
-    cover.set_animated(matches!(row, library::Row::Playlist(_)));
     content.append(&cover.widget());
     let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
     labels.set_valign(gtk::Align::Center);

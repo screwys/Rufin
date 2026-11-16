@@ -259,8 +259,8 @@ private fun SectionHeading(title: String, edge: Dp) {
 /** A station's picture: a rounded square. One without shows the radio icon on a tile tinted apart from the
  *  card or row under it. */
 @Composable
-internal fun StationLogo(binding: ByteArray?, player: PlayerConnection, size: Dp) {
-    val cover = rememberArtwork(binding, player, with(LocalDensity.current) { size.roundToPx() })
+internal fun StationLogo(binding: ByteArray?, player: PlayerConnection, size: Dp, animated: Boolean = false) {
+    val cover = rememberArtwork(binding, player, with(LocalDensity.current) { size.roundToPx() }, animated)
     if (cover.image == null && cover.missing) Box(Modifier.size(size).clip(CoverShape)
         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)),
         contentAlignment = Alignment.Center) {
@@ -406,7 +406,7 @@ private fun OnAirHeader(onAir: OnAir, player: PlayerConnection, modifier: Modifi
             Row(place, horizontalArrangement = Arrangement.spacedBy(if (wide) 24.dp else 16.dp)) {
                 Box(Modifier.size(picture).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f), spotColor = Color.Black.copy(alpha = .4f))
                     .clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                    StationLogo(station.artworkBinding, player, picture)
+                    StationLogo(station.artworkBinding, player, picture, animated = true)
                 }
                 Column(Modifier.weight(1f).heightIn(min = picture), verticalArrangement = Arrangement.Bottom) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

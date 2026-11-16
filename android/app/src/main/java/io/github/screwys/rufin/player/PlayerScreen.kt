@@ -129,7 +129,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val application = player.settings
     var artworkPixels by remember { mutableIntStateOf(0) }
     // Flip covers have no room for the cover: it becomes the player's blurred background.
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, if (tiny) 256 else artworkPixels)
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, if (tiny) 256 else artworkPixels, animated = true)
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true

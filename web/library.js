@@ -929,6 +929,7 @@ function loadCardCovers(host, signal) {
         row.artwork_count || 1,
         signal,
         row.artwork_previews,
+        card.classList.contains("detail-showcase"),
       );
     }
   };

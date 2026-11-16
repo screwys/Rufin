@@ -651,15 +651,13 @@ impl SidebarPinItem {
                     size,
                     matches!(&self.pin, SidebarPin::Genre { .. }),
                 );
-                cover.set_animated(matches!(
-                    &self.pin,
-                    SidebarPin::Playlist { .. } | SidebarPin::SmartPlaylist { .. }
-                ));
+                cover.set_animated(true);
                 cover.widget()
             }
             Pinned::Station(station) => {
                 let tile =
                     crate::library::station_cover(shell, station.artwork_binding.as_deref(), size);
+                tile.set_animated(true);
                 tile.area.set_valign(gtk::Align::Center);
                 tile.area.upcast()
             }

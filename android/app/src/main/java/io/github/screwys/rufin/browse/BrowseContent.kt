@@ -493,7 +493,7 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         // Phones: a 120 dp cover; wider panes grow it to 196 dp, as GTK's Home does.
         val cover = ((maxWidth - 32.dp) * .3f).coerceIn(112.dp, 196.dp)
-        val artwork = rememberBrowseArtwork(item, player, cover)
+        val artwork = rememberBrowseArtwork(item, player, cover, animated = true)
         // The bar over the band draws this band, at its place and size, once the page moves under it.
         var bandSize by remember { mutableStateOf(Size.Zero) }
         val bandSlot = LocalHomeBand.current
@@ -694,9 +694,9 @@ internal fun showcasePaint(key: String): Modifier {
 }
 
 @Composable
-private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp): Cover {
+private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp, animated: Boolean = false): Cover {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    return rememberArtwork(item.row.artworkIdentity, player, pixels)
+    return rememberArtwork(item.row.artworkIdentity, player, pixels, animated)
 }
 
 @Composable

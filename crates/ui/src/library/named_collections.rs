@@ -143,8 +143,6 @@ pub trait CollectionRow: library::ShowsState + Clone + PartialEq + Send + Sync +
 
 pub trait NamedCollectionRow: CollectionRow {
     const MOSAIC: bool = true;
-    /// Whether a single cover may play when it is animated.
-    const ANIMATED: bool = false;
 
     fn name(&self) -> &str;
     fn folder(&self) -> bool {
@@ -278,7 +276,6 @@ impl CollectionRow for library::PlaylistListRow {
 }
 impl NamedCollectionRow for library::PlaylistListRow {
     const MOSAIC: bool = false;
-    const ANIMATED: bool = true;
     fn name(&self) -> &str {
         match self {
             Self::Playlist(row) => &row.name,
@@ -481,7 +478,6 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             crate::widgets::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH,
             T::MOSAIC,
         );
-        cover.set_animated(T::ANIMATED);
         cover_host.append(&cover.widget());
         let menu = controls.imp().menu.get();
         let overlay = controls.imp().overlay.get();

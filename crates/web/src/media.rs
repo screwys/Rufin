@@ -516,10 +516,11 @@ async fn artwork(
         .map_err(bad_request)?
         .unwrap_or(256)
         .max(1);
-    let original = parameters
-        .get("original")
-        .is_some_and(|value| value == "true");
-    let request = if original {
+    let flag = |name| parameters.get(name).is_some_and(|value| value == "true");
+    let original = flag("original");
+    // A cover that may play is read whole, and sent whole only when it is animated.
+    let animated = flag("animated");
+    let request = if original || animated {
         rufin_core::artwork::ArtworkRequest::original(binding, size)
     } else {
         rufin_core::artwork::ArtworkRequest::new(binding, size)
@@ -544,13 +545,22 @@ async fn artwork(
             }
             rufin_core::artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
         };
-        let png = tokio::task::spawn_blocking(move || {
-            image.pixels().resized_to_cover(size)?.encode_png()
-        })
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
-        (png, "image/png")
+        let playing = image
+            .animation_bytes()
+            .filter(|_| animated)
+            .and_then(|bytes| Some((bytes.to_vec(), rufin_core::artwork::image_mime(bytes)?)));
+        match playing {
+            Some(playing) => playing,
+            None => {
+                let png = tokio::task::spawn_blocking(move || {
+                    image.pixels().resized_to_cover(size)?.encode_png()
+                })
+                .await
+                .map_err(internal)?
+                .map_err(internal)?;
+                (png, "image/png")
+            }
+        }
     };
     Ok(Response::builder()
         .header("content-type", mime)

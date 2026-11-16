@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -53,8 +52,6 @@ pub struct ArtworkState {
     playback_ready: Box<dyn Fn()>,
     textures: RefCell<TextureCache>,
     animations: RefCell<animation::Animations>,
-    /// Artwork found to be animated, whose cached still texture must not stand in for it.
-    animated_keys: RefCell<HashSet<rufin_core::artwork::ArtworkKey>>,
 }
 
 impl ArtworkState {
@@ -71,7 +68,6 @@ impl ArtworkState {
             playback_ready,
             textures: RefCell::new(Default::default()),
             animations: RefCell::new(Default::default()),
-            animated_keys: RefCell::new(HashSet::new()),
         })
     }
 
@@ -160,13 +156,6 @@ impl ArtworkState {
     ) {
         let key = self.service.key(&request);
         let animate = refresh_desktop_on_ready || tile.is_animated();
-        if !refresh_desktop_on_ready && !(animate && self.animated_keys.borrow().contains(&key)) {
-            let texture = self.textures.borrow_mut().cached_texture(&key);
-            if let Some(texture) = texture {
-                tile.set_texture_if_current(generation, texture);
-                return;
-            }
-        }
         if animate {
             let existing =
                 self.animations
@@ -175,6 +164,18 @@ impl ArtworkState {
             if let Some((lease, texture)) = existing {
                 if tile.set_texture_if_current(generation, texture) {
                     tile.set_animation(lease);
+                }
+                return;
+            }
+        }
+        if !refresh_desktop_on_ready {
+            let cached = self.textures.borrow_mut().cached_texture(&key);
+            if let Some((texture, animation)) = cached {
+                if tile.set_texture_if_current(generation, texture.clone())
+                    && animate
+                    && let Some(bytes) = animation
+                {
+                    self.animate_tile(tile, generation, key, bytes, texture);
                 }
                 return;
             }
@@ -269,16 +270,7 @@ impl ArtworkState {
                         && animate
                         && let Some(bytes) = loaded.animation_bytes()
                     {
-                        self.animated_keys.borrow_mut().insert(key.clone());
-                        let lease = self.animations.borrow_mut().attach(
-                            key,
-                            Arc::clone(bytes),
-                            tile,
-                            generation,
-                            self.artwork_scale(),
-                            texture,
-                        );
-                        tile.set_animation(lease);
+                        self.animate_tile(tile, generation, key, Arc::clone(bytes), texture);
                     }
                     current
                 } else {
@@ -300,6 +292,25 @@ impl ArtworkState {
                 false
             }
         }
+    }
+
+    fn animate_tile(
+        &self,
+        tile: &ArtworkTile,
+        generation: u64,
+        key: rufin_core::artwork::ArtworkKey,
+        bytes: Arc<[u8]>,
+        poster: gtk::gdk::Texture,
+    ) {
+        let lease = self.animations.borrow_mut().attach(
+            key,
+            bytes,
+            tile,
+            generation,
+            self.artwork_scale(),
+            poster,
+        );
+        tile.set_animation(lease);
     }
 
     pub fn clear_artwork_tile(self: &Rc<Self>, tile: &ArtworkTile) {

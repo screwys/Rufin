@@ -252,9 +252,13 @@ function releaseCovers() {
     if (!node.isConnected) entry.dispose();
 }
 
-async function coverGroup(node, query, count, signal, previews = []) {
+// A single cover plays when `animated` and it is an animated image; a mosaic's quadrants stay still.
+async function coverGroup(node, query, count, signal, previews = [], animated = false) {
   node.classList.toggle("cover-mosaic", count > 1);
-  if (count <= 1) return cover(node, query, signal, previews[0]);
+  if (count <= 1) {
+    const single = typeof query === "string" ? { uri: query } : query;
+    return cover(node, animated ? { ...single, animated: true } : query, signal, previews[0]);
+  }
   let tiles = [...node.children].filter((tile) => tile.classList.contains("cover-quadrant"));
   if (tiles.length !== 4) {
     node.replaceChildren();

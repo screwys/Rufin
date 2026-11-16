@@ -213,7 +213,7 @@
     "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
     "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
     "GET /api/lyrics/events": "Follow lyrics updates. The media_uri and run match the current playback media.",
-    "GET /api/artwork?uri=...": "Track or album cover as PNG. Set size to the displayed physical pixel size. Add original=true for the original format, including animation. Returns 404 if unavailable. picture=... in place of uri reads a picture a response named as picture: a radio station's logo or the cover of the song it plays.",
+    "GET /api/artwork?uri=...": "Track or album cover as PNG. Set size to the displayed physical pixel size. Add original=true for the original format, including animation, or animated=true for the original only when it is animated and the PNG otherwise. Returns 404 if unavailable. picture=... in place of uri reads a picture a response named as picture: a radio station's logo or the cover of the song it plays.",
     "POST /api/queue/reorder": {
       "positions": [
         0
