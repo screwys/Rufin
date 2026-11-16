@@ -2049,8 +2049,7 @@ scale.volume-slider.vertical trough fill {
   transform: scale(0.96);
   transition:
     color 180ms ease,
-    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .lyrics-instrumental {

@@ -221,8 +221,7 @@
   padding: 10px 8px;
   transition:
     color 180ms ease,
-    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1);
   text-align: center;
 }
 
