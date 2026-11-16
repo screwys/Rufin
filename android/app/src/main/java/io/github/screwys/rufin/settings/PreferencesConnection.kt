@@ -40,6 +40,9 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         private set
     var swipeRight by mutableStateOf(BrowseSwipeAction.PlayLater)
         private set
+    /** Whether a tablet shows the compact sidebar in place of the full one. */
+    var sidebarCompact by mutableStateOf(false)
+        private set
     var themeErrors by mutableStateOf<List<String>>(emptyList())
         private set
     val applicationSettings by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.player?.application }
@@ -48,6 +51,10 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
     val showDownloadedBadges by derivedStateOf { applicationSettings?.showDownloadedBadges != false }
 
     fun showThemeErrors(errors: List<String>) { themeErrors = errors }
+    fun changeSidebarCompact(compact: Boolean) {
+        sidebarCompact = compact
+        gestures?.edit()?.putBoolean("sidebar_compact", compact)?.apply()
+    }
     fun showFeedback(message: String) { connection.showFeedback(message) }
 
     suspend fun observe() {
@@ -55,6 +62,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
             val storage = context.getSharedPreferences("appearance", Context.MODE_PRIVATE)
             val left = storage.getString("swipe_left", BrowseSwipeAction.Favorite.name)
             val right = storage.getString("swipe_right", BrowseSwipeAction.PlayLater.name)
+            sidebarCompact = storage.getBoolean("sidebar_compact", false)
             Triple(storage, left, right)
         }
         gestures = savedGestures.first
