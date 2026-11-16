@@ -502,6 +502,33 @@ impl PlayerPipeline {
             }
             if element
                 .factory()
+                .is_some_and(|factory| factory.name() == "typefind")
+            {
+                // Runs before the source bin's own handler, which builds the stream's path.
+                element.connect("have-type", false, |values| {
+                    let source = values[0]
+                        .get::<gst::Element>()
+                        .expect("have-type typefind")
+                        .parent()
+                        .and_downcast::<gst::Element>()
+                        .filter(|parent| {
+                            parent
+                                .factory()
+                                .is_some_and(|factory| factory.name() == "urisourcebin")
+                        })?;
+                    let caps = values[2].get::<gst::Caps>().expect("have-type caps");
+                    let flac = caps
+                        .structure(0)
+                        .is_some_and(|caps| caps.name() == "audio/x-flac");
+                    // Lets the FLAC parser read a network stream at any offset, as it reads
+                    // a file, so a seek bisects to its target. The bin outlives one stream.
+                    let ring_bytes = if flac { 4 * 1024 * 1024_u64 } else { 0 };
+                    source.set_property("ring-buffer-max-size", ring_bytes);
+                    None
+                });
+            }
+            if element
+                .factory()
                 .is_some_and(|factory| factory.name() == "qtdemux")
             {
                 element.connect_pad_added(|_, pad| {
@@ -1211,7 +1238,13 @@ impl PlayerPipeline {
     }
 
     pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), BackendFailure> {
-        let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
+        let mut flags = gst::SeekFlags::FLUSH;
+        // An accurate seek reads everything between the last place the parser knows and
+        // the target. FLAC frames carry their own position, so a FLAC parser that reads at
+        // any offset finds the target by bisection and starts on the same sample.
+        if !self.flac_parser_reads_anywhere() {
+            flags |= gst::SeekFlags::ACCURATE;
+        }
         let end = self
             .current_stream
             .as_ref()
@@ -1289,6 +1322,25 @@ impl PlayerPipeline {
             .send_event(event)
             .then_some(())
             .ok_or_else(|| "GStreamer segment seek failed".into())
+    }
+
+    fn flac_parser_reads_anywhere(&self) -> bool {
+        self.native.as_ref().is_some_and(|(pipeline, _)| {
+            pipeline
+                .downcast_ref::<gst::Bin>()
+                .expect("playbin is a bin")
+                .iterate_recurse()
+                .into_iter()
+                .flatten()
+                .any(|element| {
+                    element
+                        .factory()
+                        .is_some_and(|factory| factory.name() == "flacparse")
+                        && element
+                            .static_pad("sink")
+                            .is_some_and(|pad| pad.mode() == gst::PadMode::Pull)
+                })
+        })
     }
 
     pub(super) fn seek_in_progress(&self) -> bool {
