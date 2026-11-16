@@ -256,11 +256,11 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     /// How many tracks one Auto DJ refill adds.
     #[serde(default = "default_auto_dj_refill_count")]
     auto_dj_refill_count: u8 = DEFAULT_AUTO_DJ_REFILL_COUNT => set_auto_dj_refill_count;
-    /// Whether radio and Auto DJ play the server's own recommendations, Rufin's filling what
-    /// they leave short. Unset until a server that recommends well is configured or the user
-    /// chooses; unset reads as off.
+    /// Whether radio and Auto DJ play Rufin's picks in place of the server's own. Off, the
+    /// server's play first and Rufin's fill what they leave short. Unset until a server that
+    /// recommends well is configured or the user chooses; unset reads as on.
     #[serde(default)]
-    server_recommendations: Option<bool> = None => set_server_recommendations;
+    override_server_recommendations: Option<bool> = None => set_override_server_recommendations;
     /// Whether Rufin's picks ask ListenBrainz for artists similar to the seed's.
     #[serde(default = "default_true")]
     auto_dj_similar_artists: bool = true => set_auto_dj_similar_artists;
@@ -437,9 +437,10 @@ impl Settings {
         self.application.notifications_enabled
     }
 
-    /// Whether radio and Auto DJ ask the seed's server for its recommendations.
-    pub fn uses_server_recommendations(&self) -> bool {
-        self.application.server_recommendations == Some(true)
+    /// Whether radio and Auto DJ play Rufin's picks without asking the seed's server for its
+    /// own.
+    pub fn overrides_server_recommendations(&self) -> bool {
+        self.application.override_server_recommendations != Some(false)
     }
 
     pub fn allows_external_metadata_lookup(&self) -> bool {

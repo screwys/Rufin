@@ -32,7 +32,7 @@ pub(crate) async fn radio_candidates(
     let mut fallback_sources = Vec::new();
     if let Some((source_key, source_id, object_id)) = seed_source {
         // The server's own picks play as it orders them; Rufin's fill what it leaves short.
-        if settings.uses_server_recommendations() {
+        if !settings.overrides_server_recommendations() {
             let seed_owner = Arc::clone(&source_owner);
             let source = tokio::task::spawn_blocking(move || seed_owner.client(&source_id).ok())
                 .await

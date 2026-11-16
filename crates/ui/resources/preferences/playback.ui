@@ -97,8 +97,8 @@
     </child>
   </object>
   <object class="AdwSwitchRow" id="server_recommendations_row">
-    <property name="title" translatable="yes">Use server recommendations</property>
-    <property name="subtitle" translatable="yes">Play the server's own picks; Rufin's fill in where it has too few</property>
+    <property name="title" translatable="yes">Override server recommendations</property>
+    <property name="subtitle" translatable="yes">Play Rufin's picks instead of the server's own</property>
   </object>
   <object class="AdwSwitchRow" id="similar_artists_row">
     <property name="title" translatable="yes">Similar artists from ListenBrainz</property>
