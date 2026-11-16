@@ -61,29 +61,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: "false"
-          cache-on-failure: true
-          prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
-          shared-key: macos-package-${{ matrix.architecture }}
-          workspaces: ". -> .local/target"
-
-      - name: Verify signed release tag
-        if: matrix.architecture == 'arm64' && inputs.verify_signed_tag
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
-
-      - name: Validate release metadata
-        if: matrix.architecture == 'arm64' && inputs.release_tag != '' && !inputs.verify_signed_tag
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: cargo run --locked -p xtask -- verify release-metadata "$RELEASE_TAG"
-
       - name: Install packaging dependencies
+        id: packages
         run: |
           set -euo pipefail
           if brew tap | grep -Fxq aws/tap; then
@@ -110,6 +89,30 @@ jobs:
             pkgconf \
             shared-mime-info \
             wavpack
+          # Cached build outputs hold these packages' versioned install paths.
+          echo "versions=$(brew list --versions | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: "false"
+          cache-on-failure: true
+          prefix-key: v1-rust
+          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+          shared-key: macos-package-${{ matrix.architecture }}-${{ steps.packages.outputs.versions }}
+          workspaces: ". -> .local/target"
+
+      - name: Verify signed release tag
+        if: matrix.architecture == 'arm64' && inputs.verify_signed_tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
+
+      - name: Validate release metadata
+        if: matrix.architecture == 'arm64' && inputs.release_tag != '' && !inputs.verify_signed_tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cargo run --locked -p xtask -- verify release-metadata "$RELEASE_TAG"
 
       - name: Select Xcode 26
         run: |

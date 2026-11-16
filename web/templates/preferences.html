@@ -34,7 +34,7 @@
       </section>
       <section id="pref-customization" role="tabpanel" hidden>
         <div class="segmented pref-tabs" role="radiogroup" aria-label="{{ localization::tr("Customization") }}">
-          {% for (tab, label) in [("layout", "Layout"), ("player", "Player"), ("menus", "Menus")] %}<label><input type="radio" name="customization-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
+          {% for (tab, label) in [("layout", "Layout"), ("home", "Home"), ("player", "Player"), ("menus", "Menus")] %}<label><input type="radio" name="customization-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
         </div>
         <div data-tabs="customization-tab" data-tab="layout">
           <h4>{{ localization::tr("Accessibility") }}</h4>
@@ -51,11 +51,20 @@
             {% call m::sidebar_mode("/layout/narrow_profile/left_sidebar", localization::tr("Left sidebar"), true) %}{% endcall %}
             {% call m::sidebar_mode("/layout/narrow_profile/right_sidebar", localization::tr("Right sidebar"), false) %}{% endcall %}
           </div>
-          <h4>{{ localization::tr("Navigation") }}</h4>
+          <h4>{{ localization::tr("Sidebar items") }}</h4>
           <div class="pref-group">
-            <button type="button" class="pref-row pref-link" id="pref-sidebar-items"><span class="pref-label"><span>{{ localization::tr("Sidebar items") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
-            <button type="button" class="pref-row pref-link" id="pref-home-blocks"><span class="pref-label"><span>{{ localization::tr("Home blocks") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+            {% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}
+            <div class="pref-rows" id="pref-routes"></div>
           </div>
+        </div>
+        <div data-tabs="customization-tab" data-tab="home" hidden>
+          <h4>{{ localization::tr("Display") }}</h4>
+          <div class="pref-group">
+            <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Size") }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Size") }}">{% for (value, title) in [("Compact", "Compact"), ("Default", "Default"), ("Large", "Large")] %}<label><input type="radio" name="/home/size" value='"{{ value }}"' data-setting="/home/size" />{{ localization::tr(title) }}</label>{% endfor %}</div></div>
+            <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Spacing") }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Spacing") }}">{% for (value, title) in [("Compact", "Small"), ("Default", "Default"), ("Large", "Wide")] %}<label><input type="radio" name="/home/spacing" value='"{{ value }}"' data-setting="/home/spacing" />{{ localization::tr(title) }}</label>{% endfor %}</div></div>
+          </div>
+          <h4>{{ localization::tr("Blocks") }}</h4>
+          <div class="pref-group" id="pref-home-blocks-list"></div>
         </div>
         <div data-tabs="customization-tab" data-tab="player" hidden>
           <h4>{{ localization::tr("Bottom bar") }}</h4>
@@ -263,7 +272,7 @@
         <div data-tabs="playback-tab" data-tab="auto-dj" hidden>
         <p class="pref-note">{{ localization::tr("What Auto DJ and radio pick") }}</p>
         <div class="pref-group">
-          <label class="pref-row" id="pref-server-recommendations"><span class="pref-label"><span>{{ localization::tr("Use server recommendations") }}</span><small>{{ localization::tr("Play the server's own picks; Rufin's fill in where it has too few") }}</small></span><input type="checkbox" role="switch" data-setting="/server_recommendations" /></label>
+          <label class="pref-row" id="pref-server-recommendations"><span class="pref-label"><span>{{ localization::tr("Override server recommendations") }}</span><small>{{ localization::tr("Play Rufin's picks instead of the server's own") }}</small></span><input type="checkbox" role="switch" data-setting="/override_server_recommendations" /></label>
           {% call m::switch("/auto_dj_similar_artists", localization::tr("Similar artists from ListenBrainz"), localization::tr("Look up the artists that listeners play alongside the current one")) %}{% endcall %}
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Auto DJ refill threshold") }}</span><small>{{ localization::tr("Add tracks when fewer than this many remain") }}</small></span><input type="number" min="1" max="10" step="1" data-setting="/auto_dj_refill_threshold" /></label>
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Tracks per refill") }}</span></span><input type="number" min="1" max="20" step="1" data-setting="/auto_dj_refill_count" /></label>
@@ -344,16 +353,4 @@
       </section>
     </div>
   </div>
-</dialog>
-<dialog id="sidebar-items-dialog" class="pref-dialog" aria-labelledby="sidebar-items-title">
-  <header class="pref-header"><span></span><h3 id="sidebar-items-title">{{ localization::tr("Sidebar items") }}</h3><button type="button" class="icon-button" data-close="sidebar-items-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
-  <div class="pref-group">{% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}</div>
-  <h4>{{ localization::tr("Pages") }}</h4>
-  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
-  <div class="pref-group" id="pref-routes"></div>
-</dialog>
-<dialog id="home-blocks-dialog" class="pref-dialog" aria-labelledby="home-blocks-title">
-  <header class="pref-header"><span></span><h3 id="home-blocks-title">{{ localization::tr("Home blocks") }}</h3><button type="button" class="icon-button" data-close="home-blocks-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
-  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
-  <div class="pref-group" id="pref-home-blocks-list"></div>
 </dialog>

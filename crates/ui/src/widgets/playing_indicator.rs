@@ -2,6 +2,9 @@ use std::{cell::RefCell, time::Duration};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
+/// A step redraws the whole window. The bars move under two pixels in this time.
+const STEP: Duration = Duration::from_millis(66);
+
 /// Mapped indicators share one timer so a step redraws all of them in one frame.
 #[derive(Default)]
 struct Animation {
@@ -49,7 +52,7 @@ mod imp {
             ANIMATION.with_borrow_mut(|animation| {
                 animation.indicators.push(obj);
                 animation.timer.get_or_insert_with(|| {
-                    glib::timeout_add_local(Duration::from_millis(33), || {
+                    glib::timeout_add_local(STEP, || {
                         ANIMATION.with_borrow(|animation| {
                             animation.indicators.iter().for_each(WidgetExt::queue_draw);
                         });

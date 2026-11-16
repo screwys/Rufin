@@ -97,7 +97,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
     val tablet = floating
     val foldable = !compact && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
     val reduceMotion = LocalReduceMotion.current
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 48.dp.roundToPx() }, animated = true)
     val background by animateColorAsState(
         artwork.image?.color?.let { lerp(MaterialTheme.colorScheme.surfaceContainer, it, .24f) }
             ?: MaterialTheme.colorScheme.surfaceContainer,
@@ -230,7 +230,7 @@ private fun MiniProgress(player: PlayerConnection, duration: ULong, playing: Boo
 internal fun NowPlayingChip(player: PlayerConnection, onOpen: () -> Unit) {
     val metadata = player.currentItem?.metadata ?: return
     val playing = player.playback?.transport?.desiredPlaying == true
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 32.dp.roundToPx() })
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 32.dp.roundToPx() }, animated = true)
     Surface(onOpen, Modifier.padding(end = 8.dp).focusRing(RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.height(48.dp).padding(start = 8.dp, end = 14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
@@ -265,7 +265,7 @@ private fun BarPlay(player: PlayerConnection, playing: Boolean) {
 internal fun SidebarPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: () -> Unit, modifier: Modifier = Modifier) {
     val playing by remember(player) { derivedStateOf { player.playback?.transport?.desiredPlaying == true } }
     val duration = player.playback?.transport?.durationMillis ?: 0UL
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 44.dp.roundToPx() })
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 44.dp.roundToPx() }, animated = true)
     // Only Next shows; a swipe goes either way, as the mini player's does.
     val (swipe, offset) = rememberTrackSwipe(player)
     Surface(modifier.fillMaxWidth().then(swipe).clickable(interactionSource = null, indication = null, onClick = onOpen), shape = RoundedCornerShape(12.dp),

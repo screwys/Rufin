@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <!-- A page's header once it has scrolled away: the title with the header's Play on the band,
+       at the page's top. Rust adds the title, which slides as the header's does. -->
+  <object class="GtkOverlay" id="root">
+    <property name="hexpand">true</property>
+    <style>
+      <class name="detail-strip"/>
+    </style>
+    <property name="child">
+      <object class="GtkDrawingArea" id="band">
+        <property name="height-request">52</property>
+        <property name="hexpand">true</property>
+        <style>
+          <class name="detail-band"/>
+        </style>
+      </object>
+    </property>
+    <child type="overlay">
+      <object class="GtkBox" id="row">
+        <property name="spacing">12</property>
+        <property name="margin-start">16</property>
+        <property name="margin-end">8</property>
+        <property name="valign">center</property>
+        <child>
+          <object class="GtkBox" id="title_host">
+            <property name="hexpand">true</property>
+            <property name="valign">center</property>
+            <property name="width-request">1</property>
+            <style>
+              <class name="detail-on-band"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="play">
+            <property name="valign">center</property>
+            <style><class name="detail-pill"/><class name="detail-pill-primary"/></style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="spacing">7</property>
+                <property name="halign">center</property>
+                <child><object class="GtkImage" id="play_icon"><property name="icon-name">rufin-media-playback-start-symbolic</property></object></child>
+                <child><object class="GtkLabel" id="play_text"><property name="label" translatable="yes">Play</property></object></child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

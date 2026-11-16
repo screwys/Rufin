@@ -2049,8 +2049,7 @@ scale.volume-slider.vertical trough fill {
   transform: scale(0.96);
   transition:
     color 180ms ease,
-    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .lyrics-instrumental {
@@ -2225,6 +2224,11 @@ button.download-queue-pause image {
 
 .detail-showcase-small .detail-title {
   font-size: 26px;
+}
+
+/* The header as a strip, above the list of a page that scrolled it away. */
+.detail-strip .detail-title {
+  font-size: 20px;
 }
 
 .detail-showcase-large .detail-artist {
@@ -3265,6 +3269,12 @@ button.menu-preview-entry:not(.menu-preview-shown) label {
 
 .station-card-drag:hover {
   background: color-mix(in srgb, var(--window-fg-color) 16%, transparent);
+}
+
+/* The list row that is being dragged to another place. */
+row.reorder-dragging {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 10%, var(--card-bg-color));
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
 }
 
 /* The card that is being dragged to another place. */

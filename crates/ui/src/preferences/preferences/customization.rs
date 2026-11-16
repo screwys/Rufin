@@ -1,17 +1,17 @@
-//! Customization: the Layout, Player and Menus tabs.
+//! Customization: the Layout, Home, Player and Menus tabs.
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
-use localization::{tr, tr_with};
-use rufin_core::settings::layout::LayoutSettings;
+use localization::tr;
+use rufin_core::settings::layout::{DisplaySize, LayoutSettings};
 use rufin_core::settings::{
-    ContextMenuItem, HomeBlockKind, LeftSidebarMode, MAX_NARROW_LAYOUT_THRESHOLD,
-    MIN_NARROW_LAYOUT_THRESHOLD, RightSidebarMode, Settings, SidebarRouteItem,
+    ContextMenuItem, HomeBlockKind, LeftSidebarMode, MAX_HOME_BLOCK_ITEMS, MAX_HOME_BLOCK_ROWS,
+    MAX_NARROW_LAYOUT_THRESHOLD, MIN_NARROW_LAYOUT_THRESHOLD, RightSidebarMode, Settings,
+    SidebarRouteItem,
 };
 
 use super::reorder_row::{ReorderRowPresentation, reorder_row};
 use crate::shell::shell::Shell;
-use crate::widgets::popup::present_light_dismiss_dialog;
 
 /// The item menu's configurable entries in the menu's order: the setting (Rating's is its own),
 /// the label, whether it opens a submenu and whether a separator comes before it.
@@ -87,8 +87,11 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         narrow_right_row: adw::ActionRow,
         narrow_left: adw::ToggleGroup,
         narrow_right: adw::ToggleGroup,
-        sidebar_items_row: adw::ActionRow,
-        home_blocks_row: adw::ActionRow,
+        sidebar_group: adw::PreferencesGroup,
+        saved_row: adw::SwitchRow,
+        home_size: adw::ToggleGroup,
+        home_spacing: adw::ToggleGroup,
+        home_blocks: gtk::ListBox,
         bottom_bar_rating_row: adw::SwitchRow,
         waveform_row: adw::SwitchRow,
         lyrics_panel_row: adw::SwitchRow,
@@ -167,10 +170,59 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         }
         update_layout(&narrow_shell, |layout| layout.narrow_enabled = enabled);
     });
-    let dialog_shell = Rc::clone(shell);
-    sidebar_items_row.connect_activated(move |row| present_sidebar_items(&dialog_shell, row));
-    let dialog_shell = Rc::clone(shell);
-    home_blocks_row.connect_activated(move |row| present_home_blocks(&dialog_shell, row));
+    saved_row.set_active(settings.sidebar.pins_visible);
+    let saved_shell = Rc::clone(shell);
+    saved_row.connect_active_notify(move |row| {
+        let visible = row.is_active();
+        if saved_shell
+            .settings
+            .update_app_settings("Pins visibility setting", |settings| {
+                if settings.sidebar.pins_visible == visible {
+                    return false;
+                }
+                settings.sidebar.pins_visible = visible;
+                true
+            })
+            .is_some()
+        {
+            saved_shell.rebuild_sidebar_navigation();
+        }
+    });
+    let sidebar_items = Rc::new(SidebarItems {
+        shell: Rc::clone(shell),
+        group: sidebar_group,
+        rows: RefCell::default(),
+        shown: RefCell::default(),
+    });
+    sidebar_items.show(&settings.sidebar.route_items);
+
+    // Home
+    let home = &settings.application.home;
+    for (toggles, size, spacing) in [
+        (&home_size, home.size, false),
+        (&home_spacing, home.spacing, true),
+    ] {
+        toggles.set_active(match size {
+            DisplaySize::Compact => 0,
+            DisplaySize::Default => 1,
+            DisplaySize::Large => 2,
+        });
+        let shell = Rc::clone(shell);
+        toggles.connect_active_notify(move |toggles| {
+            let size = match toggles.active() {
+                0 => DisplaySize::Compact,
+                2 => DisplaySize::Large,
+                _ => DisplaySize::Default,
+            };
+            let persistence = &shell.settings.persistence;
+            shell.commit_home_blocks(if spacing {
+                persistence.set_home_spacing(size)
+            } else {
+                persistence.set_home_size(size)
+            });
+        });
+    }
+    let home_blocks = HomeBlocks::new(shell, home_blocks);
 
     // Player
     let bottom_bar_shell = Rc::clone(shell);
@@ -239,35 +291,17 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
     // Menus
     populate_menu_preview(shell, &menu_preview);
 
-    let sidebar_items_row = sidebar_items_row.downgrade();
-    let home_blocks_row = home_blocks_row.downgrade();
     super::refresh_while_mapped(
         shell,
         &appearance_page,
         Rc::new(move |settings: &Settings| {
-            if let Some(row) = sidebar_items_row.upgrade() {
-                let items = &settings.sidebar.route_items;
-                row.set_subtitle(&shown_count(
-                    items.iter().filter(|item| item.visible).count(),
-                    items.len(),
-                ));
-            }
-            if let Some(row) = home_blocks_row.upgrade() {
-                row.set_subtitle(&shown_count(
-                    settings.application.home_blocks.len(),
-                    HomeBlockKind::all().len(),
-                ));
-            }
+            // The page holds the sidebar's and the blocks' rows, which follow every writer's
+            // edits.
+            sidebar_items.show(&settings.sidebar.route_items);
+            home_blocks.sync();
         }),
     );
     appearance_page.upcast()
-}
-
-fn shown_count(shown: usize, total: usize) -> String {
-    tr_with(
-        "{shown} of {total} shown",
-        &[("shown", &shown.to_string()), ("total", &total.to_string())],
-    )
 }
 
 fn update_layout(shell: &Rc<Shell>, edit: impl FnOnce(&mut LayoutSettings)) {
@@ -326,219 +360,262 @@ fn bind_right(
     });
 }
 
-fn navigation_dialog(shell: &Rc<Shell>, dialog: &str, header: &str) -> gtk::Builder {
-    let resource = "preferences/navigation_dialogs.ui";
-    let builder = crate::ui_resource::builder(resource);
-    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, dialog);
-    let header: adw::HeaderBar = crate::ui_resource::object(&builder, resource, header);
-    crate::widgets::controls::configure_dialog_header(&header);
-    dialog.set_content_height(crate::widgets::layout::large_popup_content_height(
-        shell.chrome.window.height(),
-        dialog.content_height(),
-    ));
-    builder
+/// The sidebar's pages in their order, under the Saved switch. Each edit lands in the
+/// sidebar, then the rows show the order again.
+struct SidebarItems {
+    shell: Rc<Shell>,
+    group: adw::PreferencesGroup,
+    rows: RefCell<Vec<adw::ActionRow>>,
+    /// The entries the rows show.
+    shown: RefCell<Vec<rufin_core::settings::SidebarRouteItemSettings>>,
 }
 
-fn present_sidebar_items(shell: &Rc<Shell>, parent: &adw::ActionRow) {
-    let resource = "preferences/navigation_dialogs.ui";
-    let builder = navigation_dialog(shell, "sidebar_dialog", "sidebar_header");
-    crate::objects!(builder, resource, {
-        sidebar_dialog: adw::Dialog,
-        saved_row: adw::SwitchRow,
-        sidebar_group: adw::PreferencesGroup,
-    });
-    saved_row.set_active(shell.settings.current.borrow().sidebar.pins_visible);
-    let saved_shell = Rc::clone(shell);
-    saved_row.connect_active_notify(move |row| {
-        let visible = row.is_active();
-        if saved_shell
-            .settings
-            .update_app_settings("Pins visibility setting", |settings| {
-                if settings.sidebar.pins_visible == visible {
-                    return false;
-                }
-                settings.sidebar.pins_visible = visible;
-                true
-            })
-            .is_some()
-        {
-            saved_shell.rebuild_sidebar_navigation();
+impl SidebarItems {
+    /// Lists `items`, unless the rows show them already.
+    fn show(self: &Rc<Self>, items: &[rufin_core::settings::SidebarRouteItemSettings]) {
+        if *self.shown.borrow() == items {
+            return;
         }
-    });
-    let rows = Rc::new(RefCell::new(Vec::new()));
-    populate_sidebar_items(shell, &sidebar_group, &rows);
-    present_light_dismiss_dialog(&sidebar_dialog, parent);
+        self.shown.replace(items.to_vec());
+        for row in self.rows.borrow_mut().drain(..) {
+            self.group.remove(&row);
+        }
+        for entry in items {
+            let item = entry.item;
+            let descriptor = rufin_core::route::sidebar_route_descriptor(item);
+            let commit = {
+                let weak = Rc::downgrade(self);
+                move |edit: &dyn Fn(&mut rufin_core::settings::SidebarSettings) -> bool| {
+                    let Some(items) = weak.upgrade() else {
+                        return false;
+                    };
+                    let committed = items
+                        .shell
+                        .settings
+                        .update_app_settings("sidebar setting", |settings| {
+                            edit(&mut settings.sidebar)
+                        });
+                    let Some(committed) = committed else {
+                        return false;
+                    };
+                    items.shell.rebuild_sidebar_navigation();
+                    items.show(&committed.sidebar.route_items);
+                    true
+                }
+            };
+            let on_visible = {
+                let commit = commit.clone();
+                move |visible| {
+                    commit(&|sidebar| sidebar.set_route_visible(item, visible));
+                }
+            };
+            let on_move = {
+                let commit = commit.clone();
+                move |delta| {
+                    commit(&|sidebar| sidebar.move_route(item, delta));
+                }
+            };
+            let on_drop = move |source: String, after| {
+                let Some(source) = SidebarRouteItem::from_stable_id(&source) else {
+                    return false;
+                };
+                commit(&|sidebar| sidebar.reorder_route(source, item, after))
+            };
+            let row = reorder_row(
+                ReorderRowPresentation {
+                    title: tr(descriptor.title),
+                    subtitle: if item == SidebarRouteItem::Moods {
+                        tr("Files need Mood/BPM tags written on them. Not supported for Jellyfin")
+                    } else {
+                        String::new()
+                    },
+                    icon: Some(descriptor.icon_name),
+                    visible: entry.visible,
+                    visible_sensitive: true,
+                    up_sensitive: true,
+                    down_sensitive: true,
+                    movable: true,
+                    drag_id: descriptor.stable_id.to_string(),
+                },
+                on_visible,
+                on_move,
+                on_drop,
+            );
+            self.group.add(&row);
+            self.rows.borrow_mut().push(row);
+        }
+    }
 }
 
-type RowList = Rc<RefCell<Vec<adw::ActionRow>>>;
+/// One Home block's row: its place and whether it shows, and under them how many items it
+/// lists and the rows its columns stack.
+struct HomeBlockWidgets {
+    block: HomeBlockKind,
+    row: adw::PreferencesRow,
+    drag: gtk::Image,
+    up: gtk::Button,
+    down: gtk::Button,
+    visible: gtk::Switch,
+    options: gtk::Revealer,
+    items: gtk::SpinButton,
+    rows: adw::ToggleGroup,
+}
 
-fn populate_sidebar_items(shell: &Rc<Shell>, group: &adw::PreferencesGroup, rows: &RowList) {
-    for row in rows.borrow_mut().drain(..) {
-        group.remove(&row);
+/// Home's blocks in their order. Every edit is core's; the rows then show what it committed.
+struct HomeBlocks {
+    shell: Rc<Shell>,
+    list: gtk::ListBox,
+    rows: Vec<HomeBlockWidgets>,
+    /// Set while the rows take the committed values, which is not an edit.
+    syncing: std::cell::Cell<bool>,
+}
+
+impl HomeBlocks {
+    fn new(shell: &Rc<Shell>, list: gtk::ListBox) -> Rc<Self> {
+        let blocks = Rc::new_cyclic(|weak: &std::rc::Weak<Self>| Self {
+            shell: Rc::clone(shell),
+            rows: HomeBlockKind::all()
+                .into_iter()
+                .map(|block| Self::row(weak, &list, block))
+                .collect(),
+            list,
+            syncing: std::cell::Cell::new(false),
+        });
+        blocks.sync();
+        blocks
     }
-    let items = shell.settings.current.borrow().sidebar.route_items.clone();
-    for entry in items {
-        let item = entry.item;
-        let descriptor = rufin_core::route::sidebar_route_descriptor(item);
-        // Each edit lands in the sidebar, then the rows read the order again.
-        let commit = {
-            let shell = Rc::clone(shell);
-            let group = group.downgrade();
-            let rows = Rc::downgrade(rows);
-            move |edit: &dyn Fn(&mut rufin_core::settings::SidebarSettings) -> bool| {
-                let changed = shell
-                    .settings
-                    .update_app_settings("sidebar setting", |settings| edit(&mut settings.sidebar))
-                    .is_some();
-                if changed {
-                    shell.rebuild_sidebar_navigation();
-                    if let (Some(group), Some(rows)) = (group.upgrade(), rows.upgrade()) {
-                        populate_sidebar_items(&shell, &group, &rows);
-                    }
-                }
+
+    fn row(
+        weak: &std::rc::Weak<Self>,
+        list: &gtk::ListBox,
+        block: HomeBlockKind,
+    ) -> HomeBlockWidgets {
+        let resource = "preferences/home_block_row.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            block_row: adw::PreferencesRow,
+            drag: gtk::Image,
+            title: gtk::Label,
+            up: gtk::Button,
+            down: gtk::Button,
+            visible: gtk::Switch,
+            options: gtk::Revealer,
+            items: gtk::SpinButton,
+            rows: adw::ToggleGroup,
+        });
+        let name = tr(rufin_core::settings::presentation::home_block_title(block));
+        block_row.set_title(&name);
+        title.set_label(&name);
+        visible.update_property(&[gtk::accessible::Property::Label(&name)]);
+        items.set_adjustment(&gtk::Adjustment::new(
+            f64::from(MAX_HOME_BLOCK_ITEMS),
+            1.0,
+            f64::from(MAX_HOME_BLOCK_ITEMS),
+            1.0,
+            6.0,
+            0.0,
+        ));
+        list.append(&block_row);
+
+        // An edit made by the rows themselves while they sync is none.
+        let edit = {
+            let weak = weak.clone();
+            move |edit: &dyn Fn(
+                &rufin_core::settings::SettingsOwner,
+            )
+                -> Result<bool, rufin_core::settings::SettingsError>| {
+                let Some(blocks) = weak.upgrade().filter(|blocks| !blocks.syncing.get()) else {
+                    return false;
+                };
+                let changed = blocks
+                    .shell
+                    .commit_home_blocks(edit(&blocks.shell.settings.persistence));
+                blocks.sync();
                 changed
             }
         };
-        let on_visible = {
-            let commit = commit.clone();
-            move |visible| {
-                commit(&|sidebar| sidebar.set_route_visible(item, visible));
-            }
-        };
-        let on_move = {
-            let commit = commit.clone();
-            move |delta| {
-                commit(&|sidebar| sidebar.move_route(item, delta));
-            }
-        };
-        let on_drop = move |source: String, after| {
-            let Some(source) = SidebarRouteItem::from_stable_id(&source) else {
-                return false;
-            };
-            commit(&|sidebar| sidebar.reorder_route(source, item, after))
-        };
-        let row = reorder_row(
-            ReorderRowPresentation {
-                title: tr(descriptor.title),
-                subtitle: if item == SidebarRouteItem::Moods {
-                    tr("Files need Mood/BPM tags written on them. Not supported for Jellyfin")
-                } else {
-                    String::new()
-                },
-                icon: Some(descriptor.icon_name),
-                visible: entry.visible,
-                visible_sensitive: true,
-                up_sensitive: true,
-                down_sensitive: true,
-                drag_id: descriptor.stable_id.to_string(),
-            },
-            on_visible,
-            on_move,
-            on_drop,
-        );
-        group.add(&row);
-        rows.borrow_mut().push(row);
-    }
-}
-
-fn present_home_blocks(shell: &Rc<Shell>, parent: &adw::ActionRow) {
-    let resource = "preferences/navigation_dialogs.ui";
-    let builder = navigation_dialog(shell, "home_dialog", "home_header");
-    crate::objects!(builder, resource, {
-        home_dialog: adw::Dialog,
-        home_group: adw::PreferencesGroup,
-    });
-    let rows = Rc::new(RefCell::new(Vec::new()));
-    populate_home_blocks(shell, &home_group, &rows);
-    present_light_dismiss_dialog(&home_dialog, parent);
-}
-
-fn populate_home_blocks(shell: &Rc<Shell>, group: &adw::PreferencesGroup, rows: &RowList) {
-    for row in rows.borrow_mut().drain(..) {
-        group.remove(&row);
-    }
-    let blocks = shell.settings.persistence.home_block_rows();
-    let visible_count = blocks.iter().filter(|row| row.visible).count();
-    for (position, home_block) in blocks.into_iter().enumerate() {
-        let block = home_block.block;
-        let visible_index = home_block.visible.then_some(position);
-        // Each edit is core's; the rows read again after it lands.
-        let commit = {
-            let shell = Rc::clone(shell);
-            let group = group.downgrade();
-            let rows = Rc::downgrade(rows);
-            move |result| {
-                if !shell.commit_home_blocks(result) {
-                    return false;
-                }
-                if let (Some(group), Some(rows)) = (group.upgrade(), rows.upgrade()) {
-                    populate_home_blocks(&shell, &group, &rows);
-                }
-                true
-            }
-        };
-        let on_visible = {
-            let shell = Rc::clone(shell);
-            let commit = commit.clone();
-            move |visible| {
-                commit(
-                    shell
-                        .settings
-                        .persistence
-                        .set_home_block_visible(block, visible),
-                );
-            }
-        };
-        let on_move = {
-            let shell = Rc::clone(shell);
-            let commit = commit.clone();
-            move |delta: isize| {
-                commit(
-                    shell
-                        .settings
-                        .persistence
-                        .move_home_block(block, delta as i32),
-                );
-            }
-        };
-        let on_drop = {
-            let shell = Rc::clone(shell);
-            move |source: String, after| {
+        let on_visible = edit.clone();
+        visible.connect_active_notify(move |visible| {
+            let shown = visible.is_active();
+            on_visible(&|settings| settings.set_home_block_visible(block, shown));
+        });
+        for (button, delta) in [(&up, -1), (&down, 1)] {
+            let on_move = edit.clone();
+            button.connect_clicked(move |_| {
+                on_move(&|settings| settings.move_home_block(block, delta));
+            });
+        }
+        let on_items = edit.clone();
+        items.connect_value_changed(move |items| {
+            let count = items
+                .value_as_int()
+                .clamp(1, i32::from(MAX_HOME_BLOCK_ITEMS)) as u8;
+            on_items(&|settings| settings.set_home_block_items(block, count));
+        });
+        let on_rows = edit.clone();
+        rows.connect_active_notify(move |rows| {
+            let stacked =
+                Some(rows.active() as u8).filter(|rows| (1..=MAX_HOME_BLOCK_ROWS).contains(rows));
+            on_rows(&|settings| settings.set_home_block_rows(block, stacked));
+        });
+        crate::widgets::reorder::install_row_reorder(
+            &block_row,
+            &drag,
+            format!("{block:?}"),
+            move |source, after| {
                 let Some(source) = HomeBlockKind::all()
                     .into_iter()
                     .find(|candidate| format!("{candidate:?}") == source)
                 else {
                     return false;
                 };
-                commit(
-                    shell
-                        .settings
-                        .persistence
-                        .reorder_home_block(source, block, after),
-                )
-            }
-        };
-        let row = reorder_row(
-            ReorderRowPresentation {
-                title: tr(&home_block.title),
-                subtitle: String::new(),
-                icon: None,
-                visible: home_block.visible,
-                visible_sensitive: home_block.can_toggle,
-                up_sensitive: visible_index.is_some_and(|index| index > 0),
-                down_sensitive: visible_index.is_some_and(|index| index + 1 < visible_count),
-                drag_id: format!("{block:?}"),
+                edit(&|settings| settings.reorder_home_block(source, block, after))
             },
-            on_visible,
-            on_move,
-            on_drop,
         );
-        group.add(&row);
-        rows.borrow_mut().push(row);
+        HomeBlockWidgets {
+            block,
+            row: block_row,
+            drag,
+            up,
+            down,
+            visible,
+            options,
+            items,
+            rows,
+        }
+    }
+
+    /// Shows the blocks as they are committed: the shown ones in their order, then the hidden
+    /// ones, each shown one with its options under it.
+    fn sync(&self) {
+        let blocks = self.shell.settings.persistence.home_block_rows();
+        let shown = blocks.iter().filter(|block| block.visible).count();
+        self.syncing.set(true);
+        let mut order = Vec::with_capacity(blocks.len());
+        for (position, block) in blocks.iter().enumerate() {
+            let Some(widgets) = self.rows.iter().find(|row| row.block == block.block) else {
+                continue;
+            };
+            widgets.visible.set_active(block.visible);
+            widgets.visible.set_sensitive(block.can_toggle);
+            // A hidden block has no place among the shown ones.
+            widgets.drag.set_sensitive(block.visible);
+            widgets.up.set_sensitive(block.visible && position > 0);
+            widgets
+                .down
+                .set_sensitive(block.visible && position + 1 < shown);
+            widgets
+                .options
+                .set_reveal_child(block.visible && block.has_options);
+            widgets.items.set_value(f64::from(block.items));
+            widgets.rows.set_active(u32::from(block.rows.unwrap_or(0)));
+            order.push(widgets.row.clone().upcast::<gtk::ListBoxRow>());
+        }
+        crate::widgets::reorder::order_rows(&self.list, &order);
+        self.syncing.set(false);
     }
 }
 
-/// The item menu as albums, artists and tracks show it; each entry shows or hides itself.
 fn populate_menu_preview(shell: &Rc<Shell>, preview: &gtk::Box) {
     let menu = shell
         .settings

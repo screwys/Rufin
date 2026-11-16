@@ -43,7 +43,8 @@ pub use layout::{
     default_library_list_settings, sanitized_window_size,
 };
 pub use sidebar::{
-    HomeBlockRow, SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings,
+    HomeBlockOptions, HomeBlockRow, HomeSettings, MAX_HOME_BLOCK_ITEMS, MAX_HOME_BLOCK_ROWS,
+    SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings,
 };
 
 use std::fs;
@@ -209,11 +210,16 @@ impl StoredSettings {
         self.settle_server_recommendations();
     }
 
-    /// Server recommendations start on once a Navidrome or Plex server is configured, whose
+    /// Server recommendations stay once a Navidrome or Plex server is configured, whose
     /// picks are good, or where a Jellyfin or Emby source was set to its instant mix before
     /// the choice became one setting. Once set, the choice is the user's.
     fn settle_server_recommendations(&mut self) {
-        if self.ui.application.server_recommendations.is_some() {
+        if self
+            .ui
+            .application
+            .override_server_recommendations
+            .is_some()
+        {
             return;
         }
         let recommends = self.sources.configured.iter().any(|source| {
@@ -233,7 +239,7 @@ impl StoredSettings {
             }
         });
         if recommends {
-            self.ui.application.server_recommendations = Some(true);
+            self.ui.application.override_server_recommendations = Some(false);
         }
     }
 
@@ -697,7 +703,57 @@ impl SettingsOwner {
 impl SettingsOwner {
     /// The Home blocks as the block editor lists them.
     pub fn home_block_rows(&self) -> Vec<sidebar::HomeBlockRow> {
-        sidebar::home_block_rows(&self.file.load().ui.application.home_blocks)
+        let stored = self.file.load();
+        let application = &stored.ui.application;
+        sidebar::home_block_rows(&application.home_blocks, &application.home)
+    }
+
+    /// The size of Home's cards and rows.
+    pub fn set_home_size(&self, size: layout::DisplaySize) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                let home = &mut stored.ui.application.home;
+                Ok(std::mem::replace(&mut home.size, size) != size)
+            })
+            .map_err(Into::into)
+    }
+
+    /// The space between Home's cards and columns.
+    pub fn set_home_spacing(&self, spacing: layout::DisplaySize) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                let home = &mut stored.ui.application.home;
+                Ok(std::mem::replace(&mut home.spacing, spacing) != spacing)
+            })
+            .map_err(Into::into)
+    }
+
+    /// How many items a Home block lists.
+    pub fn set_home_block_items(
+        &self,
+        block: library::HomeBlockKind,
+        items: u8,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                let home = &mut stored.ui.application.home;
+                Ok(home.edit_block(block, |options| options.items = items))
+            })
+            .map_err(Into::into)
+    }
+
+    /// The rows a Home block's columns stack; unset shows tracks as two rows and albums as cards.
+    pub fn set_home_block_rows(
+        &self,
+        block: library::HomeBlockKind,
+        rows: Option<u8>,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                let home = &mut stored.ui.application.home;
+                Ok(home.edit_block(block, |options| options.rows = rows))
+            })
+            .map_err(Into::into)
     }
 
     pub fn set_home_block_visible(

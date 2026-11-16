@@ -39,6 +39,9 @@ pub struct ArtworkTile {
     animation: Rc<RefCell<Option<super::animation::Lease>>>,
     transition_pending: Rc<Cell<bool>>,
     transition: Rc<RefCell<Option<CoverReveal>>>,
+    animated: Rc<Cell<bool>>,
+    /// Set while an animation frame is shown, so texture listeners keep the still cover.
+    presenting_frame: Rc<Cell<bool>>,
 }
 
 #[derive(Clone)]
@@ -54,6 +57,9 @@ pub struct ArtworkTileWeak {
     animation: Rc<RefCell<Option<super::animation::Lease>>>,
     transition_pending: Rc<Cell<bool>>,
     transition: Rc<RefCell<Option<CoverReveal>>>,
+    animated: Rc<Cell<bool>>,
+    /// Set while an animation frame is shown, so texture listeners keep the still cover.
+    presenting_frame: Rc<Cell<bool>>,
 }
 
 impl ArtworkTile {
@@ -119,6 +125,8 @@ impl ArtworkTile {
             animation: Rc::new(RefCell::new(None)),
             transition_pending: Rc::new(Cell::new(false)),
             transition: Rc::new(RefCell::new(None)),
+            animated: Rc::new(Cell::new(false)),
+            presenting_frame: Rc::new(Cell::new(false)),
         };
         tile.install_lifecycle();
         tile
@@ -145,6 +153,8 @@ impl ArtworkTile {
             animation: Rc::clone(&self.animation),
             transition_pending: Rc::clone(&self.transition_pending),
             transition: Rc::clone(&self.transition),
+            animated: Rc::clone(&self.animated),
+            presenting_frame: Rc::clone(&self.presenting_frame),
         }
     }
 
@@ -343,7 +353,20 @@ impl ArtworkTile {
             expected_generation: generation,
             size: Rc::clone(&self.size),
             scale: Cell::new(scale),
+            presenting_frame: Rc::clone(&self.presenting_frame),
         }
+    }
+
+    /// Lets the tile play an animated cover. It then asks for the original image, which is the
+    /// one known to keep its animation on every source.
+    pub fn set_animated(&self, animated: bool) {
+        if self.animated.replace(animated) != animated {
+            self.refresh_bound_artwork_size();
+        }
+    }
+
+    pub(super) fn is_animated(&self) -> bool {
+        self.animated.get()
     }
 
     pub(super) fn set_animation(&self, lease: super::animation::Lease) {
@@ -457,9 +480,14 @@ impl ArtworkTile {
         generation
     }
 
-    /// Calls `shown` with each texture the tile shows: its preview, then the cover.
+    /// Calls `shown` with each texture the tile shows: its preview, then the cover. An animated
+    /// cover's frames are left out, so what follows the cover stays still while it plays.
     pub fn connect_texture(&self, shown: std::rc::Rc<dyn Fn(&gtk::gdk::Texture)>) {
+        let presenting_frame = Rc::clone(&self.presenting_frame);
         self.image.connect_paintable_notify(move |picture| {
+            if presenting_frame.get() {
+                return;
+            }
             if let Some(texture) = picture.paintable().and_downcast::<gtk::gdk::Texture>() {
                 shown(&texture);
             }
@@ -651,6 +679,8 @@ impl ArtworkTileWeak {
             animation: Rc::clone(&self.animation),
             transition_pending: Rc::clone(&self.transition_pending),
             transition: Rc::clone(&self.transition),
+            animated: Rc::clone(&self.animated),
+            presenting_frame: Rc::clone(&self.presenting_frame),
         })
     }
 }

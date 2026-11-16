@@ -159,8 +159,8 @@ function render() {
     list.append(row);
     const query = cardCover(item.kind, item);
     if (station) {
-      if (item.picture) run(() => cover(artwork, { picture: item.picture }, signal, item.artwork_previews?.[0]));
-    } else if (query) run(() => coverGroup(artwork, query, item.artwork_count || 1, signal, item.artwork_previews));
+      if (item.picture) run(() => cover(artwork, { picture: item.picture, animated: true }, signal, item.artwork_previews?.[0]));
+    } else if (query) run(() => coverGroup(artwork, query, item.artwork_count || 1, signal, item.artwork_previews, true));
     // A playlist folder's picture is its preview.
     else if (item.artwork_previews?.[0]) artwork.replaceChildren(Object.assign(el("img"), { alt: "", src: item.artwork_previews[0] }));
   }

@@ -60,6 +60,8 @@ pub struct ReorderRowPresentation {
     pub visible_sensitive: bool,
     pub up_sensitive: bool,
     pub down_sensitive: bool,
+    /// Whether it can be dragged, and moved aside for a dragged row.
+    pub movable: bool,
     pub drag_id: String,
 }
 
@@ -90,27 +92,13 @@ pub fn reorder_row(
     imp.up.connect_clicked(move |_| move_up(-1));
     imp.down.connect_clicked(move |_| on_move(1));
 
-    let drag_id = presentation.drag_id;
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
-        .build();
-    source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&drag_id.to_value()))
-    });
-    imp.drag.add_controller(source);
-
-    let drop_target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-    let weak_row = row.downgrade();
-    drop_target.connect_drop(move |_, value, _, y| {
-        let Ok(source_id) = value.get::<String>() else {
-            return false;
-        };
-        let Some(row) = weak_row.upgrade() else {
-            return false;
-        };
-        on_drop(source_id, y > f64::from(row.height()) / 2.0)
-    });
-    row.add_controller(drop_target);
+    imp.drag.set_sensitive(presentation.movable);
+    crate::widgets::reorder::install_row_reorder(
+        &row,
+        &imp.drag.get(),
+        presentation.drag_id,
+        on_drop,
+    );
     row.upcast()
 }
 

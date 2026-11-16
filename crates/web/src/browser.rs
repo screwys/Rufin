@@ -725,14 +725,17 @@ struct Section<'a> {
     /// The showcase's header; other sections show rows.
     head: Option<Head<'a>>,
     rows: Vec<Shown<'a>>,
-    /// The rows each column shows: two rows, or one card.
-    column_rows: usize,
+    /// The rows each column stacks, and whether a column is one card.
+    columns: rufin_core::view::HomeColumns,
 }
 
 #[derive(Template)]
 #[template(path = "home.html")]
 struct Home<'a> {
     sections: Vec<Section<'a>>,
+    /// Home's Size and Spacing, as the styles name them.
+    size: &'static str,
+    spacing: &'static str,
     page: String,
     title: String,
     /// What committed while Home read, as JSON; empty when nothing did.
@@ -757,7 +760,15 @@ pub(super) fn home(
 ) -> Result<String, Error> {
     let token = &opened.token;
     let settings = products.settings.load();
+    let home = opened.view.home_settings();
+    let named = |size| match size {
+        rufin_core::settings::layout::DisplaySize::Compact => "compact",
+        rufin_core::settings::layout::DisplaySize::Default => "default",
+        rufin_core::settings::layout::DisplaySize::Large => "large",
+    };
     Home {
+        size: named(home.size),
+        spacing: named(home.spacing),
         sections: sections
             .iter()
             .enumerate()
@@ -786,7 +797,7 @@ pub(super) fn home(
                             form,
                         )),
                         rows: Vec::new(),
-                        column_rows: 1,
+                        columns: section.columns(home),
                         block,
                     };
                 }
@@ -812,7 +823,7 @@ pub(super) fn home(
                             )
                         })
                         .collect(),
-                    column_rows: if section.shows_rows() { 2 } else { 1 },
+                    columns: section.columns(home),
                     block,
                 }
             })

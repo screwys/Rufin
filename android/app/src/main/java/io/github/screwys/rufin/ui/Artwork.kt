@@ -18,11 +18,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import io.github.screwys.rufin.core.AndroidException
 import io.github.screwys.rufin.core.AndroidArtwork
@@ -35,8 +40,9 @@ import kotlinx.coroutines.sync.withLock
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import java.util.TreeMap
 
+/** `animated` lets the cover play when it is an animated image: a showcase's, a pin's, the player's. */
 @Composable
-internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int): Cover {
+internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int, animated: Boolean = false): Cover {
     val binding = remember(identityBytes) { identityBytes?.toList() } ?: return Cover.Missing
     val bridge = player.bridge
     val identity = remember(bridge, binding, player.artworkGeneration) { bridge?.artworkIdentity(binding.toByteArray()) }
@@ -59,13 +65,48 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
                 catch (_: Exception) { value = Cover(value.image, true); Log.d("Rufin", "Could not load artwork") }
             }
         }
-        loaded
+        val plays = if (animated && bridge != null && pixels > 0) remember(bridge, pixels) { CoverAnimation(bridge, binding.toByteArray(), pixels) } else null
+        if (plays == null) loaded else loaded.copy(plays = plays)
     }
+}
+
+/** Where a cover that may play reads its frames: the original image, at the size it is shown. */
+internal class CoverAnimation(val player: AndroidPlayer, val binding: ByteArray, val pixels: Int)
+
+/** The frame an animated cover shows now; none for a still cover, or with motion reduced. Frames are
+ *  decoded only while the screen is up, and start over when it comes back. */
+@Composable
+private fun rememberCoverFrame(plays: CoverAnimation?): ImageBitmap? {
+    if (plays == null || LocalReduceMotion.current) return null
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    return produceState<ImageBitmap?>(null, plays, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try {
+                (plays.player.artworkAnimation(plays.binding, plays.pixels.toUInt()) ?: return@repeatOnLifecycle).use { animation ->
+                    // Two bitmaps take the frames in turn, so the one on screen is never written to.
+                    val buffers = arrayOfNulls<Bitmap>(2)
+                    var turn = 0
+                    while (true) {
+                        val frame = withContext(Dispatchers.Default) { animation.nextFrame() } ?: break
+                        val (width, height) = frame.width.toInt() to frame.height.toInt()
+                        val bitmap = buffers[turn]?.takeIf { it.width == width && it.height == height }
+                            ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { buffers[turn] = it }
+                        bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(frame.rgba))
+                        value = bitmap.asImageBitmap()
+                        turn = 1 - turn
+                        delay(frame.milliseconds.toLong())
+                    }
+                }
+            }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { Log.d("Rufin", "Could not play artwork") }
+        }
+    }.value
 }
 
 /** A cover as a tile shows it: its image or preview once read, and whether it has none. Until one of
  *  them is known the tile stays plain, as GTK's pending tile does, so the fallback never precedes a cover. */
-internal data class Cover(val image: PlayerArtwork?, val missing: Boolean) {
+internal data class Cover(val image: PlayerArtwork?, val missing: Boolean, val plays: CoverAnimation? = null) {
     /** A decoded image, where none means the item has no cover. */
     constructor(image: PlayerArtwork?) : this(image, image == null)
     companion object {
@@ -160,12 +201,13 @@ internal val CoverShape = RoundedCornerShape(8.dp)
 @Composable
 internal fun Artwork(cover: Cover, modifier: Modifier = Modifier, description: String? = null) {
     val artwork = cover.image
+    val frame = rememberCoverFrame(cover.plays)
     val opacity = animateFloatAsState(if (artwork == null) 0f else 1f,
         tween(if (LocalReduceMotion.current) 0 else 160), label = "artworkOpacity").value
     Box(modifier.background(artwork?.color ?: MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         if (artwork == null && cover.missing) FallbackCover(Modifier.fillMaxSize())
         if (artwork != null) {
-            Image(artwork.bitmap.asImageBitmap(), description, Modifier.fillMaxSize().graphicsLayer { alpha = opacity }, contentScale = ContentScale.Crop)
+            Image(frame ?: artwork.bitmap.asImageBitmap(), description, Modifier.fillMaxSize().graphicsLayer { alpha = opacity }, contentScale = ContentScale.Crop)
         }
     }
 }

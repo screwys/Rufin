@@ -15,7 +15,8 @@ use tracing::warn;
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::route_layout::{
-    DETAIL_SHOWCASE_NARROW_WIDTH as NARROW_WIDTH, detail_showcase_cover_size,
+    DETAIL_SHOWCASE_NARROW_WIDTH as NARROW_WIDTH, PRIMARY_ROUTE_MARGIN_END,
+    PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_showcase_cover_size,
 };
 use crate::menus::media_menus::{CollectionPlay, row_favorite};
 use crate::widgets::artwork::{ArtworkTile, CoverGroupProjection};
@@ -133,6 +134,8 @@ mod showcase_imp {
         pub has_facts: Cell<bool>,
         /// The facts and the genres as one line.
         pub(crate) meta_fit: std::cell::OnceCell<Rc<MetaLine>>,
+        /// The header as a strip, on a page that scrolls the header away.
+        pub(crate) strip: RefCell<Option<DetailStrip>>,
     }
 
     #[glib::object_subclass]
@@ -407,6 +410,13 @@ impl ShowcaseCover {
             Self::Group(cover, _) => cover.resize(size),
         }
     }
+
+    fn set_animated(&self) {
+        match self {
+            Self::Single(cover) => cover.tile.set_animated(true),
+            Self::Group(cover, _) => cover.set_animated(true),
+        }
+    }
 }
 
 /// What a mounted header shows and does.
@@ -481,12 +491,46 @@ impl DetailShowcaseView {
         let imp = self.imp();
         if imp.band_stops.replace(stops) != stops {
             imp.band.queue_draw();
+            if let Some(strip) = &*imp.strip.borrow() {
+                strip.band.queue_draw();
+            }
         }
     }
 
     pub fn set_title(&self, text: &str) {
-        self.imp().title.set_text(text);
+        let imp = self.imp();
+        imp.title.set_text(text);
+        if let Some(strip) = &*imp.strip.borrow() {
+            strip.title.set_text(text);
+        }
         self.refit();
+    }
+
+    /// Makes `page`, which holds the mounted header above the list in `list`, scroll as one
+    /// with that list. As the header leaves, a strip with the title and Play fades in; the
+    /// page goes on leaving until `frame` (the list with its column header) is under it.
+    pub fn scrolling_page(
+        &self,
+        page: &impl IsA<gtk::Widget>,
+        (list, frame): (gtk::ScrolledWindow, gtk::Widget),
+    ) -> gtk::Widget {
+        let imp = self.imp();
+        let weak = self.downgrade();
+        let strip = DetailStrip::new(
+            move || weak.upgrade().map(|view| view.imp().band_stops.get()),
+            &imp.play,
+        );
+        strip.title.set_text(&imp.title.text());
+        // A header without buttons has a strip without Play.
+        strip.play.set_visible(imp.actions.is_visible());
+        let scrolling = super::detail_scroll::detail_scroll(
+            page,
+            &*imp.body,
+            &strip.root,
+            Some((&list, &frame)),
+        );
+        imp.strip.replace(Some(strip));
+        scrolling
     }
 
     /// Shows `text` under the title: an album's artist, or the sub-page an artist's band heads.
@@ -636,6 +680,7 @@ impl DetailShowcaseView {
             let play = Rc::clone(&play);
             button.connect_clicked(move |_| play(placement, false));
         }
+        cover.set_animated();
         let weak = self.downgrade();
         cover.connect_texture(Rc::new(move |texture| {
             if let Some(view) = weak.upgrade() {
@@ -950,6 +995,63 @@ impl DetailShowcaseView {
             .set_tooltip_text((!play_labelled).then_some(tooltip.as_str()));
         imp.fitted.set(Some((shape, width)));
         self.fit_text(layout, width);
+    }
+}
+
+/// A header as a strip, for a page that scrolls its header away: the header's title on its
+/// band, with its Play.
+pub(crate) struct DetailStrip {
+    pub(crate) root: gtk::Widget,
+    pub(crate) band: gtk::DrawingArea,
+    pub(crate) title: gtk::Label,
+    pub(crate) play: gtk::Button,
+    pub(crate) play_icon: gtk::Image,
+    pub(crate) play_text: gtk::Label,
+}
+
+impl DetailStrip {
+    /// A strip whose band paints the header's colours `stops`, and whose Play clicks the
+    /// header's own, `header_play`.
+    pub(crate) fn new(
+        stops: impl Fn() -> Option<[[u8; 3]; 3]> + 'static,
+        header_play: &gtk::Button,
+    ) -> Self {
+        let resource = "routes/detail_strip.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            root: gtk::Overlay,
+            band: gtk::DrawingArea,
+            title_host: gtk::Box,
+            play: gtk::Button,
+            play_icon: gtk::Image,
+            play_text: gtk::Label,
+        });
+        root.set_margin_top(ROUTE_TOP_MARGIN);
+        root.set_margin_bottom(ROUTE_TOP_MARGIN);
+        root.set_margin_start(PRIMARY_ROUTE_MARGIN_START);
+        root.set_margin_end(PRIMARY_ROUTE_MARGIN_END);
+        band.set_draw_func(move |_, cairo, width, height| {
+            if let Some(stops) = stops() {
+                paint_band(cairo, f64::from(width), f64::from(height), stops);
+            }
+        });
+        let (slide, title) = crate::widgets::text_slide::new_label();
+        title.add_css_class("detail-title");
+        title_host.append(&slide);
+        let header_play = header_play.downgrade();
+        play.connect_clicked(move |_| {
+            if let Some(header_play) = header_play.upgrade() {
+                header_play.emit_clicked();
+            }
+        });
+        Self {
+            root: root.upcast(),
+            band,
+            title,
+            play,
+            play_icon,
+            play_text,
+        }
     }
 }
 

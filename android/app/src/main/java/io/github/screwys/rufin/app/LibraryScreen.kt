@@ -576,7 +576,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     CompositionLocalProvider(LocalOverlayBarHeight provides if (root == "Home") barHeight else 0.dp) {
                         RootContent(model, browse, player, radio, root, rootPages, routeState, libraryRoutes, tiny, tabs, split, shown && !fullPlayer,
                             onMenu = { menu = it }, onPlaylist = { playlist = it }, onAddSource = { editSourceId = null; sources = true },
-                            onRoutes = { openMore(MoreDestination.Routes) }, onSelect = ::selectRoute)
+                            onRoutes = { openMore(MoreDestination.Customization) }, onSelect = ::selectRoute)
                     }
                 }
                 if (browse.section == AppSection.Browse) {

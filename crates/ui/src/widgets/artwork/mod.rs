@@ -123,7 +123,7 @@ impl ArtworkState {
         } else {
             self.settings.current.borrow().artwork_policy()
         };
-        let request = if refresh_desktop_on_ready {
+        let request = if refresh_desktop_on_ready || tile.is_animated() {
             ArtworkRequest::original(artwork, render_size)
         } else {
             ArtworkRequest {
@@ -155,14 +155,8 @@ impl ArtworkState {
         request: ArtworkRequest,
     ) {
         let key = self.service.key(&request);
-        if !refresh_desktop_on_ready {
-            let texture = self.textures.borrow_mut().cached_texture(&key);
-            if let Some(texture) = texture {
-                tile.set_texture_if_current(generation, texture);
-                return;
-            }
-        }
-        if refresh_desktop_on_ready {
+        let animate = refresh_desktop_on_ready || tile.is_animated();
+        if animate {
             let existing =
                 self.animations
                     .borrow()
@@ -174,6 +168,18 @@ impl ArtworkState {
                 return;
             }
         }
+        if !refresh_desktop_on_ready {
+            let cached = self.textures.borrow_mut().cached_texture(&key);
+            if let Some((texture, animation)) = cached {
+                if tile.set_texture_if_current(generation, texture.clone())
+                    && animate
+                    && let Some(bytes) = animation
+                {
+                    self.animate_tile(tile, generation, key, bytes, texture);
+                }
+                return;
+            }
+        }
         let immediate = refresh_desktop_on_ready || request.cache_only;
         let load = immediate.then(|| self.service.load(request.clone()));
         if let Some(rufin_core::artwork::ArtworkLoad::Ready(image)) = load.as_ref() {
@@ -181,7 +187,7 @@ impl ArtworkState {
                 tile,
                 generation,
                 rufin_core::artwork::ArtworkOutcome::Ready(Arc::clone(image)),
-                refresh_desktop_on_ready,
+                animate,
             );
             return;
         }
@@ -239,8 +245,7 @@ impl ArtworkState {
                     }
                     return;
                 }
-                let ready =
-                    shell.apply_artwork(&tile, generation, outcome, refresh_desktop_on_ready);
+                let ready = shell.apply_artwork(&tile, generation, outcome, animate);
                 if ready && refresh_desktop_on_ready {
                     (shell.playback_ready)();
                 }
@@ -265,15 +270,7 @@ impl ArtworkState {
                         && animate
                         && let Some(bytes) = loaded.animation_bytes()
                     {
-                        let lease = self.animations.borrow_mut().attach(
-                            key,
-                            Arc::clone(bytes),
-                            tile,
-                            generation,
-                            self.artwork_scale(),
-                            texture,
-                        );
-                        tile.set_animation(lease);
+                        self.animate_tile(tile, generation, key, Arc::clone(bytes), texture);
                     }
                     current
                 } else {
@@ -295,6 +292,25 @@ impl ArtworkState {
                 false
             }
         }
+    }
+
+    fn animate_tile(
+        &self,
+        tile: &ArtworkTile,
+        generation: u64,
+        key: rufin_core::artwork::ArtworkKey,
+        bytes: Arc<[u8]>,
+        poster: gtk::gdk::Texture,
+    ) {
+        let lease = self.animations.borrow_mut().attach(
+            key,
+            bytes,
+            tile,
+            generation,
+            self.artwork_scale(),
+            poster,
+        );
+        tile.set_animation(lease);
     }
 
     pub fn clear_artwork_tile(self: &Rc<Self>, tile: &ArtworkTile) {

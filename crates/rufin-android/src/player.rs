@@ -570,6 +570,39 @@ impl AndroidPlayer {
             .map_err(error)?
     }
 
+    /// The cover's frames when it is an animated image, read from the original.
+    pub async fn artwork_animation(
+        &self,
+        identity: Vec<u8>,
+        size: u32,
+    ) -> Result<Option<Arc<AndroidArtworkAnimation>>, AndroidError> {
+        let request = rufin_core::artwork::ArtworkRequest::original(
+            rufin_core::artwork::ArtworkBinding::opaque(&identity),
+            size,
+        )
+        .with_external(self.products.settings.load().artwork_policy());
+        let artwork = self.products.artwork.clone();
+        self.products
+            .runtime
+            .spawn(async move {
+                let image = match artwork.load(request).finish().await {
+                    rufin_core::artwork::ArtworkOutcome::Ready(image) => image,
+                    rufin_core::artwork::ArtworkOutcome::Missing
+                    | rufin_core::artwork::ArtworkOutcome::Invalidated => {
+                        return Ok(None);
+                    }
+                    rufin_core::artwork::ArtworkOutcome::Failed(message) => {
+                        return Err(error(message));
+                    }
+                };
+                Ok(image
+                    .animation_bytes()
+                    .map(|bytes| Arc::new(AndroidArtworkAnimation::new(Arc::clone(bytes), size))))
+            })
+            .await
+            .map_err(error)?
+    }
+
     pub fn subscribe_lyrics(&self) -> Arc<AndroidLyricsSubscription> {
         Arc::new(AndroidLyricsSubscription {
             current: tokio::sync::Mutex::new((self.products.lyrics.current(), true)),
@@ -623,20 +656,92 @@ impl From<&rufin_core::artwork::RgbaImage> for AndroidArtwork {
             blue: f32::from(blue) / 255.0,
         })
         .collect();
-        let mut rgba = image.rgba().to_vec();
-        // Android bitmap buffers use premultiplied color channels.
-        for pixel in rgba.chunks_exact_mut(4) {
-            let alpha = u16::from(pixel[3]);
-            for channel in &mut pixel[..3] {
-                *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
-            }
-        }
         Self {
             width: image.width(),
             height: image.height(),
-            rgba,
+            rgba: bitmap_pixels(image),
             band,
         }
+    }
+}
+
+/// Android bitmap buffers use premultiplied color channels.
+fn bitmap_pixels(image: &rufin_core::artwork::RgbaImage) -> Vec<u8> {
+    let mut rgba = image.rgba().to_vec();
+    for pixel in rgba.chunks_exact_mut(4) {
+        let alpha = u16::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    rgba
+}
+
+/// An animated cover's decoder, which its one screen reads frame by frame.
+#[derive(uniffi::Object)]
+pub struct AndroidArtworkAnimation {
+    wanted: std::sync::mpsc::Sender<()>,
+    frames: Mutex<std::sync::mpsc::Receiver<Option<AndroidArtworkFrame>>>,
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidArtworkFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    /// How long the frame stays up.
+    pub milliseconds: u32,
+}
+
+impl AndroidArtworkAnimation {
+    fn new(bytes: Arc<[u8]>, size: u32) -> Self {
+        let (wanted, requests) = std::sync::mpsc::channel::<()>();
+        let (sender, frames) = std::sync::mpsc::channel();
+        // The decoder cannot move between threads, so it lives on its own until the screen
+        // lets go of the cover.
+        std::thread::spawn(move || {
+            let Ok(Some(mut animation)) = rufin_core::artwork::Animation::new(bytes, size) else {
+                return;
+            };
+            while requests.recv().is_ok() {
+                let frame =
+                    animation
+                        .next_frame()
+                        .ok()
+                        .flatten()
+                        .map(|frame| AndroidArtworkFrame {
+                            width: frame.pixels.width(),
+                            height: frame.pixels.height(),
+                            rgba: bitmap_pixels(&frame.pixels),
+                            milliseconds: match frame.duration.as_millis() {
+                                0 => 100,
+                                milliseconds => milliseconds.min(u128::from(u32::MAX)) as u32,
+                            },
+                        });
+                let over = frame.is_none();
+                if sender.send(frame).is_err() || over {
+                    return;
+                }
+            }
+        });
+        Self {
+            wanted,
+            frames: Mutex::new(frames),
+        }
+    }
+}
+
+#[uniffi::export]
+impl AndroidArtworkAnimation {
+    /// Decodes the next frame, starting over after the last; none once its plays are over.
+    pub fn next_frame(&self) -> Option<AndroidArtworkFrame> {
+        self.wanted.send(()).ok()?;
+        self.frames
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .recv()
+            .ok()
+            .flatten()
     }
 }
 

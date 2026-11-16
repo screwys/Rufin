@@ -9,7 +9,7 @@
       {% call m::action(localization::tr("Play"), "rufin-media-playback-start-symbolic", "play-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Shuffle"), "rufin-shuffle-symbolic", "shuffle-home", "icon-button") %}{% endcall %}
       <div class="home-paging">{% call m::action(localization::tr("Previous"), "rufin-go-previous-symbolic", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "rufin-go-next-symbolic", "next-home", "icon-button") %}{% endcall %}</div>
     </div>
-    <div class="home-row" hx-sync="this:replace">{% if section.column_rows > 1 %}<div class="row-columns" style="grid-template-rows: repeat({{ section.column_rows }}, auto)">{% for row in section.rows %}{% call m::column_row(row) %}{% endcall %}{% endfor %}</div>{% else %}<div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div>{% endif %}</div>
+    <div class="home-row" data-size="{{ size }}" data-spacing="{{ spacing }}" hx-sync="this:replace">{% if !section.columns.cards %}<div class="row-columns" style="grid-template-rows: repeat({{ section.columns.rows }}, auto)">{% for row in section.rows %}{% call m::column_row(row) %}{% endcall %}{% endfor %}</div>{% else %}<div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div>{% endif %}</div>
   </section>
 {% endif %}
 {% endfor %}

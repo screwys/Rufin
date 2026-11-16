@@ -169,62 +169,50 @@ pub fn library_field_config_row(
         });
     }
 
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
-        .build();
     let field_position = available_fields(key, layout)
         .iter()
         .position(|candidate| *candidate == field)
-        .expect("configured field is available") as u32;
-    source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(
-            &field_position.to_value(),
-        ))
-    });
-    drag.add_controller(source);
-
-    let drop_target = gtk::DropTarget::new(u32::static_type(), gtk::gdk::DragAction::MOVE);
+        .expect("configured field is available");
+    // A hidden field has no place among the shown ones.
+    drag.set_sensitive(enabled);
     let settings = Rc::clone(settings);
     let changed = Rc::clone(&changed);
     let group = group.downgrade();
     let rows = Rc::downgrade(rows);
-    let row_for_drop = row.downgrade();
-    drop_target.connect_drop(move |_, value, _, y| {
-        let Ok(source_position) = value.get::<u32>() else {
-            return false;
-        };
-        let Some(source_field) = available_fields(key, layout)
-            .get(source_position as usize)
-            .copied()
-        else {
-            return false;
-        };
-        if source_field == field {
-            return false;
-        }
-        let Some(row) = row_for_drop.upgrade() else {
-            return false;
-        };
-        let (Some(group), Some(rows)) = (group.upgrade(), rows.upgrade()) else {
-            return false;
-        };
-        let after = y > f64::from(row.height()) / 2.0;
-        if settings.update_library_list_settings(key, |settings| {
-            settings.reorder_field(layout, source_field, field, after);
-        }) {
-            changed();
-        }
-        populate_library_field_rows_for_set(
-            &settings,
-            Rc::clone(&changed),
-            key,
-            layout,
-            &group,
-            &rows,
-        );
-        true
-    });
-    row.add_controller(drop_target);
+    crate::widgets::reorder::install_row_reorder(
+        &row,
+        &drag,
+        field_position.to_string(),
+        move |source, after| {
+            let Some(source_field) = source
+                .parse::<usize>()
+                .ok()
+                .and_then(|position| available_fields(key, layout).get(position).copied())
+            else {
+                return false;
+            };
+            if source_field == field {
+                return false;
+            }
+            let (Some(group), Some(rows)) = (group.upgrade(), rows.upgrade()) else {
+                return false;
+            };
+            if settings.update_library_list_settings(key, |settings| {
+                settings.reorder_field(layout, source_field, field, after);
+            }) {
+                changed();
+            }
+            populate_library_field_rows_for_set(
+                &settings,
+                Rc::clone(&changed),
+                key,
+                layout,
+                &group,
+                &rows,
+            );
+            true
+        },
+    );
 
     row
 }

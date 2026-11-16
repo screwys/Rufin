@@ -170,6 +170,8 @@ input[role="switch"]:checked::before {
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+  /* Holds its hidden input, which would otherwise widen a scrolling dialog. */
+  position: relative;
 }
 .segmented input {
   position: absolute;

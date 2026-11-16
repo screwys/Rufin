@@ -24,14 +24,20 @@ pub struct TextureCache {
 #[derive(Clone)]
 struct LiveTexture {
     texture: glib::WeakRef<gdk::Texture>,
+    animation: Option<Arc<[u8]>>,
     bytes: usize,
 }
 
 struct TextureEntry {
     texture: gdk::Texture,
+    /// The animated image the texture is the first frame of.
+    animation: Option<Arc<[u8]>>,
     bytes: usize,
     last_used: u64,
 }
+
+/// A cover's texture, and its animated image when it has one.
+pub(super) type CachedTexture = (gdk::Texture, Option<Arc<[u8]>>);
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 struct TextureAccess {
@@ -60,31 +66,35 @@ impl TextureCache {
         }
     }
 
-    fn get(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
+    fn get(&mut self, key: &ArtworkKey) -> Option<CachedTexture> {
         let last_used = self.next_access();
-        let (previous_access, texture) = {
+        let (previous_access, cached) = {
             let entry = self.entries.get_mut(key)?;
             let previous_access = TextureAccess {
                 last_used: entry.last_used,
                 key: key.clone(),
             };
             entry.last_used = last_used;
-            (previous_access, entry.texture.clone())
+            (
+                previous_access,
+                (entry.texture.clone(), entry.animation.clone()),
+            )
         };
         self.order.remove(&previous_access);
         self.order.insert(TextureAccess {
             last_used,
             key: key.clone(),
         });
-        Some(texture)
+        Some(cached)
     }
 
-    fn insert(&mut self, key: ArtworkKey, texture: gdk::Texture, bytes: usize) {
+    fn insert(&mut self, key: ArtworkKey, (texture, animation): CachedTexture, bytes: usize) {
         self.remove(&key);
         self.live_textures.insert(
             key.clone(),
             LiveTexture {
                 texture: texture.downgrade(),
+                animation: animation.clone(),
                 bytes,
             },
         );
@@ -94,6 +104,7 @@ impl TextureCache {
             key.clone(),
             TextureEntry {
                 texture,
+                animation,
                 bytes,
                 last_used,
             },
@@ -104,17 +115,18 @@ impl TextureCache {
             .retain(|_, entry| entry.texture.upgrade().is_some());
     }
 
-    pub(super) fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
-        if let Some(texture) = self.get(key) {
-            return Some(texture);
+    pub(super) fn cached_texture(&mut self, key: &ArtworkKey) -> Option<CachedTexture> {
+        if let Some(cached) = self.get(key) {
+            return Some(cached);
         }
         let live = self.live_textures.get(key)?.clone();
         let Some(texture) = live.texture.upgrade() else {
             self.live_textures.remove(key);
             return None;
         };
-        self.insert(key.clone(), texture.clone(), live.bytes);
-        Some(texture)
+        let cached = (texture, live.animation);
+        self.insert(key.clone(), cached.clone(), live.bytes);
+        Some(cached)
     }
 
     fn remove(&mut self, key: &ArtworkKey) -> Option<TextureEntry> {
@@ -175,12 +187,13 @@ impl Default for TextureCache {
 impl TextureCache {
     pub fn texture(&mut self, image: Arc<DecodedImage>) -> Option<gdk::Texture> {
         let identity = image.key().clone();
-        if let Some(texture) = self.cached_texture(&identity) {
+        if let Some((texture, _)) = self.cached_texture(&identity) {
             return Some(texture);
         }
-        let bytes = image.rgba().len() + image.animation_bytes().map_or(0, |bytes| bytes.len());
+        let animation = image.animation_bytes().cloned();
+        let bytes = image.rgba().len() + animation.as_ref().map_or(0, |bytes| bytes.len());
         let texture = texture_from_decoded(image)?;
-        self.insert(identity, texture.clone(), bytes);
+        self.insert(identity, (texture.clone(), animation), bytes);
         Some(texture)
     }
 }
@@ -269,14 +282,14 @@ mod tests {
         let keys = keys();
         let first = texture(1);
         let second = texture(2);
-        cache.insert(keys[1].clone(), first.clone(), 4);
-        cache.insert(keys[2].clone(), second.clone(), 4);
+        cache.insert(keys[1].clone(), (first.clone(), None), 4);
+        cache.insert(keys[2].clone(), (second.clone(), None), 4);
         let reused = cache
             .get(&keys[1])
             .expect("the first texture remains cached");
-        assert_eq!(reused.as_ptr(), first.as_ptr());
+        assert_eq!(reused.0.as_ptr(), first.as_ptr());
 
-        cache.insert(keys[3].clone(), texture(3), 4);
+        cache.insert(keys[3].clone(), (texture(3), None), 4);
 
         assert_eq!(cache.bytes, 8);
         assert!(
@@ -290,7 +303,7 @@ mod tests {
         let revived = cache
             .cached_texture(&keys[2])
             .expect("a mounted texture remains interned after LRU eviction");
-        assert_eq!(revived.as_ptr(), second.as_ptr());
+        assert_eq!(revived.0.as_ptr(), second.as_ptr());
         assert_eq!(cache.bytes, 8);
     }
 
@@ -314,7 +327,7 @@ mod tests {
             for (operation, value, bytes, _) in operations {
                 let key = keys[usize::from(value)].clone();
                 match operation {
-                    0 | 1 => cache.insert(key, texture(value), bytes),
+                    0 | 1 => cache.insert(key, (texture(value), None), bytes),
                     2 => {
                         cache.get(&key);
                     }

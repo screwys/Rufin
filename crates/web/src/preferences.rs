@@ -22,6 +22,8 @@ const SETTINGS: &[&str] = &[
     "/prefer_server_lyrics",
     "/external_lyrics_providers",
     "/reduce_motion",
+    "/home/size",
+    "/home/spacing",
     "/layout/default_profile/left_sidebar",
     "/layout/default_profile/right_sidebar",
     "/layout/narrow_enabled",
@@ -63,7 +65,7 @@ const SETTINGS: &[&str] = &[
     "/playback/stream_quality",
     "/auto_dj_refill_threshold",
     "/auto_dj_refill_count",
-    "/server_recommendations",
+    "/override_server_recommendations",
     "/auto_dj_similar_artists",
     "/auto_dj_same_artist",
     "/auto_dj_skip_low_rated",
@@ -109,7 +111,7 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         .settings
         .home_block_rows()
         .into_iter()
-        .map(|row| json!({"block": row.block, "title": localization::tr(&row.title), "visible": row.visible, "can_toggle": row.can_toggle}))
+        .map(|row| json!({"block": row.block, "title": localization::tr(&row.title), "visible": row.visible, "can_toggle": row.can_toggle, "has_options": row.has_options, "items": row.items, "rows": row.rows}))
         .collect::<Vec<_>>();
     let lyrics = rufin_core::settings::ExternalLyricsProvider::all()
         .into_iter()
@@ -249,6 +251,10 @@ enum Edit {
         target: Option<library::HomeBlockKind>,
         #[serde(default)]
         after: bool,
+        /// How many items it lists.
+        items: Option<u8>,
+        /// The rows its columns stack; 0 leaves that to what it holds.
+        rows: Option<u8>,
     },
 }
 
@@ -330,7 +336,19 @@ async fn write(
             delta,
             target,
             after,
+            items,
+            rows,
         } => {
+            if let Some(items) = items {
+                settings
+                    .set_home_block_items(block, items)
+                    .map_err(bad_request)?;
+            }
+            if let Some(rows) = rows {
+                settings
+                    .set_home_block_rows(block, Some(rows).filter(|rows| *rows > 0))
+                    .map_err(bad_request)?;
+            }
             if let Some(visible) = visible {
                 settings
                     .set_home_block_visible(block, visible)

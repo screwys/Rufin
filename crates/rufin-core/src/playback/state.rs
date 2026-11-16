@@ -143,9 +143,6 @@ impl Command {
     }
 }
 
-/// A stream's delay behind its station until a song change measures it: what LISTEN.moe's
-/// server sends ahead on connecting.
-const STREAM_DELAY_MILLIS: i64 = 6_000;
 /// A stream names a new song at its next block, half of one late on average.
 const TITLE_DELAY_MILLIS: i64 = 330;
 
@@ -192,8 +189,16 @@ struct RunContext {
     song_clock: Option<SongClock>,
     /// The song the feed says the station has begun, which is heard once the stream names it.
     next_song: Option<SongClock>,
-    /// How far what is heard runs behind the station: the stream's own delay.
-    stream_delay_millis: i64,
+    /// How far what is heard runs behind the station, once that is known: a song change
+    /// measures it, and a station heard before tells it on tuning in. Without it nothing
+    /// says where in its song the stream is.
+    stream_delay_millis: Option<i64>,
+    /// When the run began to load its stream and when it was first heard: the stream is
+    /// behind its station by what the server sent ahead and by the time between these.
+    loading_from_millis: Option<u64>,
+    heard_from_millis: Option<u64>,
+    /// The run stopped to buffer after it was heard, which put it further behind.
+    stalled: bool,
     bitstream: bool,
     /// A seek was sent; the position that answers it is saved.
     seeking: bool,
@@ -215,10 +220,15 @@ impl SongClock {
 }
 
 impl RunContext {
+    /// How long the run took from loading its stream to being heard.
+    fn startup_millis(&self) -> Option<i64> {
+        Some(self.heard_from_millis? as i64 - self.loading_from_millis? as i64)
+    }
+
     /// The place in the song that is heard at `monotonic_millis`, where its beginning is known.
     fn song_place(&self, monotonic_millis: u64) -> Option<u64> {
         let song = self.song_clock.as_ref().filter(|_| self.live)?;
-        let heard_from = song.began_millis + self.stream_delay_millis;
+        let heard_from = song.began_millis + self.stream_delay_millis?;
         Some((monotonic_millis as i64 - heard_from).clamp(0, song.duration_millis as i64) as u64)
     }
 
@@ -246,7 +256,10 @@ impl RunContext {
             song_cover: false,
             song_clock: None,
             next_song: None,
-            stream_delay_millis: STREAM_DELAY_MILLIS,
+            stream_delay_millis: None,
+            loading_from_millis: None,
+            heard_from_millis: None,
+            stalled: false,
             bitstream: false,
             seeking: false,
             failed_local: None,
@@ -392,6 +405,9 @@ pub(super) struct Player {
     live_rejoins: usize,
     /// A radio station announced another song, which scrobbling announces in turn.
     announced_changed: bool,
+    /// What each station's server sends ahead on connecting, by its address, as its song
+    /// changes measured it: a later run of the station is that far behind from its start.
+    stream_leads: HashMap<String, i64>,
     /// The server failed to connect: the skips that follow play only copies on this device,
     /// until a track starts or ends.
     offline: bool,
@@ -456,6 +472,7 @@ impl Player {
             consecutive_skips: 0,
             live_rejoins: 0,
             announced_changed: false,
+            stream_leads: HashMap::new(),
             offline: false,
             sleep_timer: None,
         }
@@ -1268,17 +1285,34 @@ impl Player {
                     stream.codec = stream.codec.take().or(info.codec);
                     stream.bitrate = stream.bitrate.or(info.bitrate);
                     if next_song {
-                        // The stream names the song the feed began: what is heard is this
-                        // far behind the station.
                         current.song_clock = current
                             .next_song
                             .take()
                             .filter(|song| named.as_deref().is_some_and(|named| song.names(named)));
-                        if let Some(song) = &current.song_clock {
-                            current.stream_delay_millis = (sample.monotonic_millis as i64
+                        // A song that takes over from one heard before began where the stream
+                        // named it: what is heard is this far behind the station. The first
+                        // name of a run says nothing of when its song began.
+                        if let Some(song) = current
+                            .song_clock
+                            .as_ref()
+                            .filter(|_| before.title.is_some())
+                        {
+                            let delay = (sample.monotonic_millis as i64
                                 - TITLE_DELAY_MILLIS
                                 - song.began_millis)
                                 .clamp(0, 30_000);
+                            current.stream_delay_millis = Some(delay);
+                            if let (Some(startup), false) =
+                                (current.startup_millis(), current.stalled)
+                            {
+                                tracing::debug!(
+                                    delay,
+                                    startup,
+                                    "measured a station stream's delay"
+                                );
+                                self.stream_leads
+                                    .insert(current.row.track.media_uri.clone(), delay - startup);
+                            }
                         }
                     }
                     if current.live && current.stream != before {
@@ -2402,6 +2436,14 @@ impl Player {
             return;
         }
         current.status = status;
+        if current.live {
+            match status {
+                TransportStatus::Buffering if current.heard_from_millis.is_some() => {
+                    current.stalled = true;
+                }
+                _ => {}
+            }
+        }
         self.dirty = true;
         self.qualify_current();
         if status == TransportStatus::Paused {
@@ -2876,6 +2918,23 @@ impl Player {
             return;
         };
         current.status = TransportStatus::Playing;
+        if current.live {
+            current.heard_from_millis = Some(sample.monotonic_millis);
+            // A station heard before is as far behind as then, less or more by how long this
+            // run took to be heard.
+            if let (Some(lead), Some(startup)) = (
+                self.stream_leads.get(&current.row.track.media_uri),
+                current.startup_millis(),
+            ) {
+                tracing::debug!(
+                    lead,
+                    startup,
+                    "a station stream's delay is known from before"
+                );
+                current.stream_delay_millis = Some(lead + startup);
+                self.current_media_changed = true;
+            }
+        }
         let (started_at, local_period) = current
             .continued_start
             .take()
@@ -3134,6 +3193,17 @@ impl Player {
         }
     }
 
+    /// A station's run begins to load its stream now.
+    pub(super) fn stream_loading(&mut self, run: RunId, sample: &ClockSample) {
+        if let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|current| current.id == run && current.live)
+        {
+            current.loading_from_millis = Some(sample.monotonic_millis);
+        }
+    }
+
     /// The cover of the song `run` announces was found: its row shows it from now on.
     pub(super) fn song_cover_found(&mut self, run: RunId, artist: &str, title: &str) {
         let Some(current) = self
@@ -3275,10 +3345,9 @@ impl Player {
                                     .unwrap_or_default(),
                                 codec: stream.and_then(|stream| stream.codec.clone()),
                                 bitrate: stream.and_then(|stream| stream.bitrate),
-                                timed: self
-                                    .current_run
-                                    .as_ref()
-                                    .is_some_and(|run| run.song_clock.is_some()),
+                                timed: self.current_run.as_ref().is_some_and(|run| {
+                                    run.song_clock.is_some() && run.stream_delay_millis.is_some()
+                                }),
                             }
                         }),
                 }),

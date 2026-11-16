@@ -15,12 +15,10 @@ import io.github.screwys.rufin.ui.pageMotion
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.browse.BrowseConnection
-import io.github.screwys.rufin.settings.RouteSettingsPage
 import io.github.screwys.rufin.controller.ControllerPage
 import io.github.screwys.rufin.connect.ConnectPage
 import io.github.screwys.rufin.sources.SourcesPage
 import io.github.screwys.rufin.settings.AppSettingsPage
-import io.github.screwys.rufin.settings.HomeSettingsPage
 import io.github.screwys.rufin.settings.IntegrationDetailPage
 import io.github.screwys.rufin.settings.IntegrationPage
 import io.github.screwys.rufin.settings.IntegrationsPage
@@ -45,13 +43,12 @@ internal enum class MoreDestination(val title: String) {
     General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"), Integration("Integrations"),
     Playback("Playback"), Equalizer("Equalizer"), Library("Library"), Downloads("Downloads"),
     Connect("Connect"), Controller("Controller"), Storage("Storage"), Privacy("Privacy & Security"),
-    Routes("Library items"), DownloadSettings("Downloads"),
-    BackupSettings("Backup Settings"), HomeSettings("Home blocks");
+    DownloadSettings("Downloads"),
+    BackupSettings("Backup Settings");
 
     // The sidebar's ☰ menu opens Settings and these three pages directly.
     val parent get() = when (this) {
         Root, Overview, Versions, Troubleshooting -> null
-        Routes, HomeSettings -> Customization
         Integration -> Integrations
         BackupSettings -> Privacy
         OverviewSettings -> General
@@ -111,11 +108,9 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
         MoreDestination.DownloadSettings -> DownloadSettingsPage(model, preferences)
         MoreDestination.BackupSettings -> BackupSettingsPage(model, preferences)
         MoreDestination.OverviewSettings -> OverviewSettingsPage(preferences)
-        MoreDestination.HomeSettings -> HomeSettingsPage(preferences)
-        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player, navigate)
+        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player)
         MoreDestination.Theme -> ThemeSettingsPage(preferences)
         MoreDestination.Storage -> StorageSettingsPage(model, preferences)
-        MoreDestination.Routes -> RouteSettingsPage(browse)
         MoreDestination.Equalizer -> PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER)
         MoreDestination.Controller -> ControllerPage(model)
         MoreDestination.Connect -> ConnectPage(model)
