@@ -302,26 +302,14 @@ msgstr ""
 msgid "12 hours"
 msgstr "12 ore"
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr "24 ore"
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 Ultimi Album"
@@ -387,6 +375,11 @@ msgstr "Aggiungi cartella"
 
 msgid "Add Source"
 msgstr "Aggiungi Sorgente"
+
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Aggiungi un titolo"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -467,6 +460,11 @@ msgid "Add to library"
 msgstr "Aggiungi alla Playlist"
 
 #, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Aggiungi ai Preferiti"
+
+#, fuzzy
 msgid "Add tracks when fewer than this many remain"
 msgstr "Aggiungi tracce quando ne rimangono meno di questo numero"
 
@@ -474,6 +472,11 @@ msgid "Add"
 msgstr "Aggiungi"
 
 msgid "Added to"
+msgstr "Aggiunto a"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Aggiunto a"
 
 msgid "Album Artists"
@@ -1463,6 +1466,11 @@ msgstr ""
 msgid "Decrease"
 msgstr "Decrementa"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "Predefinito"
+
 msgid "Default"
 msgstr "Predefinito"
 
@@ -1472,6 +1480,11 @@ msgid "Delete Permanently?"
 msgstr "Cancella Playlist"
 
 msgid "Delete Playlist"
+msgstr "Cancella Playlist"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete Station"
 msgstr "Cancella Playlist"
 
 #, python-brace-format
@@ -1497,6 +1510,9 @@ msgstr "Cancella Playlist"
 #| msgid "Delete Playlist"
 msgid "Delete preset"
 msgstr "Cancella Playlist"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1563,6 +1579,11 @@ msgid "Disabled"
 msgstr "Disabilitato"
 
 msgid "Disc number"
+msgstr "Numero di disco"
+
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
 msgstr "Numero di disco"
 
 msgid "Disc {number}"
@@ -1743,6 +1764,9 @@ msgid "Edit Smart Playlist"
 msgstr ""
 
 msgid "Edit Source"
+msgstr ""
+
+msgid "Edit Station"
 msgstr ""
 
 msgid "Edit lyrics"
@@ -1976,6 +2000,9 @@ msgstr "Rete di casting"
 msgid "Fetching playlists"
 msgstr "Cancella Playlist"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr ""
 
@@ -2194,6 +2221,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2230,6 +2260,9 @@ msgid "Home blocks"
 msgstr ""
 
 msgid "Home"
+msgstr ""
+
+msgid "Homepage"
 msgstr ""
 
 msgid "Hour"
@@ -2385,6 +2418,9 @@ msgstr ""
 msgid "LED spectrum"
 msgstr ""
 
+msgid "LIVE"
+msgstr ""
+
 msgid "LRCLIB"
 msgstr ""
 
@@ -2422,6 +2458,9 @@ msgid "Layout"
 msgstr ""
 
 msgid "Leave empty for an unencrypted archive."
+msgstr ""
+
+msgid "Leave out tracks rated two stars or lower"
 msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
@@ -2592,6 +2631,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2634,6 +2676,9 @@ msgid "MP3"
 msgstr ""
 
 msgid "Manage"
+msgstr ""
+
+msgid "Many"
 msgstr ""
 
 msgid "Mapped Local Path"
@@ -2842,6 +2887,11 @@ msgstr ""
 
 msgid "My music"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Seleziona un indirizzo"
 
 msgid "Name"
 msgstr ""
@@ -3166,6 +3216,9 @@ msgstr ""
 msgid "Open fullscreen player"
 msgstr ""
 
+msgid "Open homepage"
+msgstr ""
+
 msgid "Open on Emby"
 msgstr ""
 
@@ -3357,6 +3410,9 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
+msgstr ""
+
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -3554,9 +3610,6 @@ msgid "Q"
 msgstr ""
 
 msgid "Queue a track to begin"
-msgstr ""
-
-msgid "Queue and transitions"
 msgstr ""
 
 msgid "Queue tracks to show"
@@ -3773,6 +3826,11 @@ msgstr "Aggiungi cartella"
 msgid "Remove group"
 msgstr "Aggiungi cartella"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Remove image"
+msgstr "Aggiungi cartella"
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3870,6 +3928,9 @@ msgstr ""
 msgid "Restore"
 msgstr ""
 
+msgid "Results from radio-browser.info."
+msgstr ""
+
 msgid "Results per section"
 msgstr ""
 
@@ -3944,6 +4005,11 @@ msgstr ""
 
 msgid "SMB Domain"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album artist"
+msgid "Same artist"
+msgstr "Artista dell'album"
 
 msgid "Sample peak"
 msgstr ""
@@ -4073,6 +4139,9 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
+msgstr ""
+
+msgid "Search stations"
 msgstr ""
 
 #, fuzzy
@@ -4380,6 +4449,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Clear artist"
+msgid "Similar artists from ListenBrainz"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Clear artist"
 msgid "Similar artists"
 msgstr "Rimuovi artista"
 
@@ -4397,6 +4471,11 @@ msgstr ""
 
 msgid "Skip count"
 msgstr ""
+
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Skip low-rated tracks"
+msgstr "Album non disponibile"
 
 msgid "Skip same-album crossfade"
 msgstr ""
@@ -4437,6 +4516,9 @@ msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
+msgstr ""
+
+msgid "Some"
 msgstr ""
 
 msgid "Song and artist links"
@@ -4531,6 +4613,14 @@ msgstr ""
 msgid "Static"
 msgstr "Automatico"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Stations"
+msgstr "Automatico"
+
 msgid "Status display"
 msgstr ""
 
@@ -4552,6 +4642,14 @@ msgid "Storage"
 msgstr ""
 
 msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Stream address"
+msgstr "Seleziona un indirizzo"
+
+msgid "Stream quality on mobile data"
 msgstr ""
 
 msgid "Stream quality"
@@ -4786,6 +4884,9 @@ msgstr ""
 msgid "Tracks from your five latest albums"
 msgstr ""
 
+msgid "Tracks per refill"
+msgstr ""
+
 msgid "Tracks"
 msgstr ""
 
@@ -4890,9 +4991,6 @@ msgstr ""
 msgid "Use API key"
 msgstr ""
 
-msgid "Use Instant Mix for recommendations"
-msgstr ""
-
 msgid "Use Rufin data folder"
 msgstr ""
 
@@ -4946,15 +5044,15 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use server recommendations"
+msgstr ""
+
 #, fuzzy
 #| msgid "App settings"
 msgid "Use sort tags"
 msgstr "Impostazioni dell'app"
 
 msgid "Use source setting"
-msgstr ""
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
 
 msgid "User flatpak:"
@@ -5053,6 +5151,9 @@ msgstr ""
 #| msgid "Connect to Rufin"
 msgid "Welcome to Rufin"
 msgstr "Connetti a Rufin"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""
@@ -5163,9 +5264,6 @@ msgid "is not"
 msgstr ""
 
 msgid "is"
-msgstr ""
-
-msgid "kbps"
 msgstr ""
 
 msgid "not in the last"
@@ -5365,6 +5463,18 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
 
 #~ msgid "All tracks"
 #~ msgstr "Tutte le Tracce"

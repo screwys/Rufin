@@ -274,26 +274,14 @@ msgstr ""
 msgid "12 hours"
 msgstr ""
 
-msgid "128 kbps"
-msgstr "128 kbps"
-
 msgid "18 bands"
 msgstr ""
-
-msgid "192 kbps"
-msgstr "192 kbps"
 
 msgid "24 hours"
 msgstr ""
 
-msgid "256 kbps"
-msgstr "256 kbps"
-
 msgid "31 bands"
 msgstr ""
-
-msgid "320 kbps"
-msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 nejnovějších alb"
@@ -369,6 +357,11 @@ msgstr "Přidat složku"
 #| msgid "Sources"
 msgid "Add Source"
 msgstr "Zdroje"
+
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Přidat název"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -450,6 +443,11 @@ msgstr "Přidat složku"
 msgid "Add to library"
 msgstr "Přidat do playlistu"
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Add to {saved_on}"
+msgstr "Přidat do oblíbených"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr "Přidat skladby, pokud jich zbývá méně než tento počet"
 
@@ -457,6 +455,11 @@ msgid "Add"
 msgstr "Přidat"
 
 msgid "Added to"
+msgstr "Přidáno do"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Přidáno do"
 
 msgid "Album Artists"
@@ -1539,6 +1542,11 @@ msgstr "Snížit"
 
 #, fuzzy
 #| msgid "Restore Default"
+msgid "Default channel"
+msgstr "Obnovit výchozí"
+
+#, fuzzy
+#| msgid "Restore Default"
 msgid "Default"
 msgstr "Obnovit výchozí"
 
@@ -1549,6 +1557,11 @@ msgstr "Předvolba"
 
 msgid "Delete Playlist"
 msgstr "Smazat playlist"
+
+#, fuzzy
+#| msgid "Release notifications"
+msgid "Delete Station"
+msgstr "Notifikace vydání"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1573,6 +1586,9 @@ msgstr "Smazat playlist"
 #| msgid "Preset"
 msgid "Delete preset"
 msgstr "Předvolba"
+
+msgid "Delete this station?"
+msgstr ""
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1644,6 +1660,11 @@ msgid "Disabled"
 msgstr ""
 
 msgid "Disc number"
+msgstr "Číslo disku"
+
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
 msgstr "Číslo disku"
 
 #, fuzzy
@@ -1842,6 +1863,11 @@ msgstr "Chytrý Playlist"
 #| msgid "Sources"
 msgid "Edit Source"
 msgstr "Zdroje"
+
+#, fuzzy
+#| msgid "Edit metadata"
+msgid "Edit Station"
+msgstr "Upravit metadata"
 
 #, fuzzy
 #| msgid "Hide lyrics"
@@ -2108,6 +2134,9 @@ msgstr "Hledat Texty"
 msgid "Fetching playlists"
 msgstr "Chytré playlisty"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr ""
 
@@ -2350,6 +2379,9 @@ msgstr ""
 msgid "Halo"
 msgstr ""
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr ""
 
@@ -2388,6 +2420,11 @@ msgid "Home blocks"
 msgstr "Bloky domovské stránky"
 
 msgid "Home"
+msgstr "Domovská stránka"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Domovská stránka"
 
 msgid "Hour"
@@ -2554,6 +2591,9 @@ msgstr "Najděte svůj uživatelský token ListenBrainz"
 msgid "LED spectrum"
 msgstr ""
 
+msgid "LIVE"
+msgstr ""
+
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
@@ -2595,6 +2635,9 @@ msgid "Layout"
 msgstr "Rozvržení"
 
 msgid "Leave empty for an unencrypted archive."
+msgstr ""
+
+msgid "Leave out tracks rated two stars or lower"
 msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
@@ -2786,6 +2829,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2829,6 +2875,9 @@ msgstr ""
 
 msgid "Manage"
 msgstr "Spravovat"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Mapovaná lokální cesta"
@@ -3068,6 +3117,11 @@ msgstr "Ztlumeno"
 
 msgid "My music"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Name or stream address"
+msgstr "Vyhledat složku"
 
 msgid "Name"
 msgstr "Jméno"
@@ -3452,6 +3506,9 @@ msgstr ""
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
 
+msgid "Open homepage"
+msgstr ""
+
 #, fuzzy
 #| msgid "Open on Last.fm"
 msgid "Open on Emby"
@@ -3676,6 +3733,9 @@ msgstr "Pustit Rádio"
 
 msgid "Play radio"
 msgstr "Pustit Rádio"
+
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
 
 msgid "Play track"
 msgstr "Přehrát skladbu"
@@ -3909,9 +3969,6 @@ msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Zařadit skladbu na začátek fronty"
-
-msgid "Queue and transitions"
-msgstr "Fronta a přechody"
 
 #, fuzzy
 #| msgid "Queue a track to begin"
@@ -4163,6 +4220,11 @@ msgstr "Odebrat složku"
 msgid "Remove group"
 msgstr "Odebrat pravidlo"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove image"
+msgstr "Odebrat složku"
+
 msgid "Remove rule"
 msgstr "Odebrat pravidlo"
 
@@ -4270,6 +4332,9 @@ msgstr ""
 msgid "Restore"
 msgstr "Obnovit"
 
+msgid "Results from radio-browser.info."
+msgstr ""
+
 #, fuzzy
 #| msgid "Refresh section"
 msgid "Results per section"
@@ -4346,6 +4411,11 @@ msgstr ""
 
 msgid "SMB Domain"
 msgstr ""
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Přehrát interpreta"
 
 msgid "Sample peak"
 msgstr ""
@@ -4511,6 +4581,11 @@ msgstr "Možnosti vyhledávání"
 
 msgid "Search queue"
 msgstr "Fronta vyhledávání"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Hledat znovu"
 
 #, fuzzy
 #| msgid "Search Lyrics"
@@ -4877,6 +4952,11 @@ msgstr "Skrýt text skladby"
 
 #, fuzzy
 #| msgid "Play artist"
+msgid "Similar artists from ListenBrainz"
+msgstr "Přehrát interpreta"
+
+#, fuzzy
+#| msgid "Play artist"
 msgid "Similar artists"
 msgstr "Přehrát interpreta"
 
@@ -4894,6 +4974,11 @@ msgstr ""
 
 msgid "Skip count"
 msgstr "Počet přeskočení"
+
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip low-rated tracks"
+msgstr "Pouze nepřehrané skladby"
 
 msgid "Skip same-album crossfade"
 msgstr "Přeskočení prolínání mezi skladbami na stejném albu"
@@ -4934,6 +5019,9 @@ msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
+msgstr ""
+
+msgid "Some"
 msgstr ""
 
 msgid "Song and artist links"
@@ -5047,6 +5135,14 @@ msgstr "Ukládání..."
 msgid "Static"
 msgstr "Automatické aktualizace"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Stations"
+msgstr "Automatické aktualizace"
+
 msgid "Status display"
 msgstr "Zobrazení stavu"
 
@@ -5071,6 +5167,16 @@ msgstr "Tajné úložiště"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Stream address"
+msgstr "Vyhledat složku"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Kvalita streamu"
 
 msgid "Stream quality"
 msgstr "Kvalita streamu"
@@ -5320,6 +5426,11 @@ msgstr "Skladby ze všech playlistů"
 msgid "Tracks from your five latest albums"
 msgstr "Skladby z vašich pěti nejnovějších alb"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Tracks per refill"
+msgstr "Rádio skladeb"
+
 msgid "Tracks"
 msgstr "Skladby"
 
@@ -5442,11 +5553,6 @@ msgstr ""
 msgid "Use API key"
 msgstr "Použít API klíč"
 
-#, fuzzy
-#| msgid "Use Jellyfin Instant Mix for recommendations"
-msgid "Use Instant Mix for recommendations"
-msgstr "Pro doporučení použijte Jellyfin Instant Mix"
-
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
 
@@ -5507,6 +5613,11 @@ msgstr ""
 "metadat"
 
 #, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Pro doporučení použijte Jellyfin Instant Mix"
+
+#, fuzzy
 #| msgid "Lyrics settings"
 msgid "Use sort tags"
 msgstr "Nastavení textu skladeb"
@@ -5515,9 +5626,6 @@ msgstr "Nastavení textu skladeb"
 #| msgid "Lyrics settings"
 msgid "Use source setting"
 msgstr "Nastavení textu skladeb"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
 
 #, fuzzy
 #| msgid "User token"
@@ -5627,6 +5735,9 @@ msgstr ""
 #| msgid "Connection"
 msgid "Welcome to Rufin"
 msgstr "Spojení"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr ""
@@ -5738,9 +5849,6 @@ msgstr "není"
 
 msgid "is"
 msgstr "je"
-
-msgid "kbps"
-msgstr "kbps"
 
 msgid "not in the last"
 msgstr ""
@@ -5968,6 +6076,29 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Fronta a přechody"
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Okno"
 
 #~ msgid "All tracks"
 #~ msgstr "Všechny skladby"

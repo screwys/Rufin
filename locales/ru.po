@@ -334,26 +334,14 @@ msgstr "10 диапазонов"
 msgid "12 hours"
 msgstr "12 часов"
 
-msgid "128 kbps"
-msgstr "128 кбит/с"
-
 msgid "18 bands"
 msgstr "18 диапазонов"
-
-msgid "192 kbps"
-msgstr "192 кбит/с"
 
 msgid "24 hours"
 msgstr "24 часа"
 
-msgid "256 kbps"
-msgstr "256 кбит/с"
-
 msgid "31 bands"
 msgstr "31 диапазон"
-
-msgid "320 kbps"
-msgstr "320 кбит/с"
 
 msgid "5 Latest Albums"
 msgstr "5 последних альбомов"
@@ -417,6 +405,11 @@ msgstr "Добавить папку"
 
 msgid "Add Source"
 msgstr "Добавить источник"
+
+#, fuzzy
+#| msgid "Add a title"
+msgid "Add Station"
+msgstr "Добавить название"
 
 #, fuzzy
 #| msgid "Add folder"
@@ -484,6 +477,11 @@ msgstr "Добавить в папку"
 msgid "Add to library"
 msgstr "Добавить в библиотеку"
 
+#, fuzzy
+#| msgid "Add to Saved"
+msgid "Add to {saved_on}"
+msgstr "Добавить в сохраненные"
+
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 "Добавлять треки, когда их количество опустится ниже указанного значения"
@@ -492,6 +490,11 @@ msgid "Add"
 msgstr "Добавить"
 
 msgid "Added to"
+msgstr "Добавлено в"
+
+#, fuzzy
+#| msgid "Added to"
+msgid "Added"
 msgstr "Добавлено в"
 
 msgid "Album Artists"
@@ -1351,6 +1354,11 @@ msgstr "Декабрь {year}"
 msgid "Decrease"
 msgstr "Уменьшить"
 
+#, fuzzy
+#| msgid "Default"
+msgid "Default channel"
+msgstr "По умолчанию"
+
 msgid "Default"
 msgstr "По умолчанию"
 
@@ -1359,6 +1367,11 @@ msgstr "Удалить безвозвратно?"
 
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
+
+#, fuzzy
+#| msgid "Device invitation"
+msgid "Delete Station"
+msgstr "Приглашение устройства"
 
 #, python-brace-format
 msgid "Delete \"{name}\"?"
@@ -1375,6 +1388,9 @@ msgstr "Удалить файл плейлиста"
 
 msgid "Delete preset"
 msgstr "Удалить пресет"
+
+msgid "Delete this station?"
+msgstr ""
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1434,6 +1450,11 @@ msgid "Disabled"
 msgstr "Отключено"
 
 msgid "Disc number"
+msgstr "Номер диска"
+
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc subtitle"
 msgstr "Номер диска"
 
 msgid "Disc {number}"
@@ -1598,6 +1619,11 @@ msgstr "Редактировать умный плейлист"
 
 msgid "Edit Source"
 msgstr "Редактировать источник"
+
+#, fuzzy
+#| msgid "Edit Mapping"
+msgid "Edit Station"
+msgstr "Редактировать соответствия"
 
 msgid "Edit lyrics"
 msgstr "Редактировать текст песни"
@@ -1818,6 +1844,9 @@ msgstr "Получение метаданных..."
 msgid "Fetching playlists"
 msgstr "Получение плейлистов"
 
+msgid "Few"
+msgstr ""
+
 msgid "Field"
 msgstr "Поле"
 
@@ -2034,6 +2063,9 @@ msgstr "Гостевой / публичный доступ"
 msgid "Halo"
 msgstr "Halo"
 
+msgid "Heard"
+msgstr ""
+
 msgid "Height (%)"
 msgstr "Высота (%)"
 
@@ -2070,6 +2102,11 @@ msgid "Home blocks"
 msgstr "Основные блоки"
 
 msgid "Home"
+msgstr "Главная"
+
+#, fuzzy
+#| msgid "Home"
+msgid "Homepage"
 msgstr "Главная"
 
 msgid "Hour"
@@ -2220,6 +2257,9 @@ msgstr "Найдите свой токен пользователя ListenBrainz
 msgid "LED spectrum"
 msgstr "LED спектр"
 
+msgid "LIVE"
+msgstr ""
+
 msgid "LRCLIB"
 msgstr "LRCLIB"
 
@@ -2258,6 +2298,9 @@ msgstr "Макет"
 
 msgid "Leave empty for an unencrypted archive."
 msgstr "Оставьте пустым для незашифрованного архива."
+
+msgid "Leave out tracks rated two stars or lower"
+msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
 msgstr "Оставьте поле пароля пустым, чтобы сохранить введенные учетные данные"
@@ -2428,6 +2471,9 @@ msgstr "Логарифмический"
 msgid "Logs are copied"
 msgstr "Журналы скопированы"
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr "Поиск"
 
@@ -2474,6 +2520,9 @@ msgstr "MP3"
 
 msgid "Manage"
 msgstr "Управление"
+
+msgid "Many"
+msgstr ""
 
 msgid "Mapped Local Path"
 msgstr "Сопоставленный локальный путь"
@@ -2683,6 +2732,11 @@ msgstr "Звук выключен"
 
 msgid "My music"
 msgstr "Моя музыка"
+
+#, fuzzy
+#| msgid "Choose an address"
+msgid "Name or stream address"
+msgstr "Выбрать адрес"
 
 msgid "Name"
 msgstr "Имя"
@@ -3001,6 +3055,11 @@ msgstr "Открыть папку настраиваемых тем"
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
 
+#, fuzzy
+#| msgid "Open approval page"
+msgid "Open homepage"
+msgstr "Открыть страницу подтверждения"
+
 msgid "Open on Emby"
 msgstr "Открыть в Emby"
 
@@ -3194,6 +3253,9 @@ msgstr "Воспроизвести радио следующим"
 
 msgid "Play radio"
 msgstr "Воспроизвести радио"
+
+msgid "Play the server's own picks; Rufin's fill in where it has too few"
+msgstr ""
 
 msgid "Play track"
 msgstr "Воспроизвести трек"
@@ -3395,9 +3457,6 @@ msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Добавьте трек в очередь, чтобы начать воспроизведение"
-
-msgid "Queue and transitions"
-msgstr "Очередь и переходы"
 
 msgid "Queue tracks to show"
 msgstr "Отобразить треки в очереди"
@@ -3605,6 +3664,11 @@ msgstr "Удалить из папки"
 msgid "Remove group"
 msgstr "Удалить правило"
 
+#, fuzzy
+#| msgid "Remove device"
+msgid "Remove image"
+msgstr "Удалить устройство"
+
 msgid "Remove rule"
 msgstr "Удалить правило"
 
@@ -3694,6 +3758,9 @@ msgstr "Восстановить макет плеера"
 msgid "Restore"
 msgstr "Восстановить"
 
+msgid "Results from radio-browser.info."
+msgstr ""
+
 msgid "Results per section"
 msgstr "Результаты по разделам"
 
@@ -3766,6 +3833,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-домен"
+
+#, fuzzy
+#| msgid "Play artist"
+msgid "Same artist"
+msgstr "Воспроизвести исполнителя"
 
 msgid "Sample peak"
 msgstr "Пик образца"
@@ -3899,6 +3971,11 @@ msgstr "Параметры поиска"
 
 msgid "Search queue"
 msgstr "Поиск в очереди воспроизведения"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search stations"
+msgstr "Повторить поиск"
 
 msgid "Search this network"
 msgstr "Поиск в этой сети"
@@ -4216,6 +4293,11 @@ msgstr "Войти"
 msgid "Signing in..."
 msgstr "Войти"
 
+#, fuzzy
+#| msgid "Similar artists"
+msgid "Similar artists from ListenBrainz"
+msgstr "Похожие исполнители"
+
 msgid "Similar artists"
 msgstr "Похожие исполнители"
 
@@ -4233,6 +4315,11 @@ msgstr "Размер"
 
 msgid "Skip count"
 msgstr "Количество пропусков"
+
+#, fuzzy
+#| msgid "Skip unplayable tracks"
+msgid "Skip low-rated tracks"
+msgstr "Пропускать неиграемые треки"
 
 msgid "Skip same-album crossfade"
 msgstr "Пропускать плавный переход между треками одного альбома"
@@ -4272,6 +4359,9 @@ msgstr "Сплошные полосы"
 
 msgid "Some playlist entries could not be imported"
 msgstr "Некоторые элементы плейлиста не удалось импортировать"
+
+msgid "Some"
+msgstr ""
 
 msgid "Song and artist links"
 msgstr ""
@@ -4358,6 +4448,14 @@ msgstr "Запуск..."
 msgid "Static"
 msgstr "Статический"
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+#, fuzzy
+#| msgid "Static"
+msgid "Stations"
+msgstr "Статический"
+
 msgid "Status display"
 msgstr "Отображение статуса"
 
@@ -4382,6 +4480,16 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 "Сохранять рассчитанную громкость в поддерживаемых локальных музыкальных "
 "файлах"
+
+#, fuzzy
+#| msgid "Relay address"
+msgid "Stream address"
+msgstr "Адрес ретранслятора"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Качество потока"
 
 msgid "Stream quality"
 msgstr "Качество потока"
@@ -4595,6 +4703,11 @@ msgstr "Треки из каждого плейлиста"
 msgid "Tracks from your five latest albums"
 msgstr "Треки из ваших пяти последних альбомов"
 
+#, fuzzy
+#| msgid "Track details"
+msgid "Tracks per refill"
+msgstr "Подробности трека"
+
 msgid "Tracks"
 msgstr "Треки"
 
@@ -4701,9 +4814,6 @@ msgstr "Загрузить обложку"
 msgid "Use API key"
 msgstr "Использовать ключ API"
 
-msgid "Use Instant Mix for recommendations"
-msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
-
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
@@ -4753,14 +4863,16 @@ msgstr ""
 "Использовать локальные файлы для воспроизведения, текстов песен и "
 "редактирования поддерживаемых метаданных"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Use server recommendations"
+msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
+
 msgid "Use sort tags"
 msgstr "Использовать теги сортировки"
 
 msgid "Use source setting"
 msgstr "Использовать настройки источника"
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
 
 msgid "User flatpak:"
 msgstr "Пользователь flatpak:"
@@ -4854,6 +4966,9 @@ msgstr "Взвешивание"
 
 msgid "Welcome to Rufin"
 msgstr "Добро пожаловать в Rufin"
+
+msgid "What Auto DJ and radio pick"
+msgstr ""
 
 msgid "While your library loads"
 msgstr "Пока ваша библиотека загружается"
@@ -4969,9 +5084,6 @@ msgstr "не является"
 
 msgid "is"
 msgstr "является"
-
-msgid "kbps"
-msgstr "кбит/с"
 
 #, fuzzy
 #| msgid "Finish the last track"
@@ -5205,6 +5317,32 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 кбит/с"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 кбит/с"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 кбит/с"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 кбит/с"
+
+#~ msgid "kbps"
+#~ msgstr "кбит/с"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Очередь и переходы"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr "Использовать «Мгновенный микс» сервера для радио и «Авто-DJ»."
+
+#, fuzzy
+#~| msgid "Window"
+#~ msgid "now"
+#~ msgstr "Окно"
 
 #~ msgid "All tracks"
 #~ msgstr "Все треки"
@@ -5942,9 +6080,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Does MusicBrainz and Cover Art Archive lookups"
 #~ msgstr "Выполняет поиск в базах данных MusicBrainz и Cover Art Archive"
-
-#~ msgid "Edit Mapping"
-#~ msgstr "Редактировать соответствия"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Введите локальный префикс."
