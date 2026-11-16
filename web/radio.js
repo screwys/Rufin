@@ -13,9 +13,13 @@ let savedOn = "";
 
 const stationOf = (node) => JSON.parse(node.closest("[data-station]").dataset.station);
 
+// The station on air shows its logo playing when it is an animated image.
 function logo(node, station, signal) {
-  if (station.picture)
-    run(() => cover(node, { picture: station.picture }, signal, station.artwork_previews?.[0]));
+  if (!station.picture) return;
+  const query = node.closest(".radio-on-air")
+    ? { picture: station.picture, animated: true }
+    : { picture: station.picture };
+  run(() => cover(node, query, signal, station.artwork_previews?.[0]));
 }
 
 function clock(seconds) {

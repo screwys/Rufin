@@ -117,8 +117,8 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
 @Composable
 internal fun PinCover(item: BrowseItem, player: PlayerConnection, size: Dp) {
     val station = item.row.station
-    if (station != null) StationLogo(station.artworkBinding, player, size)
-    else Artwork(rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { size.roundToPx() }),
+    if (station != null) StationLogo(station.artworkBinding, player, size, animated = true)
+    else Artwork(rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { size.roundToPx() }, animated = true),
         Modifier.size(size).clip(CoverShape))
 }
 

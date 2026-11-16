@@ -20,6 +20,7 @@ pub(super) struct Target {
     pub expected_generation: u64,
     pub size: Rc<Cell<i32>>,
     pub scale: Cell<f64>,
+    pub presenting_frame: Rc<Cell<bool>>,
 }
 
 pub(super) struct Session {
@@ -219,10 +220,17 @@ impl Session {
             .borrow()
             .iter()
             .filter(|target| target.mapped())
-            .filter_map(|target| target.picture.upgrade())
+            .filter_map(|target| {
+                Some((
+                    target.picture.upgrade()?,
+                    Rc::clone(&target.presenting_frame),
+                ))
+            })
             .collect();
-        for picture in pictures {
+        for (picture, presenting_frame) in pictures {
+            presenting_frame.set(true);
             picture.set_paintable(Some(texture));
+            presenting_frame.set(false);
         }
     }
 }

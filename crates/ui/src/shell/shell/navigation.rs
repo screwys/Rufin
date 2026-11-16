@@ -644,18 +644,20 @@ impl SidebarPinItem {
     /// The pin's picture: a collection's cover or mosaic, a station's logo.
     fn cover(&self, shell: &Rc<Shell>, size: i32) -> gtk::Widget {
         match &self.shown {
-            Pinned::Row(_) => shell
-                .artwork
-                .cover_group_projection_for_artwork(
+            Pinned::Row(_) => {
+                let cover = shell.artwork.cover_group_projection_for_artwork(
                     &self.artwork(),
                     size,
                     size,
                     matches!(&self.pin, SidebarPin::Genre { .. }),
-                )
-                .widget(),
+                );
+                cover.set_animated(true);
+                cover.widget()
+            }
             Pinned::Station(station) => {
                 let tile =
                     crate::library::station_cover(shell, station.artwork_binding.as_deref(), size);
+                tile.set_animated(true);
                 tile.area.set_valign(gtk::Align::Center);
                 tile.area.upcast()
             }

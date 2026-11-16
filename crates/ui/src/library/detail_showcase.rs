@@ -410,6 +410,13 @@ impl ShowcaseCover {
             Self::Group(cover, _) => cover.resize(size),
         }
     }
+
+    fn set_animated(&self) {
+        match self {
+            Self::Single(cover) => cover.tile.set_animated(true),
+            Self::Group(cover, _) => cover.set_animated(true),
+        }
+    }
 }
 
 /// What a mounted header shows and does.
@@ -673,6 +680,7 @@ impl DetailShowcaseView {
             let play = Rc::clone(&play);
             button.connect_clicked(move |_| play(placement, false));
         }
+        cover.set_animated();
         let weak = self.downgrade();
         cover.connect_texture(Rc::new(move |texture| {
             if let Some(view) = weak.upgrade() {

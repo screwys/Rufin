@@ -500,6 +500,7 @@ impl RadioRoute {
         let cover = ArtworkTile::new(HEADER_COVER_SIZE);
         cover.area.add_css_class("station-cover");
         cover.area.add_css_class("detail-showcase-cover");
+        cover.set_animated(true);
         on_air_cover.append(&cover.area);
         let stops = Rc::new(Cell::new(OnAirHeader::no_colours()));
         let painted = Rc::clone(&stops);

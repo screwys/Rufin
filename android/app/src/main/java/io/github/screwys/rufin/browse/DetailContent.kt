@@ -553,7 +553,7 @@ private fun FullArtwork(summary: AndroidDetailSummary, player: PlayerConnection,
 private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConnection, size: Dp) {
     val bindings = summary.artworkBindings
     if (bindings.size <= 1) {
-        DetailCover(detailArtwork(bindings.firstOrNull() ?: summary.row.artworkIdentity, player, size), Modifier.size(size))
+        DetailCover(detailArtwork(bindings.firstOrNull() ?: summary.row.artworkIdentity, player, size, animated = true), Modifier.size(size))
     } else {
         Column(Modifier.size(size).clip(CoverShape)) {
             repeat(2) { y ->
@@ -582,9 +582,9 @@ private fun DetailSectionHeading(title: String) {
 }
 
 @Composable
-private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: Dp): Cover {
+private fun detailArtwork(identity: ByteArray?, player: PlayerConnection, size: Dp, animated: Boolean = false): Cover {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    return rememberArtwork(identity, player, pixels)
+    return rememberArtwork(identity, player, pixels, animated)
 }
 
 @Composable
