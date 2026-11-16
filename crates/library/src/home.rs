@@ -458,7 +458,7 @@ impl Catalog {
             };
             self.order_on(&mut transaction, &crate::Read::List(read))
                 .await?
-                .items(0..12)
+                .items(0..HOME_LIMIT as usize)
         } else {
             Vec::new()
         };

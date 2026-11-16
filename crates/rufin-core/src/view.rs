@@ -17,7 +17,9 @@ use crate::playback::{PlayRequest, QueuePlacement, random_u64};
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::SelectedLibrary;
 use crate::settings::app::Settings;
-use crate::settings::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
+use crate::settings::{
+    HomeSettings, LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings,
+};
 use crate::source::SourceOwner;
 use crate::source::feed::Changed;
 use crate::source::folders::FolderProjection;
@@ -1442,6 +1444,11 @@ impl View {
         matches!(self.body, Body::Missing)
     }
 
+    /// How Home shows its blocks, as the page was read.
+    pub fn home_settings(&self) -> &HomeSettings {
+        &self.settings.application.home
+    }
+
     /// Home's sections as clients show them, from the blocks and filter it opened with.
     pub fn home_sections(&self) -> Option<Vec<HomeSection>> {
         let Body::Home(home) = &self.body else {
@@ -1450,6 +1457,7 @@ impl View {
         Some(home_sections(
             home,
             &self.settings.application.home_blocks,
+            &self.settings.application.home,
             &self.options.filter,
         ))
     }
@@ -1723,6 +1731,7 @@ impl View {
             }
             Body::Home(_) => {
                 self.settings.application.home_blocks != current.application.home_blocks
+                    || self.settings.application.home != current.application.home
             }
             Body::Search(..) => CollectionCategory::ALL
                 .into_iter()
@@ -1970,6 +1979,15 @@ pub enum HomeSection {
     Genres(Vec<TagRow>),
 }
 
+/// How a Home section's columns show.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HomeColumns {
+    /// The rows each column stacks.
+    pub rows: usize,
+    /// Whether each column is one card rather than rows.
+    pub cards: bool,
+}
+
 /// One row of a Home section.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HomeItem {
@@ -2056,15 +2074,24 @@ impl HomeSection {
             .collect()
     }
 
-    /// Whether it shows columns of rows rather than cards: genres, and sections that hold
-    /// tracks, which lead their rows.
-    pub fn shows_rows(&self) -> bool {
-        match self {
+    /// How its columns show under `home`: the rows each stacks, and whether they are cards
+    /// rather than rows. Genres and sections that hold tracks, which lead their rows, stack two
+    /// rows unless the block chooses; albums and artists are cards while a column holds one.
+    pub fn columns(&self, home: &HomeSettings) -> HomeColumns {
+        let lists = match self {
             Self::Rows { rows, .. } | Self::Provider(HomeProviderSection { rows, .. }) => {
                 !rows.tracks.is_empty()
             }
             Self::Genres(_) => true,
             Self::Showcase(_) => false,
+        };
+        let rows = home
+            .block(self.block())
+            .rows
+            .map_or(if lists { 2 } else { 1 }, usize::from);
+        HomeColumns {
+            rows,
+            cards: !lists && rows == 1,
         }
     }
 }
@@ -2072,17 +2099,25 @@ impl HomeSection {
 /// Home's sections in the order clients show them: the visible `blocks` in their order, except
 /// that the showcase leads the server's own sections when there are any. Sections with nothing
 /// to show are left out, and so are rows whose title, artist and album do not contain `filter`.
-pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) -> Vec<HomeSection> {
+/// Each block lists as many tracks, albums and artists as `settings` gives it.
+pub fn home_sections(
+    home: &HomePage,
+    blocks: &[HomeBlockKind],
+    settings: &HomeSettings,
+    filter: &str,
+) -> Vec<HomeSection> {
     let filter = filter.trim().to_lowercase();
     let shown = |text: String| text.to_lowercase().contains(&filter);
     let album = |row: &HomeAlbumRow| {
         filter.is_empty() || shown(format!("{} {}", row.title, row.album.artist))
     };
-    let rows = |tracks: &[HomeTrackRow],
+    let rows = |items: usize,
+                tracks: &[HomeTrackRow],
                 albums: &[HomeAlbumRow],
                 artists: &[library::ArtistRow]| HomeSectionRows {
         tracks: tracks
             .iter()
+            .take(items)
             .filter(|row| {
                 filter.is_empty()
                     || shown(format!(
@@ -2092,16 +2127,24 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
             })
             .cloned()
             .collect(),
-        albums: albums.iter().filter(|row| album(row)).cloned().collect(),
+        albums: albums
+            .iter()
+            .take(items)
+            .filter(|row| album(row))
+            .cloned()
+            .collect(),
         artists: artists
             .iter()
+            .take(items)
             .filter(|row| filter.is_empty() || shown(row.name.clone()))
             .cloned()
             .collect(),
     };
-    let section_rows =
-        |section: &HomeSectionRows| rows(&section.tracks, &section.albums, &section.artists);
+    let section_rows = |items: usize, section: &HomeSectionRows| {
+        rows(items, &section.tracks, &section.albums, &section.artists)
+    };
     let block = |block: HomeBlockKind| {
+        let items = usize::from(settings.block(Some(block)).items);
         let section = match block {
             HomeBlockKind::Showcase => {
                 return home
@@ -2111,13 +2154,14 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
                     .map(|showcase| HomeSection::Showcase(Box::new(showcase.clone())));
             }
             HomeBlockKind::Genres => {
-                return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));
+                let genres = home.genres.iter().take(items).cloned().collect::<Vec<_>>();
+                return (!genres.is_empty()).then_some(HomeSection::Genres(genres));
             }
-            HomeBlockKind::Explore => rows(&[], &home.explore, &[]),
-            HomeBlockKind::MostPlayed => section_rows(&home.most_played),
-            HomeBlockKind::NewlyAdded => section_rows(&home.newly_added),
-            HomeBlockKind::RecentlyPlayed => section_rows(&home.recently_played),
-            HomeBlockKind::RecentlyReleased => section_rows(&home.recently_released),
+            HomeBlockKind::Explore => rows(items, &[], &home.explore, &[]),
+            HomeBlockKind::MostPlayed => section_rows(items, &home.most_played),
+            HomeBlockKind::NewlyAdded => section_rows(items, &home.newly_added),
+            HomeBlockKind::RecentlyPlayed => section_rows(items, &home.recently_played),
+            HomeBlockKind::RecentlyReleased => section_rows(items, &home.recently_released),
         };
         (!section.is_empty()).then_some(HomeSection::Rows {
             block,
@@ -2130,7 +2174,7 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
         .map(|section| HomeProviderSection {
             section_id: section.section_id.clone(),
             title: section.title.clone(),
-            rows: section_rows(&section.rows),
+            rows: section_rows(usize::from(settings.block(None).items), &section.rows),
         })
         .filter(|section| !section.rows.is_empty())
         .map(HomeSection::Provider)

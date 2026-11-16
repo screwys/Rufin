@@ -225,14 +225,7 @@ impl AndroidView {
             display_title: Some(track.title),
             ..shown_row(Row::Track(track.track), &HOME_TRACK_FIELDS, 0)
         };
-        // Core decides which sections show as rows of tracks, for every client.
-        let rows_kind = |section: &HomeSection| {
-            if section.shows_rows() {
-                AndroidHomeSectionKind::Tracks
-            } else {
-                AndroidHomeSectionKind::Rows
-            }
-        };
+        let home = self.view.home_settings();
         self.view
             .home_sections()
             .unwrap_or_default()
@@ -262,7 +255,7 @@ impl AndroidView {
                             .into(),
                     ),
                     HomeSection::Rows { .. } | HomeSection::Provider(_) => {
-                        (rows_kind(&section), items())
+                        (AndroidHomeSectionKind::Rows, items())
                     }
                     HomeSection::Genres(genres) => (
                         AndroidHomeSectionKind::Genres,
@@ -274,7 +267,17 @@ impl AndroidView {
                             .collect(),
                     ),
                 };
-                AndroidHomeSection { title, kind, rows }
+                // Core decides how each section's columns show, for every client.
+                let columns = section.columns(home);
+                AndroidHomeSection {
+                    title,
+                    kind,
+                    rows,
+                    column_rows: columns.rows as u32,
+                    cards: columns.cards,
+                    size: home.size,
+                    spacing: home.spacing,
+                }
             })
             .collect()
     }

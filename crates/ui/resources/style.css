@@ -3271,6 +3271,12 @@ button.menu-preview-entry:not(.menu-preview-shown) label {
   background: color-mix(in srgb, var(--window-fg-color) 16%, transparent);
 }
 
+/* The list row that is being dragged to another place. */
+row.reorder-dragging {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 10%, var(--card-bg-color));
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
+}
+
 /* The card that is being dragged to another place. */
 .station-grid > flowboxchild.station-dragging > .station-card {
   box-shadow: inset 0 0 0 2px var(--accent-bg-color);

@@ -689,6 +689,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr ""
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr ""
 
@@ -1455,9 +1458,6 @@ msgstr ""
 msgid "Drag to reorder"
 msgstr ""
 
-msgid "Drag to reorder."
-msgstr ""
-
 msgid "Duplicate preset"
 msgstr ""
 
@@ -1973,9 +1973,6 @@ msgstr ""
 msgid "Home Profile"
 msgstr ""
 
-msgid "Home blocks"
-msgstr ""
-
 msgid "Home"
 msgstr ""
 
@@ -2064,6 +2061,9 @@ msgid "Item is no longer available"
 msgstr ""
 
 msgid "Item menus"
+msgstr ""
+
+msgid "Items"
 msgstr ""
 
 #, rust-format
@@ -2845,6 +2845,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "One row shows albums and artists as cards"
+msgstr ""
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -2964,9 +2967,6 @@ msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -4175,6 +4175,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum \302\267 dBFS"
 msgstr ""
 
@@ -4940,10 +4943,6 @@ msgstr[1] ""
 
 #, rust-format
 msgid "{minutes} min"
-msgstr ""
-
-#, rust-format
-msgid "{shown} of {total} shown"
 msgstr ""
 
 #, rust-format
