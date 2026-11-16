@@ -17,7 +17,13 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,7 +52,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.settings.PreferenceChoice
-import io.github.screwys.rufin.settings.SettingsExpander
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 import io.github.screwys.rufin.settings.SettingsSwitch
@@ -228,7 +233,7 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 if (profile.automaticPreamp) SettingsRow(translate("Preamp"), trailing = {
                     Text(if (view.sampleRate == null) "-" else "${number(view.preampDb)} dB")
                 })
-                else EqNumber(translate("Preamp"), profile.manualPreampDb, -36.0..12.0, "dB", .1,
+                else EqNumber(translate("Preamp"), profile.manualPreampDb, -36.0..12.0, "dB", .1, listOf(-36.0, -24.0, -12.0, 0.0, 12.0),
                     preview = { preview(EqEdit.Preamp(it)) }, commit = ::commit)
                 val peak = view.peakDb.maxOrNull()
                 if (!view.cast || peak != null) SettingsRow(translate(if (view.cast) "Encoding peak" else "Peak"), trailing = {
@@ -240,13 +245,14 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
         if (receiverProcessing) FilledTonalButton({ outputOpen = true }, Modifier.fillMaxWidth(), colors = equalizerButtonColors()) {
             Text(remote?.name ?: translate("This device"), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (!receiverProcessing) SettingsExpander(translate("Audio effects")) {
-            Column {
-                EqNumber(translate("Bass"), profile.bassDb, -12.0..12.0, "dB", .1, reset = true, preview = { preview(EqEdit.Bass(it)) }, commit = ::commit)
-                EqNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, "dB", .1, reset = true, preview = { preview(EqEdit.Treble(it)) }, commit = ::commit)
-                SettingsSwitch(translate("Crossfeed"), view.crossfeed) { change(EqEdit.Crossfeed(it)) }
-                EqNumber(translate("Balance"), view.balance, -1.0..1.0, "", .01, reset = true, preview = { preview(EqEdit.Balance(it)) }, commit = ::commit)
-                SettingsSwitch(translate("Mono"), view.mono) { change(EqEdit.Mono(it)) }
+        if (!receiverProcessing) SettingsGroup(translate("Audio effects")) {
+            val tone = listOf(-12.0, -6.0, 0.0, 6.0, 12.0)
+            EqNumber(translate("Bass"), profile.bassDb, -12.0..12.0, "dB", .1, tone, preview = { preview(EqEdit.Bass(it)) }, commit = ::commit)
+            EqNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, "dB", .1, tone, preview = { preview(EqEdit.Treble(it)) }, commit = ::commit)
+            EqNumber(translate("Balance"), view.balance, -1.0..1.0, "", .01, listOf(-1.0, -.5, 0.0, .5, 1.0), preview = { preview(EqEdit.Balance(it)) }, commit = ::commit)
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                EqToggle(translate("Crossfeed"), view.crossfeed, Modifier.weight(1f)) { change(EqEdit.Crossfeed(it)) }
+                EqToggle(translate("Mono"), view.mono, Modifier.weight(1f)) { change(EqEdit.Mono(it)) }
             }
         }
         if (view.cast && !receiverProcessing) SettingsGroup {
@@ -332,40 +338,46 @@ internal fun EqualizerEditor(view: EqView, parametric: Boolean, frequencies: Lis
     fun change(edit: EqEdit) { preview(edit); commit() }
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ChoiceChip(response, onResponse, label = { Text(translate("Response")) })
-                ChoiceChip(spectrum, onSpectrum, label = { Text(translate("Spectrum")) }, enabled = !view.cast)
-                Spacer(Modifier.weight(1f))
-                Box {
-                    var layouts by remember { mutableStateOf(false) }
-                    FilledTonalButton({ layouts = true }, contentPadding = PaddingValues(horizontal = 4.dp), colors = equalizerButtonColors()) {
-                        Text(bands.size.toString())
-                        io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(16.dp))
-                    }
-                    DropdownMenu(layouts, { layouts = false }) {
-                        listOf(BandLayout.CLASSIC10 to "10 bands", BandLayout.BANDS18 to "18 bands", BandLayout.BANDS31 to "31 bands").forEach { (layout, label) ->
-                            DropdownMenuItem(text = { Text(translate(label)) }, onClick = { layouts = false; change(EqEdit.Layout(layout)) })
-                        }
-                    }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.align(Alignment.CenterVertically), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip(response, onResponse, label = { Text(translate("Response")) })
+                    ChoiceChip(spectrum, onSpectrum, label = { Text(translate("Spectrum")) }, enabled = !view.cast)
+                }
+                // The graphic layouts by their band count; a parametric profile picks none of them.
+                io.github.screwys.rufin.ui.SegmentedPill(listOf(BandLayout.CLASSIC10, BandLayout.BANDS18, BandLayout.BANDS31), view.profile.layout,
+                    { change(EqEdit.Layout(it)) }) { layout, _ ->
+                    Text(when (layout) { BandLayout.CLASSIC10 -> "10"; BandLayout.BANDS18 -> "18"; else -> "31" },
+                        Modifier.semantics { contentDescription = translate(when (layout) { BandLayout.CLASSIC10 -> "10 bands"; BandLayout.BANDS18 -> "18 bands"; else -> "31 bands" }) },
+                        style = MaterialTheme.typography.labelLarge)
                 }
             }
             EqualizerPlot(view, parametric, frequencies, responseCurve, spectrum, index, { selected = it }, preview, commit)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             if (bands.isNotEmpty()) {
                 val band = bands[index]
+                // Every band as a button with its frequency and gain; the picked one is the one the rows under it edit.
+                val strip = rememberLazyListState()
+                val control = equalizerControlColor()
+                LaunchedEffect(index, bands.size) {
+                    val shown = strip.layoutInfo.visibleItemsInfo.any { it.index == index && it.offset >= 0 && it.offset + it.size <= strip.layoutInfo.viewportEndOffset }
+                    if (!shown) strip.animateScrollToItem((index - 2).coerceAtLeast(0))
+                }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    PlayerIconButton("rufin-go-previous-symbolic", "Previous", { selected = (index - 1).coerceAtLeast(0) }, enabled = index > 0)
-                    Box(Modifier.weight(1f)) {
-                        var bandList by remember { mutableStateOf(false) }
-                        FilledTonalButton({ bandList = true }, Modifier.fillMaxWidth(), colors = equalizerButtonColors()) {
-                            Text("${index + 1} · ${frequency(band.frequencyHz)} Hz", maxLines = 1)
-                            io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(16.dp))
-                        }
-                        DropdownMenu(bandList, { bandList = false }, Modifier.heightIn(max = 320.dp)) {
-                            bands.forEachIndexed { i, b -> DropdownMenuItem(text = { Text("${i + 1} · ${frequency(b.frequencyHz)} Hz   ${number(b.gainDb)} dB") }, onClick = { selected = i; bandList = false }) }
+                    LazyRow(Modifier.weight(1f).selectableGroup(), state = strip, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        itemsIndexed(bands) { i, b ->
+                            val picked = i == index
+                            val scheme = MaterialTheme.colorScheme
+                            Column(Modifier.width(50.dp).height(46.dp).clip(RoundedCornerShape(12.dp))
+                                .background(if (picked) scheme.primary else control)
+                                .selectable(picked, role = Role.Tab) { selected = i },
+                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Text(frequency(b.frequencyHz), maxLines = 1, style = MaterialTheme.typography.labelMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    color = if (picked) scheme.onPrimary else scheme.onSurface)
+                                Text(number(b.gainDb), maxLines = 1, style = MaterialTheme.typography.labelSmall,
+                                    color = if (picked) scheme.onPrimary else scheme.onSurfaceVariant)
+                            }
                         }
                     }
-                    PlayerIconButton("rufin-go-next-symbolic", "Next", { selected = (index + 1).coerceAtMost(bands.lastIndex) }, enabled = index < bands.lastIndex)
                     if (parametric) PlayerIconButton("rufin-list-add-symbolic", "Add band", { selected = bands.size; change(EqEdit.AddBand) }, enabled = bands.size < 64)
                     else PlayerIconButton("rufin-edit-undo-symbolic", "Reset", { bands.indices.forEach { preview(EqEdit.BandGain(it.toUInt(), 0.0)) }; commit() })
                 }
@@ -411,7 +423,7 @@ internal fun EqualizerEditor(view: EqView, parametric: Boolean, frequencies: Lis
                         }
                     }
                 }
-                EqNumber(translate("Gain"), band.gainDb, -24.0..12.0, "dB", .1,
+                EqNumber(translate("Gain"), band.gainDb, -24.0..12.0, "dB", .1, listOf(-24.0, -12.0, 0.0, 12.0),
                     preview = { preview(EqEdit.BandGain(index.toUInt(), it)) }, commit = commit)
                 if (view.sampleRate != null && band.frequencyHz >= view.sampleRate!!.toDouble() / 2) Text(translate("Inactive at this sample rate"), style = MaterialTheme.typography.labelSmall)
             } else TextButton({ change(EqEdit.AddBand) }) { Text(translate("Add band")) }
@@ -425,35 +437,39 @@ private fun filterName(kind: FilterKind) = when (kind) {
     FilterKind.HIGH_SHELF -> "High shelf"
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** A level that goes both ways from zero: its value opens exact entry, Reset shows once it leaves zero, and the
+ *  slider fills from zero and sticks to the marks under it, which jump to their value when tapped. */
 @Composable
-private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, unit: String, step: Double, reset: Boolean = false,
-    preview: (Double) -> Unit, commit: () -> Unit) {
+private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, unit: String, step: Double,
+    marks: List<Double>, preview: (Double) -> Unit, commit: () -> Unit) {
     var draft by remember(value) { mutableDoubleStateOf(value) }
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val stops = remember(marks) { marks.map { it.toFloat() } }
+    val span = range.start.toFloat()..range.endInclusive.toFloat()
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            if (reset) {
-                var text by remember(value) { mutableStateOf(number(value)) }
-                OutlinedTextField(text, { input ->
-                    text = input
-                    input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in range }?.let { preview(it); commit() }
-                }, singleLine = true, colors = settingsTextFieldColors(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    suffix = if (unit.isEmpty()) null else { { Text(unit) } },
-                    trailingIcon = if (value == 0.0) null else { {
-                        PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { text = "0"; preview(0.0); commit() })
-                    } },
-                    modifier = Modifier.width(132.dp).semantics { contentDescription = title })
-            } else EqValue(title, draft, range, unit) { preview(it); commit() }
+            if (draft != 0.0) PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { draft = 0.0; preview(0.0); commit() }, iconSize = 18.dp)
+            EqValue(title, draft, range, unit) { preview(it); commit() }
         }
         RufinSlider(draft.toFloat(), {
             draft = (round(it / step) * step).coerceIn(range)
             preview(draft)
         }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" },
-            valueRange = range.start.toFloat()..range.endInclusive.toFloat(), onValueChangeFinished = commit)
-        if (reset) SliderMarks(range.start.toFloat()..range.endInclusive.toFloat(),
-            listOf(range.start.toFloat(), (range.start / 2).toFloat(), 0f, (range.endInclusive / 2).toFloat(), range.endInclusive.toFloat()))
+            valueRange = span, onValueChangeFinished = commit, marks = stops, origin = 0f)
+        SliderMarks(span, stops, default = 0f) { draft = it.toDouble(); preview(draft); commit() }
+    }
+}
+
+/** An effect that is on or off, as half of a row. */
+@Composable
+private fun EqToggle(label: String, checked: Boolean, modifier: Modifier, change: (Boolean) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(modifier.clip(RoundedCornerShape(5.dp)).background(if (checked) scheme.secondaryContainer else scheme.surfaceContainer)
+        .toggleable(checked, role = Role.Switch, onValueChange = change).heightIn(min = 56.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = if (checked) scheme.primary else scheme.onSurface)
+        Box(Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
+            .background(if (checked) scheme.primary else scheme.onSurfaceVariant.copy(alpha = .35f)))
     }
 }
 
@@ -521,29 +537,27 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
             val top = 12.dp.toPx()
             val width = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
             val height = (size.height - top - 24.dp.toPx()).coerceAtLeast(1f)
-            fun nearest(point: Offset): Int? = latestOrder.withIndex().minByOrNull { (column, i) ->
+            val reach = 28.dp.toPx()
+            // A drag moves a band only from that band's own handle: anywhere else on the plot the page scrolls.
+            fun grabbed(point: Offset): Int? = latestOrder.withIndex().map { (column, i) ->
                 val band = latestView.profile.bands[i]
                 val x = left + (if (parametric) latestPosition(band.frequencyHz) else (column + .5f) / latestOrder.size) * width
                 val y = top + ((latestHigh - band.gainDb) / (latestHigh - latestLow) * height).toFloat()
-                if (parametric) (point - Offset(x, y)).getDistanceSquared() else abs(point.x - x)
-            }?.value
-            var index = -1
-            var gain = 0.0
-            var hz = 1000.0
-            var span = 36.0
-            detectDragGestures(onDragStart = { point ->
-                index = nearest(point) ?: -1
-                if (index >= 0) {
-                    latestSelect(index)
-                    gain = latestView.profile.bands[index].gainDb
-                    hz = latestView.profile.bands[index].frequencyHz
-                    span = latestHigh - latestLow
-                    dragRange = latestLow to latestHigh
-                }
-            }, onDragEnd = { if (index >= 0) latestCommit(); index = -1; dragRange = null },
-                onDragCancel = { if (index >= 0) latestCommit(); index = -1; dragRange = null }) { change, delta ->
-                if (index >= 0) {
+                i to (point - Offset(x, y)).getDistance()
+            }.filter { it.second <= reach }.minByOrNull { it.second }?.first
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val index = grabbed(down.position) ?: return@awaitEachGesture
+                latestSelect(index)
+                var gain = latestView.profile.bands[index].gainDb
+                var hz = latestView.profile.bands[index].frequencyHz
+                val span = latestHigh - latestLow
+                var moved = false
+                dragRange = latestLow to latestHigh
+                drag(down.id) { change ->
+                    val delta = change.positionChange()
                     change.consume()
+                    moved = true
                     gain = (gain - delta.y / height * span).coerceIn(-24.0, 12.0)
                     if (parametric) {
                         hz = (hz * exp(delta.x / width * latestLogSpan)).coerceIn(java.lang.Double.MIN_NORMAL, 100000.0)
@@ -551,6 +565,8 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
                     }
                     latestPreview(EqEdit.BandGain(index.toUInt(), gain))
                 }
+                if (moved) latestCommit()
+                dragRange = null
             }
         }
         .pointerInput(parametric, bands.size) {
@@ -575,7 +591,7 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
         fun x(hz: Double) = left + position(hz) * width
         for (gain in listOf(high, 0.0, low)) {
             val py = y(gain)
-            drawLine(colors.outlineVariant, Offset(left, py), Offset(left + width, py))
+            drawLine(if (gain == 0.0) colors.outline else colors.outlineVariant, Offset(left, py), Offset(left + width, py))
             val text = textMeasurer.measure(number(gain), labelStyle)
             drawText(text, topLeft = Offset(0f, py - text.size.height / 2))
         }
@@ -595,12 +611,20 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
         }
         if (response.size == frequencies.size) {
             val path = Path()
+            var first = 0f
+            var last = 0f
             frequencies.forEachIndexed { i, hz ->
                 if (view.sampleRate != null && hz > view.sampleRate!!.toDouble() / 2.0) return@forEachIndexed
                 val px = x(hz)
                 val py = y(response[i]).coerceIn(top, top + height)
-                if (path.isEmpty) path.moveTo(px, py) else path.lineTo(px, py)
+                if (path.isEmpty) { path.moveTo(px, py); first = px } else path.lineTo(px, py)
+                last = px
             }
+            // The response as a soft area off the zero line, so boost and cut read at a glance.
+            if (!path.isEmpty) drawPath(Path().apply {
+                addPath(path)
+                lineTo(last, y(0.0)); lineTo(first, y(0.0)); close()
+            }, colors.primary.copy(alpha = .14f))
             drawPath(path, colors.secondary, style = Stroke(2.dp.toPx()))
         }
         val gains = Path()
@@ -613,6 +637,7 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
             val px = if (parametric) x(band.frequencyHz) else left + (column + .5f) / bands.size * width
             val py = y(band.gainDb)
             val active = band.enabled && (view.sampleRate == null || band.frequencyHz < view.sampleRate!!.toDouble() / 2.0)
+            if (parametric && i == selected) drawLine(colors.primary.copy(alpha = .5f), Offset(px, top), Offset(px, top + height), 1.dp.toPx())
             if (!parametric) {
                 drawLine(if (i == selected) colors.primary.copy(alpha = .5f) else colors.outlineVariant.copy(alpha = .6f), Offset(px, top), Offset(px, top + height), 1.dp.toPx())
                 if (column == 0) gains.moveTo(px, py) else gains.lineTo(px, py)
@@ -625,7 +650,9 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
                     }
                 }
             }
-            drawCircle(if (active) colors.primary else colors.outline, (if (i == selected) 6.dp else 3.dp).toPx(), Offset(px, py))
+            // The picked band's handle is the one sized for a finger, ringed off the lines under it.
+            if (i == selected) drawCircle(colors.surfaceContainer, 11.dp.toPx(), Offset(px, py))
+            drawCircle(if (active) colors.primary else colors.outline, (if (i == selected) 8.dp else 3.5.dp).toPx(), Offset(px, py))
         }
         if (!parametric) drawPath(gains, colors.primary.copy(alpha = .7f), style = Stroke(1.5.dp.toPx()))
         else listOf(lowHz, 100.0, 1000.0, highHz).distinct().filter { it in lowHz..highHz }.forEach { hz ->
@@ -701,18 +728,27 @@ internal fun PresetTransferDialog(importing: Boolean, text: String, onText: (Str
     })
 }
 
+/** The marks under a slider. `default` names the one the slider rests on; with `pick`, a tap takes the nearest. */
 @Composable
-internal fun SliderMarks(range: ClosedFloatingPointRange<Float>, labels: List<Float>) {
+internal fun SliderMarks(range: ClosedFloatingPointRange<Float>, labels: List<Float>, default: Float? = null, pick: ((Float) -> Unit)? = null) {
     val measurer = rememberTextMeasurer()
     val color = MaterialTheme.colorScheme.onSurfaceVariant
+    val accent = MaterialTheme.colorScheme.primary
     val style = MaterialTheme.typography.labelSmall.copy(color = color)
-    Canvas(Modifier.fillMaxWidth().height(26.dp)) {
+    val latestPick by rememberUpdatedState(pick)
+    Canvas(Modifier.fillMaxWidth().height(26.dp).then(if (pick == null) Modifier else Modifier.pointerInput(range, labels) {
+        detectTapGestures { point ->
+            val inset = 10.dp.toPx()
+            labels.minByOrNull { abs(inset + (size.width - 2 * inset) * (it - range.start) / (range.endInclusive - range.start) - point.x) }
+                ?.let { latestPick?.invoke(it) }
+        }
+    })) {
         val inset = 10.dp.toPx()
         fun x(value: Float) = inset + (size.width - 2 * inset) * (value - range.start) / (range.endInclusive - range.start)
         val ticks = labels.zipWithNext().flatMap { (start, end) -> (0..3).map { start + (end - start) * it / 4 } } + labels.last()
         ticks.forEach { drawLine(color.copy(alpha = .45f), Offset(x(it), 0f), Offset(x(it), (if (it in labels) 5.dp else 3.dp).toPx()), 1.dp.toPx()) }
         labels.forEach {
-            val label = measurer.measure(number(it.toDouble()), style)
+            val label = measurer.measure(number(it.toDouble()), if (it == default) style.copy(color = accent, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) else style)
             drawText(label, topLeft = Offset((x(it) - label.size.width / 2).coerceIn(0f, (size.width - label.size.width).coerceAtLeast(0f)), 5.dp.toPx()))
         }
     }
