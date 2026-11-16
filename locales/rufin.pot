@@ -2957,6 +2957,9 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
@@ -3042,6 +3045,9 @@ msgstr ""
 msgid "Play Next"
 msgstr ""
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr ""
 
@@ -3067,9 +3073,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -4601,9 +4604,6 @@ msgid "Use listening activity"
 msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
-msgstr ""
-
-msgid "Use server recommendations"
 msgstr ""
 
 msgid "Use sort tags"

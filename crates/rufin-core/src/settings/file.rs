@@ -135,7 +135,10 @@ pub(super) const CHOICES: &[(&str, &str)] = &[
     ),
     ("auto_dj.refill_threshold", "/auto_dj_refill_threshold"),
     ("auto_dj.refill_count", "/auto_dj_refill_count"),
-    ("auto_dj.server_recommendations", "/server_recommendations"),
+    (
+        "auto_dj.override_server_recommendations",
+        "/override_server_recommendations",
+    ),
     ("auto_dj.similar_artists", "/auto_dj_similar_artists"),
     ("auto_dj.same_artist", "/auto_dj_same_artist"),
     ("auto_dj.skip_low_rated", "/auto_dj_skip_low_rated"),

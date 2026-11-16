@@ -209,11 +209,16 @@ impl StoredSettings {
         self.settle_server_recommendations();
     }
 
-    /// Server recommendations start on once a Navidrome or Plex server is configured, whose
+    /// Server recommendations stay once a Navidrome or Plex server is configured, whose
     /// picks are good, or where a Jellyfin or Emby source was set to its instant mix before
     /// the choice became one setting. Once set, the choice is the user's.
     fn settle_server_recommendations(&mut self) {
-        if self.ui.application.server_recommendations.is_some() {
+        if self
+            .ui
+            .application
+            .override_server_recommendations
+            .is_some()
+        {
             return;
         }
         let recommends = self.sources.configured.iter().any(|source| {
@@ -233,7 +238,7 @@ impl StoredSettings {
             }
         });
         if recommends {
-            self.ui.application.server_recommendations = Some(true);
+            self.ui.application.override_server_recommendations = Some(false);
         }
     }
 
