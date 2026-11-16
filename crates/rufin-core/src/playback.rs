@@ -580,7 +580,10 @@ impl PlaybackOwner {
                         )
                     });
                 playback.post(move |player, sample| match result {
-                    Ok(stream) => player.stream_resolved(run, stream),
+                    Ok(stream) => {
+                        player.stream_loading(run, sample);
+                        player.stream_resolved(run, stream)
+                    }
                     Err(error) => player.stream_failed(run, error, sample),
                 });
                 return;
