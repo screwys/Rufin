@@ -968,6 +968,7 @@ fn home_row_widget(shell: &Rc<CatalogUi>, row: library::Row) -> (gtk::Widget, Ho
         ROW_COVER_SIZE,
         matches!(row, library::Row::Tag(_)),
     );
+    cover.set_animated(matches!(row, library::Row::Playlist(_)));
     content.append(&cover.widget());
     let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
     labels.set_valign(gtk::Align::Center);

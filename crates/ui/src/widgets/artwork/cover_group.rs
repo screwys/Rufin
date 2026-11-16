@@ -29,6 +29,11 @@ impl CoverGroupProjection {
         self.root.clone().upcast()
     }
 
+    /// Lets the group's single cover play when it is animated. Mosaic quadrants stay still.
+    pub fn set_animated(&self, animated: bool) {
+        self.single.set_animated(animated);
+    }
+
     pub fn replace(&self, shell: &Rc<ArtworkState>, artwork: &[ArtworkBinding]) {
         if artwork.len() <= 1 {
             for tile in self.quadrants.iter() {
