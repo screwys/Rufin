@@ -319,8 +319,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
             val color = MaterialTheme.colorScheme.onSurface
             val opacity by animateFloatAsState(if (lineActive) 1f else .34f,
                 tween(if (reduceMotion) 0 else 180), label = "lyricsOpacity")
-            val scale by animateFloatAsState(if (selection != null) 1f else if (lineActive) 1.04f else .96f,
-                tween(if (reduceMotion) 0 else 180), label = "lyricsScale")
+            val scale = if (selection != null) 1f else if (lineActive) 1.04f else .96f
             val pick by animateColorAsState(MaterialTheme.colorScheme.onSurface.copy(alpha = if (picked) .12f else 0f),
                 tween(if (reduceMotion) 0 else 180), label = "lyricsPick")
             Column(Modifier.fillMaxWidth().graphicsLayer {

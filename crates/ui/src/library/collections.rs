@@ -248,6 +248,11 @@ impl LibraryCollectionProjection {
         width_owner.clone().upcast()
     }
 
+    /// The list's scroller and its frame, for a page that scrolls as one with the list.
+    pub fn scroll_parts(&self) -> (gtk::ScrolledWindow, gtk::Widget) {
+        (self.scrolling_scroller(), self.scrolling_widget())
+    }
+
     pub fn item_scroll(
         &self,
     ) -> Rc<dyn Fn() -> Option<crate::widgets::mounted_route::NativeListScroll>> {

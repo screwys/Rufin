@@ -3,6 +3,8 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 pub const LYRICS_USER_SCROLL_PAUSE_MS: u64 = 3_000;
+/// How often a word being sung moves its highlight: every step redraws the window.
+const KARAOKE_STEP_MILLIS: u64 = 33;
 
 #[derive(Clone, Debug)]
 pub struct KaraokeTiming {
@@ -159,7 +161,7 @@ impl LyricsTiming {
                 return Some(
                     u64::try_from(position.max(0))
                         .unwrap_or_default()
-                        .saturating_add(16)
+                        .saturating_add(KARAOKE_STEP_MILLIS)
                         .min(end),
                 );
             }
@@ -194,7 +196,8 @@ mod tests {
     use crate::{LyricsCue, LyricsCueLine, LyricsLine};
 
     use super::{
-        KaraokeTiming, LyricsTiming, effective_cue_end, playback_position_for_lyrics_position,
+        KARAOKE_STEP_MILLIS, KaraokeTiming, LyricsTiming, effective_cue_end,
+        playback_position_for_lyrics_position,
     };
 
     #[test]
@@ -326,7 +329,7 @@ mod tests {
             .map(|end| {
                 u64::try_from(position.max(0))
                     .unwrap_or_default()
-                    .saturating_add(16)
+                    .saturating_add(KARAOKE_STEP_MILLIS)
                     .min(end)
             })
             .or(boundary)
@@ -408,7 +411,10 @@ mod tests {
         lines[1].text.clear();
         let timing = LyricsTiming::new(&lines);
         assert_eq!(timing.next_after(-250, false), Some(1_000));
-        assert_eq!(timing.next_after(1_000, true), Some(1_016));
+        assert_eq!(
+            timing.next_after(1_000, true),
+            Some(1_000 + KARAOKE_STEP_MILLIS)
+        );
         assert_eq!(timing.next_after(1_999, true), Some(2_000));
         assert_eq!(timing.next_after(1_000, false), Some(5_000));
         assert_eq!(timing.next_after(4_999, false), Some(5_000));
