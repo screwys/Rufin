@@ -316,7 +316,8 @@ pub fn stage_backup(
     }
     for name in manifest.contents.members() {
         let name = match name {
-            "playlist-folders.jsonl" => continue,
+            // Backups of 0.17 and earlier have no stations or playlist folders.
+            "playlist-folders.jsonl" | "stations.jsonl" => continue,
             "play-counts.jsonl" if !directory.path().join(name).is_file() => {
                 "legacy-activity.jsonl"
             }

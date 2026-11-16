@@ -286,6 +286,7 @@ const STATE: &[&str] = &[
     "/backup/schedule/last_successful_at",
     "/backup/schedule/retention",
     "/backup/schedule/schedule_id",
+    "/backup_notice_dismissed",
     "/cached_lyrics_sources",
     "/downloads",
     "/equalizer",

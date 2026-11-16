@@ -104,6 +104,16 @@ pub fn shows_lyrics_cache_prompt(
         })
 }
 
+/// Whether the notice to export a backup before the app ID changes is shown: it was not
+/// dismissed and a source is configured.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn shows_backup_notice(
+    application: crate::settings::ApplicationPreferences,
+    sources: Vec<SourceSummary>,
+) -> bool {
+    !application.backup_notice_dismissed && !sources.is_empty()
+}
+
 /// Whether the choice between a server's recommendations and Rufin's is shown: a configured
 /// source is a server that recommends.
 #[cfg_attr(feature = "bindings", uniffi::export)]
