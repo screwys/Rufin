@@ -826,6 +826,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr "Přehrát náhodně"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Modrá"
 
@@ -1800,11 +1803,6 @@ msgid "Drag to reorder"
 msgstr "Přetažením změňte pořadí"
 
 #, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Přetažením změňte pořadí"
-
-#, fuzzy
 #| msgid "Preset"
 msgid "Duplicate preset"
 msgstr "Předvolba"
@@ -2414,11 +2412,6 @@ msgstr "Přetažením změňte pořadí"
 msgid "Home Profile"
 msgstr ""
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Bloky domovské stránky"
-
 msgid "Home"
 msgstr "Domovská stránka"
 
@@ -2533,6 +2526,11 @@ msgstr "Úprava metadat již není k dispozici"
 #, fuzzy
 #| msgid "Context Menus"
 msgid "Item menus"
+msgstr "Kontextové menu"
+
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Items"
 msgstr "Kontextové menu"
 
 msgid "January {year}"
@@ -3468,6 +3466,11 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3605,13 +3608,15 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+#, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Override server recommendations"
+msgstr "Pro doporučení použijte Jellyfin Instant Mix"
+
 msgid "Overview"
 msgstr "Přehled"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3703,6 +3708,9 @@ msgstr "Přehrát další"
 msgid "Play Next"
 msgstr "Přehrát další"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Přehrát album"
 
@@ -3733,9 +3741,6 @@ msgstr "Pustit Rádio"
 
 msgid "Play radio"
 msgstr "Pustit Rádio"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "Přehrát skladbu"
@@ -5088,6 +5093,9 @@ msgstr "Zdroje"
 msgid "Sources"
 msgstr "Zdroje"
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -5613,11 +5621,6 @@ msgstr ""
 "metadat"
 
 #, fuzzy
-#| msgid "Use Jellyfin Instant Mix for recommendations"
-msgid "Use server recommendations"
-msgstr "Pro doporučení použijte Jellyfin Instant Mix"
-
-#, fuzzy
 #| msgid "Lyrics settings"
 msgid "Use sort tags"
 msgstr "Nastavení textu skladeb"
@@ -5989,9 +5992,6 @@ msgstr[2] ""
 msgid "{minutes} min"
 msgstr ""
 
-msgid "{shown} of {total} shown"
-msgstr ""
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
@@ -6076,6 +6076,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Přetažením změňte pořadí"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Bloky domovské stránky"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"

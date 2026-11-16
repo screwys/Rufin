@@ -805,6 +805,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr "任意播放"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "藍色"
 
@@ -1757,11 +1760,6 @@ msgid "Drag to reorder"
 msgstr "拖曳以重新排序"
 
 #, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "拖曳以重新排序"
-
-#, fuzzy
 #| msgid "Preset"
 msgid "Duplicate preset"
 msgstr "預設集"
@@ -2363,9 +2361,6 @@ msgstr "拖曳以重新排序"
 msgid "Home Profile"
 msgstr ""
 
-msgid "Home blocks"
-msgstr ""
-
 msgid "Home"
 msgstr "首頁"
 
@@ -2472,6 +2467,9 @@ msgid "Item is no longer available"
 msgstr "元資料已經不再能編輯"
 
 msgid "Item menus"
+msgstr ""
+
+msgid "Items"
 msgstr ""
 
 msgid "January {year}"
@@ -3390,6 +3388,11 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "在專輯與藝人頁面上顯示外部服務的圖示"
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3523,13 +3526,13 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr "總覽"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3619,6 +3622,9 @@ msgstr "接續播放"
 msgid "Play Next"
 msgstr "接續播放"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "播放專輯"
 
@@ -3649,9 +3655,6 @@ msgstr "播放電台"
 
 msgid "Play radio"
 msgstr "播放電台"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "播放曲目"
@@ -4968,6 +4971,9 @@ msgstr "無來源"
 msgid "Sources"
 msgstr ""
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -5478,9 +5484,6 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
-msgid "Use server recommendations"
-msgstr ""
-
 #, fuzzy
 #| msgid "Lyrics settings"
 msgid "Use sort tags"
@@ -5815,9 +5818,6 @@ msgstr[0] ""
 msgid "{minutes} min"
 msgstr ""
 
-msgid "{shown} of {total} shown"
-msgstr ""
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
@@ -5902,6 +5902,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "拖曳以重新排序"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"

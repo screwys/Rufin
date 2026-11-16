@@ -9,8 +9,8 @@ msgstr ""
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-16 07:09+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
-"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
-"\n"
+"Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/"
+">\n"
 "Language: id\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -808,6 +808,9 @@ msgstr "Bitrate"
 msgid "Bitstream"
 msgstr "Bitstream"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Biru"
 
@@ -1588,11 +1591,6 @@ msgstr "Seret untuk mengubah urutan"
 msgid "Drag to reorder"
 msgstr "Seret untuk mengubah urutan"
 
-#, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Seret untuk mengubah urutan"
-
 msgid "Duplicate preset"
 msgstr "Duplikasi preset"
 
@@ -2134,11 +2132,6 @@ msgstr "Tahan untuk mengubah urutan"
 msgid "Home Profile"
 msgstr "Pofil Beranda"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Blok Beranda"
-
 msgid "Home"
 msgstr "Beranda"
 
@@ -2240,6 +2233,11 @@ msgstr "Item ini sudah tidak tersedia"
 #| msgid "Context Menus"
 msgid "Item menus"
 msgstr "Menu konteks"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "ID Item"
 
 msgid "January {year}"
 msgstr "Januari {year}"
@@ -3051,6 +3049,9 @@ msgstr ""
 msgid "One path per line"
 msgstr "Satu jalur per baris"
 
+msgid "One row shows albums and artists as cards"
+msgstr ""
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3162,13 +3163,13 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3248,6 +3249,9 @@ msgstr ""
 msgid "Play Next"
 msgstr ""
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr ""
 
@@ -3273,9 +3277,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -4393,6 +4394,11 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+#, fuzzy
+#| msgid "Grid spacing"
+msgid "Spacing"
+msgstr "Jarak kiri"
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -4825,9 +4831,6 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
-msgid "Use server recommendations"
-msgstr ""
-
 msgid "Use sort tags"
 msgstr ""
 
@@ -5153,9 +5156,6 @@ msgstr[1] ""
 msgid "{minutes} min"
 msgstr ""
 
-msgid "{shown} of {total} shown"
-msgstr ""
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
@@ -5245,6 +5245,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Seret untuk mengubah urutan"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Blok Beranda"
 
 #, fuzzy
 #~ msgid "128 kbps"

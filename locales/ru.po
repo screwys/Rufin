@@ -794,6 +794,9 @@ msgstr "Битрейт"
 msgid "Bitstream"
 msgstr "Битовый поток"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Синий"
 
@@ -1567,11 +1570,6 @@ msgstr "Перетащите, чтобы изменить порядок"
 msgid "Drag to reorder"
 msgstr "Перетащите, чтобы изменить порядок"
 
-#, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Перетащите, чтобы изменить порядок"
-
 msgid "Duplicate preset"
 msgstr "Дублировать пресет"
 
@@ -2096,11 +2094,6 @@ msgstr "Удерживайте, чтобы изменить порядок"
 msgid "Home Profile"
 msgstr "Главный профиль"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Основные блоки"
-
 msgid "Home"
 msgstr "Главная"
 
@@ -2204,6 +2197,11 @@ msgstr "Элемент больше недоступен"
 #| msgid "Context Menus"
 msgid "Item menus"
 msgstr "Контекстные меню"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "ID элемента"
 
 msgid "January {year}"
 msgstr "Январь {year}"
@@ -3025,6 +3023,12 @@ msgstr ""
 msgid "One path per line"
 msgstr "Один путь на строку"
 
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr ""
+"Отображать значки внешних сервисов на страницах альбомов и исполнителей"
+
 msgid "Online Lookups"
 msgstr "Онлайн-поиск"
 
@@ -3139,13 +3143,15 @@ msgstr "Обводка полос"
 msgid "Output gain"
 msgstr "Выходное усиление"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Override server recommendations"
+msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
+
 msgid "Overview"
 msgstr "Обзор"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3227,6 +3233,9 @@ msgstr "Воспроизвести следующим (в случайном п�
 msgid "Play Next"
 msgstr "Воспроизвести следующим"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Воспроизвести альбом"
 
@@ -3253,9 +3262,6 @@ msgstr "Воспроизвести радио следующим"
 
 msgid "Play radio"
 msgstr "Воспроизвести радио"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "Воспроизвести трек"
@@ -4413,6 +4419,11 @@ msgstr "Источник"
 msgid "Sources"
 msgstr "Источники"
 
+#, fuzzy
+#| msgid "Spacious"
+msgid "Spacing"
+msgstr "Просторный"
+
 msgid "Spectrum · dBFS"
 msgstr "Спектр · dBFS"
 
@@ -4863,11 +4874,6 @@ msgstr ""
 "Использовать локальные файлы для воспроизведения, текстов песен и "
 "редактирования поддерживаемых метаданных"
 
-#, fuzzy
-#| msgid "Use Instant Mix for recommendations"
-msgid "Use server recommendations"
-msgstr "Использовать «Мгновенный микс» для получения рекомендаций"
-
 msgid "Use sort tags"
 msgstr "Использовать теги сортировки"
 
@@ -5217,11 +5223,6 @@ msgstr[2] "{field} · Различается для {count} треков"
 msgid "{minutes} min"
 msgstr "{minutes} мин"
 
-#, fuzzy
-#| msgid "{stage} ({count} of {total} tracks)"
-msgid "{shown} of {total} shown"
-msgstr "{stage} ({count} из {total} треков)"
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} из {total}, {cached} кэшировано)"
 
@@ -5317,6 +5318,21 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Перетащите, чтобы изменить порядок"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Основные блоки"
+
+#, fuzzy
+#~| msgid "{stage} ({count} of {total} tracks)"
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{stage} ({count} из {total} треков)"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 кбит/с"
@@ -6258,9 +6274,6 @@ msgstr "Добро пожаловать в программу установки
 #~ msgstr ""
 #~ "Здесь появятся интеллектуальные плейлисты после заполнения "
 #~ "предустановленного набора."
-
-#~ msgid "Spacious"
-#~ msgstr "Просторный"
 
 #~ msgid ""
 #~ "Stop playback reporting, external lyrics, external metadata, "

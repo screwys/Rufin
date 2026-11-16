@@ -805,6 +805,9 @@ msgstr "Bitrate"
 msgid "Bitstream"
 msgstr "Bitstream"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Blau"
 
@@ -1590,11 +1593,6 @@ msgstr "Zum Sortieren ziehen"
 msgid "Drag to reorder"
 msgstr "Zum Sortieren ziehen"
 
-#, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Zum Sortieren ziehen"
-
 msgid "Duplicate preset"
 msgstr "Voreinstellung duplizieren"
 
@@ -2126,11 +2124,6 @@ msgstr "Zum Sortieren ziehen"
 msgid "Home Profile"
 msgstr "Home-Profil"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Startseiten-Bereiche"
-
 msgid "Home"
 msgstr "Übersicht"
 
@@ -2233,6 +2226,11 @@ msgstr "Element ist nicht mehr verfügbar"
 #| msgid "Context Menus"
 msgid "Item menus"
 msgstr "Kontextmenüs"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "Element-ID"
 
 msgid "January {year}"
 msgstr "Januar {year}"
@@ -3070,6 +3068,11 @@ msgid "One path per line"
 msgstr "Ein Pfad pro Zeile"
 
 #, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Symbole externer Dienste auf Album- und Künstlerseiten anzeigen"
+
+#, fuzzy
 #| msgid "Lookup"
 msgid "Online Lookups"
 msgstr "Abfrage"
@@ -3184,13 +3187,15 @@ msgstr "Umriss-Balken"
 msgid "Output gain"
 msgstr "Ausgangsverstärkung"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Override server recommendations"
+msgstr "Instant Mix für Empfehlungen verwenden"
+
 msgid "Overview"
 msgstr "Übersicht"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3274,6 +3279,9 @@ msgstr "Als Nächstes wiedergeben (zufällig)"
 msgid "Play Next"
 msgstr "Als Nächstes abspielen"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Album abspielen"
 
@@ -3300,9 +3308,6 @@ msgstr "Radio als Nächstes abspielen"
 
 msgid "Play radio"
 msgstr "Radio abspielen"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "Titel abspielen"
@@ -4468,6 +4473,11 @@ msgstr "Quelle"
 msgid "Sources"
 msgstr "Quellen"
 
+#, fuzzy
+#| msgid "Spacious"
+msgid "Spacing"
+msgstr "Geräumig"
+
 msgid "Spectrum · dBFS"
 msgstr "Spektrum · dBFS"
 
@@ -4932,11 +4942,6 @@ msgstr ""
 "Bearbeitung von Metadaten verwenden"
 
 #, fuzzy
-#| msgid "Use Instant Mix for recommendations"
-msgid "Use server recommendations"
-msgstr "Instant Mix für Empfehlungen verwenden"
-
-#, fuzzy
 #| msgid "Use source setting"
 msgid "Use sort tags"
 msgstr "Quelleneinstellung verwenden"
@@ -5279,11 +5284,6 @@ msgstr[1] "{field} · Unterschiedlich in {count} Titeln"
 msgid "{minutes} min"
 msgstr ""
 
-#, fuzzy
-#| msgid "{stage} ({count} of {total} tracks)"
-msgid "{shown} of {total} shown"
-msgstr "{stage} ({count} von {total} Titeln)"
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} von {total}, {cached} zwischengespeichert)"
 
@@ -5380,6 +5380,21 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Zum Sortieren ziehen"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Startseiten-Bereiche"
+
+#, fuzzy
+#~| msgid "{stage} ({count} of {total} tracks)"
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{stage} ({count} von {total} Titeln)"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"
@@ -6168,9 +6183,6 @@ msgstr "Willkommen beim Rufin-Setup"
 #~ msgid "Smart playlists will appear here after the default set is seeded."
 #~ msgstr ""
 #~ "Smart-Playlists erscheinen hier, nachdem das Standardset generiert wurde."
-
-#~ msgid "Spacious"
-#~ msgstr "Geräumig"
 
 #~ msgid "Subsonic / OpenSubsonic"
 #~ msgstr "Subsonic / OpenSubsonic"

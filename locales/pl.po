@@ -681,6 +681,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr ""
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr ""
 
@@ -1429,9 +1432,6 @@ msgstr ""
 msgid "Drag to reorder"
 msgstr ""
 
-msgid "Drag to reorder."
-msgstr ""
-
 msgid "Duplicate preset"
 msgstr ""
 
@@ -1942,9 +1942,6 @@ msgstr ""
 msgid "Home Profile"
 msgstr ""
 
-msgid "Home blocks"
-msgstr ""
-
 msgid "Home"
 msgstr ""
 
@@ -2033,6 +2030,9 @@ msgid "Item is no longer available"
 msgstr ""
 
 msgid "Item menus"
+msgstr ""
+
+msgid "Items"
 msgstr ""
 
 msgid "January {year}"
@@ -2805,6 +2805,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "One row shows albums and artists as cards"
+msgstr ""
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -2916,13 +2919,13 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3000,6 +3003,9 @@ msgstr ""
 msgid "Play Next"
 msgstr ""
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr ""
 
@@ -3025,9 +3031,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -4118,6 +4121,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -4544,9 +4550,6 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
-msgid "Use server recommendations"
-msgstr ""
-
 msgid "Use sort tags"
 msgstr ""
 
@@ -4864,9 +4867,6 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "{minutes} min"
-msgstr ""
-
-msgid "{shown} of {total} shown"
 msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"

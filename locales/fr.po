@@ -774,6 +774,9 @@ msgstr "Débit"
 msgid "Bitstream"
 msgstr "Flux"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Bleu"
 
@@ -1532,9 +1535,6 @@ msgstr "Glisser vers un dossier"
 msgid "Drag to reorder"
 msgstr "Glisser pour réorganiser"
 
-msgid "Drag to reorder."
-msgstr "Glisser pour réorganiser."
-
 msgid "Duplicate preset"
 msgstr "Dupliquer le préréglage"
 
@@ -2053,9 +2053,6 @@ msgstr "Maintenir pour réorganiser"
 msgid "Home Profile"
 msgstr "Profil d’accueil"
 
-msgid "Home blocks"
-msgstr "Blocs d’accueil"
-
 msgid "Home"
 msgstr "Accueil"
 
@@ -2146,6 +2143,11 @@ msgstr "L’élément n’est plus disponible"
 
 msgid "Item menus"
 msgstr "Menus des éléments"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "ID de l’élément"
 
 msgid "January {year}"
 msgstr "Janvier {year}"
@@ -2938,6 +2940,11 @@ msgstr ""
 msgid "One path per line"
 msgstr "Un chemin par ligne"
 
+#, fuzzy
+#| msgid "Service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Icônes des services sur les pages d’album et d’artiste"
+
 msgid "Online Lookups"
 msgstr "Recherches en ligne"
 
@@ -3051,14 +3058,16 @@ msgstr "Barres de contour"
 msgid "Output gain"
 msgstr "Gain de sortie"
 
+#, fuzzy
+#| msgid "Use server recommendations"
+msgid "Override server recommendations"
+msgstr "Utiliser les recommandations serveur"
+
 msgid "Overview"
 msgstr "Aperçu"
 
 msgid "Page links"
 msgstr "Liens des pages"
-
-msgid "Pages"
-msgstr "Pages"
 
 msgid "Parametric"
 msgstr "Paramétrique"
@@ -3137,6 +3146,9 @@ msgstr "Lire ensuite (aléatoire)"
 msgid "Play Next"
 msgstr "Lire ensuite"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Lire l’album"
 
@@ -3163,11 +3175,6 @@ msgstr "Lire la radio ensuite"
 
 msgid "Play radio"
 msgstr "Lire la radio"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
-"Lire les sélections du serveur ; celles de Rufin comblent le manque quand il "
-"en propose trop peu"
 
 msgid "Play track"
 msgstr "Lire le morceau"
@@ -4264,6 +4271,11 @@ msgstr "Source"
 msgid "Sources"
 msgstr "Sources"
 
+#, fuzzy
+#| msgid "Grid spacing"
+msgid "Spacing"
+msgstr "Espacement de la grille"
+
 msgid "Spectrum · dBFS"
 msgstr "Spectre · dBFS"
 
@@ -4705,9 +4717,6 @@ msgstr ""
 "Utiliser les fichiers locaux pour la lecture, les paroles et la modification "
 "des métadonnées prises en charge"
 
-msgid "Use server recommendations"
-msgstr "Utiliser les recommandations serveur"
-
 msgid "Use sort tags"
 msgstr "Utiliser les balises de tri"
 
@@ -5025,9 +5034,6 @@ msgstr[1] "{field} · Différent sur {count} morceaux"
 msgid "{minutes} min"
 msgstr "{minutes} min"
 
-msgid "{shown} of {total} shown"
-msgstr "{shown} sur {total} affichés"
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} sur {total}, {cached} en cache)"
 
@@ -5124,6 +5130,23 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "Drag to reorder."
+#~ msgstr "Glisser pour réorganiser."
+
+#~ msgid "Home blocks"
+#~ msgstr "Blocs d’accueil"
+
+#~ msgid "Pages"
+#~ msgstr "Pages"
+
+#~ msgid "Play the server's own picks; Rufin's fill in where it has too few"
+#~ msgstr ""
+#~ "Lire les sélections du serveur ; celles de Rufin comblent le manque quand "
+#~ "il en propose trop peu"
+
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{shown} sur {total} affichés"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"

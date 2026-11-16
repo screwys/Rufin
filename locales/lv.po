@@ -831,6 +831,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr "Atskaņot nejaušā secībā"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Zils"
 
@@ -1761,11 +1764,6 @@ msgid "Drag to reorder"
 msgstr "Pārvelciet, lai mainītu secību"
 
 #, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Pārvelciet, lai mainītu secību"
-
-#, fuzzy
 #| msgid "Paste preset"
 msgid "Duplicate preset"
 msgstr "Ielīmēt iepriekš iestatīto"
@@ -2356,11 +2354,6 @@ msgstr "Pārvelciet, lai mainītu secību"
 msgid "Home Profile"
 msgstr "Sākums Profils"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Sākuma bloki"
-
 msgid "Home"
 msgstr "Sākums"
 
@@ -2471,6 +2464,11 @@ msgstr "Metadatu rediģēšana vairs nav pieejama"
 #, fuzzy
 #| msgid "Context Menus"
 msgid "Item menus"
+msgstr "Konteksta izvēlnes"
+
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Items"
 msgstr "Konteksta izvēlnes"
 
 msgid "January {year}"
@@ -3374,6 +3372,11 @@ msgstr "Viena mape vienā rindā; atstājiet tukšu, lai iekļautu visu kolekcij
 msgid "One path per line"
 msgstr "Viena ceļa adrese katrā rindā"
 
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Rādīt ārējo pakalpojumu ikonas albumu un izpildītāju lapās"
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3499,13 +3502,15 @@ msgstr "Kontūru joslas"
 msgid "Output gain"
 msgstr ""
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Override server recommendations"
+msgstr "Izmantot funkciju Instant Mix”, lai saņemtu ieteikumus"
+
 msgid "Overview"
 msgstr "Pārskats"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3589,6 +3594,9 @@ msgstr "Atskaņot nākamo (jauktā secībā)"
 msgid "Play Next"
 msgstr "Atskaņot nākamo"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Atskaņot albumu"
 
@@ -3619,9 +3627,6 @@ msgstr "Atskaņot radio"
 
 msgid "Play radio"
 msgstr "Atskaņot radio"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "Atskaņot dziesmu"
@@ -4901,6 +4906,11 @@ msgid "Sources"
 msgstr "Avoti"
 
 #, fuzzy
+#| msgid "Spacious"
+msgid "Spacing"
+msgstr "Plašs"
+
+#, fuzzy
 #| msgid "Spectrum line"
 msgid "Spectrum · dBFS"
 msgstr "Spektra līnija"
@@ -5424,11 +5434,6 @@ msgstr ""
 "rediģēšanai"
 
 #, fuzzy
-#| msgid "Use Instant Mix for recommendations"
-msgid "Use server recommendations"
-msgstr "Izmantot funkciju Instant Mix”, lai saņemtu ieteikumus"
-
-#, fuzzy
 #| msgid "Use source setting"
 msgid "Use sort tags"
 msgstr "Izmantot avota iestatījumu"
@@ -5805,11 +5810,6 @@ msgstr ""
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"
-msgid "{shown} of {total} shown"
-msgstr "{statuss} · {posms} {pabeigts}{kopā}"
-
-#, fuzzy
-#| msgid "{status} · {stage} {completed}{total}"
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{statuss} · {posms} {pabeigts}{kopā}"
 
@@ -5910,6 +5910,21 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Pārvelciet, lai mainītu secību"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Sākuma bloki"
+
+#, fuzzy
+#~| msgid "{status} · {stage} {completed}{total}"
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{statuss} · {posms} {pabeigts}{kopā}"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"
@@ -6680,9 +6695,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgstr ""
 #~ "Viedie atskaņošanas saraksti parādīsies šeit, kad tiks pievienoti "
 #~ "noklusējuma iestatījumi."
-
-#~ msgid "Spacious"
-#~ msgstr "Plašs"
 
 #~ msgid "Subsonic / OpenSubsonic"
 #~ msgstr "Subsonic / OpenSubsonic"

@@ -766,6 +766,9 @@ msgstr "Bit hızı"
 msgid "Bitstream"
 msgstr "Bit akışı"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Mavi"
 
@@ -1521,9 +1524,6 @@ msgstr "Bir klasöre sürükleyin"
 msgid "Drag to reorder"
 msgstr "Yeniden sıralamak için sürükleyin"
 
-msgid "Drag to reorder."
-msgstr "Yeniden sıralamak için sürükleyin."
-
 msgid "Duplicate preset"
 msgstr "Ön ayarı çoğalt"
 
@@ -2038,9 +2038,6 @@ msgstr "Yeniden sıralamak için basılı tutun"
 msgid "Home Profile"
 msgstr "Ana Profil"
 
-msgid "Home blocks"
-msgstr "Ana sayfa blokları"
-
 msgid "Home"
 msgstr "Ana Sayfa"
 
@@ -2131,6 +2128,11 @@ msgstr "Öğe artık kullanılamıyor"
 
 msgid "Item menus"
 msgstr "Öğe menüleri"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "Öğe kimliği"
 
 msgid "January {year}"
 msgstr "Ocak {year}"
@@ -2913,6 +2915,11 @@ msgstr ""
 msgid "One path per line"
 msgstr "Her satırda bir yol"
 
+#, fuzzy
+#| msgid "Service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Albüm ve sanatçı sayfalarındaki hizmet simgeleri"
+
 msgid "Online Lookups"
 msgstr "Çevrimiçi Aramalar"
 
@@ -3024,14 +3031,16 @@ msgstr "Ana hat çubukları"
 msgid "Output gain"
 msgstr "Çıkış kazancı"
 
+#, fuzzy
+#| msgid "Use server recommendations"
+msgid "Override server recommendations"
+msgstr "Sunucu önerilerini kullanın"
+
 msgid "Overview"
 msgstr "Özet"
 
 msgid "Page links"
 msgstr "Sayfa bağlantıları"
-
-msgid "Pages"
-msgstr "Sayfalar"
 
 msgid "Parametric"
 msgstr "Parametrik"
@@ -3109,6 +3118,9 @@ msgstr "Sıradaki Çal (karışık)"
 msgid "Play Next"
 msgstr "Sıradaki Çal"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Albümü çal"
 
@@ -3135,11 +3147,6 @@ msgstr "Radyoyu sıradaki çal"
 
 msgid "Play radio"
 msgstr "Radyoyu çal"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
-"Sunucunun kendi seçimlerini oynayın; Rufin, sayı yetersiz olduğu yerlerde "
-"boşlukları doldursun"
 
 msgid "Play track"
 msgstr "Parçayı çal"
@@ -4231,6 +4238,11 @@ msgstr "Kaynak"
 msgid "Sources"
 msgstr "Kaynaklar"
 
+#, fuzzy
+#| msgid "Grid spacing"
+msgid "Spacing"
+msgstr "Izgara aralığı"
+
 msgid "Spectrum · dBFS"
 msgstr "Spektrum · dBFS"
 
@@ -4664,9 +4676,6 @@ msgstr ""
 "Oynatma, şarkı sözleri ve desteklenen meta veri düzenleme için yerel "
 "dosyaları kullan"
 
-msgid "Use server recommendations"
-msgstr "Sunucu önerilerini kullanın"
-
 msgid "Use sort tags"
 msgstr "Sıralama etiketlerini kullan"
 
@@ -4982,9 +4991,6 @@ msgstr[1] "{field} · parça {count} boyunca farklılıklar gösteriyor"
 msgid "{minutes} min"
 msgstr "{minutes} dk"
 
-msgid "{shown} of {total} shown"
-msgstr "{total} içinden {shown} gösteriliyor"
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({total} içinden {completed}, {cached} önbellekte)"
 
@@ -5078,6 +5084,23 @@ msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Rufin Kurulumuna Hoş Geldiniz"
+
+#~ msgid "Drag to reorder."
+#~ msgstr "Yeniden sıralamak için sürükleyin."
+
+#~ msgid "Home blocks"
+#~ msgstr "Ana sayfa blokları"
+
+#~ msgid "Pages"
+#~ msgstr "Sayfalar"
+
+#~ msgid "Play the server's own picks; Rufin's fill in where it has too few"
+#~ msgstr ""
+#~ "Sunucunun kendi seçimlerini oynayın; Rufin, sayı yetersiz olduğu yerlerde "
+#~ "boşlukları doldursun"
+
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{total} içinden {shown} gösteriliyor"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"
