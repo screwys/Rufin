@@ -799,6 +799,9 @@ msgstr "Bitikiirus"
 msgid "Bitstream"
 msgstr "Bitivoog"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Sinine"
 
@@ -1584,11 +1587,6 @@ msgstr "Järjekorra muutmiseks lohista"
 msgid "Drag to reorder"
 msgstr "Järjekorra muutmiseks lohista"
 
-#, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Järjekorra muutmiseks lohista"
-
 msgid "Duplicate preset"
 msgstr "Tee eelseadistusest koopia"
 
@@ -2115,11 +2113,6 @@ msgstr "Järjekorra muutmiseks lohista"
 msgid "Home Profile"
 msgstr "Koduprofiil"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Avalehe plokid"
-
 msgid "Home"
 msgstr "Avaleht"
 
@@ -2222,6 +2215,11 @@ msgstr "Objekt pole enam saadaval"
 #| msgid "Context Menus"
 msgid "Item menus"
 msgstr "Kontekstimenüüd"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "Objekti tunnus"
 
 msgid "January {year}"
 msgstr "Jaanuar {year}"
@@ -3049,6 +3047,11 @@ msgid "One path per line"
 msgstr "Üks asukoht rea kohta"
 
 #, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Kuva väliste teenuste ikoonid albumi ja esitaja lehtedel"
+
+#, fuzzy
 #| msgid "Lookup"
 msgid "Online Lookups"
 msgstr "Tuvastus"
@@ -3163,13 +3166,15 @@ msgstr "Kontuuriga ribad"
 msgid "Output gain"
 msgstr "Väljundi võimendustegur"
 
+#, fuzzy
+#| msgid "Use Instant Mix for recommendations"
+msgid "Override server recommendations"
+msgstr "Kasuta soovitusteks „Instant Mix“ liidestust"
+
 msgid "Overview"
 msgstr "Ülevaade"
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3253,6 +3258,9 @@ msgstr "Esita järgmisena (segatuna)"
 msgid "Play Next"
 msgstr "Esita järgmisena"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Esita albumit"
 
@@ -3279,9 +3287,6 @@ msgstr "Esita järgmiseks raadiorežiimis"
 
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
-msgstr ""
 
 msgid "Play track"
 msgstr "Esita lugu"
@@ -4444,6 +4449,11 @@ msgstr "Allikas"
 msgid "Sources"
 msgstr "Allikad"
 
+#, fuzzy
+#| msgid "Spacious"
+msgid "Spacing"
+msgstr "Ruumikas"
+
 msgid "Spectrum · dBFS"
 msgstr "Spekter · dBFS"
 
@@ -4908,11 +4918,6 @@ msgstr ""
 "metateabe muutmiseks"
 
 #, fuzzy
-#| msgid "Use Instant Mix for recommendations"
-msgid "Use server recommendations"
-msgstr "Kasuta soovitusteks „Instant Mix“ liidestust"
-
-#, fuzzy
 #| msgid "Use source setting"
 msgid "Use sort tags"
 msgstr "Kasuta allika seadistust"
@@ -5255,11 +5260,6 @@ msgstr[1] "{field} · {count} raja puhul erinev"
 msgid "{minutes} min"
 msgstr ""
 
-#, fuzzy
-#| msgid "{stage} ({count} of {total} tracks)"
-msgid "{shown} of {total} shown"
-msgstr "{stage} ({count} / {total} tracks)"
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr "{stage} ({completed} / {total}, {cached} cached)"
 
@@ -5355,6 +5355,21 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Järjekorra muutmiseks lohista"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Avalehe plokid"
+
+#, fuzzy
+#~| msgid "{stage} ({count} of {total} tracks)"
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{stage} ({count} / {total} tracks)"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"
@@ -6136,9 +6151,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #~ msgid "Smart playlists will appear here after the default set is seeded."
 #~ msgstr ""
 #~ "Nutikad esitusloendid ilmuvad siia pärast vaikimisi komplekti loomist."
-
-#~ msgid "Spacious"
-#~ msgstr "Ruumikas"
 
 #~ msgid "Subsonic / OpenSubsonic"
 #~ msgstr "Subsonic / OpenSubsonic"

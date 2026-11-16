@@ -793,6 +793,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr "Toista satunnainen"
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Sininen"
 
@@ -1724,11 +1727,6 @@ msgid "Drag to reorder"
 msgstr "Vedä järjestääksesi uudelleen"
 
 #, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Vedä järjestääksesi uudelleen"
-
-#, fuzzy
 #| msgid "Paste preset"
 msgid "Duplicate preset"
 msgstr "Liitä esiasetus"
@@ -2316,11 +2314,6 @@ msgstr "Vedä järjestääksesi uudelleen"
 msgid "Home Profile"
 msgstr "Kotiprofiili"
 
-#, fuzzy
-#| msgid "Home Blocks"
-msgid "Home blocks"
-msgstr "Kotilohkot"
-
 msgid "Home"
 msgstr "Koti"
 
@@ -2432,6 +2425,11 @@ msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
 #, fuzzy
 #| msgid "Context Menus"
 msgid "Item menus"
+msgstr "Kontekstivalikot"
+
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Items"
 msgstr "Kontekstivalikot"
 
 msgid "January {year}"
@@ -3333,6 +3331,11 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show external service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Näytä ulkoisen palvelun kuvakkeet albumi- ja esittäjäsivuilla"
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3458,13 +3461,15 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+#, fuzzy
+#| msgid "Server Actions"
+msgid "Override server recommendations"
+msgstr "Palvelimen toiminnot"
+
 msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3550,6 +3555,9 @@ msgstr "Toista seuraava"
 msgid "Play Next"
 msgstr "Toista seuraava"
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr "Toista albumi"
 
@@ -3579,9 +3587,6 @@ msgid "Play radio next"
 msgstr "Toista satunnainen (toista seuraavaksi)"
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -4893,6 +4898,9 @@ msgstr "Lähde"
 msgid "Sources"
 msgstr "Lähteet"
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -5408,11 +5416,6 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
 #, fuzzy
-#| msgid "Server Actions"
-msgid "Use server recommendations"
-msgstr "Palvelimen toiminnot"
-
-#, fuzzy
 #| msgid "Lyrics settings"
 msgid "Use sort tags"
 msgstr "Sanoitusten asetukset"
@@ -5772,9 +5775,6 @@ msgstr[1] ""
 msgid "{minutes} min"
 msgstr ""
 
-msgid "{shown} of {total} shown"
-msgstr ""
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
@@ -5871,6 +5871,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Vedä järjestääksesi uudelleen"
+
+#, fuzzy
+#~| msgid "Home Blocks"
+#~ msgid "Home blocks"
+#~ msgstr "Kotilohkot"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"

@@ -807,6 +807,9 @@ msgstr ""
 msgid "Bitstream"
 msgstr ""
 
+msgid "Blocks"
+msgstr ""
+
 msgid "Blue"
 msgstr "Blu"
 
@@ -1709,11 +1712,6 @@ msgstr "Trascina per riordinare"
 msgid "Drag to reorder"
 msgstr "Trascina per riordinare"
 
-#, fuzzy
-#| msgid "Drag to reorder"
-msgid "Drag to reorder."
-msgstr "Trascina per riordinare"
-
 msgid "Duplicate preset"
 msgstr ""
 
@@ -2256,9 +2254,6 @@ msgstr "Trascina per riordinare"
 msgid "Home Profile"
 msgstr ""
 
-msgid "Home blocks"
-msgstr ""
-
 msgid "Home"
 msgstr ""
 
@@ -2364,6 +2359,11 @@ msgstr "Artista non disponibile"
 #, fuzzy
 #| msgid "Context Menus"
 msgid "Item menus"
+msgstr "Menu Contestuali"
+
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Items"
 msgstr "Menu Contestuali"
 
 msgid "January {year}"
@@ -3186,6 +3186,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "One row shows albums and artists as cards"
+msgstr ""
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -3299,13 +3302,13 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -3385,6 +3388,9 @@ msgstr ""
 msgid "Play Next"
 msgstr ""
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr ""
 
@@ -3410,9 +3416,6 @@ msgid "Play radio next"
 msgstr ""
 
 msgid "Play radio"
-msgstr ""
-
-msgid "Play the server's own picks; Rufin's fill in where it has too few"
 msgstr ""
 
 msgid "Play track"
@@ -4576,6 +4579,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -5044,9 +5050,6 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
-msgid "Use server recommendations"
-msgstr ""
-
 #, fuzzy
 #| msgid "App settings"
 msgid "Use sort tags"
@@ -5378,9 +5381,6 @@ msgstr[1] ""
 msgid "{minutes} min"
 msgstr ""
 
-msgid "{shown} of {total} shown"
-msgstr ""
-
 msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
@@ -5463,6 +5463,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Drag to reorder"
+#~ msgid "Drag to reorder."
+#~ msgstr "Trascina per riordinare"
 
 #~ msgid "128 kbps"
 #~ msgstr "128 kbps"
