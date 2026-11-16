@@ -11,9 +11,10 @@ use crate::library::CatalogUi;
 use crate::widgets::interactions::ContextMenuOpen;
 use crate::widgets::layout::{AllocationOwner, allocation_owner, configure_fill_width_clip};
 use crate::widgets::mounted_route::MountedRoute;
-use rufin_core::settings::HomeBlockKind;
+use rufin_core::settings::layout::DisplaySize;
 use rufin_core::settings::presentation::format_duration_units;
-use rufin_core::view::{HomeItem, HomeSection, View};
+use rufin_core::settings::{HomeBlockKind, HomeSettings};
+use rufin_core::view::{HomeColumns, HomeItem, HomeSection, View};
 use std::sync::Arc;
 
 use super::collections::library_route_inset;
@@ -51,8 +52,8 @@ struct MountedHomeSection {
     adjustment: glib::WeakRef<gtk::Adjustment>,
     /// Each built entry's binding, in the order of `data`.
     cells: Rc<RefCell<Vec<HomeRowBinding>>>,
-    /// The rows each column shows; 1 for cards.
-    column_rows: usize,
+    columns: HomeColumns,
+    metrics: HomeMetrics,
 }
 
 impl MountedHomeSection {
@@ -103,9 +104,10 @@ impl MountedHomeSection {
         else {
             return;
         };
-        let (width, gap) = column_size(self.column_rows);
+        let (width, gap) = self.metrics.column(self.columns);
+        let rows = self.columns.rows;
         let data = self.data.borrow();
-        let columns = data.len().div_ceil(self.column_rows);
+        let columns = data.len().div_ceil(rows);
         // Before its first allocation the scroller shows no more than the route's width.
         let end = match adjustment.page_size() {
             page if page > 0.0 => scrolled(&adjustment, &self.row) + page,
@@ -113,21 +115,21 @@ impl MountedHomeSection {
         };
         let shown = (end / f64::from(width + gap)).ceil() as usize;
         let mut cells = self.cells.borrow_mut();
-        let built = cells.len().div_ceil(self.column_rows);
+        let built = cells.len().div_ceil(rows);
         // One column past the ones shown, so keyboard focus moving on scrolls the row to it.
         let wanted = (shown + 1).min(columns).max(built);
-        for items in data.chunks(self.column_rows).take(wanted).skip(built) {
+        for items in data.chunks(rows).take(wanted).skip(built) {
             let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
             column.set_width_request(width);
             for item in items.iter().cloned() {
                 let (cell, bind) = match item {
-                    library::Row::Album(album) if self.column_rows == 1 => {
-                        home_album_card(&shell, album)
+                    library::Row::Album(album) if self.columns.cards => {
+                        home_album_card(&shell, album, width)
                     }
-                    library::Row::Artist(artist) if self.column_rows == 1 => {
-                        home_artist_card(&shell, artist)
+                    library::Row::Artist(artist) if self.columns.cards => {
+                        home_artist_card(&shell, artist, width)
                     }
-                    item => home_row_widget(&shell, item),
+                    item => home_row_widget(&shell, item, self.metrics.row_cover),
                 };
                 cells.push(bind);
                 column.append(&cell);
@@ -181,23 +183,44 @@ impl MountedHomeSection {
     }
 }
 
-const CARD_WIDTH: i32 = 160;
-const CARD_GAP: i32 = 10;
-const ROW_COLUMN_WIDTH: i32 = 300;
-const ROW_COLUMN_GAP: i32 = 20;
-const ROW_COVER_SIZE: i32 = 52;
-
-/// The rows each column of `section` shows: two rows, or one card.
-fn column_rows(section: &HomeSection) -> usize {
-    if section.shows_rows() { 2 } else { 1 }
+/// The sizes Home's columns take from its Size and Spacing.
+#[derive(Clone, Copy, PartialEq)]
+struct HomeMetrics {
+    card_width: i32,
+    card_gap: i32,
+    row_width: i32,
+    row_gap: i32,
+    row_cover: i32,
 }
 
-/// The width of a column of `rows` rows and the gap to the next one.
-fn column_size(rows: usize) -> (i32, i32) {
-    if rows == 1 {
-        (CARD_WIDTH, CARD_GAP)
-    } else {
-        (ROW_COLUMN_WIDTH, ROW_COLUMN_GAP)
+impl HomeMetrics {
+    fn new(home: &HomeSettings) -> Self {
+        let (card_width, row_width, row_cover) = match home.size {
+            DisplaySize::Compact => (128, 260, 40),
+            DisplaySize::Default => (160, 300, 52),
+            DisplaySize::Large => (200, 340, 64),
+        };
+        let (card_gap, row_gap) = match home.spacing {
+            DisplaySize::Compact => (4, 12),
+            DisplaySize::Default => (10, 20),
+            DisplaySize::Large => (18, 28),
+        };
+        Self {
+            card_width,
+            card_gap,
+            row_width,
+            row_gap,
+            row_cover,
+        }
+    }
+
+    /// The width of a column of `columns` and the gap to the next one.
+    fn column(&self, columns: HomeColumns) -> (i32, i32) {
+        if columns.cards {
+            (self.card_width, self.card_gap)
+        } else {
+            (self.row_width, self.row_gap)
+        }
     }
 }
 
@@ -604,6 +627,8 @@ impl HomeRouteProjection {
             return;
         };
         let sections = view.home_sections().unwrap_or_default();
+        let home = view.home_settings().clone();
+        let metrics = HomeMetrics::new(&home);
         self.view.replace(view);
         let mut previous = self.shown.take();
         let mut shown = Vec::with_capacity(sections.len());
@@ -622,7 +647,8 @@ impl HomeRouteProjection {
                 }
                 (Some(ShownHomeSection::Rows(view)), section)
                     if !matches!(section, HomeSection::Showcase(_))
-                        && view.mounted.column_rows == column_rows(&section) =>
+                        && view.mounted.columns == section.columns(&home)
+                        && view.mounted.metrics == metrics =>
                 {
                     if let HomeSection::Provider(provider) = &section {
                         view.header.set_title(&home_provider_title(provider));
@@ -634,7 +660,8 @@ impl HomeRouteProjection {
                     if let Some(kept) = kept {
                         self.content.remove(kept.root());
                     }
-                    let next = self.build(&shell, id.clone(), section);
+                    let columns = section.columns(&home);
+                    let next = self.build(&shell, id.clone(), section, columns, metrics);
                     self.content.append(next.root());
                     next
                 }
@@ -661,12 +688,13 @@ impl HomeRouteProjection {
         shell: &Rc<CatalogUi>,
         id: HomeSectionId,
         section: HomeSection,
+        columns: HomeColumns,
+        metrics: HomeMetrics,
     ) -> ShownHomeSection {
         if let HomeSection::Showcase(showcase) = section {
             return ShownHomeSection::Showcase(HomeShowcaseView::new(shell, *showcase));
         }
-        let view =
-            shell.home_section_view(&section.title(), home_rows(&section), column_rows(&section));
+        let view = shell.home_section_view(&section.title(), home_rows(&section), columns, metrics);
         for (button, shuffled) in [(view.header.play(), false), (view.header.shuffle(), true)] {
             let shell = Rc::downgrade(shell);
             let shown = Rc::downgrade(&self.shown);
@@ -776,7 +804,8 @@ impl CatalogUi {
         self: &Rc<Self>,
         title: &str,
         items: Vec<library::Row>,
-        rows: usize,
+        columns: HomeColumns,
+        metrics: HomeMetrics,
     ) -> HomeSectionView {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
@@ -784,7 +813,7 @@ impl CatalogUi {
         header.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         section.append(&header);
 
-        let (width, gap) = column_size(rows);
+        let (width, gap) = metrics.column(columns);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, gap);
         row.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         row.set_margin_end(COLLECTION_GRID_CARD_MARGIN);
@@ -803,7 +832,8 @@ impl CatalogUi {
             rest: gtk::Box::new(gtk::Orientation::Horizontal, 0),
             adjustment: adjustment.downgrade(),
             cells: Rc::new(RefCell::new(Vec::new())),
-            column_rows: rows,
+            columns,
+            metrics,
         };
         mounted.render();
         // The row builds as far as it shows; ‹ › scroll it and rest at its ends.
@@ -918,10 +948,11 @@ fn home_showcase_page(
 fn home_album_card(
     shell: &Rc<CatalogUi>,
     album: library::AlbumRow,
+    width: i32,
 ) -> (gtk::Widget, HomeRowBinding) {
     let cell = AlbumGridCell::new(shell, &rufin_core::settings::layout::HOME_ALBUM_FIELDS);
     cell.enable_card_activation();
-    cell.set_cover_size(CARD_WIDTH);
+    cell.set_cover_size(width);
     cell.bind(0, album);
     let widget = cell.widget();
     (
@@ -937,10 +968,11 @@ fn home_album_card(
 fn home_artist_card(
     shell: &Rc<CatalogUi>,
     artist: library::ArtistRow,
+    width: i32,
 ) -> (gtk::Widget, HomeRowBinding) {
     let cell = ArtistGridCell::new(shell, &rufin_core::settings::layout::HOME_ARTIST_FIELDS);
     cell.enable_card_activation();
-    cell.set_cover_size(CARD_WIDTH);
+    cell.set_cover_size(width);
     cell.bind(0, artist);
     let widget = cell.widget();
     (
@@ -956,7 +988,11 @@ fn home_artist_card(
 /// A row of a Home column: the cover, the title and, under it, Home's fields of the row or a
 /// genre's album count. A click opens its page and a double click plays it, as on the sidebar's
 /// Saved rows, whose play controls it shows on hover.
-fn home_row_widget(shell: &Rc<CatalogUi>, row: library::Row) -> (gtk::Widget, HomeRowBinding) {
+fn home_row_widget(
+    shell: &Rc<CatalogUi>,
+    row: library::Row,
+    cover_size: i32,
+) -> (gtk::Widget, HomeRowBinding) {
     let widget = gtk::Overlay::new();
     widget.add_css_class("home-row");
     widget.add_css_class(CONTEXT_MENU_HOVER_OWNER_CLASS);
@@ -964,8 +1000,8 @@ fn home_row_widget(shell: &Rc<CatalogUi>, row: library::Row) -> (gtk::Widget, Ho
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let cover = shell.artwork.cover_group_projection_for_artwork(
         &[],
-        ROW_COVER_SIZE,
-        ROW_COVER_SIZE,
+        cover_size,
+        cover_size,
         matches!(row, library::Row::Tag(_)),
     );
     content.append(&cover.widget());

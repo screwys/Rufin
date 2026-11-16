@@ -40,6 +40,7 @@ pub mod swipe;
 pub mod feedback;
 
 pub mod media_drag;
+pub mod reorder;
 
 pub mod forms;
 

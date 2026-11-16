@@ -366,27 +366,30 @@ private fun HomeContent(
                             ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
                         }
                     }
-                    // Genres wrap as chips, track blocks page through columns of two rows, and the rest
-                    // are cards.
-                    // Tracks and genres page through columns of two rows; a genre row opens the genre, a
-                    // track row its menu, as Home's cards do.
-                    if (section.kind == AndroidHomeSectionKind.GENRES || section.kind == AndroidHomeSectionKind.TRACKS) LazyRow(
+                    // Core says how a block's columns show: the rows each stacks, or one card. A genre row
+                    // opens the genre, any other its menu, as Home's cards do. Home's Size and Spacing set
+                    // the widths and gaps.
+                    if (!section.cards) LazyRow(
                         modifier = Modifier.nestedScroll(sectionScroll),
-                        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(when (section.spacing) { DisplaySize.COMPACT -> 8.dp; DisplaySize.LARGE -> 24.dp; else -> 16.dp })) {
                         val genres = section.kind == AndroidHomeSectionKind.GENRES
-                        items(section.items.chunked(2), key = { column -> browseItemKey(column.first()) }) { column ->
-                            Column(Modifier.width(300.dp)) {
+                        val cover = when (section.size) { DisplaySize.COMPACT -> 44.dp; DisplaySize.LARGE -> 64.dp; else -> 56.dp }
+                        items(section.items.chunked(section.columnRows), key = { column -> browseItemKey(column.first()) }) { column ->
+                            Column(Modifier.width(when (section.size) { DisplaySize.COMPACT -> 260.dp; DisplaySize.LARGE -> 340.dp; else -> 300.dp })) {
                                 column.forEach { item ->
                                     if (genres) HomeRow(item, player, { onActivate(item) }, onMenu,
-                                        item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "))
-                                    else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle)
+                                        item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "), cover)
+                                    else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle, cover)
                                 }
                             }
                         }
                     } else LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
-                        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(when (section.spacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp })) {
+                        val width = when (section.size) { DisplaySize.COMPACT -> 120.dp; DisplaySize.LARGE -> 180.dp; else -> 150.dp }
                         items(section.items, key = ::browseItemKey) { item ->
-                            CoverCard(item, player, Modifier.width(150.dp), onMenu, onMenu, oneLine = true)
+                            CoverCard(item, player, Modifier.width(width), onMenu, onMenu, oneLine = true)
                         }
                     }
                 }
@@ -418,15 +421,15 @@ private fun PaneRow(item: BrowseItem, player: PlayerConnection, onActivate: (Bro
     }
 }
 
-/** A row in a Home block (a track or a genre): cover, title and its line, and ⋯ for its menu. */
+/** A row in a Home block: cover, title and its line, and ⋯ for its menu. */
 @Composable
 private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    line: String) {
+    line: String, cover: Dp) {
     val shown = favoriteItem(player.model, item)
-    val artwork = rememberBrowseArtwork(item, player, 56.dp)
-    Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
+    val artwork = rememberBrowseArtwork(item, player, cover)
+    Row(Modifier.fillMaxWidth().height(cover + 16.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        BrowseCover(item, artwork, Modifier.size(56.dp).clip(CoverShape))
+        BrowseCover(item, artwork, Modifier.size(cover).clip(CoverShape))
         Column(Modifier.weight(1f)) {
             BrowseTitle(shown, maxLines = 1, style = MaterialTheme.typography.bodyLarge, player = player, showDownloadBadge = false)
             if (line.isNotBlank()) Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis,

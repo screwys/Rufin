@@ -274,6 +274,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     #[serde(default)]
     home_blocks: Vec<HomeBlockKind> = default_home_blocks();
     #[serde(default)]
+    home: super::sidebar::HomeSettings = super::sidebar::HomeSettings::default();
+    #[serde(default)]
     context_menu: ContextMenuSettings = ContextMenuSettings::default() => set_context_menu;
     #[serde(default)]
     activity_overview: ActivityOverviewSettings = ActivityOverviewSettings::default();
@@ -522,6 +524,7 @@ impl Settings {
             self.window_height = None;
         }
         sanitize_home_blocks(&mut self.application.home_blocks);
+        self.application.home.sanitize();
         sanitize_downloads(&mut self.downloads);
     }
 
