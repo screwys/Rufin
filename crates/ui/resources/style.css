@@ -2226,6 +2226,11 @@ button.download-queue-pause image {
   font-size: 26px;
 }
 
+/* The header as a strip, above the list of a page that scrolled it away. */
+.detail-strip .detail-title {
+  font-size: 20px;
+}
+
 .detail-showcase-large .detail-artist {
   font-size: 17px;
 }

@@ -135,6 +135,10 @@ impl TrackListProjection {
         self.collection.scrolling_widget()
     }
 
+    pub fn scroll_parts(&self) -> (gtk::ScrolledWindow, gtk::Widget) {
+        self.collection.scroll_parts()
+    }
+
     pub fn item_navigation(&self) -> crate::widgets::mounted_route::MountedRouteItemNavigation {
         self.collection.item_navigation()
     }

@@ -184,7 +184,7 @@ impl CatalogUi {
         wrapper.append(&track_stack);
 
         GroupedDetailView {
-            root: wrapper.upcast(),
+            root: showcase_view.scrolling_page(&wrapper, track_projection.scroll_parts()),
             tracks: track_projection,
             toolbar,
             showcase: showcase_view,

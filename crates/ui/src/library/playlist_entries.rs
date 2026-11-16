@@ -56,6 +56,10 @@ pub struct PlaylistEntriesView {
 }
 
 impl PlaylistEntriesView {
+    pub fn scroll_parts(&self) -> (gtk::ScrolledWindow, gtk::Widget) {
+        self.collection.scroll_parts()
+    }
+
     pub fn play(
         &self,
         queue: &rufin_core::playback::PlaybackOwner,
