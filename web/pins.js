@@ -14,14 +14,7 @@ import {
   coverGroup,
   releaseCovers,
 } from "./ui.js";
-import {
-  bindDrag,
-  acceptsMedia,
-  acceptsPin,
-  draggedMedia,
-  mediaSelection,
-  playlistMedia,
-} from "./drag.js";
+import { bindDrag, draggedMedia, mediaSelection, playlistMedia, playlistMember } from "./drag.js";
 
 let pins = [];
 let items = [];
@@ -43,6 +36,19 @@ function pinAction(pin) {
 
 function move(moved, target) {
   return api("/pins", "PATCH", { moved, target });
+}
+
+function samePin(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Whether the pinned `item` takes what this page drags: any pin moves among the pins, a playlist
+// core says takes tracks takes them, and a playlist folder takes playlists.
+function takes(item, media) {
+  if (media.pin) return true;
+  if (item.kind === "playlist") return Boolean(item.takes_tracks && (media.page || media.uris));
+  if (item.kind === "playlist-folder") return Boolean(playlistMember(media));
+  return false;
 }
 
 // A station has no page: it plays.
@@ -125,11 +131,8 @@ function render() {
       pin: item.pin,
     }));
     row.addEventListener("dragover", (event) => {
-      if (
-        !acceptsPin(event) &&
-        !(item.kind === "playlist" && acceptsMedia(event))
-      )
-        return;
+      const media = draggedMedia();
+      if (!media || !takes(item, media)) return;
       event.preventDefault();
       row.classList.add("pin-drop");
     });
@@ -140,20 +143,19 @@ function render() {
         .forEach((node) => node.classList.remove("pin-drop"));
     });
     row.addEventListener("drop", (event) => {
-      if (
-        !acceptsPin(event) &&
-        !(item.kind === "playlist" && acceptsMedia(event))
-      )
-        return;
+      const media = draggedMedia();
+      if (!media || !takes(item, media)) return;
       event.preventDefault();
       event.stopPropagation();
       row.classList.remove("pin-drop");
-      const payload = draggedMedia();
       run(async () => {
-        const media = await payload;
         if (media.pin) await move(media.pin, item.pin);
-        else if (item.kind === "playlist" && (media.page || media.uris)) await playlistMedia(item.id, media);
-        else await addPin(media, item.pin);
+        else if (item.kind === "playlist") await playlistMedia(item.id, media);
+        else
+          await api("/playlist-folders/members", "POST", {
+            folder: item.id,
+            members: [playlistMember(media)],
+          });
       });
     });
     list.append(row);
@@ -174,29 +176,59 @@ function render() {
   markPins();
 }
 
-async function addPin(media, target) {
-  const pin = media.row.pin;
-  if (!pin) return;
-  await api("/pins", "POST", { pin, pinned: true });
-  if (target) await move(pin, target);
+// While this page's drag is over the sidebar, as on GTK: the drop area for a collection no pin
+// keeps yet, and the pins that cannot take the drag dimmed.
+function showDropFeedback(media) {
+  const pin = media.row?.pin;
+  $("pin-new").classList.toggle(
+    "open",
+    Boolean(visible && !media.pin && pin && !pins.some((shown) => samePin(shown, pin))),
+  );
+  for (const [index, row] of [...$("pin-list").children].entries())
+    row.classList.toggle("drop-unavailable", !takes(items[index], media));
+}
+
+function clearDropFeedback() {
+  $("pin-new").classList.remove("open", "pin-drop");
+  for (const row of $("pin-list").children) row.classList.remove("drop-unavailable", "pin-drop");
 }
 
 function initPins() {
+  const navigation = $("navigation");
+  navigation.addEventListener("dragenter", () => {
+    const media = draggedMedia();
+    if (media) showDropFeedback(media);
+  });
+  navigation.addEventListener("dragleave", (event) => {
+    if (!navigation.contains(event.relatedTarget)) clearDropFeedback();
+  });
+  document.addEventListener("dragend", clearDropFeedback);
+  document.addEventListener("drop", clearDropFeedback);
   const section = $("pins");
   section.addEventListener("dragover", (event) => {
-    if (!acceptsPin(event)) return;
-    event.preventDefault();
+    if (draggedMedia()?.pin) event.preventDefault();
   });
   section.addEventListener("drop", (event) => {
-    if (!acceptsPin(event)) return;
+    const moved = draggedMedia()?.pin;
+    if (!moved) return;
     event.preventDefault();
-    const payload = draggedMedia();
-    run(async () => {
-      const media = await payload;
-      if (media.pin && pins.length)
-        await move(media.pin, pins[pins.length - 1]);
-      else await addPin(media);
-    });
+    if (pins.length) run(() => move(moved, pins[pins.length - 1]));
+  });
+  const area = $("pin-new");
+  area.addEventListener("dragover", (event) => {
+    if (!area.classList.contains("open")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    area.classList.add("pin-drop");
+  });
+  area.addEventListener("dragleave", () => area.classList.remove("pin-drop"));
+  area.addEventListener("drop", (event) => {
+    if (!area.classList.contains("open")) return;
+    const pin = draggedMedia()?.row?.pin;
+    event.preventDefault();
+    event.stopPropagation();
+    clearDropFeedback();
+    if (pin) run(() => api("/pins", "POST", { pin, pinned: true, first: true }));
   });
 }
 

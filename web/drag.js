@@ -2,7 +2,6 @@ import { api } from "./connection.js";
 import { el, icon } from "./ui.js";
 
 const mediaType = "application/x-rufin-media";
-const pinType = "application/x-rufin-collection";
 // Playlists and smart playlists, which a folder or another playlist takes.
 const playlistType = "application/x-rufin-playlists";
 let current = null;
@@ -14,13 +13,12 @@ function mediaSelection(kind, row) {
   return { kind, row, ...(row.play ? { page: row.play } : row.uri ? { uris: [row.uri] } : {}) };
 }
 
-function bindDrag(node, read, pinnable = true) {
+function bindDrag(node, read) {
   node.draggable = true;
   node.addEventListener("dragstart", (event) => {
     const media = read();
-    current = Promise.resolve(media);
+    current = media;
     if (media.page || media.uris) event.dataTransfer.setData(mediaType, "");
-    if (pinnable) event.dataTransfer.setData(pinType, "");
     if (playlistMember(media)) event.dataTransfer.setData(playlistType, "");
     event.dataTransfer.effectAllowed = "copyMove";
     preview?.remove();
@@ -53,11 +51,9 @@ function acceptsMedia(event) {
   return event.dataTransfer.types.includes(mediaType);
 }
 
+// What this page drags; null for a drag from elsewhere.
 function draggedMedia() {
   return current;
-}
-function acceptsPin(event) {
-  return event.dataTransfer.types.includes(pinType);
 }
 
 function acceptsPlaylists(event) {
@@ -90,7 +86,6 @@ function playlistMedia(id, media) {
 export {
   bindDrag,
   acceptsMedia,
-  acceptsPin,
   acceptsPlaylists,
   playlistMember,
   draggedMedia,

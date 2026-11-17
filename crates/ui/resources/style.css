@@ -1229,6 +1229,31 @@ gridview.album-grid {
   opacity: 0.72;
 }
 
+/* Where a new pin drops while a drag is over the sidebar; the pins that cannot take it are
+   insensitive and fade as libadwaita fades them. */
+.sidebar-new-pin-area {
+  margin: 0 8px;
+  /* A pin row's height: its button's 4px padding around the cover, less this border. */
+  padding: 3px;
+  border: 1px dashed color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 9px;
+}
+
+.sidebar-new-pin-area.compact {
+  margin: 0 6px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.sidebar-new-pin-area image {
+  opacity: 0.62;
+}
+
+.sidebar-pin-activate,
+.compact-sidebar-pin-activate {
+  transition: filter 200ms ease-out;
+}
+
 .sidebar-pin-row.playing .sidebar-pin-title {
   color: var(--accent-color);
 }
