@@ -58,7 +58,10 @@ internal class ConnectConnection(private val model: RufinConnection) {
                             if (!next.connecting && next.error == null) operationActive = false
                             val offer = next.continuation?.device
                             if (offer != null && offer != offered) model.showFeedback(
-                                translate("Continue from {device}").replace("{device}", next.continuation!!.name))
+                                translate("Continue from {device}").replace("{device}", next.continuation!!.name),
+                                action = RufinConnection.FeedbackAction(translate("Continue")) {
+                                    action(ConnectAction.Continue(offer))
+                                })
                             offered = offer
                             state = next
                         }
