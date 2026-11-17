@@ -82,15 +82,19 @@ fn kind_tiles(carousel: &adw::Carousel) -> (Vec<(MixKind, gtk::ToggleButton)>, V
             let glyph = gtk::Image::from_icon_name(&choice.icon);
             glyph.set_pixel_size(20);
             content.append(&glyph);
-            content.append(
-                &gtk::Label::builder()
-                    .label(tr(&choice.title))
-                    .wrap(true)
-                    .lines(2)
-                    .ellipsize(gtk::pango::EllipsizeMode::End)
-                    .justify(gtk::Justification::Center)
-                    .build(),
-            );
+            let title = gtk::Label::builder()
+                .label(tr(&choice.title))
+                .wrap(true)
+                .lines(2)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .justify(gtk::Justification::Center)
+                .build();
+            // Two lines tall whatever its width: the carousel measures its pages before it gives
+            // them their width, so a tile's height must not follow it.
+            title.connect_realize(|title| {
+                title.set_size_request(-1, title.create_pango_layout(Some("\n")).pixel_size().1);
+            });
+            content.append(&title);
             let tile = gtk::ToggleButton::builder()
                 .child(&content)
                 .css_classes(["mix-kind", "mix-glyph"])

@@ -1528,10 +1528,7 @@ dialog.alert.playlist-delete-dialog .message-area {
   color: var(--accent-fg-color);
 }
 
-/* Tall enough for a glyph over a name of two lines, so a tile's height doesn't follow its
-   width; the carousel measures its pages before it gives them their width. */
 .mix-glyph {
-  min-height: 55px;
   padding: 6px 4px;
 }
 
