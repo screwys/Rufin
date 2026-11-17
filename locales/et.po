@@ -1302,6 +1302,11 @@ msgstr "API võtmed"
 msgid "Create a playlist from queue"
 msgstr "Koosta esitusloend esitusjärjekorrast"
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "Create a playlist"
+msgstr "Koosta esitusloend"
+
 msgid "Create playlist"
 msgstr "Koosta esitusloend"
 
@@ -1848,6 +1853,11 @@ msgstr "Lemmik"
 msgid "Favorites and ratings"
 msgstr "Lemmiklood ja hinnangud"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Lemmikud"
+
 msgid "Favorites"
 msgstr "Lemmikud"
 
@@ -1970,6 +1980,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Unusta allikas"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Lemmikute uuendamine ei õnnestunud"
 
 msgid "Format not supported"
 msgstr "Vorming pole toetatud"
@@ -2666,6 +2681,9 @@ msgstr "Esita järgmisena"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr "Režiim"
 
@@ -2704,6 +2722,11 @@ msgstr "Enim vahele jäetud"
 
 msgid "Most played"
 msgstr "Enimesitatud"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Enim vahele jäetud"
 
 msgid "Motion"
 msgstr "Liikumine"
@@ -2836,6 +2859,11 @@ msgstr "Uus esitusloend"
 
 msgid "New Smart Playlist"
 msgstr "Uus nutikas esitusloend"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Esitamata"
 
 msgid "New download rule"
 msgstr "Uus allalaadimisreegel"
@@ -3057,6 +3085,11 @@ msgstr "Väljas"
 
 msgid "Offline"
 msgstr "Pole võrgus"
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Korda"
 
 msgid "On"
 msgstr "Sees"
@@ -3524,6 +3557,9 @@ msgstr "Lisatud esitusjärjekorda"
 msgid "Quick Connect"
 msgstr "Kiirühendus"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Välju Rufinist"
 
@@ -3579,6 +3615,11 @@ msgstr "Salvestis"
 
 msgid "Red"
 msgstr "Punane"
+
+#, fuzzy
+#| msgid "Nearby discovery"
+msgid "Rediscover"
+msgstr "Tuvastamine lähedusest"
 
 msgid "Redo"
 msgstr "Korda tegevust"
@@ -4720,6 +4761,9 @@ msgstr "Siia esitusloendisse saab lisada vaid lugusid allikast {source}"
 msgid "This source cannot edit this field"
 msgstr "Sellest allikast ei saa antud välja muuta"
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr "Järgnevaga eemaldad seadistatud oleku. Kas soovid jätkata?"
 
@@ -4751,6 +4795,11 @@ msgid "Top artists"
 msgstr "Populaarsemad esitajad"
 
 msgid "Top genres"
+msgstr "Populaarsemad žanrid"
+
+#, fuzzy
+#| msgid "Top genres"
+msgid "Top rated"
 msgstr "Populaarsemad žanrid"
 
 msgid "Top tracks"

@@ -1397,6 +1397,11 @@ msgstr "Cancella Playlist"
 
 #, fuzzy
 #| msgid "Delete Playlist"
+msgid "Create a playlist"
+msgstr "Cancella Playlist"
+
+#, fuzzy
+#| msgid "Delete Playlist"
 msgid "Create playlist"
 msgstr "Cancella Playlist"
 
@@ -1977,6 +1982,11 @@ msgstr ""
 msgid "Favorites and ratings"
 msgstr ""
 
+#, fuzzy
+#| msgid "Add to Favorites"
+msgid "Favorites only"
+msgstr "Aggiungi ai Preferiti"
+
 msgid "Favorites"
 msgstr ""
 
@@ -2107,6 +2117,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr ""
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Non è stato possibile aggiornare i preferiti"
 
 msgid "Format not supported"
 msgstr ""
@@ -2800,6 +2815,9 @@ msgstr ""
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2837,6 +2855,9 @@ msgid "Most Skipped"
 msgstr ""
 
 msgid "Most played"
+msgstr ""
+
+msgid "Most skipped"
 msgstr ""
 
 #, fuzzy
@@ -2965,6 +2986,9 @@ msgid "New Playlist"
 msgstr ""
 
 msgid "New Smart Playlist"
+msgstr ""
+
+msgid "New and unplayed"
 msgstr ""
 
 msgid "New download rule"
@@ -3192,6 +3216,9 @@ msgid "Off"
 msgstr ""
 
 msgid "Offline"
+msgstr ""
+
+msgid "On repeat"
 msgstr ""
 
 msgid "On"
@@ -3644,6 +3671,9 @@ msgstr ""
 msgid "Quick Connect"
 msgstr ""
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr ""
 
@@ -3700,6 +3730,9 @@ msgid "Recording"
 msgstr "Scaricando"
 
 msgid "Red"
+msgstr ""
+
+msgid "Rediscover"
 msgstr ""
 
 msgid "Redo"
@@ -4832,6 +4865,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -4869,6 +4905,11 @@ msgstr "Artisti dell'album"
 #, fuzzy
 #| msgid "Any genre"
 msgid "Top genres"
+msgstr "Qualunque genere"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top rated"
 msgstr "Qualunque genere"
 
 #, fuzzy

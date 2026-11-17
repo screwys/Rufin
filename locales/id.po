@@ -1303,6 +1303,11 @@ msgstr "Kunci API"
 msgid "Create a playlist from queue"
 msgstr "Buat playlist dari antrean"
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "Create a playlist"
+msgstr "Buat playlist"
+
 msgid "Create playlist"
 msgstr "Buat playlist"
 
@@ -1858,6 +1863,11 @@ msgstr "Favorit"
 msgid "Favorites and ratings"
 msgstr "Favorit dan penilaian"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Favorit"
+
 msgid "Favorites"
 msgstr "Favorit"
 
@@ -1981,6 +1991,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Lupakan Sumber"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Tidak dapat memperbarui favorit"
 
 msgid "Format not supported"
 msgstr "Format tidak didukung"
@@ -2675,6 +2690,11 @@ msgstr "Campurkan (putar selanjutnya)"
 msgid "Mix"
 msgstr "Campur"
 
+#, fuzzy
+#| msgid "Remixes"
+msgid "Mixes"
+msgstr "Remix"
+
 msgid "Mode"
 msgstr "Mode"
 
@@ -2714,6 +2734,11 @@ msgstr "Paling Sering Dilewati"
 
 msgid "Most played"
 msgstr "Paling sering diputar"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Paling Sering Dilewati"
 
 msgid "Motion"
 msgstr "Gerakan"
@@ -2843,6 +2868,11 @@ msgstr "Playlist Baru"
 
 msgid "New Smart Playlist"
 msgstr "Playlist Pintar Baru"
+
+#, fuzzy
+#| msgid "Ever played"
+msgid "New and unplayed"
+msgstr "Pernah diputar"
 
 msgid "New download rule"
 msgstr "Aturan unduhan baru"
@@ -3058,6 +3088,11 @@ msgstr "Mati"
 #, fuzzy
 msgid "Offline"
 msgstr "Offline"
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Ulangi"
 
 msgid "On"
 msgstr "Nyala"
@@ -3515,6 +3550,9 @@ msgstr "Dalam antrean"
 msgid "Quick Connect"
 msgstr "Koneksi Cepat"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Keluar dari Rufin"
 
@@ -3570,6 +3608,11 @@ msgstr "Rekaman"
 
 msgid "Red"
 msgstr "Merah"
+
+#, fuzzy
+#| msgid "Nearby discovery"
+msgid "Rediscover"
+msgstr "Deteksi perangkat sekitar"
 
 msgid "Redo"
 msgstr "Ulangi"
@@ -4667,6 +4710,11 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "This time last year"
+msgstr "Selesaikan lagu terakhir"
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -4699,6 +4747,11 @@ msgstr ""
 
 msgid "Top genres"
 msgstr ""
+
+#, fuzzy
+#| msgid "Sample rate"
+msgid "Top rated"
+msgstr "Laju sampel"
 
 msgid "Top tracks"
 msgstr ""
