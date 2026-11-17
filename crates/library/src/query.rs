@@ -21,6 +21,12 @@ pub enum Collection {
         key: SmartPlaylistKey,
         now: i64,
     },
+    /// These tracks of a source in this order, as a Quick mix page lists what its next press
+    /// plays.
+    Tracks {
+        source: SourceKey,
+        keys: Arc<[TrackKey]>,
+    },
     History {
         source: Option<SourceId>,
     },

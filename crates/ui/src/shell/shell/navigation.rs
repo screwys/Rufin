@@ -167,6 +167,7 @@ impl Shell {
         }
         if previous.application.home_blocks != current.application.home_blocks
             || previous.application.home != current.application.home
+            || previous.application.quick_mix != current.application.quick_mix
         {
             self.refresh_mounted_home();
         }

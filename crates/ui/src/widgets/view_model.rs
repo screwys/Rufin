@@ -1090,6 +1090,15 @@ impl Rows<Row> {
         })
     }
 
+    /// Everything the page lists, in the order and filter it shows.
+    pub fn whole_selection(&self) -> Option<crate::widgets::selection::TrackSelectionSnapshot> {
+        let view = self.view()?;
+        Some(crate::widgets::selection::TrackSelectionSnapshot {
+            input: view.selection()?,
+            count: view.len(),
+        })
+    }
+
     /// Plays row `index` as core's row rule decides: on a page through [`View::play`], else
     /// what [`PlayTarget::of_row`] plays outside a page.
     ///

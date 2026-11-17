@@ -19,11 +19,13 @@ use std::sync::Arc;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, home_album_cover_projection,
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, ShowcaseSubject,
+    home_album_cover_projection,
 };
 use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, MediaPlayingBinding, ReusableCollectionGridCell,
 };
+use super::playlist_detail::smart_artwork;
 use crate::library::home_layout::home_section_header;
 use crate::menus::media_menus::present_row_menu;
 
@@ -265,6 +267,7 @@ struct HomeSectionView {
 #[derive(Clone, PartialEq)]
 enum HomeSectionId {
     Showcase,
+    QuickMix,
     Genres,
     Rows(HomeBlockKind),
     Provider(String),
@@ -273,17 +276,19 @@ enum HomeSectionId {
 fn home_section_id(section: &HomeSection) -> HomeSectionId {
     match section {
         HomeSection::Showcase(_) => HomeSectionId::Showcase,
+        HomeSection::QuickMix(_) => HomeSectionId::QuickMix,
         HomeSection::Genres(_) => HomeSectionId::Genres,
         HomeSection::Rows { block, .. } => HomeSectionId::Rows(*block),
         HomeSection::Provider(provider) => HomeSectionId::Provider(provider.section_id.clone()),
     }
 }
 
-/// A shown Home section: a page of items, or the showcase.
+/// A shown Home section: a page of items, the showcase or Quick mix.
 #[derive(Clone)]
 enum ShownHomeSection {
     Rows(HomeSectionView),
     Showcase(HomeShowcaseView),
+    QuickMix(QuickMixView),
 }
 
 impl ShownHomeSection {
@@ -291,8 +296,174 @@ impl ShownHomeSection {
         match self {
             Self::Rows(view) => &view.root,
             Self::Showcase(view) => &view.0.root,
+            Self::QuickMix(view) => view.0.grid.upcast_ref(),
         }
     }
+}
+
+/// Home's Quick mix: a tile for each entry that matches something, which opens its page; its
+/// Play plays it.
+#[derive(Clone)]
+struct QuickMixView(Rc<QuickMixState>);
+
+struct QuickMixState {
+    shell: std::rc::Weak<CatalogUi>,
+    grid: gtk::FlowBox,
+    /// The covers' size and the gap between tiles.
+    metrics: HomeMetrics,
+    /// The tiles in the grid's order.
+    tiles: RefCell<Vec<QuickMixTileView>>,
+}
+
+struct QuickMixTileView {
+    tile: gtk::FlowBoxChild,
+    covers: crate::widgets::artwork::CoverGroupProjection,
+    glyph: gtk::Image,
+    title: gtk::Label,
+    tracks: gtk::Label,
+    /// The entry it shows.
+    shown: Rc<RefCell<Option<rufin_core::view::QuickMixTile>>>,
+}
+
+impl QuickMixView {
+    fn new(
+        shell: &Rc<CatalogUi>,
+        tiles: Vec<rufin_core::view::QuickMixTile>,
+        metrics: HomeMetrics,
+    ) -> Self {
+        let resource = "routes/home_quick_mix.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, { grid: gtk::FlowBox });
+        grid.set_row_spacing(metrics.card_gap as u32);
+        grid.set_column_spacing(metrics.card_gap as u32);
+        let view = Self(Rc::new(QuickMixState {
+            shell: Rc::downgrade(shell),
+            grid,
+            metrics,
+            tiles: RefCell::new(Vec::new()),
+        }));
+        let state = Rc::downgrade(&view.0);
+        view.0.grid.connect_child_activated(move |_, tile| {
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            let entry = state
+                .tiles
+                .borrow()
+                .iter()
+                .find(|shown| shown.tile == *tile)
+                .and_then(|shown| Some(shown.shown.borrow().as_ref()?.entry));
+            if let (Some(entry), Some(shell)) = (entry, state.shell.upgrade()) {
+                shell.open_route(Route::QuickMix(entry));
+            }
+        });
+        view.show(tiles);
+        view
+    }
+
+    /// Shows `tiles`: the tiles shown take them in place when there are as many.
+    fn show(&self, tiles: Vec<rufin_core::view::QuickMixTile>) {
+        let state = &self.0;
+        let Some(shell) = state.shell.upgrade() else {
+            return;
+        };
+        if state.tiles.borrow().len() != tiles.len() {
+            state.grid.remove_all();
+            let cover = state.metrics.row_cover;
+            let built = tiles
+                .iter()
+                .map(|_| {
+                    let resource = "routes/home_quick_mix_tile.ui";
+                    let builder = crate::ui_resource::builder(resource);
+                    crate::objects!(builder, resource, {
+                        tile: gtk::FlowBoxChild,
+                        covers: gtk::Overlay,
+                        play: gtk::Button,
+                        glyph: gtk::Image,
+                        title: gtk::Label,
+                        tracks: gtk::Label,
+                    });
+                    let projection =
+                        shell
+                            .artwork
+                            .cover_group_projection_for_artwork(&[], cover, cover, false);
+                    covers.set_child(Some(&projection.widget()));
+                    let shown = Rc::new(RefCell::new(None::<rufin_core::view::QuickMixTile>));
+                    let (play_shell, play_shown) = (Rc::downgrade(&shell), Rc::clone(&shown));
+                    play.connect_clicked(move |_| {
+                        let entry = play_shown.borrow().as_ref().map(|tile| tile.entry);
+                        if let (Some(shell), Some(entry)) = (play_shell.upgrade(), entry) {
+                            crate::shell::player::mix::play_quick_mix(
+                                shell.shell(),
+                                entry,
+                                QueuePlacement::Now,
+                            );
+                        }
+                    });
+                    let (menu_shell, menu_shown) = (Rc::downgrade(&shell), Rc::clone(&shown));
+                    install_context_menu_openers(
+                        &tile,
+                        Rc::new(move |target, position| {
+                            if let (Some(shell), Some(tile)) =
+                                (menu_shell.upgrade(), menu_shown.borrow().clone())
+                            {
+                                present_quick_mix_tile_menu(&shell, tile, target, position);
+                            }
+                        }),
+                    );
+                    state.grid.append(&tile);
+                    QuickMixTileView {
+                        tile,
+                        covers: projection,
+                        glyph,
+                        title,
+                        tracks,
+                        shown,
+                    }
+                })
+                .collect();
+            state.tiles.replace(built);
+        }
+        for (shown, tile) in state.tiles.borrow().iter().zip(tiles) {
+            shown.glyph.set_icon_name(Some(&tile.icon));
+            shown.title.set_text(&tile.title);
+            shown
+                .tracks
+                .set_text(&track_count_text(u64::from(tile.tracks)));
+            shown
+                .covers
+                .replace(&shell.artwork, &smart_artwork(&tile.artwork_binding));
+            shown.shown.replace(Some(tile));
+        }
+    }
+}
+
+/// A Quick mix tile's menu, core's Quick mix menu: it plays the entry as its Play does, and
+/// makes a playlist of and downloads what its page lists.
+fn present_quick_mix_tile_menu(
+    shell: &Rc<CatalogUi>,
+    tile: rufin_core::view::QuickMixTile,
+    target: &gtk::Widget,
+    position: Option<(f64, f64)>,
+) {
+    let menu =
+        rufin_core::menu::quick_mix(&shell.settings.current.borrow(), tile.first_track, None);
+    let media = MediaDragSource::capture_target(PlayTarget::Route(Route::QuickMix(tile.entry)));
+    let (play_shell, entry) = (Rc::downgrade(shell.shell()), tile.entry);
+    // It is shuffled already: a shuffled play plays it as it is.
+    let play: crate::menus::media_menus::CollectionPlay = Rc::new(move |placement, _| {
+        if let Some(shell) = play_shell.upgrade() {
+            crate::shell::player::mix::play_quick_mix(&shell, entry, placement);
+        }
+    });
+    crate::menus::media_menus::present_quick_mix_menu(
+        target,
+        shell.shell(),
+        &menu,
+        (tile.title, media),
+        play,
+        position,
+    );
 }
 
 /// Home's showcase: one header at a time, sliding to the album before or after it.
@@ -645,6 +816,12 @@ impl HomeRouteProjection {
                     view.show(*showcase);
                     ShownHomeSection::Showcase(view)
                 }
+                (Some(ShownHomeSection::QuickMix(view)), HomeSection::QuickMix(tiles))
+                    if view.0.metrics == metrics =>
+                {
+                    view.show(tiles);
+                    ShownHomeSection::QuickMix(view)
+                }
                 (Some(ShownHomeSection::Rows(view)), section)
                     if !matches!(section, HomeSection::Showcase(_))
                         && view.mounted.columns == section.columns(&home)
@@ -691,9 +868,15 @@ impl HomeRouteProjection {
         columns: HomeColumns,
         metrics: HomeMetrics,
     ) -> ShownHomeSection {
-        if let HomeSection::Showcase(showcase) = section {
-            return ShownHomeSection::Showcase(HomeShowcaseView::new(shell, *showcase));
-        }
+        let section = match section {
+            HomeSection::Showcase(showcase) => {
+                return ShownHomeSection::Showcase(HomeShowcaseView::new(shell, *showcase));
+            }
+            HomeSection::QuickMix(tiles) => {
+                return ShownHomeSection::QuickMix(QuickMixView::new(shell, tiles, metrics));
+            }
+            section => section,
+        };
         let view = shell.home_section_view(&section.title(), home_rows(&section), columns, metrics);
         for (button, shuffled) in [(view.header.play(), false), (view.header.shuffle(), true)] {
             let shell = Rc::downgrade(shell);
@@ -725,7 +908,7 @@ impl HomeRouteProjection {
             .iter()
             .filter_map(|(_, shown)| match shown {
                 ShownHomeSection::Rows(view) => Some(view.clone()),
-                ShownHomeSection::Showcase(_) => None,
+                ShownHomeSection::Showcase(_) | ShownHomeSection::QuickMix(_) => None,
             })
             .collect()
     }
@@ -931,7 +1114,7 @@ fn home_showcase_page(
     });
     let widget = view.mount(
         shell,
-        library::Row::Album(album),
+        ShowcaseSubject::Row(library::Row::Album(album)),
         ShowcaseMount {
             shape: ShowcaseShape::Home,
             initial_width: width,

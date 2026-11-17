@@ -183,9 +183,62 @@ function showCustomization(preferences) {
   })), (entry, change) => save(change.source
     ? { operation: "home_block", block: change.source, target: entry.key, after: change.after }
     : { operation: "home_block", block: entry.key, ...change }));
+  showQuickMix(preferences.quick_mix);
   for (const node of document.querySelectorAll("[data-menu-item]"))
     node.setAttribute("aria-pressed", String(values["/context_menu/items"]?.find((entry) => entry.item === node.dataset.menuItem)?.visible ?? true));
   document.querySelector("[data-menu-rating]").setAttribute("aria-pressed", String(values["/context_menu/rating_visible"] !== false));
+}
+
+// Quick mix in one container, as GTK's: its entries as chips in their Home order, each with a
+// filled check that drops it, dragged to reorder; the templates not in it after them, faded,
+// each with + that appends it; and the smart playlists, + copying one's rules. At six entries
+// every + is insensitive.
+function showQuickMix(editor) {
+  const chip = (choice) => {
+    const node = el("span", "quick-mix-chip");
+    node.classList.toggle("added", choice.added);
+    node.append(icon(choice.icon));
+    if (choice.added && choice.entry !== undefined) {
+      const handle = icon("rufin-list-drag-handle-symbolic");
+      handle.classList.add("quick-mix-handle");
+      node.append(handle);
+    }
+    node.append(el("span", "quick-mix-chip-title", choice.title));
+    const toggle = el("button", "icon-button");
+    toggle.type = "button";
+    const title = tr(choice.added ? "Remove" : "Add");
+    toggle.title = title;
+    toggle.setAttribute("aria-label", `${title}: ${choice.title}`);
+    toggle.disabled = !choice.added && !editor.can_add;
+    toggle.append(icon(choice.added ? "rufin-object-select-symbolic" : "rufin-list-add-symbolic"));
+    const { entry, template, playlist } = choice;
+    toggle.onclick = () => save({ operation: "quick_mix", entry, template, playlist });
+    node.append(toggle);
+    return node;
+  };
+  const choices = el("div", "quick-mix-chips");
+  const entries = new Map();
+  const movable = (node) => entries.has(node);
+  for (const choice of editor.choices) {
+    const node = chip(choice);
+    choices.append(node);
+    if (choice.entry === undefined) continue;
+    entries.set(node, choice.entry);
+    node.title = tr("Drag to reorder");
+    // The dragged entry lands before the entry that follows it, or after the one it follows.
+    node.addEventListener("pointerdown", (event) => {
+      if (event.button || event.target.closest("button")) return;
+      event.preventDefault();
+      dragToReorder(choices, node, movable, (next, previous) =>
+        save({ operation: "quick_mix", entry: choice.entry, target: entries.get(next ?? previous), after: !next }));
+    });
+  }
+  const playlists = el("div", "quick-mix-chips");
+  playlists.append(...editor.playlists.map(chip));
+  const parts = [choices];
+  if (editor.playlists.length)
+    parts.push(el("h5", "quick-mix-heading", tr("Smart playlists")), playlists);
+  $("pref-quick-mix").replaceChildren(...parts);
 }
 
 // A shown Home block's own choices, under its row: how many items it lists and the rows its
@@ -269,52 +322,73 @@ function listRows(host, entries, edit) {
       handle.addEventListener("pointerdown", (event) => {
         if (!movable(row) || event.button) return;
         event.preventDefault();
-        row.classList.add("reorder-dragging");
-        const start = [...host.children];
-        const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-        const drag = (event) => {
-          const over = [...host.children].find((other) => {
-            const rect = other.getBoundingClientRect();
-            return other !== row && movable(other) && event.clientY >= rect.top && event.clientY < rect.bottom;
-          });
-          if (!over) return;
-          // The row takes the other's place once the pointer is past its middle, so rows of
-          // different heights do not trade places back and forth.
-          const rect = over.getBoundingClientRect();
-          const below = Boolean(row.compareDocumentPosition(over) & Node.DOCUMENT_POSITION_FOLLOWING);
-          if (below !== event.clientY > rect.top + rect.height / 2) return;
-          const tops = new Map([...host.children].map((other) => [other, other.getBoundingClientRect().top]));
-          host.insertBefore(row, below ? over.nextSibling : over);
-          if (calm) return;
-          for (const [other, top] of tops) {
-            const moved = top - other.getBoundingClientRect().top;
-            if (other !== row && moved)
-              other.animate([{ transform: `translateY(${moved}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
-          }
-        };
-        const end = (event) => {
-          removeEventListener("pointermove", drag);
-          removeEventListener("pointerup", end);
-          removeEventListener("pointercancel", end);
-          row.classList.remove("reorder-dragging");
-          const order = [...host.children];
-          if (order.every((other, index) => other === start[index])) return;
-          // The dragged row lands before the row that follows it, or after the one it follows.
-          const place = order.indexOf(row);
-          const next = order[place + 1];
-          const previous = order[place - 1];
-          if (event.type === "pointerup" && next && movable(next)) edit(byRow.get(next), { source: entry.key, after: false });
-          else if (event.type === "pointerup" && previous && movable(previous)) edit(byRow.get(previous), { source: entry.key, after: true });
-          else host.replaceChildren(...start);
-        };
-        // The window hears the drag: a row that changes place would let go of a captured pointer.
-        addEventListener("pointermove", drag);
-        addEventListener("pointerup", end);
-        addEventListener("pointercancel", end);
+        // The dragged row lands before the row that follows it, or after the one it follows.
+        dragToReorder(host, row, movable, (next, previous) =>
+          next ? edit(byRow.get(next), { source: entry.key, after: false })
+            : edit(byRow.get(previous), { source: entry.key, after: true }));
       });
       return row;
     }),
   );
+}
+
+// Drags `item` among the children of `host` that are `movable`; the ones it passes make way,
+// as GTK's reorder rows do, across a line it shares with them or along the list. Let go in a
+// new place, `drop` takes the movable items now after and before it; elsewhere, or cancelled,
+// everything goes back.
+function dragToReorder(host, item, movable, drop) {
+  item.classList.add("reorder-dragging");
+  const start = [...host.children];
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const drag = (event) => {
+    // The movable item nearest the pointer, so the gaps between them and the space past the
+    // ends keep it moving.
+    const distance = (other) => {
+      const rect = other.getBoundingClientRect();
+      const x = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
+      const y = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
+      return x * x + y * y;
+    };
+    const over = [...host.children].filter((other) => other !== item && movable(other))
+      .reduce((nearest, other) => (!nearest || distance(other) < distance(nearest) ? other : nearest), null);
+    if (!over) return;
+    // It takes the other's place once the pointer is past its middle, so items of different
+    // sizes do not trade places back and forth.
+    const rect = over.getBoundingClientRect();
+    const own = item.getBoundingClientRect();
+    const after = Boolean(item.compareDocumentPosition(over) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const past = Math.abs(own.top - rect.top) < 1
+      ? event.clientX > rect.left + rect.width / 2
+      : event.clientY > rect.top + rect.height / 2;
+    if (after !== past) return;
+    const boxes = new Map([...host.children].map((other) => [other, other.getBoundingClientRect()]));
+    host.insertBefore(item, after ? over.nextSibling : over);
+    if (calm) return;
+    for (const [other, box] of boxes) {
+      const now = other.getBoundingClientRect();
+      const [x, y] = [box.left - now.left, box.top - now.top];
+      if (other !== item && (x || y))
+        other.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
+    }
+  };
+  const end = (event) => {
+    removeEventListener("pointermove", drag);
+    removeEventListener("pointerup", end);
+    removeEventListener("pointercancel", end);
+    item.classList.remove("reorder-dragging");
+    const order = [...host.children];
+    if (order.every((other, index) => other === start[index])) return;
+    const place = order.indexOf(item);
+    const next = order[place + 1];
+    const previous = order[place - 1];
+    if (event.type === "pointerup" && ((next && movable(next)) || (previous && movable(previous))))
+      drop(next && movable(next) ? next : null, previous);
+    else host.replaceChildren(...start);
+  };
+  // The window hears the drag: an item that changes place would let go of a captured pointer.
+  addEventListener("pointermove", drag);
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
 }
 
 function save(edit) {

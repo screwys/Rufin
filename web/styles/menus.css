@@ -150,6 +150,11 @@ input[role="switch"]:checked {
 input[role="switch"]:checked::before {
   transform: translateX(16px);
 }
+/* A switch fixed by another choice, dimmed as a disabled button is. */
+input[role="switch"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 /* Linked toggle buttons, as GTK's segmented choices. */
 .segmented {
   display: flex;

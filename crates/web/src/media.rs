@@ -260,9 +260,13 @@ async fn mix_settings(
         .map_err(internal)?
         .map(|row| json!({"id":row.key,"name":row.name}));
     let total = boolean(&parameters, "total")?.then_some(total as i64);
+    let kinds = rufin_core::mix::mix_kinds()
+        .into_iter()
+        .map(|choice| json!({"kind":choice.kind,"title":localization::tr(&choice.title),"icon":choice.icon,"favorites":choice.favorites}))
+        .collect::<Vec<_>>();
     Ok(json_response(
         StatusCode::OK,
-        json!({"total":total,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
+        json!({"total":total,"settings":settings,"kinds":kinds,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.name})).collect::<Vec<_>>()}),
     ))
 }
 
@@ -279,19 +283,16 @@ async fn mix(
         max_year: Option<u16>,
         genre: Option<library::GenreKey>,
         #[serde(default)]
-        played: library::PlayedFilter,
+        played: library::MixKind,
+        #[serde(default)]
+        favorites: bool,
         #[serde(default)]
         albums: bool,
         mode: String,
     }
     let input: Input = body(request).await?;
     let selected = mix_library(&products, &input.source, input.folder.as_deref()).await?;
-    let placement = match input.mode.as_str() {
-        "replace" => rufin_core::playback::QueuePlacement::Now,
-        "next" => rufin_core::playback::QueuePlacement::Next,
-        "append" => rufin_core::playback::QueuePlacement::Last,
-        _ => return Err(bad_request("Queue mode must be replace, append or next")),
-    };
+    let placement = mix_placement(&input.mode)?;
     // The selection is saved as the dialogs of the other clients save theirs; the count of the
     // unit it does not play stays as saved.
     let genre = match input.genre {
@@ -308,9 +309,9 @@ async fn mix(
         None => None,
     };
     let settings = products.settings.clone();
-    tokio::task::spawn_blocking(move || {
+    let mix = tokio::task::spawn_blocking(move || {
         let saved = settings.mix_preferences();
-        settings.set_mix_preferences(rufin_core::settings::MixSettings {
+        let mix = rufin_core::settings::MixSettings {
             albums: input.albums,
             limit: if input.albums {
                 saved.limit
@@ -325,23 +326,17 @@ async fn mix(
             min_year: input.min_year,
             max_year: input.max_year,
             genre,
-            played_filter: input.played,
-        })
+            kind: input.played,
+            favorites: input.favorites,
+        };
+        settings.set_mix_preferences(mix)
     })
     .await
     .map_err(internal)?
     .map_err(internal)?;
-    let request = rufin_core::playback::MixRequest {
-        placement,
-        requested: input.count.min(500),
-        criteria: library::MixCriteria {
-            min_year: input.min_year.map(i64::from),
-            max_year: input.max_year.map(i64::from),
-            genre: input.genre,
-            played: input.played,
-            albums: input.albums,
-        },
-    };
+    let request = rufin_core::mix::mix_request(&products.library, &mix, &selected, placement)
+        .await
+        .map_err(bad_request)?;
     let empty =
         rufin_core::mix::queue_mix(&products.library, &selected, request, &products.playback)
             .await
@@ -594,4 +589,14 @@ async fn artwork(
         .header("cache-control", "private, max-age=300")
         .body(Body::from(bytes))
         .expect("image headers"))
+}
+
+/// Where a mix's `mode` (replace, next or append) queues it.
+pub(super) fn mix_placement(mode: &str) -> Result<rufin_core::playback::QueuePlacement, Error> {
+    Ok(match mode {
+        "replace" => rufin_core::playback::QueuePlacement::Now,
+        "next" => rufin_core::playback::QueuePlacement::Next,
+        "append" => rufin_core::playback::QueuePlacement::Last,
+        _ => return Err(bad_request("Queue mode must be replace, append or next")),
+    })
 }

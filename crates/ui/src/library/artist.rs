@@ -17,7 +17,7 @@ use rufin_core::view::Opened;
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
     DetailShowcaseView, MediaCoverProjection, ShowcaseCover, ShowcaseMount, ShowcaseShape,
-    media_cover_projection,
+    ShowcaseSubject, media_cover_projection,
 };
 use super::routes::SearchableTrackOptions;
 use crate::library::route_layout::PRIMARY_ROUTE_MARGIN_START;
@@ -554,7 +554,7 @@ fn artist_detail_header_restored(
     ));
     let root = showcase.mount(
         shell,
-        library::Row::Artist(artist.row.clone()),
+        ShowcaseSubject::Row(library::Row::Artist(artist.row.clone())),
         ShowcaseMount {
             shape: ShowcaseShape::Detail,
             initial_width: width,

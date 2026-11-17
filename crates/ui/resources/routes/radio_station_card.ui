@@ -51,7 +51,7 @@
                     <property name="tooltip-text" translatable="yes">Drag to reorder</property>
                     <property name="valign">center</property>
                     <property name="cursor"><object class="GdkCursor"><property name="name">grab</property></object></property>
-                    <style><class name="station-card-drag"/></style>
+                    <style><class name="station-card-drag"/><class name="reorder-handle"/></style>
                   </object>
                 </child>
                 <child>

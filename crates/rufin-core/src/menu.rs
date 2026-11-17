@@ -17,6 +17,8 @@ pub struct Menu {
     pub play: bool,
     pub radio: Option<RadioSeed>,
     pub add_to_playlist: bool,
+    /// Create a playlist: a new playlist of what a Quick mix lists, named after it.
+    pub create_playlist: bool,
     /// Add to or Remove from Favorites.
     pub favorite: bool,
     /// The rating stars.
@@ -184,6 +186,38 @@ pub fn pinned_station(settings: &Settings, pin: &SidebarPin) -> Menu {
     Menu {
         pinned: offered && settings.sidebar.is_pinned(pin),
         pin: offered.then(|| pin.clone()),
+        ..Menu::default()
+    }
+}
+
+/// The menu of a Quick mix entry, on its Home tile and its page: its plays, the radio of the
+/// first track it plays, a playlist of what it lists, and its downloads; `downloaded` when its
+/// page counted them, unknown on a tile. It has no Store row to edit, pin or delete.
+pub fn quick_mix(settings: &Settings, first: Option<String>, downloaded: Option<bool>) -> Menu {
+    quick_mix_offered(first, downloaded, |item| {
+        settings.application.context_menu.is_visible(item)
+    })
+}
+
+/// What a Quick mix entry offers, every entry shown: its page header's buttons, as a row's
+/// header follows [`swipes`].
+pub fn quick_mix_swipes(first: Option<String>, downloaded: Option<bool>) -> Menu {
+    quick_mix_offered(first, downloaded, |_| true)
+}
+
+fn quick_mix_offered(
+    first: Option<String>,
+    downloaded: Option<bool>,
+    shown: impl Fn(ContextMenuItem) -> bool,
+) -> Menu {
+    Menu {
+        play: shown(ContextMenuItem::Play),
+        radio: first
+            .map(RadioSeed::Track)
+            .filter(|_| shown(ContextMenuItem::PlayRadio)),
+        create_playlist: shown(ContextMenuItem::AddToPlaylist),
+        download: downloaded != Some(true) && shown(ContextMenuItem::Download),
+        remove_download: downloaded == Some(true) && shown(ContextMenuItem::Download),
         ..Menu::default()
     }
 }

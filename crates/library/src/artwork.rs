@@ -519,6 +519,21 @@ pub(crate) async fn raw_playlist_artwork_on(
         .collect())
 }
 
+/// A smart playlist's mosaic of `picks`, member URIs, as a binding; None without picks.
+pub(crate) fn mosaic_binding(
+    source_id: Option<String>,
+    object_id: String,
+    picks: Vec<String>,
+) -> Option<Vec<u8>> {
+    let mosaic = (!picks.is_empty())
+        .then(|| serde_json::to_string(&picks).ok())
+        .flatten();
+    playlist_mosaic(mosaic.as_deref(), (true, source_id, object_id))
+        .ok()
+        .flatten()
+        .and_then(|candidate| serde_json::to_vec(&[candidate]).ok())
+}
+
 /// The candidate a playlist's mosaic picks compose; None without picks.
 pub(crate) fn playlist_mosaic(
     mosaic: Option<&str>,

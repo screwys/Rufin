@@ -162,6 +162,8 @@ impl AndroidReading {
 #[derive(uniffi::Enum)]
 pub enum AndroidHomeSectionKind {
     Showcase,
+    /// Quick mix's tiles, with no header.
+    QuickMix,
     /// Tracks, albums and artists.
     Rows,
     Genres,
@@ -174,12 +176,74 @@ pub struct AndroidHomeSection {
     pub title: String,
     pub kind: AndroidHomeSectionKind,
     pub rows: Vec<AndroidBrowseRow>,
+    /// Quick mix's tiles; empty for every other section.
+    pub quick_mix: Vec<AndroidQuickMixTile>,
     /// The rows each of its columns stacks, and whether a column is one card.
     pub column_rows: u32,
     pub cards: bool,
     /// Home's Size and Spacing.
     pub size: rufin_core::settings::layout::DisplaySize,
     pub spacing: rufin_core::settings::layout::DisplaySize,
+}
+
+/// A Quick mix entry as Home's tile shows it: its name and glyph, the tracks its next press
+/// plays, and the mosaic of the albums they start with, its page's picture.
+#[derive(uniffi::Record)]
+pub struct AndroidQuickMixTile {
+    /// Its place among the Quick mix entries, which a press plays and its page's route names.
+    pub entry: u32,
+    pub title: String,
+    pub icon: String,
+    pub tracks: u32,
+    pub artwork_identity: Option<Vec<u8>>,
+    /// The media URI of the first track its press plays, which its menu's radio starts from.
+    pub first_track: Option<String>,
+    /// The entry as its menu shows it.
+    pub row: AndroidBrowseRow,
+}
+
+impl From<&rufin_core::view::QuickMixTile> for AndroidQuickMixTile {
+    fn from(tile: &rufin_core::view::QuickMixTile) -> Self {
+        Self {
+            entry: tile.entry,
+            title: tile.title.clone(),
+            icon: tile.icon.clone(),
+            tracks: tile.tracks,
+            artwork_identity: tile.artwork_binding.clone(),
+            first_track: tile.first_track.clone(),
+            row: quick_mix_row(library::QuickMixRow {
+                entry: tile.entry,
+                name: tile.title.clone(),
+                definition: Default::default(),
+                track_count: i64::from(tile.tracks),
+                duration_millis: 0,
+                downloaded_count: 0,
+                artwork_binding: tile.artwork_binding.clone(),
+            }),
+        }
+    }
+}
+
+/// A Quick mix entry as a row: it shows as a smart playlist that is none of the library's. Its
+/// key is none, it opens the entry's page and pins nothing; no action takes the key, as its
+/// menu is core's Quick mix menu.
+pub(crate) fn quick_mix_row(entry: library::QuickMixRow) -> AndroidBrowseRow {
+    let route = Route::QuickMix(entry.entry);
+    let row = Row::Playlist(PlaylistListRow::SmartPlaylist(library::SmartPlaylistRow {
+        smart_playlist_key: library::SmartPlaylistKey::from_raw(0),
+        object_id: format!("quick-mix:{}", entry.entry),
+        name: entry.name,
+        definition: entry.definition,
+        position: 0,
+        track_count: entry.track_count,
+        duration_millis: entry.duration_millis,
+        downloaded_count: entry.downloaded_count,
+        artwork_binding: entry.artwork_binding,
+    }));
+    AndroidBrowseRow {
+        downloaded: row.downloaded(),
+        ..AndroidBrowseRow::opening(row, route)
+    }
 }
 
 /// What a detail page's header shows besides its row: its pictures, credited artists, label

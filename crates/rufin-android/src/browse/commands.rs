@@ -24,6 +24,27 @@ impl AndroidLibrary {
         }
     }
 
+    /// A Quick mix entry's menu, as core offers it under the saved menu settings: its radio
+    /// starts from `first_track`, and `downloaded` is whether its page counted all it lists
+    /// downloaded, unknown on its Home tile.
+    pub fn quick_mix_menu(
+        &self,
+        first_track: Option<String>,
+        downloaded: Option<bool>,
+    ) -> rufin_core::menu::Menu {
+        rufin_core::menu::quick_mix(&self.settings.load(), first_track, downloaded)
+    }
+
+    /// A Quick mix page header's buttons: its menu with every entry shown, as a row's header
+    /// follows its swipes.
+    pub fn quick_mix_swipes(
+        &self,
+        first_track: Option<String>,
+        downloaded: Option<bool>,
+    ) -> rufin_core::menu::Menu {
+        rufin_core::menu::quick_mix_swipes(first_track, downloaded)
+    }
+
     /// What a swipe on the row can do, as core's Menu offers it with every entry shown.
     pub fn swipes(&self, row: AndroidBrowseRow) -> rufin_core::menu::Menu {
         rufin_core::menu::swipes(&self.source, &self.settings.load(), &row.row)
@@ -227,17 +248,19 @@ impl AndroidLibrary {
         Ok(())
     }
 
-    /// Plays the radio the row seeds, as its menu offers it.
+    /// The radio a play of the row seeds.
+    pub fn radio_seed(&self, row: AndroidBrowseRow) -> Option<library::RadioSeed> {
+        rufin_core::menu::radio_seed(&row.row)
+    }
+
+    /// Plays the radio `seed` at `placement`, as a row's radio or its menu's offers it.
     pub fn play_radio(
         &self,
-        row: AndroidBrowseRow,
+        seed: library::RadioSeed,
         placement: rufin_core::playback::QueuePlacement,
-    ) -> Result<(), AndroidError> {
-        let seed = rufin_core::menu::radio_seed(&row.row)
-            .ok_or_else(|| error("This item has no radio action"))?;
+    ) {
         self.playback
             .play_radio(rufin_core::playback::RadioPlayRequest { seed, placement });
-        Ok(())
     }
 
     /// Plays the tracks of `selection` at `placement`, shuffled when `shuffled`.
@@ -419,6 +442,52 @@ impl AndroidLibrary {
             .map_err(error)?;
         rufin_core::mix::play_saved_mix(&self.playback, settings, placement)
             .await
+            .map_err(error)
+    }
+
+    /// The kinds Mix offers, in the order its pages show them, with their names translated.
+    pub fn mix_kinds(&self) -> Vec<rufin_core::mix::MixKindChoice> {
+        rufin_core::mix::mix_kinds()
+            .into_iter()
+            .map(|choice| rufin_core::mix::MixKindChoice {
+                title: localization::tr(&choice.title),
+                ..choice
+            })
+            .collect()
+    }
+
+    /// Plays Quick mix's entry `entry` in the selected library at `placement`. True means
+    /// nothing matched.
+    pub async fn play_quick_mix(
+        &self,
+        entry: u32,
+        placement: rufin_core::playback::QueuePlacement,
+    ) -> Result<bool, AndroidError> {
+        rufin_core::quick_mix::play_quick_mix(&self.playback, entry, placement)
+            .await
+            .map_err(error)
+    }
+
+    /// Quick mix as its editor lists it, with the user's smart playlists by name.
+    pub async fn quick_mix_editor(
+        &self,
+    ) -> Result<rufin_core::settings::quick_mix::QuickMixEditor, AndroidError> {
+        self.source
+            .quick_mix_editor()
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
+    }
+
+    /// Appends a copy of the smart playlist `object_id`'s rules and name to Quick mix. False when
+    /// it is gone or Quick mix is full.
+    pub async fn add_quick_mix_playlist(&self, object_id: String) -> Result<bool, AndroidError> {
+        self.source
+            .add_quick_mix_playlist(object_id)
+            .recv()
+            .await
+            .map_err(error)?
             .map_err(error)
     }
 

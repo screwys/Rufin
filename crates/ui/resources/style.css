@@ -918,16 +918,37 @@ row.artist-search-result button.search-preview-play {
   background-color: color-mix(in srgb, currentColor 8%, transparent);
 }
 
-.track-table row:selected,
-.album-grid > child:selected,
-.album-grid > flowboxchild:selected {
+.track-table row:selected {
   background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.track-table row:selected:hover,
+.track-table row:selected:hover {
+  background-color: color-mix(in srgb, currentColor 13%, transparent);
+}
+
+/* A selected card is outlined around its whole slot, so its cover keeps its own colors; the
+   keyboard's place among unselected cards shows as a fainter outline. */
+.album-grid > child,
+.album-grid > flowboxchild {
+  border-radius: 12px;
+}
+
+gridview.album-grid > child:selected,
+flowbox.album-grid > flowboxchild:selected {
+  background-color: transparent;
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
 .album-grid > child:selected:hover,
 .album-grid > flowboxchild:selected:hover {
-  background-color: color-mix(in srgb, currentColor 13%, transparent);
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+gridview.album-grid > child:focus-visible:not(:selected),
+flowbox.album-grid > flowboxchild:focus-visible:not(:selected) {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  outline-offset: -2px;
 }
 
 .album-grid > child.collection-grid-empty,
@@ -1507,6 +1528,18 @@ dialog.alert.playlist-delete-dialog .message-area {
   color: var(--accent-fg-color);
 }
 
+/* Tall enough for a glyph over a name of two lines, so a tile's height doesn't follow its
+   width; the carousel measures its pages before it gives them their width. */
+.mix-glyph {
+  min-height: 55px;
+  padding: 6px 4px;
+}
+
+.mix-glyph label {
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
 .home-row {
   margin: 0 -6px;
   padding: 6px;
@@ -1524,6 +1557,94 @@ dialog.alert.playlist-delete-dialog .message-area {
 .home-row:hover,
 .home-row.context-menu-hover-held {
   background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* Home's Quick mix: filled tiles, each the albums its next press starts with, its name and the
+   tracks it plays; Play shows over the albums under the pointer and the keyboard. */
+flowbox.home-quick-mix > flowboxchild {
+  padding: 6px 12px 6px 6px;
+  border-radius: 10px;
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+flowbox.home-quick-mix > flowboxchild:hover {
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+button.home-quick-mix-play {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  -gtk-icon-size: 20px;
+  color: white;
+  opacity: 0;
+  transition:
+    opacity 120ms ease-out,
+    background 120ms ease-out;
+}
+
+button.home-quick-mix-play:hover {
+  background: rgb(0 0 0 / 70%);
+}
+
+flowbox.home-quick-mix > flowboxchild:hover button.home-quick-mix-play,
+flowbox.home-quick-mix > flowboxchild:focus-visible button.home-quick-mix-play,
+button.home-quick-mix-play:focus-visible {
+  opacity: 1;
+}
+
+/* Customization › Home's Quick mix: its entries as chips, then the faded ones it could add. An
+   entry's drag handle takes its glyph's place under the pointer. */
+.quick-mix-chip {
+  min-height: 34px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.quick-mix-chip-title {
+  font-weight: 600;
+}
+
+.quick-mix-chip.faded {
+  background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.quick-mix-chip.faded .quick-mix-chip-title {
+  font-weight: 500;
+}
+
+.quick-mix-chip.faded .quick-mix-chip-glyph,
+.quick-mix-chip.faded .quick-mix-chip-title {
+  opacity: 0.5;
+}
+
+.quick-mix-chip .reorder-handle,
+.quick-mix-chip.movable:hover .quick-mix-chip-glyph,
+.quick-mix-chip.movable.reorder-dragging .quick-mix-chip-glyph {
+  opacity: 0;
+}
+
+.quick-mix-chip.movable:hover .reorder-handle,
+.quick-mix-chip.movable.reorder-dragging .reorder-handle {
+  opacity: 1;
+}
+
+.quick-mix-chip.reorder-dragging {
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
+}
+
+button.quick-mix-chip-button {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  -gtk-icon-size: 14px;
+}
+
+.quick-mix-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--window-fg-color) 62%, transparent);
 }
 
 .album-button {
@@ -3473,11 +3594,11 @@ row.reorder-dragging {
 }
 
 /* The card that is being dragged to another place. */
-.station-grid > flowboxchild.station-dragging > .station-card {
+.station-grid > flowboxchild.reorder-dragging > .station-card {
   box-shadow: inset 0 0 0 2px var(--accent-bg-color);
 }
 
-.station-grid > flowboxchild.station-dragging .station-card-manage {
+.station-grid > flowboxchild.reorder-dragging .station-card-manage {
   opacity: 1;
 }
 

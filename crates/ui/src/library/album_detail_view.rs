@@ -16,8 +16,8 @@ use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, album_external_links,
-    media_cover_projection,
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, ShowcaseSubject,
+    album_external_links, media_cover_projection,
 };
 use crate::library::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_wrapper,
@@ -105,7 +105,7 @@ impl CatalogUi {
         showcase_view.replace_external_links(album_external_links(self, &album));
         let showcase = showcase_view.mount(
             self,
-            library::Row::Album(album.row.clone()),
+            ShowcaseSubject::Row(library::Row::Album(album.row.clone())),
             ShowcaseMount {
                 shape: ShowcaseShape::Detail,
                 initial_width: inner_content_width,

@@ -53,65 +53,186 @@ pub async fn smart_playlist_match_count(
 #[derive(Clone, Debug, PartialEq)]
 pub struct SmartPlaylistTemplate {
     pub name: &'static str,
+    /// Its glyph, as Quick mix and Mix show it.
+    pub icon: &'static str,
     pub definition: library::SmartPlaylistDefinition,
 }
 
+/// The templates, listening first. Plays and last plays are a server's own on its sources and
+/// Rufin's listens on the others, so those templates fill from the start on a server and as
+/// Rufin is used on files; a listening period and skips count Rufin's listens alone.
 pub fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
     use library::{
-        SmartPlaylistCondition as C, SmartPlaylistDefinition as D, SmartPlaylistRule as R,
-        SmartPlaylistRuleField as F, SmartPlaylistRuleOperator as O, SmartPlaylistRuleValue as V,
-        SmartPlaylistSort as S,
+        SmartPlaylistActivityPeriod as P, SmartPlaylistCondition as C,
+        SmartPlaylistDefinition as D, SmartPlaylistRule as R, SmartPlaylistRuleField as F,
+        SmartPlaylistRuleOperator as O, SmartPlaylistRuleValue as V, SmartPlaylistSort as S,
     };
-    let template = |name, rule: R, sort_field, descending, limit| SmartPlaylistTemplate {
-        name,
-        definition: D {
-            conditions: vec![C::Rule(rule)],
-            sort_field,
-            descending,
-            limit,
-            ..D::default()
-        },
+    let template = |name, icon, rules: Vec<R>, activity_period, sort_field, descending, limit| {
+        SmartPlaylistTemplate {
+            name,
+            icon,
+            definition: D {
+                conditions: rules.into_iter().map(C::Rule).collect(),
+                sort_field,
+                descending,
+                activity_period,
+                limit,
+                ..D::default()
+            },
+        }
     };
     let rule = |field, operator, value| R {
         field,
         operator,
         value: Some(value),
     };
+    let days = |field, operator, days| rule(field, operator, V::Number(days));
     vec![
         template(
             localization::msgid("Most played"),
-            rule(F::PlayCount, O::Above, V::Number(0)),
+            "rufin-trophy-symbolic",
+            vec![rule(F::PlayCount, O::Above, V::Number(0))],
+            P::Lifetime,
             S::PlayCount,
             true,
             Some(100),
         ),
         template(
+            localization::msgid("On repeat"),
+            "rufin-fire-symbolic",
+            vec![rule(F::PlayCount, O::Above, V::Number(1))],
+            P::Monthly,
+            S::PlayCount,
+            true,
+            Some(50),
+        ),
+        template(
             localization::msgid("Recently played"),
-            rule(F::Played, O::Is, V::Bool(true)),
+            "rufin-history-symbolic",
+            vec![rule(F::Played, O::Is, V::Bool(true))],
+            P::Lifetime,
             S::LastPlayed,
             true,
             Some(100),
         ),
         template(
+            localization::msgid("Rediscover"),
+            "rufin-rediscover-symbolic",
+            // Played often, the longest unheard first: it fills wherever there is history,
+            // however recent all of it is.
+            vec![
+                rule(F::PlayCount, O::Above, V::Number(2)),
+                days(F::LastPlayed, O::NotInTheLast, 30),
+            ],
+            P::Lifetime,
+            S::LastPlayed,
+            false,
+            Some(100),
+        ),
+        template(
+            localization::msgid("Not played recently"),
+            "rufin-leaf-fall-symbolic",
+            vec![
+                rule(F::Played, O::Is, V::Bool(true)),
+                days(F::LastPlayed, O::NotInTheLast, 90),
+            ],
+            P::Lifetime,
+            S::Random,
+            false,
+            Some(100),
+        ),
+        // Last played a month either side of a year ago: a server keeps one last play a track.
+        template(
+            localization::msgid("This time last year"),
+            "rufin-calendar-symbolic",
+            vec![
+                days(F::LastPlayed, O::NotInTheLast, 335),
+                days(F::LastPlayed, O::InTheLast, 395),
+            ],
+            P::Lifetime,
+            S::PlayCount,
+            true,
+            Some(100),
+        ),
+        template(
+            localization::msgid("Never played"),
+            "rufin-leaf-symbolic",
+            vec![rule(F::Played, O::Is, V::Bool(false))],
+            P::Lifetime,
+            S::Title,
+            false,
+            None,
+        ),
+        template(
             localization::msgid("Recently added"),
-            rule(F::DateAdded, O::InTheLast, V::Number(30)),
+            "rufin-clock-plus-symbolic",
+            vec![days(F::DateAdded, O::InTheLast, 30)],
+            P::Lifetime,
+            S::DateAdded,
+            true,
+            None,
+        ),
+        template(
+            localization::msgid("New and unplayed"),
+            "rufin-magic-wand-symbolic",
+            vec![
+                days(F::DateAdded, O::InTheLast, 90),
+                rule(F::Played, O::Is, V::Bool(false)),
+            ],
+            P::Lifetime,
             S::DateAdded,
             true,
             None,
         ),
         template(
             localization::msgid("Favorites"),
-            rule(F::Favorite, O::Is, V::Bool(true)),
+            "rufin-heart-filled-symbolic",
+            vec![rule(F::Favorite, O::Is, V::Bool(true))],
+            P::Lifetime,
             S::Title,
             false,
             None,
         ),
+        // Never-played favorites last.
         template(
-            localization::msgid("Never played"),
-            rule(F::Played, O::Is, V::Bool(false)),
-            S::Title,
+            localization::msgid("Forgotten favorites"),
+            "rufin-forgotten-favorites-symbolic",
+            vec![
+                rule(F::Favorite, O::Is, V::Bool(true)),
+                days(F::LastPlayed, O::NotInTheLast, 30),
+            ],
+            P::Lifetime,
+            S::LastPlayed,
             false,
+            Some(100),
+        ),
+        // Ratings count half stars: three and a half stars and up.
+        template(
+            localization::msgid("Top rated"),
+            "rufin-starred-symbolic",
+            vec![rule(F::Rating, O::Above, V::Number(6))],
+            P::Lifetime,
+            S::Rating,
+            true,
             None,
+        ),
+        template(
+            localization::msgid("Most skipped"),
+            "rufin-thumbs-down-symbolic",
+            vec![rule(F::SkipCount, O::Above, V::Number(0))],
+            P::Lifetime,
+            S::SkipCount,
+            true,
+            Some(100),
+        ),
+        template(
+            localization::msgid("Random"),
+            "rufin-dice-symbolic",
+            Vec::new(),
+            P::Lifetime,
+            S::Random,
+            false,
+            Some(100),
         ),
     ]
 }

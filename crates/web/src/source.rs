@@ -8,7 +8,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             "/api/sources",
             get(list).post(add).patch(update).delete(forget),
         )
-        .route("/api/downloads", post(download))
+        .route("/api/downloads", post(download).delete(download))
         .route("/api/downloads/quality", post(download_quality))
         .route("/api/stream/quality", post(stream_quality))
         .route("/api/sources/progress", get(progress))
@@ -52,22 +52,28 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/integrations/files/edit", get(edit_file_integration))
 }
 
+/// Downloads the tracks of the media posted, or deletes their downloads.
 async fn download(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
+    let remove = request.method() == hyper::Method::DELETE;
     #[derive(Deserialize)]
     struct Input {
+        #[serde(default)]
         uris: Vec<String>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
-    products
-        .source
-        .download_selection(library::MemberSelection::Uris(input.uris.into()))
-        .recv()
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
+    let selection =
+        playlists::media_selection(&products, input.uris, input.page, input.ranges).await?;
+    let reply = if remove {
+        products.source.remove_download_selection(selection)
+    } else {
+        products.source.download_selection(selection)
+    };
+    reply.recv().await.map_err(internal)?.map_err(internal)?;
     Ok(accepted())
 }
 

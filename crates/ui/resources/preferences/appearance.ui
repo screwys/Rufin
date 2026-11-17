@@ -205,6 +205,58 @@
                     </child>
                   </object>
                 </child>
+                <child>
+                  <!-- Quick mix's entries in their Home order, then the templates, then the user's smart playlists. -->
+                  <object class="AdwPreferencesGroup" id="quick_mix_group">
+                    <property name="title" translatable="yes">Mixes</property>
+                    <property name="visible">false</property>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <style><class name="card"/></style>
+                        <child>
+                          <object class="AdwWrapBox" id="quick_mix_choices">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">8</property>
+                            <property name="margin-top">12</property>
+                            <property name="margin-bottom">12</property>
+                            <property name="margin-start">12</property>
+                            <property name="margin-end">12</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox" id="quick_mix_playlists_part">
+                            <property name="orientation">vertical</property>
+                            <property name="visible">false</property>
+                            <child>
+                              <object class="GtkSeparator" />
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Smart playlists</property>
+                                <property name="xalign">0</property>
+                                <property name="margin-top">12</property>
+                                <property name="margin-start">12</property>
+                                <property name="margin-end">12</property>
+                                <style><class name="quick-mix-heading"/></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwWrapBox" id="quick_mix_playlists">
+                                <property name="child-spacing">8</property>
+                                <property name="line-spacing">8</property>
+                                <property name="margin-top">8</property>
+                                <property name="margin-bottom">12</property>
+                                <property name="margin-start">12</property>
+                                <property name="margin-end">12</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
               </object>
             </property>
           </object>

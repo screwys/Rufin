@@ -40,21 +40,24 @@
                 </child>
               </object>
             </child>
-            <child><object class="GtkBox" id="new_public_options">
-                <property name="visible">false</property>
-                <property name="spacing">8</property>
-                <child><object class="GtkSwitch" id="new_public">
-                    <property name="valign">center</property>
-                    <accessibility><relation name="labelled-by">new_public_label</relation></accessibility>
-                  </object></child>
-                <child><object class="GtkLabel" id="new_public_label"><property name="label" translatable="yes">Public</property></object></child>
-              </object></child>
+            <!-- Public at the start when the owner offers it, Create at the end. -->
             <child><object class="GtkBox">
-                <property name="halign">end</property>
                 <property name="spacing">8</property>
-                <property name="margin-top">6</property>
-                <child><object class="GtkButton" id="new_cancel"><property name="label" translatable="yes">Cancel</property></object></child>
-                <child><object class="GtkButton" id="new_create"><property name="label" translatable="yes">Create</property><style><class name="suggested-action"/></style></object></child>
+                <child><object class="GtkBox" id="new_public_options">
+                    <property name="visible">false</property>
+                    <property name="spacing">8</property>
+                    <child><object class="GtkSwitch" id="new_public">
+                        <property name="valign">center</property>
+                        <accessibility><relation name="labelled-by">new_public_label</relation></accessibility>
+                      </object></child>
+                    <child><object class="GtkLabel" id="new_public_label"><property name="label" translatable="yes">Public</property></object></child>
+                  </object></child>
+                <child><object class="GtkButton" id="new_create">
+                    <property name="label" translatable="yes">Create</property>
+                    <property name="hexpand">true</property>
+                    <property name="halign">end</property>
+                    <style><class name="suggested-action"/></style>
+                  </object></child>
               </object></child>
           </object>
         </property>

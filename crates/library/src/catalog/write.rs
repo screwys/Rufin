@@ -389,14 +389,14 @@ impl ShowsState for crate::Header {
         match self {
             Self::Album(album) => album.row.state(change),
             Self::Artist(artist) => artist.row.state(change),
-            Self::Playlist(_) | Self::Smart(_) | Self::Tag(_) => None,
+            Self::Playlist(_) | Self::Smart(_) | Self::QuickMix(_) | Self::Tag(_) => None,
         }
     }
     fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         match self {
             Self::Album(album) => album.row.state_mut(change),
             Self::Artist(artist) => artist.row.state_mut(change),
-            Self::Playlist(_) | Self::Smart(_) | Self::Tag(_) => None,
+            Self::Playlist(_) | Self::Smart(_) | Self::QuickMix(_) | Self::Tag(_) => None,
         }
     }
     fn downloads(&self) -> Option<crate::Downloads> {
@@ -405,6 +405,9 @@ impl ShowsState for crate::Header {
             Self::Artist(artist) => artist.row.downloads(),
             Self::Playlist(playlist) => playlist.downloads(),
             Self::Smart(smart) => smart.downloads(),
+            Self::QuickMix(row) => {
+                Some(crate::Downloads::QuickMix(row.entry, row.downloaded_count))
+            }
             Self::Tag(tag) => tag.downloads(),
         }
     }
@@ -414,6 +417,10 @@ impl ShowsState for crate::Header {
             Self::Artist(artist) => artist.row.show_downloads(read),
             Self::Playlist(playlist) => playlist.show_downloads(read),
             Self::Smart(smart) => smart.show_downloads(read),
+            Self::QuickMix(row) => {
+                matches!(read, crate::Downloads::QuickMix(entry, count) if entry == row.entry
+                    && show(&mut row.downloaded_count, count))
+            }
             Self::Tag(tag) => tag.show_downloads(read),
         }
     }

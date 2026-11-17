@@ -1,5 +1,5 @@
 use library::{
-    LibraryField, MixCriteria, PlayedFilter, RadioSeed, ReadCancellation, SearchRequest,
+    LibraryField, MixCriteria, RadioSeed, ReadCancellation, SearchRequest,
     SmartPlaylistActivityPeriod, SmartPlaylistCondition, SmartPlaylistDefinition,
     SmartPlaylistMatch, SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
     SmartPlaylistRuleValue, SmartPlaylistSort,
@@ -796,6 +796,8 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             0,
             0,
             &library::HomeBlockKind::all(),
+            &[],
+            &[],
             &cancel,
         )
         .await
@@ -856,6 +858,8 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
                     library::HomeBlockKind::MostPlayed,
                     library::HomeBlockKind::RecentlyPlayed,
                 ],
+                &[],
+                &[],
                 &cancel,
             )
             .await
@@ -908,7 +912,16 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
     let cancel = ReadCancellation::new();
     let all = fixture
         .catalog
-        .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &HomeBlockKind::all(),
+            &[],
+            &[],
+            &cancel,
+        )
         .await
         .unwrap();
     assert!(all.showcase.is_some());
@@ -919,15 +932,56 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
     assert!(!all.recently_released.albums.is_empty());
     assert!(!all.genres.is_empty());
 
+    // A Quick mix entry shows what its press plays: as many tracks, under its page's mosaic.
+    let everything = library::SmartPlaylistDefinition::default();
+    let quick_mix = fixture
+        .catalog
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &[HomeBlockKind::QuickMix],
+            std::slice::from_ref(&everything),
+            &[7],
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .quick_mix;
+    let [face] = &quick_mix[..] else {
+        panic!("one Quick mix entry: {quick_mix:?}");
+    };
+    let pressed = fixture
+        .catalog
+        .quick_mix_press(None, &everything, 7, 0, &cancel)
+        .await
+        .unwrap();
+    // The page's header draws the mosaic of the tracks the press starts with.
+    let library::Header::QuickMix(header) =
+        fixture
+            .catalog
+            .quick_mix_header(0, "Random".into(), everything.clone(), &pressed, None)
+    else {
+        panic!("a Quick mix header");
+    };
+    assert_eq!(header.track_count as usize, pressed.tracks.len());
+    assert!(header.artwork_binding.is_some(), "the header has a mosaic");
+    assert_eq!(face.tracks as usize, pressed.tracks.len());
+    // Home's tile draws the same mosaic, so the page finds it composed.
+    assert_eq!(face.artwork_binding, header.artwork_binding);
+
     for block in HomeBlockKind::all() {
         let selected = fixture
             .catalog
-            .home_page(fixture.source, None, 0, 0, &[block], &cancel)
+            .home_page(fixture.source, None, 0, 0, &[block], &[], &[], &cancel)
             .await
             .unwrap();
         let mut expected = HomePage::default();
         match block {
             HomeBlockKind::Showcase => expected.showcase = all.showcase.clone(),
+            // No entries were asked for.
+            HomeBlockKind::QuickMix => {}
             HomeBlockKind::Explore => expected.explore = all.explore.clone(),
             HomeBlockKind::MostPlayed => {
                 expected.most_played = all.most_played.clone();
@@ -948,7 +1002,7 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
     assert_eq!(
         fixture
             .catalog
-            .home_page(fixture.source, None, 0, 0, &[], &cancel)
+            .home_page(fixture.source, None, 0, 0, &[], &[], &[], &cancel)
             .await
             .unwrap(),
         HomePage::default()
@@ -964,7 +1018,16 @@ async fn home_reads_only_enabled_blocks_and_server_sections_leave_only_the_showc
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let served = fixture
         .catalog
-        .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &HomeBlockKind::all(),
+            &[],
+            &[],
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(served.showcase, all.showcase);
@@ -3446,6 +3509,8 @@ async fn home_search_and_radio_results_stay_bounded() {
             0,
             0,
             &library::HomeBlockKind::all(),
+            &[],
+            &[],
             &cancel,
         )
         .await
@@ -3477,6 +3542,8 @@ async fn home_search_and_radio_results_stay_bounded() {
             0,
             2,
             &library::HomeBlockKind::all(),
+            &[],
+            &[],
             &cancel,
         )
         .await
@@ -3535,6 +3602,8 @@ async fn home_search_and_radio_results_stay_bounded() {
             0,
             0,
             &library::HomeBlockKind::all(),
+            &[],
+            &[],
             &cancel,
         )
         .await
@@ -3558,6 +3627,8 @@ async fn home_search_and_radio_results_stay_bounded() {
                 0,
                 0,
                 &library::HomeBlockKind::all(),
+                &[],
+                &[],
                 &cancel
             )
             .await
@@ -3578,6 +3649,8 @@ async fn home_search_and_radio_results_stay_bounded() {
                 0,
                 0,
                 &library::HomeBlockKind::all(),
+                &[],
+                &[],
                 &cancel
             )
             .await
@@ -3587,16 +3660,34 @@ async fn home_search_and_radio_results_stay_bounded() {
         1
     );
 
+    let genre = super::support::tag(&fixture.catalog, library::Item::Genre(fixture.genre))
+        .await
+        .expect("the genre");
     let criteria = MixCriteria {
-        min_year: Some(2020),
-        max_year: Some(2030),
-        genre: Some(fixture.genre),
-        played: PlayedFilter::All,
+        definition: library::SmartPlaylistDefinition {
+            conditions: vec![
+                library::SmartPlaylistCondition::Rule(library::SmartPlaylistRule {
+                    field: library::SmartPlaylistRuleField::Year,
+                    operator: library::SmartPlaylistRuleOperator::Between,
+                    value: Some(library::SmartPlaylistRuleValue::NumberRange {
+                        min: 2020,
+                        max: 2030,
+                    }),
+                }),
+                library::SmartPlaylistCondition::Rule(library::SmartPlaylistRule {
+                    field: library::SmartPlaylistRuleField::Genre,
+                    operator: library::SmartPlaylistRuleOperator::Equals,
+                    value: Some(library::SmartPlaylistRuleValue::Text(genre.name)),
+                }),
+            ],
+            ..library::SmartPlaylistDefinition::default()
+        },
         albums: false,
+        favorites: false,
     };
     let library::MixPick::Tracks(mix) = fixture
         .catalog
-        .mix_pick(fixture.source, None, &criteria, 2, 0, 7, &cancel)
+        .mix_pick(None, &criteria, 2, 0, 7, &cancel)
         .await
         .expect("bounded mix pick")
     else {

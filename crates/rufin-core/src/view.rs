@@ -97,6 +97,9 @@ pub struct View {
     art: bool,
     /// The header it shows; a reread that keeps the header keeps it.
     header: Option<HeaderKey>,
+    /// The header a page with no Store row builds as it opens, a Quick mix page's, kept by its
+    /// rereads.
+    built: Option<Header>,
     body: Body,
     /// This read's identity, which its plays carry as `|result=`: a play from a newer read of
     /// the page queues again.
@@ -166,6 +169,10 @@ enum Plan {
     Missing,
 }
 
+/// What a page reads: its header's key, its plan, and the header a page with no Store row
+/// builds.
+type Planned = (Option<HeaderKey>, Plan, Option<Header>);
+
 /// What of the selected library a page reads, by the one music folder rule (decisions.md,
 /// 2026-11-06), as Feishin: clients pass the selection and core applies it by route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,7 +196,7 @@ impl Scope {
             Route::Playlists | Route::PlaylistFolder { smart: false, .. } => return Self::Source,
             Route::AlbumDetail(_) => Kind::Album,
             Route::PlaylistDetail(_) => Kind::Playlist,
-            Route::SmartPlaylistDetail(_) => Kind::SmartPlaylist,
+            Route::SmartPlaylistDetail(_) | Route::QuickMix(_) => Kind::SmartPlaylist,
             Route::GenreDetail(_) => Kind::Genre,
             Route::MoodDetail(_) => Kind::Mood,
             Route::ArtistDetail(_)
@@ -395,7 +402,7 @@ impl SourceOwner {
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
         let settings = self.shared.settings.committed();
-        let (header, plan) = self
+        let (header, plan, built) = self
             .plan(&route, selected.as_ref(), &options, &settings, cancel)
             .await?;
         read(
@@ -407,6 +414,7 @@ impl SourceOwner {
                 settings,
                 art,
                 header: None,
+                built,
                 body: Body::Missing,
                 read: 0,
             },
@@ -457,7 +465,7 @@ impl SourceOwner {
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
         let settings = self.shared.settings.committed();
-        let (header, plan) = self
+        let (header, plan, _) = self
             .plan(route, selected, options, &settings, cancel)
             .await?;
         // An album, artist or tag page with no tracks reads as missing, as its header counts
@@ -545,7 +553,7 @@ impl SourceOwner {
         options: &OpenOptions,
         settings: &Settings,
         cancel: &ReadCancellation,
-    ) -> LibraryResult<(Option<HeaderKey>, Plan)> {
+    ) -> LibraryResult<Planned> {
         let catalog = &self.shared.catalog;
         tokio::select! {
             () = catalog.loaded() => {}
@@ -684,6 +692,34 @@ impl SourceOwner {
                 Some(HeaderKey::Smart { key: *key, now }),
                 Plan::Rows(Read::Members(member(Collection::Smart { key: *key, now }))),
             ),
+            Route::QuickMix(index) => {
+                let selected = selected
+                    .ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()))?;
+                match settings.application.quick_mix.get(*index as usize) {
+                    Some(entry) => {
+                        let definition =
+                            crate::quick_mix::scoped(std::slice::from_ref(entry), selected)
+                                .remove(0);
+                        let seed = self.quick_mix_seeds(std::slice::from_ref(&definition))[0];
+                        let press = catalog
+                            .quick_mix_press(folder, &definition, seed, now, cancel)
+                            .await?;
+                        let header = catalog.quick_mix_header(
+                            *index,
+                            entry.title(),
+                            definition,
+                            &press,
+                            folder,
+                        );
+                        let read = member(Collection::Tracks {
+                            source: selected.source_key,
+                            keys: press.tracks,
+                        });
+                        return Ok((None, Plan::Rows(Read::Members(read)), Some(header)));
+                    }
+                    None => (None, Plan::Missing),
+                }
+            }
             Route::GenreDetail(key) => (
                 Some(HeaderKey::Genre(*key)),
                 Plan::Rows(Read::Members(member(Collection::Genre(*key)))),
@@ -756,6 +792,11 @@ impl SourceOwner {
             }
             Route::Home => {
                 let (showcase, explore) = self.home_variations();
+                let quick_mix = selected
+                    .map(|selected| {
+                        crate::quick_mix::scoped(&settings.application.quick_mix, selected)
+                    })
+                    .unwrap_or_default();
                 let home = catalog
                     .home_page(
                         require_source()?,
@@ -763,6 +804,8 @@ impl SourceOwner {
                         showcase,
                         explore,
                         &settings.application.home_blocks,
+                        &quick_mix,
+                        &self.quick_mix_seeds(&quick_mix),
                         cancel,
                     )
                     .await?;
@@ -785,7 +828,7 @@ impl SourceOwner {
             // The Radio page reads `stations::page`; it has no rows of the Catalog.
             Route::Radio => (None, Plan::Missing),
         };
-        Ok((header, plan))
+        Ok((header, plan, None))
     }
 }
 
@@ -942,6 +985,8 @@ async fn read(
         }
         Plan::Missing => (None, 0, Vec::new(), None),
     };
+    // A page with no Store row shows the header it built.
+    let header = header.or_else(|| view.built.clone());
     let found = match &header {
         Some(Header::Tag(tag)) => tag.summary.track_count > 0,
         Some(Header::Album(album)) => album.row.summary.track_count > 0,
@@ -1354,6 +1399,8 @@ impl View {
                 .selection()
         };
         let selections = match &section {
+            // Without a header it has no section play; each tile plays its own entry.
+            HomeSection::QuickMix(_) => return None,
             HomeSection::Showcase(showcase) => vec![album(&showcase.current.album)],
             HomeSection::Genres(genres) => genres
                 .iter()
@@ -1458,6 +1505,7 @@ impl View {
             home,
             &self.settings.application.home_blocks,
             &self.settings.application.home,
+            &self.settings.application.quick_mix,
             &self.options.filter,
         ))
     }
@@ -1732,6 +1780,7 @@ impl View {
             Body::Home(_) => {
                 self.settings.application.home_blocks != current.application.home_blocks
                     || self.settings.application.home != current.application.home
+                    || self.settings.application.quick_mix != current.application.quick_mix
             }
             Body::Search(..) => CollectionCategory::ALL
                 .into_iter()
@@ -1827,6 +1876,8 @@ impl View {
                     | Route::AlbumArtistFavoriteTracks(_)
                     | Route::GenreDetail(_)
                     | Route::MoodDetail(_)
+                    // A Quick mix page keeps the tracks it opened with.
+                    | Route::QuickMix(_)
             ) =>
             {
                 let members = member_read(
@@ -1954,6 +2005,7 @@ impl View {
             settings,
             art: self.art,
             header: self.header,
+            built: self.built.clone(),
             body: Body::Missing,
             read: 0,
         }
@@ -1964,11 +2016,27 @@ impl View {
     }
 }
 
+/// A Quick mix entry as Home shows it: its name and glyph, the tracks its next press plays,
+/// and the mosaic of the albums they start with, the one its page shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuickMixTile {
+    /// Its place among the Quick mix entries, which a press plays.
+    pub entry: u32,
+    pub title: String,
+    pub icon: String,
+    pub tracks: u32,
+    pub artwork_binding: Option<Vec<u8>>,
+    /// The media URI of the first track its press plays, which its menu's radio starts from.
+    pub first_track: Option<String>,
+}
+
 /// One Home section, as every client shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HomeSection {
     /// The showcase album, with the ones either side of it in its order.
     Showcase(Box<library::HomeShowcase>),
+    /// The Quick mix entries that match something; it has no header.
+    QuickMix(Vec<QuickMixTile>),
     /// Explore, Most played, Newly added, Recently played or Recently released.
     Rows {
         block: HomeBlockKind,
@@ -2032,6 +2100,7 @@ impl HomeSection {
     pub fn block(&self) -> Option<HomeBlockKind> {
         match self {
             Self::Showcase(_) => Some(HomeBlockKind::Showcase),
+            Self::QuickMix(_) => Some(HomeBlockKind::QuickMix),
             Self::Genres(_) => Some(HomeBlockKind::Genres),
             Self::Rows { block, .. } => Some(*block),
             Self::Provider(_) => None,
@@ -2043,6 +2112,7 @@ impl HomeSection {
         use crate::settings::presentation::{home_block_title, home_provider_title};
         match self {
             Self::Showcase(_) => localization::tr(home_block_title(HomeBlockKind::Showcase)),
+            Self::QuickMix(_) => localization::tr(home_block_title(HomeBlockKind::QuickMix)),
             Self::Genres(_) => localization::tr(home_block_title(HomeBlockKind::Genres)),
             Self::Rows { block, .. } => localization::tr(home_block_title(*block)),
             Self::Provider(provider) => {
@@ -2056,7 +2126,7 @@ impl HomeSection {
         let rows = match self {
             Self::Rows { rows, .. } => rows,
             Self::Provider(provider) => &provider.rows,
-            Self::Showcase(_) | Self::Genres(_) => return Vec::new(),
+            Self::Showcase(_) | Self::QuickMix(_) | Self::Genres(_) => return Vec::new(),
         };
         rows.tracks
             .iter()
@@ -2083,7 +2153,7 @@ impl HomeSection {
                 !rows.tracks.is_empty()
             }
             Self::Genres(_) => true,
-            Self::Showcase(_) => false,
+            Self::Showcase(_) | Self::QuickMix(_) => false,
         };
         let rows = home
             .block(self.block())
@@ -2097,13 +2167,14 @@ impl HomeSection {
 }
 
 /// Home's sections in the order clients show them: the visible `blocks` in their order, except
-/// that the showcase leads the server's own sections when there are any. Sections with nothing
+/// that the showcase and Quick mix lead the server's own sections when there are any. Sections with nothing
 /// to show are left out, and so are rows whose title, artist and album do not contain `filter`.
 /// Each block lists as many tracks, albums and artists as `settings` gives it.
 pub fn home_sections(
     home: &HomePage,
     blocks: &[HomeBlockKind],
     settings: &HomeSettings,
+    quick_mix: &[crate::settings::quick_mix::QuickMixEntry],
     filter: &str,
 ) -> Vec<HomeSection> {
     let filter = filter.trim().to_lowercase();
@@ -2153,6 +2224,25 @@ pub fn home_sections(
                     .filter(|showcase| album(&showcase.current))
                     .map(|showcase| HomeSection::Showcase(Box::new(showcase.clone())));
             }
+            HomeBlockKind::QuickMix => {
+                let tiles = home
+                    .quick_mix
+                    .iter()
+                    .filter_map(|face| {
+                        let entry = quick_mix.get(face.entry as usize)?;
+                        let title = entry.title();
+                        (filter.is_empty() || shown(title.clone())).then(|| QuickMixTile {
+                            entry: face.entry,
+                            title,
+                            icon: entry.icon().to_owned(),
+                            tracks: face.tracks,
+                            artwork_binding: face.artwork_binding.clone(),
+                            first_track: face.first_track.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                return (!tiles.is_empty()).then_some(HomeSection::QuickMix(tiles));
+            }
             HomeBlockKind::Genres => {
                 let genres = home.genres.iter().take(items).cloned().collect::<Vec<_>>();
                 return (!genres.is_empty()).then_some(HomeSection::Genres(genres));
@@ -2182,11 +2272,10 @@ pub fn home_sections(
     let mut sections = Vec::new();
     let mut blocks = blocks.iter().copied().collect::<Vec<_>>();
     if !providers.is_empty() {
-        if let Some(index) = blocks
-            .iter()
-            .position(|block| *block == HomeBlockKind::Showcase)
-        {
-            sections.extend(block(blocks.remove(index)));
+        for leading in [HomeBlockKind::Showcase, HomeBlockKind::QuickMix] {
+            if let Some(index) = blocks.iter().position(|block| *block == leading) {
+                sections.extend(block(blocks.remove(index)));
+            }
         }
         sections.extend(providers);
     }
@@ -2487,7 +2576,7 @@ pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryL
             LibraryListKey::SmartPlaylists
         }
         Route::PlaylistDetail(_) => LibraryListKey::PlaylistTracks,
-        Route::SmartPlaylistDetail(_) => LibraryListKey::SmartPlaylistTracks,
+        Route::SmartPlaylistDetail(_) | Route::QuickMix(_) => LibraryListKey::SmartPlaylistTracks,
         Route::AlbumDetail(_) => LibraryListKey::AlbumDetailTracks,
         Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
             LibraryListKey::ArtistAlbums
@@ -2544,10 +2633,10 @@ pub fn supports_downloaded_filter(route: &Route, category: CollectionCategory) -
     ) && category == CollectionCategory::Tracks
 }
 
-/// Whether plays change what an open route shows. An open Smart Playlist keeps the list it
-/// opened with; plays change its members on the next visit.
+/// Whether plays change what an open route shows. An open Smart Playlist or Quick mix keeps the
+/// list it opened with; plays change its members on the next visit.
 fn uses_activity(route: &Route, options: &OpenOptions, settings: &LibraryListSettings) -> bool {
-    if matches!(route, Route::SmartPlaylistDetail(_)) {
+    if matches!(route, Route::SmartPlaylistDetail(_) | Route::QuickMix(_)) {
         return false;
     }
     let layout = options.layout.unwrap_or(settings.layout);

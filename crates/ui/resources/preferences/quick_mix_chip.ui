@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <!-- A Quick mix choice in Customization › Home: its glyph, which an entry's drag handle takes
+       the place of under the pointer, its name, and the check that removes it or the + that adds it. -->
+  <object class="GtkBox" id="chip">
+    <property name="spacing">8</property>
+    <style><class name="quick-mix-chip"/></style>
+    <child>
+      <object class="GtkOverlay">
+        <property name="valign">center</property>
+        <child>
+          <object class="GtkImage" id="glyph">
+            <property name="pixel-size">16</property>
+            <style><class name="quick-mix-chip-glyph"/></style>
+          </object>
+        </child>
+        <child type="overlay">
+          <!-- Not a button: the chips' own drag gesture starts on it. -->
+          <object class="GtkImage" id="drag">
+            <property name="visible">false</property>
+            <property name="icon-name">rufin-list-drag-handle-symbolic</property>
+            <property name="pixel-size">16</property>
+            <property name="tooltip-text" translatable="yes">Drag to reorder</property>
+            <property name="cursor"><object class="GdkCursor"><property name="name">grab</property></object></property>
+            <style><class name="reorder-handle"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="title">
+        <property name="single-line-mode">true</property>
+        <style><class name="quick-mix-chip-title"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="remove">
+        <property name="visible">false</property>
+        <property name="icon-name">rufin-object-select-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Remove</property>
+        <property name="valign">center</property>
+        <style><class name="circular"/><class name="suggested-action"/><class name="quick-mix-chip-button"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="add">
+        <property name="visible">false</property>
+        <property name="icon-name">rufin-list-add-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Add</property>
+        <property name="valign">center</property>
+        <style><class name="circular"/><class name="flat"/><class name="quick-mix-chip-button"/></style>
+      </object>
+    </child>
+  </object>
+</interface>

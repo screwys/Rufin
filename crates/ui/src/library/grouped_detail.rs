@@ -10,7 +10,9 @@ use crate::widgets::view_model::Rows;
 use library::Row;
 
 use super::collections::library_route_inset;
-use super::detail_showcase::{DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape};
+use super::detail_showcase::{
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, ShowcaseSubject,
+};
 use super::route_shell::LibraryToolbarProjection;
 use super::routes::{SearchableTrackOptions, TrackListProjection};
 use crate::library::route_layout::{
@@ -141,7 +143,7 @@ impl CatalogUi {
         };
         let showcase = showcase_view.mount(
             self,
-            row,
+            ShowcaseSubject::Row(row),
             ShowcaseMount {
                 shape: ShowcaseShape::Detail,
                 initial_width: content_width,

@@ -20,6 +20,60 @@ let limits = [100, 10];
 /** The kind chosen, a `played` value. */
 let played = "All";
 
+/** The kind tiles a page holds, in three columns. */
+const kindsPerPage = 6;
+const kindColumns = 3;
+
+/** The page of kinds shown. */
+let kindPage = 0;
+
+const kindTiles = () => [...$("mix-played").querySelectorAll("button")];
+
+/** Favorites only as chosen, which a kind that fixes it on keeps. */
+let chosenFavorites = false;
+
+/** Favorites only follows the chosen kind: picking tracks of a kind whose rules pick favorites
+ *  alone it shows on and can't change; otherwise it is as chosen. */
+function showFavorites() {
+  const tile = kindTiles().find((tile) => tile.value === played);
+  const fixed = units().value !== "1" && tile?.dataset.favorites === "true";
+  $("mix-favorites").disabled = fixed;
+  $("mix-favorites").checked = fixed || chosenFavorites;
+}
+
+/** Builds the pages of kind tiles from core's kinds, once. */
+function showKinds(kinds) {
+  if ($("mix-played").childElementCount) return;
+  for (let first = 0; first < kinds.length; first += kindsPerPage) {
+    const page = document.createElement("div");
+    page.className = "mix-page";
+    for (const kind of kinds.slice(first, first + kindsPerPage)) {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.value = kind.kind;
+      tile.dataset.favorites = String(kind.favorites);
+      tile.setAttribute("aria-pressed", "false");
+      const title = document.createElement("span");
+      title.textContent = kind.title;
+      tile.append(icon(kind.icon), title);
+      page.append(tile);
+    }
+    $("mix-played").append(page);
+    $("mix-dots").append(document.createElement("span"));
+  }
+}
+
+function showKindPage(page) {
+  const pages = [...$("mix-played").children];
+  kindPage = Math.max(0, Math.min(page, pages.length - 1));
+  pages.forEach((shown, index) => (shown.hidden = index !== kindPage));
+  [...$("mix-dots").children].forEach((dot, index) =>
+    dot.setAttribute("aria-current", String(index === kindPage)),
+  );
+  $("mix-previous").disabled = kindPage === 0;
+  $("mix-next").disabled = kindPage === pages.length - 1;
+}
+
 /** The unit's two choices, tracks and albums; its value is the index of the one chosen. */
 const units = () => $("mix-form").elements["mix-unit"];
 
@@ -34,8 +88,12 @@ function showUnit() {
 
 function choosePlayed(value) {
   played = value;
-  for (const chip of $("mix-played").children)
-    chip.setAttribute("aria-pressed", String(chip.value === value));
+  const tiles = kindTiles();
+  for (const tile of tiles)
+    tile.setAttribute("aria-pressed", String(tile.value === value));
+  const chosen = tiles.findIndex((tile) => tile.value === value);
+  showKindPage(Math.floor(Math.max(0, chosen) / kindsPerPage));
+  showFavorites();
 }
 
 /** A year field's value; an empty or unreadable one leaves that end open. */
@@ -68,6 +126,8 @@ async function loadMix(reset = false) {
     showUnit();
     $("mix-min-year").value = settings.min_year ?? "";
     $("mix-max-year").value = settings.max_year ?? "";
+    chosenFavorites = settings.favorites;
+    showKinds(result.kinds);
     choosePlayed(settings.played_filter);
     chooseGenre(result.selected_genre);
     state.mixSource = state.source;
@@ -112,6 +172,7 @@ async function playMix(mode = "replace") {
     max_year: year("mix-max-year"),
     genre: selectedGenre?.id ?? null,
     played,
+    favorites: chosenFavorites,
     mode,
   });
   if (result.empty) notice(tr("No matching tracks found"));
@@ -128,10 +189,36 @@ function init() {
     unit.addEventListener("change", () => {
       limits[1 - Number(units().value)] = Number($("mix-count").value);
       showUnit();
+      showFavorites();
     });
+  $("mix-favorites").addEventListener("change", () => {
+    chosenFavorites = $("mix-favorites").checked;
+  });
   $("mix-played").addEventListener("click", (event) => {
-    const chip = event.target.closest("button");
-    if (chip) choosePlayed(chip.value);
+    const tile = event.target.closest("button");
+    if (tile) choosePlayed(tile.value);
+  });
+  $("mix-previous").addEventListener("click", () => showKindPage(kindPage - 1));
+  $("mix-next").addEventListener("click", () => showKindPage(kindPage + 1));
+  // Left and Right past the edge tile of a page move to the next page's tile in the same row.
+  $("mix-played").addEventListener("keydown", (event) => {
+    const forward = event.key === "ArrowRight";
+    if (!forward && event.key !== "ArrowLeft") return;
+    const tiles = kindTiles(),
+      index = tiles.indexOf(document.activeElement);
+    if (index < 0) return;
+    const place = index % kindsPerPage,
+      row = Math.floor(place / kindColumns),
+      column = place % kindColumns,
+      page = Math.floor(index / kindsPerPage);
+    const edge = forward ? column === kindColumns - 1 || index === tiles.length - 1 : column === 0;
+    const target = forward ? page + 1 : page - 1;
+    if (!edge || target < 0 || target * kindsPerPage >= tiles.length) return;
+    event.preventDefault();
+    const first = target * kindsPerPage,
+      last = Math.min(first + kindsPerPage, tiles.length) - 1;
+    showKindPage(target);
+    tiles[Math.min(first + row * kindColumns + (forward ? 0 : kindColumns - 1), last)].focus();
   });
   $("mix").addEventListener("click", () => run(openMix));
   $("mix").addEventListener("contextmenu", (event) => {

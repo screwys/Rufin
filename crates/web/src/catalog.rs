@@ -120,6 +120,31 @@ pub(super) async fn step_showcase(
     )
 }
 
+/// Plays a Quick mix entry of Home at `mode` (replace, next or append), shuffled as its tile's
+/// covers show it; `played` is false when nothing matched.
+pub(super) async fn play_quick_mix(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        source: sources::SourceId,
+        entry: u32,
+        #[serde(default = "replace")]
+        mode: String,
+    }
+    fn replace() -> String {
+        "replace".to_owned()
+    }
+    let input: Input = body(request).await?;
+    let placement = media::mix_placement(&input.mode)?;
+    source::ensure_selected(&products, input.source).await?;
+    let nothing = rufin_core::quick_mix::play_quick_mix(&products.playback, input.entry, placement)
+        .await
+        .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({"played": !nothing})))
+}
+
 async fn folders(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,

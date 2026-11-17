@@ -211,7 +211,7 @@ impl Totals {
     }
 
     /// Adds a playlist's or smart playlist's track with its download.
-    fn add_member(&mut self, record: &TrackRec) {
+    pub(crate) fn add_member(&mut self, record: &TrackRec) {
         self.add(record);
         self.downloaded += u32::from(record.flags & DOWNLOADED != 0);
     }
@@ -955,9 +955,9 @@ impl Context<'_> {
     fn collection_source(&self, collection: &Collection) -> Option<u16> {
         let snapshot = self.snapshot;
         match collection {
-            Collection::Source(source) | Collection::Objects { source, .. } => {
-                self.source_slot(*source)
-            }
+            Collection::Source(source)
+            | Collection::Objects { source, .. }
+            | Collection::Tracks { source, .. } => self.source_slot(*source),
             Collection::Album(key) => snapshot.albums.get(key.raw()).map(Packed::source),
             Collection::Artist { key, .. } => snapshot.artists.get(key.raw()).map(Packed::source),
             Collection::Genre(key) => snapshot.tags.get(key.raw()).map(Packed::source),
@@ -1028,6 +1028,14 @@ impl Context<'_> {
                 .smart
                 .as_deref()
                 .map_or_else(Vec::new, |tracks| self.listed_tracks(tracks, folder))
+                .into_iter()
+                .map(member)
+                .collect(),
+            Collection::Tracks { keys, .. } => self
+                .listed_tracks(
+                    &keys.iter().map(|key| key.raw()).collect::<Vec<_>>(),
+                    folder,
+                )
                 .into_iter()
                 .map(member)
                 .collect(),
@@ -2128,7 +2136,7 @@ impl Context<'_> {
 
     /// The tracks a smart playlist's rules match in music folder `folder`, in slot order and
     /// before its limit.
-    fn matching<'s>(
+    pub(crate) fn matching<'s>(
         &'s self,
         definition: &'s SmartPlaylistDefinition,
         inputs: &'s Inputs,
@@ -2221,7 +2229,7 @@ impl Context<'_> {
 }
 
 /// A track's place in the shuffle of time `now`: splitmix64 of both.
-fn shuffled(key: u32, now: i64) -> i64 {
+pub(crate) fn shuffled(key: u32, now: i64) -> i64 {
     let mut mixed = (u64::from(key) << 32 ^ now as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
     mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -2272,6 +2280,13 @@ pub(crate) struct Views {
     orders: Vec<Order>,
     /// Members of the smart playlists open pages hold.
     opened: Vec<OpenedSmart>,
+    /// The tracks open Quick mix pages list, by entry.
+    quick_mix_pages: Vec<(u32, std::sync::Weak<[crate::TrackKey]>)>,
+    /// Quick mix entries' faces, most recently built last.
+    quick_mix: Vec<(
+        crate::quick_mix::QuickMixKey,
+        Arc<crate::quick_mix::QuickMixFace>,
+    )>,
 }
 
 impl Views {
@@ -2883,6 +2898,48 @@ impl Catalog {
             Read::Folders(_) => {}
         }
         Ok(inputs)
+    }
+
+    /// Keeps the tracks the page of Quick mix entry `entry` lists while the page holds them.
+    pub(crate) fn hold_quick_mix_page(&self, entry: u32, tracks: &Arc<[crate::TrackKey]>) {
+        let pages = &mut self.views().quick_mix_pages;
+        pages.retain(|(kept, held)| *kept != entry && held.strong_count() > 0);
+        pages.push((entry, Arc::downgrade(tracks)));
+    }
+
+    /// The tracks the open page of Quick mix entry `entry` lists.
+    pub(crate) fn quick_mix_page(&self, entry: u32) -> Option<Arc<[crate::TrackKey]>> {
+        self.views()
+            .quick_mix_pages
+            .iter()
+            .find(|(kept, _)| *kept == entry)
+            .and_then(|(_, held)| held.upgrade())
+    }
+
+    /// The Quick mix face built from `key`, when one is held.
+    pub(crate) fn held_quick_mix(
+        &self,
+        key: &crate::quick_mix::QuickMixKey,
+    ) -> Option<Arc<crate::quick_mix::QuickMixFace>> {
+        self.views()
+            .quick_mix
+            .iter()
+            .find(|held| held.0 == *key)
+            .map(|held| held.1.clone())
+    }
+
+    /// Holds a Quick mix face, dropping the oldest past what six entries in a few folders keep.
+    pub(crate) fn hold_quick_mix(
+        &self,
+        key: crate::quick_mix::QuickMixKey,
+        face: Arc<crate::quick_mix::QuickMixFace>,
+    ) {
+        let held = &mut self.views().quick_mix;
+        held.retain(|(kept, _)| *kept != key);
+        if held.len() >= 24 {
+            held.remove(0);
+        }
+        held.push((key, face));
     }
 
     /// The members a page that opened this smart playlist at `now` holds, while its rules

@@ -12,6 +12,7 @@ import {
   notice,
   run,
   showFavorite,
+  cover,
   coverGroup,
   bindHoverControls,
   bindGenres,
@@ -288,7 +289,8 @@ function showPage(data) {
   $("title").textContent = data.name || data.title;
   document.title = `${data.name || data.title} – Rufin`;
   showHistory();
-  $("library-toolbar").hidden = data.section === "Home" || data.section === "Radio";
+  // Home and Radio list nothing to search or sort, as the server leaves them unlisted.
+  $("library-toolbar").hidden = opened.route === "Home" || opened.route === "Radio";
   $("play-collection").hidden = data.play !== "true";
   $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
   $("new-smart-playlist").hidden = !(opened.route === "SmartPlaylists" || opened.route.PlaylistFolder?.smart);
@@ -849,6 +851,65 @@ function bindPlaylistDrop(card, kind, row) {
   });
 }
 
+// The menu of a card, a header or a Quick mix tile, as core's Menu offers it: `media` is what it
+// adds, downloads and deletes, and `play(mode)` plays it.
+function rowMenu(row, kind, media, play) {
+  const actions = [], options = row.menu;
+  if (options.play)
+    actions.push(
+      [tr("Play"), () => play("replace")],
+      [tr("Play Next"), () => play("next")],
+      [tr("Play Later"), () => play("append")],
+    );
+  if (options.radio) actions.push(radioMenu(options.radio));
+  actions.push(null);
+  if (options.add_to_playlist) actions.push(playlistMenu(media));
+  if (options.create_playlist)
+    actions.push([tr("Create a playlist"), () => openName(null, media, row.title), "rufin-playlists-compact-symbolic"]);
+  if (options.favorite)
+    actions.push([
+      row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
+      () => setFavorite(row, kind),
+    ]);
+  // The web's playlist dialogs edit, export and delete playlists and edit smart ones, not
+  // folders.
+  if (options.export && kind === "playlist")
+    actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
+  if (options.remove_unavailable)
+    actions.push([
+      tr("Remove unavailable tracks"),
+      () => api(`/playlists/remove-unavailable?id=${row.id}`, "POST"),
+      "rufin-user-trash-symbolic",
+    ]);
+  if (options.edit && kind === "playlist") actions.push([tr("Edit"), () => openName(row)]);
+  if (options.edit && kind === "smart-playlist")
+    actions.push([tr("Edit"), () => openSmartPlaylist({ key: row.id })]);
+  if (options.delete && kind === "playlist")
+    actions.push([
+      tr("Delete Playlist"),
+      async () => {
+        if (confirm(tr('Delete "{name}"?', { name: row.title || row.name })))
+          await api(`/playlists?id=${row.id}`, "DELETE");
+      },
+    ]);
+  if (options.edit_metadata && ["album", "artist", "track"].includes(kind))
+    actions.push([tr("Edit metadata"), () => openMetadata({ kind, uri: row.uri }), "rufin-document-edit-symbolic"]);
+  const destination = options.go_to && goToMenu(row);
+  if (destination) actions.push(null, destination);
+  if (options.share) actions.push(shareAction(options.share));
+  if (options.download) actions.push([tr("Download"), () => api("/downloads", "POST", media), "rufin-download-symbolic"]);
+  if (options.remove_download)
+    actions.push([
+      kind === "track" ? tr("Remove Download") : tr("Remove Downloads"),
+      () => api("/downloads", "DELETE", media),
+      "rufin-user-trash-symbolic",
+    ]);
+  if (options.delete_permanently) actions.push(deleteAction(media));
+  // The pin closes the menu, as on GTK and Android.
+  if (options.pin) actions.push(pinAction(options.pin));
+  return actions;
+}
+
 function bindCard(card) {
   for (const node of card.querySelectorAll(".detail-title, .detail-meta > .detail-facts")) slideText(node);
   // The header's width, not the row's, which the fitting itself changes.
@@ -874,57 +935,9 @@ function bindCard(card) {
       card.classList.add("selected");
     };
     const play = (mode) => queueMedia(mediaSelection(kind, row), mode);
-    const menu = async (anchor, event) => {
-      const actions = [], options = row.menu;
-      if (options.play)
-        actions.push(
-          [tr("Play"), () => play("replace")],
-          [tr("Play Next"), () => play("next")],
-          [tr("Play Later"), () => play("append")],
-        );
-      if (options.radio) actions.push(radioMenu(options.radio));
-      actions.push(null);
-      if (options.add_to_playlist)
-        actions.push(
-          playlistMenu(row.play ? { page: row.play } : { uris: [row.uri] }),
-        );
-      if (options.favorite)
-        actions.push([
-          row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
-          () => setFavorite(row, kind),
-        ]);
-      // The web's playlist dialogs edit, export and delete playlists and edit smart ones, not
-      // folders.
-      if (options.export && kind === "playlist")
-        actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
-      if (options.remove_unavailable)
-        actions.push([
-          tr("Remove unavailable tracks"),
-          () => api(`/playlists/remove-unavailable?id=${row.id}`, "POST"),
-          "rufin-user-trash-symbolic",
-        ]);
-      if (options.edit && kind === "playlist") actions.push([tr("Edit"), () => openName(row)]);
-      if (options.edit && kind === "smart-playlist")
-        actions.push([tr("Edit"), () => openSmartPlaylist({ key: row.id })]);
-      if (options.delete && kind === "playlist")
-        actions.push([
-          tr("Delete Playlist"),
-          async () => {
-            if (confirm(tr('Delete "{name}"?', { name: row.title || row.name })))
-              await api(`/playlists?id=${row.id}`, "DELETE");
-          },
-        ]);
-      if (options.edit_metadata && ["album", "artist", "track"].includes(kind))
-        actions.push([tr("Edit metadata"), () => openMetadata({ kind, uri: row.uri }), "rufin-document-edit-symbolic"]);
-      const destination = options.go_to && goToMenu(row);
-      if (destination) actions.push(null, destination);
-      if (options.share) actions.push(shareAction(options.share));
-      if (options.delete_permanently)
-        actions.push(deleteAction(row.play ? { page: row.play } : { uris: [row.uri] }));
-      // The pin closes the menu, as on GTK and Android.
-      if (options.pin) actions.push(pinAction(options.pin));
-      showMenu(actions, anchor, event);
-    };
+    // What adding, downloading or deleting it takes: the page it plays, else its track.
+    const media = row.play ? { page: row.play } : { uris: [row.uri] };
+    const menu = (anchor, event) => showMenu(rowMenu(row, kind, media, play), anchor, event);
     card.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
@@ -940,6 +953,9 @@ function bindCard(card) {
           return setRating(button.closest("[data-rating-chip]"), button, event.detail ? event.clientX : Infinity, kind, row.uri);
         if (action === "edit") return kind === "playlist" ? openName(row) : openSmartPlaylist({ key: row.id });
         if (action === "radio") return playRadio(row.menu.radio);
+        if (action === "create-playlist") return openName(null, media, row.title);
+        if (action === "download") return api("/downloads", "POST", media);
+        if (action === "remove-download") return api("/downloads", "DELETE", media);
         if (action === "menu") return menu(button);
         return play(action);
       });
@@ -992,10 +1008,18 @@ async function stepShowcase(head, forward) {
 
 const requestedCovers = new WeakSet();
 
-// What a card's picture is read by; None for a playlist folder, whose preview is its picture.
+// A Quick mix tile's mosaic, its page's picture, over its preview.
+function loadQuickMixCover(host, signal) {
+  const cell = host.querySelector(".quick-mix-cover[data-picture]");
+  if (cell) run(() => cover(cell, { picture: cell.dataset.picture }, signal, cell.querySelector("img")?.getAttribute("src")));
+}
+
+// What a card's picture is read by; None for a playlist folder, whose preview is its picture,
+// and for a Quick mix without one.
 function cardCover(kind, row) {
   if (kind === "playlist") return { playlist: row.id };
   if (kind === "smart-playlist") return { smart_playlist: row.id };
+  if (kind === "quick-mix") return row.picture && { picture: row.picture };
   if (kind === "genre" || kind === "mood") return { genre: row.id, source: row.source };
   return row.uri;
 }
@@ -1039,6 +1063,27 @@ function bindHome(signal, offsets) {
   const layouts = [];
   bindCards($("content"));
   for (const section of $("content").querySelectorAll(".home-section")) {
+    // A Quick mix tile opens its entry's page; its Play plays the entry as its covers show it,
+    // and Home changes to the next.
+    for (const tile of section.querySelectorAll(".quick-mix-tile")) {
+      const open = tile.querySelector(".quick-mix-open");
+      open.onclick = (event) => {
+        event.preventDefault();
+        navigate(JSON.parse(open.dataset.page));
+      };
+      const payload = JSON.parse(tile.elements.payload.value);
+      const play = (mode) => run(async () => {
+        if (!(await api("/home/quick-mix", "POST", { ...payload, mode })).played) notice(tr("Nothing to play here"));
+      });
+      tile.querySelector(".quick-mix-play").onclick = () => play("replace");
+      // Its menu is core's Quick mix menu; it plays the entry and acts on the page it opens.
+      const row = mediaRow(tile);
+      tile.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        showMenu(rowMenu(row, "quick-mix", { page: row.play }, play), tile, event);
+      }, { signal });
+      loadQuickMixCover(tile, signal);
+    }
     const body = section.querySelector(".home-row");
     if (!body) {
       loadCardCovers(section, signal);

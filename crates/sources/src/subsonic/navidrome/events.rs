@@ -232,6 +232,8 @@ mod tests {
                     0,
                     0,
                     &[library::HomeBlockKind::NewlyAdded],
+                    &[],
+                    &[],
                     &cancellation,
                 )
                 .await

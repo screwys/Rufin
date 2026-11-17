@@ -7,6 +7,7 @@ import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.Menu
 import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.shared.rufin_core.addPlaylistTracks
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
@@ -219,6 +220,11 @@ private fun <T> DisplayChoices(label: String, choices: List<T>, selected: T, tit
     }
 }
 
+/** A Quick mix entry's menu, which is none of a row of the library's: core's Quick mix menu, its plays, and the
+ *  tracks it lists, which Create a playlist and Download take. */
+internal class QuickMixMenu(val menu: Menu, val play: (QueuePlacement, Boolean) -> Unit,
+    val tracks: suspend () -> MemberSelection?)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun BrowseMenuSheet(
@@ -235,11 +241,13 @@ internal fun BrowseMenuSheet(
     var deletePermanently by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf<Share?>(null) }
     var folderPicker by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    val quickMix = listed.quickMix
     val playlistFolder = item.row.playlistFolder
     val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
     // What the menu offers, as GTK's menus do, under the saved menu settings.
-    val menu = remember(item.row, browse.library) { browse.library?.menu(item.row) }
+    val menu = remember(item.row, browse.library) { quickMix?.menu ?: browse.library?.menu(item.row) }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
     // While the radio has the big buttons, a tap anywhere else in the menu hands them back.
@@ -298,14 +306,16 @@ internal fun BrowseMenuSheet(
                         }
                         if (plays.isNotEmpty()) Row(Modifier.fillMaxWidth().onPlaced { buttonsLayout = it }.padding(horizontal = 16.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            fun play(placement: QueuePlacement, shuffled: Boolean) {
+                                if (quickMix != null) quickMix.play(placement, shuffled)
+                                else if (placement is QueuePlacement.Replace && onPlayNow != null) onPlayNow(shuffled)
+                                else browse.play(item, placement, shuffled)
+                            }
                             plays.forEach { (icon, title, placement) ->
-                                val now = placement is QueuePlacement.Replace
                                 BrowsePrimaryAction(icon, title, Modifier.weight(1f), accent = radio,
-                                    shuffle = if (radio) null else { { if (now) onPlayNow?.invoke(true) ?: browse.play(item, placement, true)
-                                        else browse.play(item, placement, true); onDismiss() } }) {
-                                    if (radio) browse.radio(item, placement)
-                                    else if (now) onPlayNow?.invoke(false) ?: browse.play(item)
-                                    else browse.play(item, placement)
+                                    shuffle = if (radio) null else { { play(placement, true); onDismiss() } }) {
+                                    if (radio) offered.radio?.let { browse.radio(it, placement) }
+                                    else play(placement, false)
                                     onDismiss()
                                 }
                             }
@@ -319,6 +329,7 @@ internal fun BrowseMenuSheet(
                     }
                 }
                 if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", action = onPlaylist)
+                if (offered.createPlaylist) BrowseMenuAction("rufin-playlists-compact-symbolic", "Create a playlist") { creating = true }
                 if (offered.favorite) BrowseMenuAction(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     if (item.row.favorite) "Remove from Favorites" else "Add to Favorites") { browse.favorite(item); onDismiss() }
                 offered.folder?.let { inFolder ->
@@ -334,8 +345,14 @@ internal fun BrowseMenuSheet(
                     browse.library?.removeUnavailableTracks(item.row.playlist!!.playlistKey)
                     onDismiss()
                 } }
-                if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
-                if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
+                // A Quick mix entry downloads the tracks it lists.
+                fun download(remove: Boolean) {
+                    if (quickMix != null) model.runAction { quickMix.tracks()?.use { browse.library?.downloadSelection(it, remove) } }
+                    else browse.download(item, remove)
+                    onDismiss()
+                }
+                if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { download(false) }
+                if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { download(true) }
                 if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
                 offered.share?.let { share -> BrowseMenuAction("rufin-share-symbolic", "Share") { sharing = share } }
                 if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", action = onMetadata)
@@ -373,6 +390,13 @@ internal fun BrowseMenuSheet(
     if (navigation) MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri }, player, { route, title, source ->
         navigation = false; onDismiss(); onNavigate(route, title, source)
     }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
+    // Create a playlist makes one, named as the Quick mix entry, of what it lists.
+    if (creating && quickMix != null) PlaylistCreateSheet(model, { creating = false; onDismiss() }, item.row.title) { name, sourceId, public ->
+        val source = model.sourceOwner ?: return@PlaylistCreateSheet
+        quickMix.tracks()?.use { selection -> createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) } }
+        creating = false
+        onDismiss()
+    }
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
         folderMembers = listOfNotNull(folderMember)) { folderPicker = false; onDismiss() }
     if (rename) {
@@ -660,13 +684,15 @@ private suspend fun playlistSelection(library: io.github.screwys.rufin.core.Andr
 internal fun PlaylistCreateSheet(
     model: RufinConnection,
     onDismiss: () -> Unit,
+    /** The name it starts with. */
+    initialName: String = "",
     // Name, owning source and public.
     save: suspend (String, String?, Boolean?) -> Unit,
 ) {
     // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
         ?.takeIf { it.ownsPlaylists }
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
     var currentSource by remember(source?.id) { mutableStateOf(source != null) }
     var public by remember { mutableStateOf(false) }
     val supportsPublic = currentSource && source?.supportsPlaylistPublic == true
@@ -684,17 +710,20 @@ internal fun PlaylistCreateSheet(
                         else Image(painterResource(R.drawable.app_icon), null, Modifier.size(24.dp))
                     }
                 }))
-            if (supportsPublic) Row(Modifier.fillMaxWidth().toggleable(public, role = Role.Switch) { public = it },
+        } },
+        // Public at the start where the owner offers it, Create at the end; Back or a tap outside dismisses it.
+        confirmButton = { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (supportsPublic) Row(Modifier.toggleable(public, role = Role.Switch) { public = it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Switch(public, null)
                 Text(translate("Public"))
             }
-        } },
-        confirmButton = { TextButton({ model.runAction {
-            save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic })
-        } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Create")) } },
-        dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } })
+            Spacer(Modifier.weight(1f))
+            TextButton({ model.runAction {
+                save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic })
+            } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Create")) }
+        } })
 }
 
 internal class BrowseChoiceSource(

@@ -137,6 +137,13 @@ impl crate::SmartPlaylistRow {
     }
 }
 
+impl crate::QuickMixRow {
+    /// Whether every track the Quick mix page lists is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
 impl PlaylistListRow {
     /// Whether every track of the playlist is downloaded; a folder never is.
     pub fn downloaded(&self) -> bool {

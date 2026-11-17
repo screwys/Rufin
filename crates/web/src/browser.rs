@@ -91,7 +91,7 @@ struct Shown<'a> {
     /// Its title: Home rows have their own.
     title: String,
     /// Its JSON for the script: the row, its menu and the page it opens.
-    data: String,
+    data: Value,
     fields: Vec<(LibraryField, String)>,
     menu: Menu,
     /// The link it opens; empty for tracks.
@@ -234,7 +234,7 @@ impl<'a> Shown<'a> {
                 })
                 .collect(),
             menu,
-            data: data.to_string(),
+            data,
             href,
             play,
             previews,
@@ -386,10 +386,26 @@ impl<'a> Shown<'a> {
 /// A showcase: Home's, or a detail page's header. A gradient band with the cover over its
 /// edge, the title, the facts, the genres and the buttons.
 struct Head<'a> {
-    row: Shown<'a>,
+    /// The row it shows, with its favorite, edit and menu; a Quick mix page shows an entry,
+    /// which is no row, and offers its actions as buttons.
+    row: Option<Shown<'a>>,
+    title: String,
+    /// Its kind, as the script reads it.
+    kind: &'static str,
+    /// Its JSON for the script: its row's, or the entry's; with its menu and the page it plays.
+    data: Value,
+    /// What its Play posts.
+    play: String,
+    menu: Menu,
+    /// Whether its picture is a mosaic, and the previews of its tiles.
+    mosaic: bool,
+    tiles: Vec<String>,
+    /// Its picture for pages without scripts.
+    artwork: String,
+    form: &'a Form,
     home: bool,
     /// An album's artist, under its title.
-    artist: bool,
+    artist: Option<String>,
     facts: Vec<(&'static str, String)>,
     /// Each genre's name and the page it opens.
     genres: Vec<(String, String)>,
@@ -540,13 +556,10 @@ impl<'a> Head<'a> {
                 Vec::new(),
             ),
             other => (
-                vec![
-                    ("rufin-tracks-symbolic", row.track_count()),
-                    (
-                        "rufin-preferences-system-time-symbolic",
-                        row.long_duration(),
-                    ),
-                ],
+                row.summary().map_or_else(
+                    || collection_facts(0, 0),
+                    |shown| collection_facts(shown.track_count, shown.duration_millis),
+                ),
                 match other {
                     Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist
                         .genres
@@ -564,8 +577,18 @@ impl<'a> Head<'a> {
                 .and_then(|shown| shown.artwork.first().copied()),
         );
         Self {
-            artist: matches!(row.row, Row::Album(_) | Row::AlbumHeading(_)),
-            row,
+            title: row.title.clone(),
+            kind: row.kind(),
+            data: row.data.clone(),
+            play: row.play.clone(),
+            menu: row.menu.clone(),
+            mosaic: row.mosaic(),
+            tiles: row.preview_tiles().into_iter().map(str::to_owned).collect(),
+            artwork: row.artwork(),
+            form,
+            artist: matches!(row.row, Row::Album(_) | Row::AlbumHeading(_))
+                .then(|| row.artist().to_owned()),
+            row: Some(row),
             home,
             facts,
             genres,
@@ -573,21 +596,123 @@ impl<'a> Head<'a> {
             band,
         }
     }
-}
 
-/// The header of the page `header` opens.
-fn header_row(header: &library::Header) -> Row {
-    match header {
-        library::Header::Album(album) => Row::Album(album.row.clone()),
-        library::Header::Artist(artist) => Row::Artist(artist.row.clone()),
-        library::Header::Tag(tag) => Row::Tag(tag.clone()),
-        library::Header::Playlist(playlist) => {
-            Row::Playlist(PlaylistListRow::Playlist((**playlist).clone()))
-        }
-        library::Header::Smart(smart) => {
-            Row::Playlist(PlaylistListRow::SmartPlaylist((**smart).clone()))
+    /// A Quick mix page's header, as a smart playlist's shows one: its name, its picture and
+    /// its facts; its menu is core's Quick mix menu of what `page` lists, its Radio starting
+    /// from `first`, the first track listed.
+    fn quick_mix(
+        products: &ProductHandles,
+        settings: &rufin_core::settings::app::Settings,
+        page: &page::PageToken,
+        mix: &library::QuickMixRow,
+        first: Option<&Row>,
+        form: &'a Form,
+    ) -> Self {
+        let first = match first {
+            Some(Row::Track(track) | Row::AlbumTrack { track, .. }) => {
+                Some(track.media_uri.clone())
+            }
+            _ => None,
+        };
+        let shown = rufin_core::menu::quick_mix(settings, first.clone(), Some(mix.downloaded()));
+        // Its header's buttons show every entry, as a row's header does.
+        let menu = rufin_core::menu::quick_mix_swipes(first, Some(mix.downloaded()));
+        let previews = artwork_previews(products, mix.artwork_binding.iter())
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .collect::<Vec<_>>();
+        let picture = mix.artwork_binding.as_deref().map(media::picture);
+        Self {
+            row: None,
+            title: mix.name.clone(),
+            kind: "quick-mix",
+            data: json!({"kind":"quick-mix","entry":mix.entry,"title":mix.name,"track_count":mix.track_count,
+                "duration_ms":mix.duration_millis,"picture":picture,"artwork_count":previews.len(),
+                "artwork_previews":previews,"menu":shown,"play":page}),
+            play: json!({ "page": page }).to_string(),
+            menu,
+            mosaic: false,
+            tiles: vec![previews.first().cloned().unwrap_or_default()],
+            artwork: picture.map_or_else(String::new, |picture| {
+                format!("/api/artwork?picture={picture}")
+            }),
+            form,
+            home: false,
+            artist: None,
+            facts: collection_facts(mix.track_count, mix.duration_millis),
+            genres: Vec::new(),
+            links: Vec::new(),
+            band: band(products, settings, mix.artwork_binding.as_deref()),
         }
     }
+
+    /// Starts its Radio from `first`, the first track its page lists: a smart playlist's, as
+    /// GTK's.
+    fn radio_from(&mut self, first: Option<&Row>) {
+        self.menu.radio = first.and_then(rufin_core::menu::radio_seed);
+        self.data["menu"] = json!(self.menu);
+    }
+}
+
+/// A collection's facts: how many tracks it has and how long they play.
+fn collection_facts(tracks: i64, millis: i64) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "rufin-tracks-symbolic",
+            localization::track_count_text(tracks.max(0) as u64),
+        ),
+        (
+            "rufin-preferences-system-time-symbolic",
+            rufin_core::settings::presentation::format_duration_units(
+                (millis.max(0) / 1000) as u32,
+            ),
+        ),
+    ]
+}
+
+/// The header of the page `opened` opens, with its first rows.
+fn page_head<'a>(
+    products: &ProductHandles,
+    settings: &rufin_core::settings::app::Settings,
+    opened: &page::Opened,
+    form: &'a Form,
+) -> Option<Head<'a>> {
+    use library::Header;
+    let header = opened.header.as_ref().filter(|_| opened.offset == 0)?;
+    let token = &opened.token;
+    let row = match header {
+        Header::QuickMix(mix) => {
+            return Some(Head::quick_mix(
+                products,
+                settings,
+                token,
+                mix,
+                opened.rows.first(),
+                form,
+            ));
+        }
+        Header::Album(album) => Row::Album(album.row.clone()),
+        Header::Artist(artist) => Row::Artist(artist.row.clone()),
+        Header::Tag(tag) => Row::Tag(tag.clone()),
+        Header::Playlist(playlist) => {
+            Row::Playlist(PlaylistListRow::Playlist((**playlist).clone()))
+        }
+        Header::Smart(smart) => Row::Playlist(PlaylistListRow::SmartPlaylist((**smart).clone())),
+    };
+    let mut head = Head::new(
+        products,
+        settings,
+        token,
+        row,
+        Some(page::title(products, token, Some(header))),
+        false,
+        head_links(products, settings, header),
+        form,
+    );
+    if let Header::Smart(_) = header {
+        head.radio_from(opened.rows.first());
+    }
+    Some(head)
 }
 
 #[derive(Template)]
@@ -693,18 +818,7 @@ pub(super) fn library(
     let list = token.list();
     let header = opened.header.as_ref();
     Library {
-        head: header.filter(|_| opened.offset == 0).map(|header| {
-            Head::new(
-                products,
-                &settings,
-                token,
-                header_row(header),
-                Some(page::title(products, token, Some(header))),
-                false,
-                head_links(products, &settings, header),
-                form,
-            )
-        }),
+        head: page_head(products, &settings, opened, form),
         rows,
         columns: fields
             .iter()
@@ -759,9 +873,66 @@ struct Section<'a> {
     title: String,
     /// The showcase's header; other sections show rows.
     head: Option<Head<'a>>,
+    /// Quick mix's entries; other sections show rows.
+    tiles: Vec<QuickMixTile<'a>>,
     rows: Vec<Shown<'a>>,
     /// The rows each column stacks, and whether a column is one card.
     columns: rufin_core::view::HomeColumns,
+}
+
+/// A Quick mix entry's Home tile: its name and glyph, how many tracks its next press plays and
+/// the mosaic of the albums they start with, its page's picture. It opens the entry's page; its
+/// Play plays the entry.
+struct QuickMixTile<'a> {
+    title: String,
+    icon: String,
+    count: String,
+    /// Its mosaic for `/api/artwork?picture=` and that mosaic's preview; empty without one.
+    picture: String,
+    preview: String,
+    /// What its Play posts.
+    payload: String,
+    /// Its name, its menu, core's Quick mix menu, and the page it opens as its menu acts on it,
+    /// as the script reads them.
+    data: String,
+    /// The page it opens, as the script reads it, and as a link.
+    page: String,
+    href: String,
+    form: &'a Form,
+}
+
+impl<'a> QuickMixTile<'a> {
+    fn new(
+        products: &ProductHandles,
+        settings: &rufin_core::settings::app::Settings,
+        scope: &page::PageToken,
+        tile: &rufin_core::view::QuickMixTile,
+        form: &'a Form,
+    ) -> Self {
+        let opens = scope.at(rufin_core::route::Route::QuickMix(tile.entry));
+        let page = opens.json();
+        let menu = rufin_core::menu::quick_mix(settings, tile.first_track.clone(), None);
+        Self {
+            data: json!({"title": tile.title, "menu": menu, "play": opens}).to_string(),
+            title: tile.title.clone(),
+            icon: tile.icon.clone(),
+            count: localization::track_count_text(u64::from(tile.tracks)),
+            picture: tile
+                .artwork_binding
+                .as_deref()
+                .map(media::picture)
+                .unwrap_or_default(),
+            preview: artwork_previews(products, tile.artwork_binding.iter())
+                .into_iter()
+                .flatten()
+                .next()
+                .unwrap_or_default(),
+            payload: json!({"source": scope.source, "entry": tile.entry}).to_string(),
+            href: link(&HashMap::from([("page".to_owned(), page.clone())])),
+            page,
+            form,
+        }
+    }
 }
 
 #[derive(Template)]
@@ -818,6 +989,19 @@ pub(super) fn home(
                 } else {
                     block.clone()
                 };
+                if let rufin_core::view::HomeSection::QuickMix(tiles) = section {
+                    return Section {
+                        title: section.title(),
+                        head: None,
+                        tiles: tiles
+                            .iter()
+                            .map(|tile| QuickMixTile::new(products, &settings, token, tile, form))
+                            .collect(),
+                        rows: Vec::new(),
+                        columns: section.columns(home),
+                        block,
+                    };
+                }
                 if let rufin_core::view::HomeSection::Showcase(showcase) = section {
                     return Section {
                         title: section.title(),
@@ -831,6 +1015,7 @@ pub(super) fn home(
                             Vec::new(),
                             form,
                         )),
+                        tiles: Vec::new(),
                         rows: Vec::new(),
                         columns: section.columns(home),
                         block,
@@ -839,6 +1024,7 @@ pub(super) fn home(
                 Section {
                     title: section.title(),
                     head: None,
+                    tiles: Vec::new(),
                     rows: page::home_rows(section)
                         .into_iter()
                         .enumerate()

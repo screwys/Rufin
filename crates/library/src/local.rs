@@ -31,6 +31,8 @@ pub enum Downloads {
     Folder(crate::FolderKey, i64),
     Playlist(crate::PlaylistKey, i64),
     Smart(crate::SmartPlaylistKey, i64),
+    /// A Quick mix page, by its entry: the tracks it lists.
+    QuickMix(u32, i64),
 }
 
 #[derive(Clone, Debug)]
@@ -425,6 +427,24 @@ impl Catalog {
                     smart
                         .get(&key.raw())
                         .map(|totals| i64::from(totals.downloaded)),
+                ),
+                Downloads::QuickMix(entry, shown) => (
+                    shown,
+                    self.quick_mix_page(*entry).map(|tracks| {
+                        let folder = context
+                            .row_folder(folder, CatalogKind::SmartPlaylist, None)
+                            .flatten();
+                        let mut totals = crate::catalog::views::Totals::default();
+                        for record in tracks
+                            .iter()
+                            .filter_map(|key| snapshot.tracks.get(key.raw()))
+                        {
+                            if context.in_source_folder(record, folder) {
+                                totals.add_member(record);
+                            }
+                        }
+                        totals.summary().downloaded_count
+                    }),
                 ),
             };
             if let Some(current) = current {
