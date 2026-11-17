@@ -4,7 +4,9 @@
 {% if let Some(head) = section.head %}
   <div class="home-section" data-block="Showcase">{% call m::showcase(head) %}{% endcall %}</div>
 {% else if !section.tiles.is_empty() %}
-  <section class="home-section quick-mix" data-block="{{ section.block }}" aria-label="{{ section.title }}">
+  <section class="home-section home-panel" data-block="{{ section.block }}">
+    <div class="home-heading"><h2>{{ section.title }}</h2></div>
+    <div class="home-card"><div class="quick-mix-lines"><div class="quick-mix">
 {% for tile in section.tiles %}
     <form method="post" action="/api/home/quick-mix" class="quick-mix-tile" data-row="{{ tile.data }}" data-enhanced-form>
       <input type="hidden" name="csrf" value="{{ tile.form.csrf }}" />
@@ -14,17 +16,21 @@
         <span class="quick-mix-cover"{% if !tile.picture.is_empty() %} data-picture="{{ tile.picture }}"{% endif %}>{% if !tile.preview.is_empty() %}<img src="{{ tile.preview }}" alt="" />{% else if tile.picture.is_empty() %}{% call m::icon(tile.icon) %}{% endcall %}{% else %}{% call m::icon("rufin-symbolic") %}{% endcall %}{% endif %}</span>
         <span class="quick-mix-text"><span class="quick-mix-title">{% call m::icon(tile.icon) %}{% endcall %}<span>{{ tile.title }}</span></span><span class="quick-mix-count">{{ tile.count }}</span></span>
       </a>
-      <button type="submit" class="quick-mix-play" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}: {{ tile.title }}">{% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+      <div class="pin-controls"><div class="cover-morph">
+        <button type="submit" name="mode" value="next" class="cover-side" title="{{ localization::tr("Play Next") }}" aria-label="{{ localization::tr("Play Next") }}">{% call m::icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
+        <button type="submit" name="mode" value="replace" class="cover-play" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}: {{ tile.title }}">{% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+        <button type="submit" name="mode" value="append" class="cover-side" title="{{ localization::tr("Play Later") }}" aria-label="{{ localization::tr("Play Later") }}">{% call m::icon("rufin-go-last-symbolic") %}{% endcall %}</button>
+      </div></div>
     </form>
 {% endfor %}
+    </div></div></div>
   </section>
 {% else %}
-  <section class="home-section" data-block="{{ section.block }}" data-index="{{ loop.index0 }}">
+  <section class="home-section home-panel" data-block="{{ section.block }}">
     <div class="home-heading"><h2>{{ section.title }}</h2>
-      {% call m::action(localization::tr("Play"), "rufin-media-playback-start-symbolic", "play-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Shuffle"), "rufin-shuffle-symbolic", "shuffle-home", "icon-button") %}{% endcall %}
       <div class="home-paging">{% call m::action(localization::tr("Previous"), "rufin-go-previous-symbolic", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "rufin-go-next-symbolic", "next-home", "icon-button") %}{% endcall %}</div>
     </div>
-    <div class="home-row" data-size="{{ size }}" data-spacing="{{ spacing }}" hx-sync="this:replace">{% if !section.columns.cards %}<div class="row-columns" style="grid-template-rows: repeat({{ section.columns.rows }}, auto)">{% for row in section.rows %}{% call m::column_row(row) %}{% endcall %}{% endfor %}</div>{% else %}<div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div>{% endif %}</div>
+    <div class="home-row" data-size="{{ size }}" data-spacing="{{ spacing }}" hx-sync="this:replace">{% if !section.columns.cards %}<div class="row-columns" data-rows="{{ section.columns.rows }}" style="grid-template-rows: repeat({{ section.columns.rows }}, auto)">{% for row in section.rows %}{% call m::column_row(row) %}{% endcall %}{% endfor %}</div>{% else %}<div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div>{% endif %}</div>
   </section>
 {% endif %}
 {% endfor %}

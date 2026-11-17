@@ -1003,9 +1003,11 @@ fn combined_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::Album,
             LibraryField::Tools,
         ],
+        // Smart playlists and mixes start from a playlist's columns.
         LibraryListKey::GenreTracks
         | LibraryListKey::MoodTracks
-        | LibraryListKey::PlaylistTracks => {
+        | LibraryListKey::PlaylistTracks
+        | LibraryListKey::SmartPlaylistTracks => {
             vec![
                 LibraryField::RowIndex,
                 LibraryField::TitleMerged,
@@ -1013,12 +1015,6 @@ fn combined_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
                 LibraryField::Tools,
             ]
         }
-        LibraryListKey::SmartPlaylistTracks => vec![
-            LibraryField::RowIndex,
-            LibraryField::TitleMerged,
-            LibraryField::Album,
-            LibraryField::Tools,
-        ],
     }
 }
 fn default_grid_fields(key: LibraryListKey) -> Vec<LibraryField> {

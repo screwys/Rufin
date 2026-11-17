@@ -276,22 +276,22 @@ nav .icon {
 .pin-controls {
   --cover-play: 30px;
   --cover-side: 26px;
-  --cover-glass: color-mix(in srgb, currentColor 10%, transparent);
+  /* The row's hover colour over the surface it sits on (a Home card's, else the sidebar's); the
+     group opens on that same colour. */
+  --cover-glass: transparent;
+  /* It fills the row's height at its end, out to the row's edges. */
   position: absolute;
-  right: 2px;
+  top: 0;
+  right: 0;
+  bottom: 0;
   width: 102px;
-  height: 40px;
-  border-radius: 7px;
-  background: color-mix(in srgb, currentColor 8%, var(--sidebar));
+  border-radius: inherit;
+  background: color-mix(in srgb, currentColor 8%, var(--row-surface, var(--sidebar)));
   visibility: hidden;
 }
 
 .pin-controls .cover-morph button {
   pointer-events: auto;
-}
-
-.pin-controls .cover-morph .cover-play {
-  box-shadow: none;
 }
 
 .pin-controls .cover-morph .cover-play .icon {

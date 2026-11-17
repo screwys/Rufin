@@ -1384,65 +1384,6 @@ impl View {
             .and_then(|selected| selected.music_folder_key)
     }
 
-    /// What playing Home's section `index` queues: its rows in the order it shows them. None
-    /// when the page is not Home or has no such section.
-    pub fn play_section(
-        &self,
-        index: usize,
-        placement: QueuePlacement,
-        shuffled: bool,
-    ) -> Option<PlayRequest> {
-        let section = self.home_sections()?.into_iter().nth(index)?;
-        // Each album and genre as its page lists it: an album whole, a genre in the folder.
-        let album = |album: &library::AlbumRow| {
-            self.page_members(&Route::of_album(album), Collection::Album(album.album_key))
-                .selection()
-        };
-        let selections = match &section {
-            // Without a header it has no section play; each tile plays its own entry.
-            HomeSection::QuickMix(_) => return None,
-            HomeSection::Showcase(showcase) => vec![album(&showcase.current.album)],
-            HomeSection::Genres(genres) => genres
-                .iter()
-                .map(|genre| {
-                    let key = library::GenreKey::from_raw(genre.key);
-                    self.page_members(&Route::GenreDetail(key), Collection::Genre(key))
-                        .selection()
-                })
-                .collect(),
-            HomeSection::Rows { .. } | HomeSection::Provider(_) => section
-                .items()
-                .into_iter()
-                .map(|item| match item {
-                    HomeItem::Track(row) => MemberSelection::Keys {
-                        source: None,
-                        keys: vec![row.track.track_key].into(),
-                    },
-                    HomeItem::Album(row) => album(&row.album),
-                    HomeItem::Artist(row) => self
-                        .page_members(
-                            &Route::of_artist(&row),
-                            Collection::Artist {
-                                key: row.artist_key,
-                                album_artist: row.album_artist,
-                            },
-                        )
-                        .selection(),
-                })
-                .collect(),
-        };
-        let id = match &section {
-            HomeSection::Provider(provider) => format!("provider:{}", provider.section_id),
-            _ => section.block().map(block_id).unwrap_or_default(),
-        };
-        let source = self.selected.as_ref()?.source_id.as_str();
-        Some(
-            PlayRequest::captured(MemberSelection::Concat(selections), 0, placement, false)
-                .with_context(self.with_read(format!("home:{source}:{id}")).into())
-                .shuffled(shuffled),
-        )
-    }
-
     /// Whether the page offers a letter index: it lists by a name its letter sections follow.
     pub fn has_letter_sections(&self) -> bool {
         let named = matches!(
@@ -2281,14 +2222,6 @@ pub fn home_sections(
     }
     sections.extend(blocks.into_iter().filter_map(block));
     sections
-}
-
-/// A Home block's name in the context id of a section play.
-fn block_id(block: HomeBlockKind) -> String {
-    serde_json::to_value(block)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_default()
 }
 
 /// What playing `selection` whole queues, with `context`, from a random track when shuffled.

@@ -9,8 +9,6 @@ crate::composite_box!(
         heading: gtk::Label,
         previous: gtk::Button,
         next: gtk::Button,
-        play: gtk::Button,
-        shuffle: gtk::Button,
     }
 );
 
@@ -30,13 +28,5 @@ impl HomeSectionHeaderView {
 
     pub fn next(&self) -> gtk::Button {
         self.imp().next.get()
-    }
-
-    pub fn play(&self) -> gtk::Button {
-        self.imp().play.get()
-    }
-
-    pub fn shuffle(&self) -> gtk::Button {
-        self.imp().shuffle.get()
     }
 }

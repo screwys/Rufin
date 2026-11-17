@@ -1266,25 +1266,19 @@ gridview.album-grid {
   color: var(--accent-color);
 }
 
-/* A row's play controls at its end: one block in the row's hover colour, so the row's text ends
-   under it, holding the grid cover's Play group at a row's size. */
+/* A row's play controls at its end: one block in the row's hover colour over the surface the row
+   sits on (a Home card's, else the pane's), so the row's text ends under it, holding the grid
+   cover's Play group at a row's size. The group opens on that same colour. */
 .row-play-group {
   min-width: 102px;
-  min-height: 40px;
-  margin-right: 2px;
-  border-radius: 7px;
-  background: color-mix(in srgb, currentColor 8%, var(--shell-panel-bg-color));
-}
-
-.row-play-group .cover-morph.open {
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, currentColor 8%, var(--row-surface, var(--shell-panel-bg-color)));
 }
 
 .row-play-group button.cover-play-button {
   min-width: 30px;
   min-height: 30px;
   -gtk-icon-size: 14px;
-  box-shadow: none;
 }
 
 .row-play-group button.cover-side-button {
@@ -1556,39 +1550,104 @@ dialog.alert.playlist-delete-dialog .message-area {
   background-color: color-mix(in srgb, currentColor 8%, transparent);
 }
 
-/* Home's Quick mix: filled tiles, each the albums its next press starts with, its name and the
-   tracks it plays; Play shows over the albums under the pointer and the keyboard. */
+/* A Home section: its heading and ‹ › on the page, and under them a card holding what they name,
+   filled from the window as the rows are, whatever the theme's card color. A column of rows is
+   a list with lines between its rows; the row under the pointer drops its line for its rounded
+   fill. */
+.home-section-card {
+  --row-surface: color-mix(in srgb, currentColor 5%, var(--shell-panel-bg-color));
+  padding: 10px 0;
+  border-radius: 12px;
+  background-color: var(--row-surface);
+}
+
+.home-section .section-heading {
+  font-size: 19px;
+}
+
+.home-section-pages > button {
+  min-width: 32px;
+  min-height: 28px;
+  padding: 0;
+  -gtk-icon-size: 14px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  box-shadow: none;
+}
+
+.home-section-pages > button:hover {
+  background: color-mix(in srgb, currentColor 17%, transparent);
+}
+
+.home-section-pages > button:active {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.home-section-pages > button:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.home-section-pages > button:last-child {
+  border-radius: 0 999px 999px 0;
+  box-shadow: inset 1px 0 color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.home-section-pages > button:disabled {
+  opacity: 1;
+}
+
+.home-section-pages > button:disabled image {
+  opacity: 0.32;
+}
+
+.home-column > .home-row {
+  padding: 8px 6px;
+}
+
+/* A row's Play block reaches out over the row's padding to its top, bottom and end. */
+.home-row > .row-play-group {
+  margin: -6px -6px -6px 0;
+  border-radius: var(--radius);
+}
+
+.home-column > .home-row > .row-play-group {
+  margin: -8px -6px -8px 0;
+}
+
+.home-column > .home-row:not(:hover):not(.context-menu-hover-held) {
+  border-radius: 0;
+}
+
+.home-column > .home-row + .home-row:not(:hover):not(.context-menu-hover-held) {
+  box-shadow: inset 0 1px color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* Home's Quick mix: rows as Home's other rows, each the albums its next press starts with, its
+   name and the tracks it plays, with a line above it; the grid's clip hides the first line's.
+   Under the pointer the rows' Play group shows at its end, reaching its edges. */
+flowbox.home-quick-mix {
+  margin-top: -1px;
+}
+
 flowbox.home-quick-mix > flowboxchild {
-  padding: 6px 12px 6px 6px;
-  border-radius: 10px;
-  background-color: color-mix(in srgb, currentColor 8%, transparent);
+  padding: 0;
+  box-shadow: inset 0 1px color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.home-quick-mix-row {
+  padding: 8px 6px;
+}
+
+.home-quick-mix-row > .row-play-group {
+  margin: -8px -6px -8px 0;
+  border-radius: var(--radius);
 }
 
 flowbox.home-quick-mix > flowboxchild:hover {
-  background-color: color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: var(--radius);
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow: none;
 }
 
-button.home-quick-mix-play {
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  -gtk-icon-size: 20px;
-  color: white;
-  opacity: 0;
-  transition:
-    opacity 120ms ease-out,
-    background 120ms ease-out;
-}
-
-button.home-quick-mix-play:hover {
-  background: rgb(0 0 0 / 70%);
-}
-
-flowbox.home-quick-mix > flowboxchild:hover button.home-quick-mix-play,
-flowbox.home-quick-mix > flowboxchild:focus-visible button.home-quick-mix-play,
-button.home-quick-mix-play:focus-visible {
-  opacity: 1;
-}
 
 /* Customization › Home's Quick mix: its entries as chips, then the faded ones it could add. An
    entry's drag handle takes its glyph's place under the pointer. */
@@ -1712,7 +1771,7 @@ button.cover-play-button {
   -gtk-icon-size: 20px;
   color: var(--accent-fg-color);
   background: var(--accent-bg-color);
-  box-shadow: 0 6px 16px rgb(0 0 0 / 32%);
+  box-shadow: none;
   transform: scale(1);
   transition:
     transform 120ms ease-out,
@@ -1734,7 +1793,8 @@ button.cover-play-button.compact-sidebar-pin-play {
   -gtk-icon-size: 16px;
 }
 
-/* Play Next and Play Later come out of Play's sides onto glass. */
+/* Play Next and Play Later come out of Play's sides onto glass; a row's open on the row as it
+   is. */
 .cover-morph {
   border-radius: 999px;
   padding: 0;
@@ -1747,6 +1807,10 @@ button.cover-play-button.compact-sidebar-pin-play {
 .cover-morph.open {
   padding: 4px;
   background: rgb(0 0 0 / 52%);
+}
+
+.row-play-group .cover-morph.open {
+  background: transparent;
 }
 
 button.cover-side-button {
@@ -2478,10 +2542,6 @@ button.download-queue-pause {
 
 button.download-queue-pause image {
   -gtk-icon-size: 12px;
-}
-
-.home-section-control-button {
-  margin-left: -5px;
 }
 
 .window-controls menubutton.icon-button > button {

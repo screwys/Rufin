@@ -604,26 +604,8 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
     match key {
         LibraryListKey::ArtistTracks
         | LibraryListKey::GenreTracks
-        | LibraryListKey::PlaylistTracks => return track_list_column_width(field),
-        LibraryListKey::SmartPlaylistTracks => {}
-        _ => return column_width(field),
-    }
-
-    match field {
-        LibraryField::RowIndex => 44,
-        LibraryField::Title | LibraryField::TitleMerged => 212,
-        LibraryField::Album
-        | LibraryField::Artist
-        | LibraryField::AlbumArtist
-        | LibraryField::Genre
-        | LibraryField::Grouping => 180,
-        LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 82,
-        LibraryField::ReleaseDate | LibraryField::DateAdded => 108,
-        LibraryField::Year
-        | LibraryField::DiscNumber
-        | LibraryField::TrackNumber
-        | LibraryField::Bpm => 62,
-        LibraryField::Duration => 70,
+        | LibraryListKey::PlaylistTracks
+        | LibraryListKey::SmartPlaylistTracks => track_list_column_width(field),
         _ => column_width(field),
     }
 }
