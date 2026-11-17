@@ -5956,14 +5956,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/notify/notify-8.2.1.crate",
-        "sha256": "82f812702fbc75d35416d3f884e04925be7e9498f4eceea2e24ba34559284674",
-        "dest": "cargo/vendor/notify-8.2.1"
+        "url": "https://static.crates.io/crates/notify/notify-8.2.2.crate",
+        "sha256": "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab",
+        "dest": "cargo/vendor/notify-8.2.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"82f812702fbc75d35416d3f884e04925be7e9498f4eceea2e24ba34559284674\", \"files\": {}}",
-        "dest": "cargo/vendor/notify-8.2.1",
+        "contents": "{\"package\": \"c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab\", \"files\": {}}",
+        "dest": "cargo/vendor/notify-8.2.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {

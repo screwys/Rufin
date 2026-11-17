@@ -640,6 +640,11 @@ impl SettingsOwner {
             .update(|stored| Ok(stored.ui.sidebar.set_pinned(pin, pinned)))
     }
 
+    pub fn pin_first(&self, pin: SidebarPin) -> Result<bool, String> {
+        self.file
+            .update(|stored| Ok(stored.ui.sidebar.pin_first(pin)))
+    }
+
     pub fn set_route_visible(&self, item: SidebarRouteItem, visible: bool) -> Result<bool, String> {
         self.file
             .update(|stored| Ok(stored.ui.sidebar.set_route_visible(item, visible)))

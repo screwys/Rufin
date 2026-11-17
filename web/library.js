@@ -554,7 +554,7 @@ function bindTracks(host, signal) {
     tr.setAttribute("aria-rowindex", index + 2);
     bindDrag(tr, () => selected(index)
       ? { kind: "track", row, page: opened, ranges: selection }
-      : mediaSelection("track", row), false);
+      : mediaSelection("track", row));
     tr.classList.toggle("selected", selected(index));
     tr.setAttribute("aria-selected", String(selected(index)));
     tr.addEventListener(
@@ -777,7 +777,7 @@ function bindCard(card) {
     const row = mediaRow(card),
       kind = card.dataset.kind;
     if (!card.classList.contains("pin-row")) {
-      bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
+      bindDrag(card, () => mediaSelection(kind, row));
       bindPlaylistDrop(card, kind, row);
     }
     const open = () => {

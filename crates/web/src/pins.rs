@@ -72,6 +72,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 None => json!({"kind":null,"name":"Rufin"}),
             };
         }
+        item["takes_tracks"] = json!(products.source.takes_tracks(&row));
         item["pin"] = json!(pin);
         items.push(item);
     }
@@ -89,13 +90,19 @@ async fn set(
     struct Input {
         pin: SidebarPin,
         pinned: bool,
+        /// Pins it first, where the sidebar's drop area for new pins stands.
+        #[serde(default)]
+        first: bool,
     }
     let input: Input = body(request).await?;
     let settings = products.settings.clone();
-    let changed = tokio::task::spawn_blocking(move || settings.set_pinned(input.pin, input.pinned))
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
+    let changed = tokio::task::spawn_blocking(move || match input.first && input.pinned {
+        true => settings.pin_first(input.pin),
+        false => settings.set_pinned(input.pin, input.pinned),
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 

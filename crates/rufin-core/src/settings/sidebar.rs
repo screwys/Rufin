@@ -243,6 +243,15 @@ impl SidebarSettings {
         self.pins.len() != previous_len
     }
 
+    /// Pins `pin` first, where the sidebar's drop area for new pins stands.
+    pub fn pin_first(&mut self, pin: SidebarPin) -> bool {
+        if self.pins.contains(&pin) {
+            return false;
+        }
+        self.pins.insert(0, pin);
+        true
+    }
+
     pub fn reorder_pin(&mut self, moved: &SidebarPin, target: &SidebarPin, after: bool) -> bool {
         if moved == target {
             return false;

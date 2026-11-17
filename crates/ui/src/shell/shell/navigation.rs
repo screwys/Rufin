@@ -40,6 +40,7 @@ const NAV_SELECTED_CLASS: &str = "selected";
 const SIDEBAR_PINS_HEADING_CLASS: &str = "sidebar-pins-heading";
 const SIDEBAR_SPACER_CLASS: &str = "sidebar-spacer";
 const SIDEBAR_PIN_ROW_CLASS: &str = "sidebar-pin-row";
+const SIDEBAR_NEW_PIN_CLASS: &str = "sidebar-new-pin";
 const SIDEBAR_PIN_PLAYING_CLASS: &str = "playing";
 const SIDEBAR_PIN_COVER_SIZE: i32 = 40;
 const COMPACT_SIDEBAR_PIN_COVER_SIZE: i32 = 56;
@@ -194,6 +195,16 @@ impl Shell {
             if station {
                 self.refresh_mounted_radio();
             }
+        }
+    }
+
+    fn pin_sidebar_first(self: &Rc<Self>, pin: SidebarPin) {
+        if self
+            .settings
+            .update_app_settings("Pins setting", |settings| settings.sidebar.pin_first(pin))
+            .is_some()
+        {
+            request_sidebar_pins(self);
         }
     }
 
@@ -1461,6 +1472,207 @@ fn install_playlist_pin_drop(
     });
     target.add_css_class("media-drop-target");
     target.add_controller(drop_target);
+}
+
+/// While a drag of the library is over the sidebar, as a file manager shows its bookmarks: a drop
+/// area for a collection no pin keeps yet, and the pins that cannot take the drag dimmed.
+pub(super) fn install_sidebar_drop_feedback(shell: &Rc<Shell>) {
+    let motion = gtk::DropControllerMotion::new();
+    let entered = Rc::downgrade(shell);
+    motion.connect_enter(move |motion, _, _| {
+        let (Some(shell), Some(drop)) = (entered.upgrade(), motion.drop()) else {
+            return;
+        };
+        // A pin moves among the pins, which all take it.
+        if drop.formats().contains_type(glib::Variant::static_type()) {
+            return;
+        }
+        let Some(source) = drop.drag().and_then(|drag| {
+            let value = drag
+                .content()
+                .value(glib::BoxedAnyObject::static_type())
+                .ok()?;
+            media_drag_source(&value)
+        }) else {
+            return;
+        };
+        show_sidebar_drop_feedback(&shell, &source);
+    });
+    let left = Rc::downgrade(shell);
+    motion.connect_leave(move |_| {
+        if let Some(shell) = left.upgrade() {
+            clear_sidebar_drop_feedback(&shell);
+        }
+    });
+    shell.navigation_view.sidebar_modes.add_controller(motion);
+}
+
+fn show_sidebar_drop_feedback(shell: &Rc<Shell>, source: &MediaDragSource) {
+    let items = sidebar_pin_items(shell);
+    let route = match source {
+        MediaDragSource::Target {
+            target: PlayTarget::Route(route),
+        } => Some(route),
+        _ => None,
+    };
+    let new_pin = route.filter(|route| {
+        shell.settings.current.borrow().sidebar.pins_visible
+            && route.pinned_item(&shell.products.library).is_some()
+            && !items
+                .iter()
+                .any(|item| item.route().as_ref() == Some(*route))
+    });
+    if let Some(route) = new_pin {
+        remove_new_pin_drops(shell);
+        let normal = &shell.navigation_view.normal_nav_pins;
+        let heading = normal
+            .first_child()
+            .filter(|child| child.has_css_class(SIDEBAR_PINS_HEADING_CLASS));
+        normal.insert_child_after(&new_pin_drop(shell, route, false), heading.as_ref());
+        let compact = &shell.navigation_view.compact_nav;
+        compact.insert_child_after(
+            &new_pin_drop(shell, route, true),
+            compact_pin_anchor(compact).as_ref(),
+        );
+    }
+    let takes = |item: &SidebarPinItem| match &item.pin {
+        SidebarPin::Playlist { .. } => item
+            .row()
+            .is_some_and(|row| shell.products.source.takes_tracks(row)),
+        SidebarPin::PlaylistFolder { .. } => {
+            crate::menus::playlist_folders::folder_takes_drag(source)
+        }
+        _ => false,
+    };
+    let taking = items
+        .iter()
+        .map(|item| (item.widget_name(), takes(item)))
+        .collect::<HashMap<_, _>>();
+    for container in [
+        &shell.navigation_view.normal_nav_pins,
+        &shell.navigation_view.compact_nav,
+    ] {
+        for (name, widget) in keyed_sidebar_pin_widgets(container) {
+            widget.set_sensitive(taking.get(&name).copied().unwrap_or(false));
+        }
+    }
+}
+
+/// Folds the drop area away, which leaves once folded, and lets every pin take drops again.
+fn clear_sidebar_drop_feedback(shell: &Shell) {
+    for container in [
+        &shell.navigation_view.normal_nav_pins,
+        &shell.navigation_view.compact_nav,
+    ] {
+        let mut child = container.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            if let Some(revealer) = widget
+                .downcast_ref::<gtk::Revealer>()
+                .filter(|revealer| revealer.has_css_class(SIDEBAR_NEW_PIN_CLASS))
+            {
+                revealer.set_reveal_child(false);
+            } else if widget.has_css_class(SIDEBAR_PIN_ROW_CLASS) {
+                widget.set_sensitive(true);
+            }
+        }
+    }
+}
+
+/// Removes drop areas still folding away from an earlier drag.
+fn remove_new_pin_drops(shell: &Shell) {
+    for container in [
+        &shell.navigation_view.normal_nav_pins,
+        &shell.navigation_view.compact_nav,
+    ] {
+        let mut child = container.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            if widget.has_css_class(SIDEBAR_NEW_PIN_CLASS) {
+                container.remove(&widget);
+            }
+        }
+    }
+}
+
+/// The drop area that pins the collection `route` shows first. It unfolds once shown and
+/// leaves its box once folded.
+fn new_pin_drop(shell: &Rc<Shell>, route: &Route, compact: bool) -> gtk::Widget {
+    let label = tr("Add to Saved");
+    let icon = gtk::Image::from_icon_name("rufin-bookmark-symbolic");
+    let area = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    area.add_css_class("sidebar-new-pin-area");
+    area.update_property(&[gtk::accessible::Property::Label(&label)]);
+    if compact {
+        area.add_css_class("compact");
+        area.set_halign(gtk::Align::Center);
+        area.set_size_request(
+            COMPACT_SIDEBAR_PIN_COVER_SIZE,
+            COMPACT_SIDEBAR_PIN_COVER_SIZE,
+        );
+        area.set_tooltip_text(Some(&label));
+        icon.set_hexpand(true);
+        icon.set_pixel_size(COMPACT_NAV_ICON_SIZE);
+        area.append(&icon);
+    } else {
+        icon.set_size_request(SIDEBAR_PIN_COVER_SIZE, SIDEBAR_PIN_COVER_SIZE);
+        area.append(&icon);
+        let title = gtk::Label::new(Some(&label));
+        title.add_css_class("sidebar-pin-title");
+        title.set_xalign(0.0);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        area.append(&title);
+    }
+    let drop = gtk::DropTarget::new(
+        glib::BoxedAnyObject::static_type(),
+        gtk::gdk::DragAction::COPY,
+    );
+    crate::widgets::media_drag::style_order_drop_target(&drop, false, |_| false);
+    let shell = Rc::downgrade(shell);
+    let route = route.clone();
+    drop.connect_drop(move |_, _, _, _| {
+        let Some(owner) = shell.upgrade() else {
+            return false;
+        };
+        let source = owner.products.source.clone();
+        let route = route.clone();
+        let task = owner.products.runtime.spawn(async move {
+            source
+                .route_pin(&route, &library::ReadCancellation::new())
+                .await
+        });
+        let shell = shell.clone();
+        glib::spawn_future_local(async move {
+            let result = match task.await {
+                Ok(read) => read.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            let Some(shell) = shell.upgrade() else { return };
+            match result {
+                Ok(Some(pin)) => shell.pin_sidebar_first(pin),
+                Ok(None) => {}
+                Err(error) => warn!(%error, "could not read the dropped collection's pin"),
+            }
+        });
+        true
+    });
+    area.add_controller(drop);
+    let revealer = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideDown)
+        .transition_duration(200)
+        .child(&area)
+        .build();
+    revealer.add_css_class(SIDEBAR_NEW_PIN_CLASS);
+    revealer.connect_map(|revealer| revealer.set_reveal_child(true));
+    revealer.connect_child_revealed_notify(|revealer| {
+        if !revealer.is_child_revealed()
+            && !revealer.reveals_child()
+            && let Some(parent) = revealer.parent().and_downcast::<gtk::Box>()
+        {
+            parent.remove(revealer);
+        }
+    });
+    revealer.upcast()
 }
 
 fn install_sidebar_pin_double_click(
