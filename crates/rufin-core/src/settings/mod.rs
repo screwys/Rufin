@@ -15,6 +15,7 @@ pub mod context_menu;
 pub mod layout;
 mod library_lists;
 pub mod presentation;
+pub mod quick_mix;
 pub mod right_panel;
 mod storage_reset;
 pub(crate) use storage_reset::device_secrets;

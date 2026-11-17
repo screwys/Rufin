@@ -45,7 +45,7 @@
       "source": "source ID",
       "library": "library ID, or null for All Music"
     },
-    "GET /api/home?source=...": "Home sections in the app's order with the app's titles: the visible blocks in their configured order, with the server's own sections right after the Showcase. Each section lists its tracks, then its albums; the Showcase lists the album before the one it shows, that album, and the album after. You can set folder, or block to read one block's section.",
+    "GET /api/home?source=...": "Home sections in the app's order with the app's titles: the visible blocks in their configured order, with the server's own sections right after the Showcase and Quick mix. Each section lists its tracks, then its albums; the Showcase lists the album before the one it shows, that album, and the album after. Quick mix lists no items but tiles: its entries that match something, as {entry, title, icon, tracks, albums}, tracks being how many a press plays and albums the ones it starts with, at most four. You can set folder, or block to read one block's section.",
     "POST /api/home": {
       "source": "source ID",
       "block": "Explore | MostPlayed | NewlyAdded | RecentlyPlayed | RecentlyReleased"
@@ -55,6 +55,12 @@
       "forward": "true for the next album, false for the one before",
       "returns": "rows: the album before the one now shown, that album, and the album after; empty without albums. Home reads show it from then on."
     },
+    "POST /api/home/quick-mix": {
+      "source": "source ID",
+      "entry": "a Quick mix tile's entry",
+      "returns": "played: false when nothing matched. Plays the entry shuffled as its tile's albums show it, then Home's Quick mix moves to its next shuffle."
+    },
+    "GET /api/quick-mix?source=...&entry=...": "Browse the tracks a Quick mix tile's entry plays next, as a smart playlist's tracks: entry is a tile's from GET /api/home. Use q, offset, limit (up to 256), sort and descending; it shares the saved order of smart playlists' tracks. Later reads of the page keep the tracks it opened with. POST /api/queue, /api/downloads or /api/playlists/entries with {page} takes what it lists; POST /api/home/quick-mix plays the entry as its tile does. An entry that is gone lists nothing.",
     "GET /api/appearance": "The app's theme and colors, and grids: whether covers mark favorites (favorite_badges) and show ratings (star_ratings).",
     "POST /api/sources": "Connect, save and select a source, then scan its music in the background. Returns the source ID after selection. Follow /api/sources/events for scan progress. See source_setup for examples.",
     "PATCH /api/sources": "Change source settings. See source_update for examples.",
@@ -70,15 +76,15 @@
       "id": "source ID"
     },
     "POST /api/delete": "Delete permanently, when Preferences allow it (allow_permanent_delete): the files of {uris:[track URI]}, or of a page's rows with {page} or {page, ranges}. A Jellyfin, Emby or Plex server deletes its tracks itself; a Local, WebDAV or SMB source, or a Subsonic server through its Local File Access folder, has the files deleted. A CUE image is deleted whole with its sheet, when all of its tracks are selected. The tracks leave the library and their downloads are removed.",
-    "POST /api/downloads": "Download tracks with {uris:[track URI]}. Each track goes to its source's download location in that source's download quality, as a download started in the app does. Returns without waiting for the downloads.",
+    "POST /api/downloads": "Download tracks with {uris:[track URI]}, or a page's rows with {page} or {page, ranges}. Each track goes to its source's download location in that source's download quality, as a download started in the app does. Returns without waiting for the downloads.",
     "GET /api/downloads/cache-settings": "Read artwork and lyrics caching choices across all sources and whether artists and albums sort by their sort tags, as {artwork:bool,lyrics:bool,sort_tags:bool}. True downloads automatically; false downloads lazily.",
     "POST /api/downloads/cache-settings": "Set caching choices across all sources and the sort tag choice with {artwork:bool,lyrics:bool,sort_tags:bool}. Automatic downloads include existing and newly scanned entries. Returns the saved choices.",
     "POST /api/downloads/quality": "Set a source download profile with {source:source ID,edit:{quality:original|{transcoded:{codec:opus|aac|mp3|vorbis|flac,bitrate_kbps:128,channels:preserve|stereo_lossy|stereo}}}}. Bitrate presets run from 64 through 320 kbps in 16 kbps steps. FLAC ignores bitrate. Rufin uses server transcoding when suitable and otherwise encodes the original locally. The quality applies to downloads that have not started; tracks already downloaded keep their copy. To change one part of the saved quality as the app's control does, send edit {codec:null|codec} (null is the original), {bitrate_kbps:160} or {channels:...}; the app picks the bitrate a new codec starts at. Returns the saved quality and download_quality {value,bitrate,channels}: whether it offers a bitrate and channels.",
     "POST /api/stream/quality": "Set the quality streams are asked for with {edit}; the edits are those of POST /api/downloads/quality. A server encodes a track only when its own audio does not fit: a lossy format when the track's bitrate is above the chosen one, FLAC when the track is lossless in another format, and either when it has more channels than the quality keeps. Returns stream_quality {value,bitrate,channels}. GET /api/preferences returns the same view as stream_quality.",
     "POST /api/downloads/clear-artwork-cache": "Clear the artwork cache across sources. Keeps artwork for completed and active music downloads, authored playlist artwork and source files. Takes no body and returns after clearing.",
     "POST /api/downloads/clear-lyrics-cache": "Clear cached lyrics across sources. Keeps lyrics for completed and active music downloads, edited lyrics and source files. Takes no body and returns after clearing.",
-    "GET /api/preferences": "Read the preferences the browser shows as {values:{JSON pointer:value},routes:[{item,title,subtitle,icon,visible}],home_blocks:[{block,title,visible,can_toggle,has_options,items,rows}],lists:[{title,group:library|pages|player,subtitle}],providers:{pointer:[{key,title,subtitle}]},themes:[{preference,id,name,preview|light+dark,accents:[{name,title,color}],accent}],theme_errors}. Themes list System, the built-in themes and the custom themes folder; preview holds the colors a tile draws. Pointers name fields of the stored settings, such as /playback/transition_mode or /private_mode. providers lists every cover, artist image and lyrics provider for /cover_providers, /artist_image_providers and /external_lyrics_providers, whose stored lists hold the enabled ones in the order they are asked.",
-    "POST /api/preferences": "Change a preference with {operation:set,path:JSON pointer from GET /api/preferences,value}, a sidebar entry with {operation:route,item,visible?,delta?,target?,after?} a Home block with {operation:home_block,block,visible?,delta?,target?,after?,items?,rows?}, where items is how many it lists (1-24) and rows how many each column stacks (1-3, 0 for automatic), or a theme with {operation:theme,theme:preference,accent?}, where accent picks one of a named theme's own accents. Delta moves the entry; target with after drops it before or after another. Returns what GET returns.",
+    "GET /api/preferences": "Read the preferences the browser shows as {values:{JSON pointer:value},routes:[{item,title,subtitle,icon,visible}],home_blocks:[{block,title,visible,can_toggle,has_options,items,rows}],quick_mix:{choices,playlists,can_add},lists:[{title,group:library|pages|player,subtitle}],providers:{pointer:[{key,title,subtitle}]},themes:[{preference,id,name,preview|light+dark,accents:[{name,title,color}],accent}],theme_errors}. Themes list System, the built-in themes and the custom themes folder; preview holds the colors a tile draws. quick_mix's choices are its entries in their Home order, then the templates no entry was copied from; playlists are the smart playlists, each {title,icon,added} with entry (its place), template (its untranslated name) or playlist (its ID); can_add is false once it holds six entries. Pointers name fields of the stored settings, such as /playback/transition_mode or /private_mode. providers lists every cover, artist image and lyrics provider for /cover_providers, /artist_image_providers and /external_lyrics_providers, whose stored lists hold the enabled ones in the order they are asked.",
+    "POST /api/preferences": "Change a preference with {operation:set,path:JSON pointer from GET /api/preferences,value}, a sidebar entry with {operation:route,item,visible?,delta?,target?,after?} a Home block with {operation:home_block,block,visible?,delta?,target?,after?,items?,rows?}, where items is how many it lists (1-24) and rows how many each column stacks (1-3, 0 for automatic), a Quick mix choice with {operation:quick_mix,entry?,template?,playlist?,target?,after?}, where entry alone removes that entry, entry with target drops it before or after the entry target, and template or playlist appends a copy of its rules, or a theme with {operation:theme,theme:preference,accent?}, where accent picks one of a named theme's own accents. Delta moves the entry; target with after drops it before or after another. Returns what GET returns.",
     "GET /api/scrobbling": "Read the scrobbling accounts as {lastfm:{enabled,now_playing,connected,username,api_key,api_secret},listenbrainz:{enabled,now_playing,connected,username,user_token},librefm:{enabled,now_playing,connected,username},servers:[{id,name,protocol:listenbrainz|audioscrobbler,url,enabled,now_playing,connected,username}]}.",
     "POST /api/scrobbling": "Change scrobbling with {operation:switch,account:lastfm|librefm|listenbrainz|server id,switch:enabled|now_playing,value}, {operation:credential,api_key?,api_secret?} for Last.fm, {operation:connect_listenbrainz,user_token}, {operation:add_server,name,protocol,url,username?,secret}, {operation:sign_in_server,id,username?,secret} or {operation:remove_server,id}. secret is a ListenBrainz server's user token, or an Audioscrobbler server's password, which is sent once for a session and not kept. Returns what GET returns.",
     "POST /api/scrobbling/connect": "Sign in through the service's page with {service:lastfm,api_key,api_secret} (empty for Rufin's own Last.fm key) or {service:librefm}. Streams events {open:url}, the page to open in a browser, then {connected:username} or {error}.",
@@ -250,7 +256,7 @@
       "mode": "replace"
     },
     "POST /api/playback/auto-dj": "Toggle Auto DJ using the app’s existing settings.",
-    "GET /api/mix?source=...": "Saved Mix settings and genres. Use q and offset to browse genres, 64 at a time.",
+    "GET /api/mix?source=...": "Saved Mix settings, the kinds Mix offers in page order as {kind,title,icon}, and genres. Use q and offset to browse genres, 64 at a time.",
     "POST /api/queue/mix": {
       "source": "source ID",
       "albums": false,
@@ -258,7 +264,8 @@
       "min_year": null,
       "max_year": null,
       "genre": null,
-      "played": "All | Unplayed | Played | NotPlayedRecently | RecentlyAdded",
+      "played": "a kind from GET /api/mix, such as All | Unplayed | Played | NotPlayedRecently | RecentlyAdded | OnRepeat",
+      "favorites": "false; true plays favorite tracks, or favorite albums when albums is true",
       "mode": "replace | next | append",
       "note": "Saves the selection as the app's Mix settings."
     },

@@ -3,6 +3,21 @@
 {% for section in sections %}
 {% if let Some(head) = section.head %}
   <div class="home-section" data-block="Showcase">{% call m::showcase(head) %}{% endcall %}</div>
+{% else if !section.tiles.is_empty() %}
+  <section class="home-section quick-mix" data-block="{{ section.block }}" aria-label="{{ section.title }}">
+{% for tile in section.tiles %}
+    <form method="post" action="/api/home/quick-mix" class="quick-mix-tile" data-row="{{ tile.data }}" data-enhanced-form>
+      <input type="hidden" name="csrf" value="{{ tile.form.csrf }}" />
+      <input type="hidden" name="return" value="{{ tile.form.return_to }}" />
+      <input type="hidden" name="payload" value="{{ tile.payload }}" />
+      <a class="quick-mix-open" href="{{ tile.href }}" data-page="{{ tile.page }}" title="{{ tile.title }}">
+        <span class="quick-mix-cover"{% if !tile.picture.is_empty() %} data-picture="{{ tile.picture }}"{% endif %}>{% if !tile.preview.is_empty() %}<img src="{{ tile.preview }}" alt="" />{% else if tile.picture.is_empty() %}{% call m::icon(tile.icon) %}{% endcall %}{% else %}{% call m::icon("rufin-symbolic") %}{% endcall %}{% endif %}</span>
+        <span class="quick-mix-text"><span class="quick-mix-title">{% call m::icon(tile.icon) %}{% endcall %}<span>{{ tile.title }}</span></span><span class="quick-mix-count">{{ tile.count }}</span></span>
+      </a>
+      <button type="submit" class="quick-mix-play" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}: {{ tile.title }}">{% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+    </form>
+{% endfor %}
+  </section>
 {% else %}
   <section class="home-section" data-block="{{ section.block }}" data-index="{{ loop.index0 }}">
     <div class="home-heading"><h2>{{ section.title }}</h2>

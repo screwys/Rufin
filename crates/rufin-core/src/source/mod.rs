@@ -103,6 +103,10 @@ pub(crate) struct Shared {
     /// Where Home's showcase walk stands: the position its last step landed on.
     home_showcase_position: std::sync::atomic::AtomicI64,
     home_explore_variation: std::sync::atomic::AtomicI64,
+    /// Where Quick mix's shuffles start, and how many times each entry's rules were pressed
+    /// since: an entry's next press plays the shuffle of both, whose start Home shows.
+    home_quick_mix_seed: i64,
+    quick_mix_presses: std::sync::Mutex<std::collections::HashMap<u64, i64>>,
     pub(crate) artwork: Artwork,
     pub(crate) catalog: Arc<Catalog>,
     downloads: Downloads,
@@ -435,6 +439,8 @@ impl SourceOwner {
                 lyrics_edited: tokio::sync::watch::channel(None).0,
                 home_showcase_position: std::sync::atomic::AtomicI64::new(home_variation),
                 home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
+                home_quick_mix_seed: home_variation,
+                quick_mix_presses: std::sync::Mutex::default(),
                 artwork,
                 catalog,
                 downloads,
@@ -1339,7 +1345,54 @@ impl SourceOwner {
     }
 }
 
+/// Quick mix rules by a hash of what they hold.
+fn quick_mix_rules(definition: &library::SmartPlaylistDefinition) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(definition)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
 impl SourceOwner {
+    /// The shuffle each of these Quick mix rules' next press plays. Entries hold their own, so a
+    /// press moves only its entry's covers.
+    pub(crate) fn quick_mix_seeds(
+        &self,
+        definitions: &[library::SmartPlaylistDefinition],
+    ) -> Vec<i64> {
+        let presses = self
+            .shared
+            .quick_mix_presses
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        definitions
+            .iter()
+            .map(|definition| {
+                let rules = quick_mix_rules(definition);
+                (self.shared.home_quick_mix_seed ^ rules as i64)
+                    .wrapping_add(presses.get(&rules).copied().unwrap_or_default())
+            })
+            .collect()
+    }
+
+    /// Moves these rules to their next shuffle and has Home show their covers.
+    pub(crate) fn next_quick_mix(
+        &self,
+        source: library::SourceKey,
+        definition: &library::SmartPlaylistDefinition,
+    ) {
+        *self
+            .shared
+            .quick_mix_presses
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(quick_mix_rules(definition))
+            .or_default() += 1;
+        self.notice(feed::Notice::Home(source));
+    }
+
     pub fn home_variations(&self) -> (i64, i64) {
         (
             self.shared.home_showcase_position.load(Ordering::Relaxed),

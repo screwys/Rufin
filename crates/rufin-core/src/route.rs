@@ -65,6 +65,8 @@ pub enum Route {
     PlaylistDetail(PlaylistKey),
     SmartPlaylists,
     SmartPlaylistDetail(SmartPlaylistKey),
+    /// A Quick mix entry, by its place: the tracks its next press plays, in that order.
+    QuickMix(u32),
     PlaylistFolder {
         key: library::PlaylistFolderKey,
         smart: bool,
@@ -171,6 +173,7 @@ impl Route {
                     | Self::Genres
                     | Self::Moods
                     | Self::Folders { .. }
+                    | Self::QuickMix(_)
             ),
         }
     }

@@ -131,6 +131,7 @@ fn routes() -> Router<ProductHandles> {
             list_route("home", (0, 0)).post(catalog::refresh_home),
         )
         .route("/api/home/showcase", post(catalog::step_showcase))
+        .route("/api/home/quick-mix", post(catalog::play_quick_mix))
         .route("/api/tracks", list_route("tracks", (100, 256)))
         .route("/api/albums", list_route("albums", (100, 128)))
         .route(
@@ -165,6 +166,7 @@ fn routes() -> Router<ProductHandles> {
             "/api/smart-playlists/tracks",
             list_route("smart-playlists/tracks", (48, 256)),
         )
+        .route("/api/quick-mix", list_route("quick-mix", (48, 256)))
         .route(
             "/api/queue",
             get(queue_state).post(queue_play).delete(queue_clear),

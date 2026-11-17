@@ -28,15 +28,87 @@
 #mix-form :is(.segmented, .pref-group) {
   margin: 0;
 }
-#mix-played {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.mix-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-/* A long translation wraps inside its chip. */
-#mix-played button {
-  height: auto;
-  min-height: 34px;
-  padding: 4px 8px;
-  white-space: normal;
+.mix-heading h2 {
+  flex: 1;
+}
+.mix-heading button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.mix-heading button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.mix-heading button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+#mix-dots {
+  display: flex;
+  gap: 6px;
+}
+#mix-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.3;
+}
+#mix-dots span[aria-current="true"] {
+  opacity: 1;
+}
+/* One page of kinds at a time: three columns of two rows, a glyph over each name. */
+.mix-page {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+  gap: 6px;
+}
+#mix-played {
+  min-height: calc(2 * 64px + 6px);
+}
+.mix-page[hidden] {
+  display: none;
+}
+.mix-page button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+.mix-page button span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mix-page button[aria-pressed="true"] {
+  background: var(--blue);
+  color: white;
 }
 
 #mix-genre {
@@ -159,15 +231,87 @@
 #mix-form :is(.segmented, .pref-group) {
   margin: 0;
 }
-#mix-played {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.mix-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-/* A long translation wraps inside its chip. */
-#mix-played button {
-  height: auto;
-  min-height: 34px;
-  padding: 4px 8px;
-  white-space: normal;
+.mix-heading h2 {
+  flex: 1;
+}
+.mix-heading button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.mix-heading button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.mix-heading button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+#mix-dots {
+  display: flex;
+  gap: 6px;
+}
+#mix-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.3;
+}
+#mix-dots span[aria-current="true"] {
+  opacity: 1;
+}
+/* One page of kinds at a time: three columns of two rows, a glyph over each name. */
+.mix-page {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+  gap: 6px;
+}
+#mix-played {
+  min-height: calc(2 * 64px + 6px);
+}
+.mix-page[hidden] {
+  display: none;
+}
+.mix-page button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+.mix-page button span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mix-page button[aria-pressed="true"] {
+  background: var(--blue);
+  color: white;
 }
 
 #mix-genre {

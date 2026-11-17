@@ -463,9 +463,12 @@ mod tests {
 pub const MAX_HOME_BLOCK_ITEMS: u8 = 24;
 
 /// Whether `block` has an item count and rows to choose: every block but the showcase, which
-/// shows one album.
+/// shows one album, and Quick mix, whose entries are its own.
 const fn has_home_block_options(block: library::HomeBlockKind) -> bool {
-    !matches!(block, library::HomeBlockKind::Showcase)
+    !matches!(
+        block,
+        library::HomeBlockKind::Showcase | library::HomeBlockKind::QuickMix
+    )
 }
 
 /// How many items `block` lists until it is chosen: featured genres list half as many.

@@ -73,6 +73,7 @@ import io.github.screwys.rufin.core.AndroidDetailLink
 import io.github.screwys.rufin.core.albumCountText
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidDetailSummary
+import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.core.AndroidArtistReleaseGroup
 import io.github.screwys.rufin.core.AndroidSortField
 import io.github.screwys.rufin.core.translate
@@ -144,8 +145,9 @@ internal fun DetailContent(
         LazyColumn(Modifier.fillMaxSize().nestedScroll(reveal), state = state, contentPadding = PaddingValues(
             top = if (finding) LocalOverlayBarHeight.current else 0.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
             if (!finding) item("detail-header") { CompositionLocalProvider(LocalFindHeight provides findHeight) {
+                val quickMix = remember(summary, page.pageView) { page.quickMixMenu(header = true) }
                 DetailHeader(route, summary, favoriteItem(player.model, headerItem), player, onPlay, onFavorite, onOpenRoute, onMenu,
-                    onRadio, onDownload)
+                    onRadio, onDownload, if (rows.itemCount > 0) rows.peek(0) else null, quickMix)
             } }
             if (artist && page.favoriteCount > 0UL) item("detail-favorites") {
                 Column {
@@ -294,9 +296,11 @@ private fun DetailHeader(
     route: Route, summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
     onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onOpenRoute: (Route, String) -> Unit, onMenu: (BrowseItem) -> Unit,
-    onRadio: (BrowseItem) -> Unit, onDownload: (BrowseItem) -> Unit,
+    onRadio: (BrowseItem) -> Unit, onDownload: (BrowseItem) -> Unit, first: BrowseItem?, quickMix: QuickMixMenu?,
 ) {
     val bar = LocalOverlayBarHeight.current
+    // A Quick mix entry shows as a smart playlist that is none of the library's, with no Edit: its menu, core's Quick
+    // mix menu, decides its buttons, and Create a playlist and Download take the tracks its page lists.
     val albumCount = (item.row.artistRow?.summary?.albumCount ?: 0L).coerceAtLeast(0).toULong()
     val playlist = item.row.playlist != null || item.row.smartPlaylist != null
     val title = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold)
@@ -315,8 +319,14 @@ private fun DetailHeader(
     }
     // A playlist's Edit opens the editor its row menu's Edit opens, where that menu offers it.
     val browse = player.model.browse
-    val editable = remember(item.row, browse.library) { playlist && browse.library?.menu(item.row)?.edit == true }
+    val editable = remember(item.row, browse.library) { playlist && quickMix == null && browse.library?.menu(item.row)?.edit == true }
     var editing by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    if (creating && quickMix != null) PlaylistCreateSheet(player.model, { creating = false }, item.row.title) { name, sourceId, public ->
+        val source = player.model.sourceOwner ?: return@PlaylistCreateSheet
+        quickMix.tracks()?.use { selection -> createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) } }
+        creating = false
+    }
     if (editing) {
         val smartPlaylist = item.row.smartPlaylist
         if (smartPlaylist != null) SmartPlaylistEditor(player.model, browse, { editing = false }, smartPlaylist)
@@ -372,22 +382,34 @@ private fun DetailHeader(
             { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) }, labels == 2)
         if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null || item.row.playlist != null)
             ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) }, labelled = labels >= 1)
+        // A smart playlist's and a Quick mix entry's radio starts from the first track listed, as a playlist's
+        // from its first entry.
+        else if (quickMix != null) quickMix.menu.radio?.let { seed ->
+            ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { browse.radio(seed, QueuePlacement.Replace(0UL)) }, labelled = labels >= 1)
+        }
+        else if (item.row.smartPlaylist != null && first != null)
+            ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(first) }, labelled = labels >= 1)
         if (item.row.albumRow != null || item.row.artistRow != null)
             ShowcaseRound("rufin-heart-outline-symbolic", "Favorite", { onFavorite(item) }, favorite = item.row.favorite)
         if (editable) ShowcaseRound("rufin-document-edit-symbolic", "Edit", { editing = true })
-        ShowcaseRound("rufin-download-symbolic", if (item.row.downloaded) "Remove Downloads" else "Download",
-            { onDownload(item) }, if (item.row.downloaded) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+        if (quickMix?.menu?.createPlaylist == true) ShowcaseRound("rufin-playlists-compact-symbolic", "Create a playlist", { creating = true })
+        if (quickMix == null || quickMix.menu.download || quickMix.menu.removeDownload)
+            ShowcaseRound("rufin-download-symbolic", if (item.row.downloaded) "Remove Downloads" else "Download", {
+                if (quickMix != null) player.model.runAction { quickMix.tracks()?.use { browse.library?.downloadSelection(it, item.row.downloaded) } }
+                else onDownload(item)
+            }, if (item.row.downloaded) MaterialTheme.colorScheme.primary else LocalContentColor.current)
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val phone = maxWidth < 560.dp
         val counts = route is Route.ArtistDetail || route is Route.AlbumArtistDetail
         val cover = if (phone) 122.dp else ((maxWidth - 32.dp) * .3f).coerceIn(164.dp, 224.dp)
-        // A tap shows the artwork whole, as a click on GTK's cover does; a long press opens the menu.
+        // A tap shows the artwork whole, as a click on GTK's cover does; a long press opens the menu, a Quick mix
+        // entry's its own.
         var viewing by remember { mutableStateOf(false) }
         val coverBox: @Composable () -> Unit = {
             Box(Modifier.size(cover).shadow(14.dp, CoverShape, ambientColor = Color.Black.copy(alpha = .4f),
                 spotColor = Color.Black.copy(alpha = .4f))
-                .pointerInput(item.row.key) { detectTapGestures(onTap = { viewing = true }, onLongPress = { onMenu(item) }) }) {
+                .pointerInput(item.row.key) { detectTapGestures(onTap = { viewing = true }, onLongPress = { onMenu(item.copy(quickMix = quickMix)) }) }) {
                 DetailHeaderCover(summary, player, cover)
             }
         }
@@ -564,10 +586,15 @@ private fun FullArtwork(summary: AndroidDetailSummary, player: PlayerConnection,
 }
 
 @Composable
-private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConnection, size: Dp) {
-    val bindings = summary.artworkBindings
+private fun DetailHeaderCover(summary: AndroidDetailSummary, player: PlayerConnection, size: Dp) =
+    CoverMosaic(summary.artworkBindings.ifEmpty { listOf(summary.row.artworkIdentity) }, player, size, animated = true)
+
+/** Covers as one square, as GTK's cover group shows them: one whole, more as four quadrants that repeat them.
+ *  Only a single cover may play. */
+@Composable
+internal fun CoverMosaic(bindings: List<ByteArray?>, player: PlayerConnection, size: Dp, animated: Boolean = false) {
     if (bindings.size <= 1) {
-        DetailCover(detailArtwork(bindings.firstOrNull() ?: summary.row.artworkIdentity, player, size, animated = true), Modifier.size(size))
+        DetailCover(detailArtwork(bindings.firstOrNull(), player, size, animated), Modifier.size(size))
     } else {
         Column(Modifier.size(size).clip(CoverShape)) {
             repeat(2) { y ->

@@ -1035,7 +1035,10 @@ private fun DetailPane(model: RufinConnection, browse: BrowseConnection, player:
                     PlayerIconButton("rufin-selection-mode-symbolic", "Select", { select.route = location.route })
                 }
                 if (page != null) PlayerIconButton("rufin-filter-symbolic", "Customize", { onCustomize(page) })
-                summary?.let { shown -> PlayerIconButton("rufin-view-more-symbolic", "More actions", { onMenu(BrowseItem(shown.row, 0UL, null)) }) }
+                // A Quick mix entry's menu is core's Quick mix menu of what its page lists.
+                summary?.let { shown -> PlayerIconButton("rufin-view-more-symbolic", "More actions", {
+                    onMenu(BrowseItem(shown.row, 0UL, null, quickMix = page.quickMixMenu()))
+                }) }
                 trailing()
             }
         }

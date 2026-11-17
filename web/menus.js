@@ -299,7 +299,8 @@ let newPlaylistUris = { uris: [] };
 let playlistSource = null;
 let playlistPublic = null;
 
-async function openName(playlist = null, uris = []) {
+// Edits `playlist`, or makes a new one of `uris` (or a {page}), its name starting as `name`.
+async function openName(playlist = null, uris = [], name = "") {
   editingPlaylist = playlist;
   $("name-dialog").classList.toggle("playlist-edit", !!playlist);
   $("playlist-apply").textContent = playlist ? tr("Apply") : tr("Save");
@@ -307,7 +308,7 @@ async function openName(playlist = null, uris = []) {
   $("name-title").textContent = playlist
     ? tr("Edit Playlist")
     : tr("New Playlist");
-  $("playlist-name").value = playlist?.name || "";
+  $("playlist-name").value = playlist?.name || name;
   $("playlist-owner").hidden = !!playlist;
   $("playlist-file-options").hidden = !playlist;
   $("playlist-public-row").hidden = true;

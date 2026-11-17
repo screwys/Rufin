@@ -1,6 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
+    sync::Arc,
 };
 
 use ::library::{AlbumRow, AlbumView, ArtistView, PlaylistListRow, Row};
@@ -24,6 +25,7 @@ use crate::widgets::interactions::{ContextMenuOpen, install_context_menu_openers
 use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::localization::bind_label_text_with;
 use crate::widgets::media_drag::MediaDragSource;
+use crate::widgets::view_model::Rows;
 use rufin_core::route::Route;
 
 /// From this width titles take their largest size.
@@ -111,6 +113,8 @@ mod showcase_imp {
         #[template_child]
         pub edit: TemplateChild<gtk::Button>,
         #[template_child]
+        pub create_playlist: TemplateChild<gtk::Button>,
+        #[template_child]
         pub download: TemplateChild<gtk::Button>,
         #[template_child]
         pub more: TemplateChild<gtk::Button>,
@@ -118,8 +122,8 @@ mod showcase_imp {
         pub step_previous: TemplateChild<gtk::Button>,
         #[template_child]
         pub step_next: TemplateChild<gtk::Button>,
-        /// The row the header shows, which its buttons act on.
-        pub row: RefCell<Option<Row>>,
+        /// What the header shows, which its buttons act on.
+        pub subject: RefCell<Option<ShowcaseSubject>>,
         pub(crate) shell: RefCell<Weak<CatalogUi>>,
         pub offers_download: Cell<bool>,
         /// The cover's Artwork button, under the pointer while the row's picture can change.
@@ -421,6 +425,88 @@ impl ShowcaseCover {
     }
 }
 
+/// What a header's buttons act on.
+#[derive(Clone)]
+pub enum ShowcaseSubject {
+    /// A row of the library: an album, an artist, a genre or a saved playlist.
+    Row(Row),
+    /// A smart playlist and the tracks its page lists: Radio starts from the first of them, as a
+    /// playlist's from its first entry.
+    Smart(Row, Rows<Row>),
+    /// A Quick mix, which is no row of the library: Radio starts from the first track it lists,
+    /// Create a playlist offers a playlist `name` of everything it lists, Download takes
+    /// everything it lists, and `downloaded` is whether all of it is downloaded.
+    QuickMix {
+        name: String,
+        rows: Rows<Row>,
+        downloaded: bool,
+    },
+}
+
+impl ShowcaseSubject {
+    /// The row of the library it is.
+    fn row(&self) -> Option<&Row> {
+        match self {
+            Self::Row(row) | Self::Smart(row, _) => Some(row),
+            Self::QuickMix { .. } => None,
+        }
+    }
+
+    /// The media Download takes.
+    fn media(&self) -> Option<MediaDragSource> {
+        match self {
+            Self::Row(row) | Self::Smart(row, _) => {
+                rufin_core::view::PlayTarget::of_row(row).map(MediaDragSource::capture_target)
+            }
+            Self::QuickMix { rows, .. } => rows.whole_selection().map(MediaDragSource::selection),
+        }
+    }
+
+    fn play_radio(&self, shell: &CatalogUi) {
+        let playback = Arc::clone(&shell.products.playback);
+        let play = move |row: &Row| {
+            if let Some(seed) = rufin_core::menu::radio_seed(row) {
+                playback.play_radio(RadioPlayRequest::now(seed));
+            }
+        };
+        let rows = match self {
+            Self::Row(row) => return play(row),
+            Self::Smart(_, rows) | Self::QuickMix { rows, .. } => rows,
+        };
+        let Some(view) = rows.view() else { return };
+        shell.products.runtime.spawn(async move {
+            match view.rows(0..1, &::library::ReadCancellation::new()).await {
+                Ok(first) => {
+                    if let Some(row) = first.first() {
+                        play(row);
+                    }
+                }
+                Err(error) => warn!(%error, "could not read the first track"),
+            }
+        });
+    }
+}
+
+/// A Quick mix page's menu, core's Quick mix menu, or with `header` its header's buttons, which
+/// show every entry: its radio starts from the first of `rows`, the tracks the page lists, and
+/// `downloaded` is whether all of them are.
+pub(crate) fn quick_mix_menu(
+    shell: &CatalogUi,
+    rows: &Rows<Row>,
+    downloaded: bool,
+    header: bool,
+) -> rufin_core::menu::Menu {
+    let first = match rows.ready(0).as_deref() {
+        Some(Row::Track(track) | Row::AlbumTrack { track, .. }) => Some(track.media_uri.clone()),
+        _ => None,
+    };
+    if header {
+        rufin_core::menu::quick_mix_swipes(first, Some(downloaded))
+    } else {
+        rufin_core::menu::quick_mix(&shell.settings.current.borrow(), first, Some(downloaded))
+    }
+}
+
 /// What a mounted header shows and does.
 pub struct ShowcaseMount {
     pub shape: ShowcaseShape,
@@ -648,12 +734,12 @@ impl DetailShowcaseView {
         self.refit();
     }
 
-    /// Mounts the header for `row`: its cover, with a playlist's picture buttons on hover, its
-    /// buttons, and its shape at each width.
+    /// Mounts the header for `subject`: its cover, with a playlist's picture buttons on hover,
+    /// its buttons, and its shape at each width.
     pub(crate) fn mount(
         &self,
         shell: &Rc<CatalogUi>,
-        row: Row,
+        subject: ShowcaseSubject,
         mount: ShowcaseMount,
     ) -> gtk::Widget {
         let ShowcaseMount {
@@ -686,13 +772,13 @@ impl DetailShowcaseView {
         overlay.set_valign(gtk::Align::Start);
         overlay.set_child(Some(&button));
         install_context_menu_openers(&overlay, Rc::clone(&menu));
-        // Home's showcase steps through albums; a page's own cover changes its picture.
-        if shape != ShowcaseShape::Home {
+        // Home's showcase steps through albums; a row's own cover changes its picture.
+        if shape != ShowcaseShape::Home && subject.row().is_some() {
             self.install_artwork_button(&overlay);
         }
         self.imp().cover_host.append(&overlay);
         self.bind_actions(shell, play, menu, download);
-        self.show_row(row);
+        self.show(subject);
         self.present(shape, initial_width, Some(cover))
     }
 
@@ -706,28 +792,46 @@ impl DetailShowcaseView {
 
     /// Shows `row`'s radio, favorite and downloads in the buttons, which then act on it.
     pub fn show_row(&self, row: Row) {
+        self.show(ShowcaseSubject::Row(row));
+    }
+
+    /// Shows `subject`'s radio, favorite, edit and downloads in the buttons, which then act on
+    /// it.
+    pub(crate) fn show(&self, subject: ShowcaseSubject) {
         let imp = self.imp();
         let Some(shell) = imp.shell.borrow().upgrade() else {
             return;
         };
-        let offered = rufin_core::menu::swipes(
-            &shell.products.source,
-            &shell.settings.current.borrow(),
-            &row,
-        );
-        imp.radio.set_visible(offered.radio.is_some());
+        // A row offers what its swipes do; a Quick mix what its menu does.
+        let offered = match &subject {
+            ShowcaseSubject::Row(row) | ShowcaseSubject::Smart(row, _) => rufin_core::menu::swipes(
+                &shell.products.source,
+                &shell.settings.current.borrow(),
+                row,
+            ),
+            ShowcaseSubject::QuickMix {
+                rows, downloaded, ..
+            } => quick_mix_menu(&shell, rows, *downloaded, true),
+        };
+        let downloaded = offered.remove_download;
+        // A smart playlist's radio starts from the first track it lists, read when it starts.
+        let smart = matches!(subject, ShowcaseSubject::Smart(..));
+        imp.radio.set_visible(smart || offered.radio.is_some());
         imp.favorite.set_visible(offered.favorite);
-        if let Some((_, favorite)) = row_favorite(&row) {
+        if let Some((_, favorite)) = subject.row().and_then(row_favorite) {
             set_favorite_button_active(&imp.favorite, favorite);
         }
         imp.edit
-            .set_visible(offered.edit && playlist_row(&row).is_some());
-        if imp.artwork_button.borrow().is_some() {
+            .set_visible(offered.edit && subject.row().and_then(playlist_row).is_some());
+        imp.create_playlist.set_visible(offered.create_playlist);
+        if let Some(row) = subject.row()
+            && imp.artwork_button.borrow().is_some()
+        {
             self.show_artwork_writable(&shell, row.clone(), offered.edit_metadata);
         }
-        let downloaded = offered.remove_download;
-        imp.download
-            .set_visible(imp.offers_download.get() && (offered.download || downloaded));
+        imp.download.set_visible(
+            imp.offers_download.get() && (offered.download || offered.remove_download),
+        );
         if downloaded {
             imp.download.add_css_class("active-toggle");
         } else {
@@ -738,7 +842,7 @@ impl DetailShowcaseView {
         } else {
             msgid("Download")
         })));
-        imp.row.replace(Some(row));
+        imp.subject.replace(Some(subject));
         self.refit();
     }
 
@@ -839,14 +943,8 @@ impl DetailShowcaseView {
         });
         let view = self.downgrade();
         imp.radio.connect_clicked(move |_| {
-            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
-                return;
-            };
-            if let Some(seed) = rufin_core::menu::radio_seed(&row) {
-                shell
-                    .products
-                    .playback
-                    .play_radio(RadioPlayRequest::now(seed));
+            if let Some((shell, subject)) = view.upgrade().and_then(|view| view.subject()) {
+                subject.play_radio(&shell);
             }
         });
         let view = self.downgrade();
@@ -874,14 +972,29 @@ impl DetailShowcaseView {
             }
         });
         let view = self.downgrade();
-        imp.download.connect_clicked(move |button| {
-            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+        imp.create_playlist
+            .set_icon_name(crate::widgets::interactions::ADD_TO_PLAYLIST_ICON);
+        imp.create_playlist.connect_clicked(move |_| {
+            let Some((shell, ShowcaseSubject::QuickMix { name, rows, .. })) =
+                view.upgrade().and_then(|view| view.subject())
+            else {
                 return;
             };
-            if let Some(target) = rufin_core::view::PlayTarget::of_row(&row) {
+            if let Some(selection) = rows.whole_selection() {
+                shell
+                    .shell()
+                    .new_playlist_dialog_with(name, selection.input);
+            }
+        });
+        let view = self.downgrade();
+        imp.download.connect_clicked(move |button| {
+            let Some((shell, subject)) = view.upgrade().and_then(|view| view.subject()) else {
+                return;
+            };
+            if let Some(media) = subject.media() {
                 crate::menus::media_menus::download(
                     shell.shell(),
-                    &MediaDragSource::capture_target(target),
+                    &media,
                     button.has_css_class("active-toggle"),
                 );
             }
@@ -942,13 +1055,18 @@ impl DetailShowcaseView {
 
     /// The row the header shows.
     pub fn row(&self) -> Option<Row> {
-        self.imp().row.borrow().clone()
+        self.imp().subject.borrow().as_ref()?.row().cloned()
     }
 
     /// The page and the row the buttons act on.
     fn shown(&self) -> Option<(Rc<CatalogUi>, Row)> {
+        Some((self.imp().shell.borrow().upgrade()?, self.row()?))
+    }
+
+    /// The page and what the buttons act on.
+    fn subject(&self) -> Option<(Rc<CatalogUi>, ShowcaseSubject)> {
         let imp = self.imp();
-        Some((imp.shell.borrow().upgrade()?, imp.row.borrow().clone()?))
+        Some((imp.shell.borrow().upgrade()?, imp.subject.borrow().clone()?))
     }
 
     fn present(

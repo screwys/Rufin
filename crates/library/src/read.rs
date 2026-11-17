@@ -99,6 +99,7 @@ impl OrderInner {
                 read.filter.len()
                     + match &read.collection {
                         Collection::Objects { ids, .. } => texts(ids),
+                        Collection::Tracks { keys, .. } => keys.len() * 8,
                         _ => 0,
                     }
             }
@@ -461,6 +462,8 @@ pub enum Header {
     Artist(Box<ArtistView>),
     Playlist(Box<PlaylistRow>),
     Smart(Box<SmartPlaylistRow>),
+    /// A Quick mix page, as a smart playlist's header shows one.
+    QuickMix(Box<crate::QuickMixRow>),
     Tag(TagRow),
 }
 

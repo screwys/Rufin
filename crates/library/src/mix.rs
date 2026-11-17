@@ -1,17 +1,21 @@
-//! Picks tracks or whole albums at random from the resident Catalog, as Mix asks.
+//! Picks tracks or whole albums at random from what a smart playlist definition matches in the
+//! resident Catalog, as Mix asks.
 
 use std::collections::HashSet;
 
 use crate::catalog::snapshot::{Packed, TrackRec};
-use crate::catalog::views::{Context, known};
+use crate::catalog::views::{Context, Inputs, favorite, smart_period};
 use crate::radio::{queued_tracks, require_radio_bounds};
 use crate::{
-    AlbumKey, Catalog, FolderKey, GenreKey, LibraryResult, ReadCancellation, SourceKey, TrackKey,
+    AlbumKey, Catalog, FolderKey, LibraryResult, ReadCancellation, SmartPlaylistDefinition,
+    TrackKey,
 };
 
+/// What Mix picks from. The first five are the kinds it always had, saved under their names;
+/// the rest are smart playlist templates.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum PlayedFilter {
+pub enum MixKind {
     #[default]
     All,
     Unplayed,
@@ -20,19 +24,26 @@ pub enum PlayedFilter {
     NotPlayedRecently,
     /// Added in the last 30 days.
     RecentlyAdded,
+    ThisTimeLastYear,
+    OnRepeat,
+    Rediscover,
+    MostPlayed,
+    RecentlyPlayed,
+    ForgottenFavorites,
+    NewAndUnplayed,
+    TopRated,
+    MostSkipped,
 }
-
-const RECENT_PLAY_SECONDS: i64 = 180 * 86_400;
-const RECENT_ADDITION_SECONDS: i64 = 30 * 86_400;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixCriteria {
-    pub min_year: Option<i64>,
-    pub max_year: Option<i64>,
-    pub genre: Option<GenreKey>,
-    pub played: PlayedFilter,
-    /// Whole albums, each of whose tracks matches, in place of tracks.
+    /// The kind's rules with Mix's own filters added, read in the selected source. A limit
+    /// cuts the kind to its first tracks in its order, which Mix then picks from.
+    pub definition: SmartPlaylistDefinition,
+    /// Whole albums in place of tracks.
     pub albums: bool,
+    /// Favorites only: favorite tracks, or favorite albums when it picks albums.
+    pub favorites: bool,
 }
 
 /// What a random pick chose, in the order it plays.
@@ -43,13 +54,14 @@ pub enum MixPick {
 }
 
 impl Catalog {
-    /// `requested` tracks, or whole albums, of a source that match the criteria at `now` (unix
-    /// seconds), chosen evenly as `variation` picks.
-    /// The music folder narrows the tracks; an album counts with a track in it and every track
-    /// matching. Queued tracks are left out, and albums holding one.
+    /// `requested` tracks, or whole albums, of what `criteria` matches in music folder `folder`
+    /// at `now` (unix seconds), chosen evenly as `variation` picks. Queued tracks are left out,
+    /// and albums holding one.
+    ///
+    /// An album counts with a track in the folder when its tracks are what the kind picks: each
+    /// of them for a kind of rules alone, any of them for a kind cut to its first tracks.
     pub async fn mix_pick(
         &self,
-        source: SourceKey,
         folder: Option<FolderKey>,
         criteria: &MixCriteria,
         requested: usize,
@@ -58,93 +70,97 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<MixPick> {
         require_radio_bounds(0, requested)?;
-        let queued = {
-            let mut connection = self.acquire_cancellable(cancellation).await?;
-            queued_tracks(&mut connection).await?
+        let mut definition = criteria.definition.clone();
+        if criteria.favorites && !criteria.albums {
+            definition
+                .conditions
+                .push(crate::SmartPlaylistCondition::Rule(
+                    crate::SmartPlaylistRule {
+                        field: crate::SmartPlaylistRuleField::Favorite,
+                        operator: crate::SmartPlaylistRuleOperator::Is,
+                        value: Some(crate::SmartPlaylistRuleValue::Bool(true)),
+                    },
+                ));
+        }
+        let definition = &definition;
+        let (queued, inputs) = {
+            let mut connection = self.acquire_loaded(cancellation).await?;
+            let queued = queued_tracks(&mut connection).await?;
+            let mut inputs = Inputs::default();
+            let periods = smart_period(definition).into_iter().collect();
+            self.read_periods(&mut connection, &mut inputs, periods, now)
+                .await?;
+            (queued.into_iter().collect::<HashSet<_>>(), inputs)
         };
-        self.loaded().await;
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
-        let none = || {
-            if criteria.albums {
+        let seed = variation as u64;
+        let free = |track: &TrackRec| !queued.contains(&i64::from(track.key));
+        let Some(folder) = context.folder_slot(folder, None) else {
+            return Ok(if criteria.albums {
                 MixPick::Albums(Vec::new())
             } else {
                 MixPick::Tracks(Vec::new())
-            }
+            });
         };
-        let Some(owner) = snapshot.source_slot(source) else {
-            return Ok(none());
-        };
-        let folder = match folder {
-            Some(folder) => match snapshot.folders.slot(folder.raw()) {
-                Some(slot) => Some(slot),
-                None => return Ok(none()),
-            },
-            None => None,
-        };
-        let genre = match criteria.genre {
-            Some(genre) => match snapshot.tags.slot(genre.raw()) {
-                Some(slot) => Some(slot),
-                None => return Ok(none()),
-            },
-            None => None,
-        };
-        let queued = queued.into_iter().collect::<HashSet<_>>();
-        let year = |track: &TrackRec| (track.year != i16::MIN).then_some(i64::from(track.year));
-        let matches = |slot: u32, track: &TrackRec| {
-            let played = context.played(slot, track);
-            !queued.contains(&i64::from(track.key))
-                && criteria
-                    .min_year
-                    .is_none_or(|min| year(track).is_some_and(|year| year >= min))
-                && criteria
-                    .max_year
-                    .is_none_or(|max| year(track).is_some_and(|year| year <= max))
-                && genre.is_none_or(|genre| snapshot.track_runs(track)[2].contains(&genre))
-                && match criteria.played {
-                    PlayedFilter::All => true,
-                    PlayedFilter::Unplayed => played.plays == 0,
-                    PlayedFilter::Played => played.plays > 0,
-                    PlayedFilter::NotPlayedRecently => played
-                        .last
-                        .is_none_or(|last| i64::from(last) < now - RECENT_PLAY_SECONDS),
-                    PlayedFilter::RecentlyAdded => known(track.added)
-                        .is_some_and(|added| i64::from(added) >= now - RECENT_ADDITION_SECONDS),
-                }
-        };
-        let in_folder = |track: &TrackRec| {
-            folder.is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
-        };
-        let tracks = snapshot
-            .tracks
-            .iter()
-            .filter(|(_, track)| track.source == owner && track.indexed());
-        let seed = variation as u64;
         if !criteria.albums {
+            let (tracks, _) = context.quick_mix_tracks(definition, &inputs, folder, variation);
             let chosen = sampled(
-                tracks.filter(|(slot, track)| in_folder(track) && matches(*slot, track)),
+                tracks
+                    .into_iter()
+                    .filter_map(|(_, slot)| snapshot.tracks.live(slot).filter(|track| free(track))),
                 requested,
                 seed,
             );
             return Ok(MixPick::Tracks(
                 chosen
                     .into_iter()
-                    .map(|(_, track)| TrackKey::from_raw(i64::from(track.key)))
+                    .map(|track| TrackKey::from_raw(i64::from(track.key)))
                     .collect(),
             ));
         }
-        // Each album's slot with whether a track is in the folder and whether all match.
-        let mut albums = std::collections::HashMap::<u32, (bool, bool)>::new();
-        for (slot, track) in tracks {
+        let rules = definition;
+        let ranked = rules.limit.is_some() && rules.sort_field != crate::SmartPlaylistSort::Random;
+        let (picked, _) = context.quick_mix_tracks(rules, &inputs, None, variation);
+        let picked = picked
+            .into_iter()
+            .map(|(_, slot)| slot)
+            .collect::<HashSet<_>>();
+        let source = rules
+            .source_id
+            .as_ref()
+            .and_then(|id| {
+                snapshot
+                    .sources
+                    .values()
+                    .find(|source| source.object == id.as_str())
+            })
+            .and_then(|source| snapshot.source_slot(source.key));
+        // Each album's slot: whether a track is in the folder, whether one is picked, whether
+        // all are, and whether one is queued.
+        let mut albums = std::collections::HashMap::<u32, [bool; 4]>::new();
+        for (slot, track) in snapshot.tracks.iter() {
+            if !track.indexed() || source.is_some_and(|source| track.source != source) {
+                continue;
+            }
             if let Some(album) = context.album_of(track) {
-                let (inside, all) = albums.entry(album).or_insert((false, true));
-                *inside |= in_folder(track);
-                *all = *all && matches(slot, track);
+                let [inside, any, all, queued] =
+                    albums.entry(album).or_insert([false, false, true, false]);
+                *inside |= context.in_source_folder(track, folder);
+                *any |= picked.contains(&slot);
+                *all &= picked.contains(&slot);
+                *queued |= !free(track);
             }
         }
         let mut eligible = albums
             .into_iter()
-            .filter(|(_, (inside, all))| *inside && *all)
+            .filter(|(album, [inside, any, all, queued])| {
+                *inside
+                    && !*queued
+                    && if ranked { *any } else { *all }
+                    && (!criteria.favorites
+                        || favorite(snapshot.albums.records[*album as usize].flags))
+            })
             .map(|(album, _)| album)
             .collect::<Vec<_>>();
         // The map's order differs between runs; the variation alone picks.

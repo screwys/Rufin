@@ -25,6 +25,24 @@ import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.shared.rufin_core.ContextMenuItem
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 import io.github.screwys.rufin.shared.rufin_core.HomeBlockRow
+import io.github.screwys.rufin.shared.rufin_core.QuickMixChoice
+import io.github.screwys.rufin.shared.rufin_core.QuickMixChoiceKind
+import io.github.screwys.rufin.shared.rufin_core.QuickMixEditor
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import io.github.screwys.rufin.ui.RufinSlider
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,7 +67,7 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             else when (tab) {
                 CustomizationTab.Layout -> LayoutTab(preferences, browse)
-                CustomizationTab.Home -> HomeTab(preferences)
+                CustomizationTab.Home -> HomeTab(preferences, browse)
                 CustomizationTab.Player -> PlayerTab(player)
                 CustomizationTab.Menus -> MenusTab(preferences)
             }
@@ -82,9 +100,9 @@ private fun LayoutTab(preferences: PreferencesConnection, browse: BrowseConnecti
     }
 }
 
-/** Home's Size and Spacing, and its blocks: their order, which show, and each one's item count and rows. */
+/** Home's Size and Spacing, its blocks: their order, which show, and each one's item count and rows, and Quick mix. */
 @Composable
-private fun HomeTab(preferences: PreferencesConnection) {
+private fun HomeTab(preferences: PreferencesConnection, browse: BrowseConnection) {
     val application = preferences.applicationSettings ?: return
     val home = application.home
     val rows = remember(application.homeBlocks, home) { preferences.nativeSettings().homeBlockRows() }
@@ -104,6 +122,135 @@ private fun HomeTab(preferences: PreferencesConnection) {
             onReorder = { _, id, target, after -> preferences.changePreference { reorderHomeBlock(block(id), block(target), after) } },
             onToggle = { id, on -> preferences.changePreference { setHomeBlockVisible(block(id), on) } },
             details = { id -> rows.find { it.block.name == id }?.let { HomeBlockOptions(preferences, it) } })
+    }
+    QuickMixGroup(preferences, browse)
+}
+
+/** Quick mix's entries in their Home order, then the templates no entry was copied from, as chips, and under
+ *  them the user's smart playlists, as GTK's Quick mix group. An entry's check removes it, a + adds while
+ *  another fits, and a long press drags an entry to another's place. Every edit is core's; the chips then
+ *  show what it saved. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuickMixGroup(preferences: PreferencesConnection, browse: BrowseConnection) {
+    val library = browse.library ?: return
+    val saved = preferences.applicationSettings?.quickMix
+    var editor by remember { mutableStateOf<QuickMixEditor?>(null) }
+    LaunchedEffect(library, saved) { browse.quickMixEditor()?.let { editor = it } }
+    val shown = editor ?: return
+    val scheme = MaterialTheme.colorScheme
+    fun entry(choice: QuickMixChoice) = (choice.kind as? QuickMixChoiceKind.Entry)?.index
+    val entries = shown.choices.filter { entry(it) != null }
+    // The entries as a drag moves them, by their place in Quick mix; a drop commits the move.
+    var order by remember(shown) { mutableStateOf(entries.map { entry(it)!! }) }
+    var original by remember(shown) { mutableStateOf(order) }
+    var dragged by remember(shown) { mutableStateOf<UInt?>(null) }
+    var pointer by remember(shown) { mutableStateOf(Offset.Zero) }
+    var grip by remember(shown) { mutableStateOf(Offset.Zero) }
+    var over by remember(shown) { mutableStateOf<UInt?>(null) }
+    val bounds = remember(shown) { mutableStateMapOf<UInt, Rect>() }
+    fun commit(from: Int, to: Int) {
+        if (from != to) preferences.changePreference { reorderQuickMix(from.toUInt(), to.toUInt(), to > from) }
+    }
+    fun move(index: UInt, step: Int) {
+        val from = order.indexOf(index)
+        val to = from + step
+        if (to !in order.indices) return
+        order = order.toMutableList().apply { add(to, removeAt(from)) }
+        commit(from, to)
+    }
+    SettingsGroup(translate("Mixes")) {
+        Column(Modifier.fillMaxWidth().background(scheme.surfaceContainer)) {
+            FlowRow(Modifier.fillMaxWidth().padding(12.dp).pointerInput(shown) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { at ->
+                        val hit = bounds.entries.firstOrNull { it.value.contains(at) } ?: return@detectDragGesturesAfterLongPress
+                        dragged = hit.key; pointer = at; grip = at - hit.value.topLeft; original = order; over = null
+                    },
+                    onDrag = { change, amount ->
+                        val moving = dragged ?: return@detectDragGesturesAfterLongPress
+                        change.consume()
+                        pointer += amount
+                        // Entering another entry takes its place; the one passed steps aside.
+                        val under = bounds.entries.firstOrNull { it.key != moving && it.value.contains(pointer) }?.key
+                        if (under != null && under != over) {
+                            val to = order.indexOf(under)
+                            order = order.toMutableList().apply { remove(moving); add(to, moving) }
+                        }
+                        over = under
+                    },
+                    onDragEnd = {
+                        dragged?.let { moving -> commit(original.indexOf(moving), order.indexOf(moving)) }
+                        dragged = null
+                    },
+                    onDragCancel = { order = original; dragged = null },
+                )
+            }, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                order.forEachIndexed { place, index -> key(index) {
+                    val choice = entries.first { entry(it) == index }
+                    val lifted = dragged == index
+                    QuickMixChip(choice, shown.canAdd, browse, preferences, Modifier
+                        .onPlaced { bounds[index] = it.boundsInParent() }
+                        .zIndex(if (lifted) 1f else 0f)
+                        .graphicsLayer {
+                            if (lifted) bounds[index]?.let { at ->
+                                translationX = pointer.x - grip.x - at.left
+                                translationY = pointer.y - grip.y - at.top
+                            }
+                        }
+                        .then(if (lifted) Modifier.shadow(6.dp, CircleShape) else Modifier)
+                        // Screen readers move an entry a place at a time.
+                        .semantics {
+                            customActions = listOfNotNull(
+                                CustomAccessibilityAction(translate("Move up")) { move(index, -1); true }.takeIf { place > 0 },
+                                CustomAccessibilityAction(translate("Move down")) { move(index, 1); true }.takeIf { place < order.lastIndex })
+                        })
+                } }
+                shown.choices.filter { entry(it) == null }.forEach { choice -> QuickMixChip(choice, shown.canAdd, browse, preferences) }
+            }
+            // Under a line across the container, the user's smart playlists.
+            if (shown.playlists.isNotEmpty()) {
+                HorizontalDivider(color = scheme.onSurface.copy(alpha = .08f))
+                Text(translate("Smart playlists"), Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
+                    style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant)
+                FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    shown.playlists.forEach { choice -> QuickMixChip(choice, shown.canAdd, browse, preferences) }
+                }
+            }
+        }
+    }
+}
+
+/** A Quick mix choice: its glyph and name, then a filled check that removes an entry, or a + that adds a
+ *  template or a smart playlist while another entry fits. What is not in Quick mix is faded. */
+@Composable
+private fun QuickMixChip(choice: QuickMixChoice, canAdd: Boolean, browse: BrowseConnection, preferences: PreferencesConnection,
+    modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val faded = if (choice.added) 1f else .5f
+    Row(modifier.height(40.dp).clip(CircleShape).background(if (choice.added) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh)
+        .padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RufinIcon(choice.icon, null, Modifier.size(16.dp).alpha(faded))
+        Text(choice.title, Modifier.weight(1f, fill = false).alpha(faded), style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (choice.added) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val kind = choice.kind
+        if (choice.added) {
+            val index = (kind as? QuickMixChoiceKind.Entry)?.index
+            FilledIconButton({ index?.let { preferences.changePreference { removeQuickMix(it) } } }, Modifier.size(32.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = scheme.secondaryContainer,
+                    contentColor = scheme.onSecondaryContainer)) {
+                RufinIcon("rufin-object-select-symbolic", translate("Remove"), Modifier.size(14.dp))
+            }
+        } else IconButton({
+            when (kind) {
+                is QuickMixChoiceKind.Template -> preferences.changePreference { addQuickMixTemplate(kind.name) }
+                is QuickMixChoiceKind.Playlist -> browse.addQuickMixPlaylist(kind.objectId)
+                is QuickMixChoiceKind.Entry -> {}
+            }
+        }, Modifier.size(32.dp), enabled = canAdd) {
+            RufinIcon("rufin-list-add-symbolic", translate("Add"), Modifier.size(14.dp))
+        }
     }
 }
 

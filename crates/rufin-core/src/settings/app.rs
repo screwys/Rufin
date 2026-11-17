@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::downloads::{DownloadRules, SourceDownloadSettings};
 use crate::presence::Settings as RichPresenceSettings;
-use library::PlayedFilter;
+use library::MixKind;
 use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 pub use metadata_lookup::{ArtistImageProvider, CoverProvider};
@@ -122,7 +122,11 @@ pub struct MixSettings {
     pub min_year: Option<u16>,
     pub max_year: Option<u16>,
     pub genre: Option<MixGenreSelection>,
-    pub played_filter: PlayedFilter,
+    /// Saved under the name it had when only plays and additions narrowed Mix.
+    #[serde(rename = "played_filter")]
+    pub kind: MixKind,
+    /// Favorite tracks only, or favorite albums when it plays albums.
+    pub favorites: bool,
 }
 
 impl Default for MixSettings {
@@ -134,7 +138,8 @@ impl Default for MixSettings {
             min_year: None,
             max_year: None,
             genre: None,
-            played_filter: PlayedFilter::All,
+            kind: MixKind::All,
+            favorites: false,
         }
     }
 }
@@ -283,6 +288,9 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     home_blocks: Vec<HomeBlockKind> = default_home_blocks();
     #[serde(default)]
     home: super::sidebar::HomeSettings = super::sidebar::HomeSettings::default();
+    /// Home's Quick mix entries, in their order.
+    #[serde(default = "super::quick_mix::default_quick_mix")]
+    quick_mix: Vec<super::quick_mix::QuickMixEntry> = super::quick_mix::default_quick_mix();
     #[serde(default)]
     context_menu: ContextMenuSettings = ContextMenuSettings::default() => set_context_menu;
     #[serde(default)]

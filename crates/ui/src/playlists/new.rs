@@ -124,8 +124,7 @@ fn new_playlist_dialog(
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         new_dialog: adw::Dialog, new_entry: gtk::Entry, new_owner: gtk::ToggleButton,
-        new_public_options: gtk::Box, new_public: gtk::Switch,
-        new_cancel: gtk::Button, new_create: gtk::Button,
+        new_public_options: gtk::Box, new_public: gtk::Switch, new_create: gtk::Button,
     });
     new_entry.set_text(name);
     // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
@@ -144,12 +143,6 @@ fn new_playlist_dialog(
     new_owner.connect_toggled(move |owner| {
         if let Some(options) = options.upgrade() {
             options.set_visible(owner.is_active() && supports_public);
-        }
-    });
-    let dialog = new_dialog.downgrade();
-    new_cancel.connect_clicked(move |_| {
-        if let Some(dialog) = dialog.upgrade() {
-            dialog.close();
         }
     });
     let dialog = new_dialog.downgrade();

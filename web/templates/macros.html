@@ -59,30 +59,36 @@
 </article>
 {% endmacro %}
 {% macro showcase(head) %}
-<section class="detail-showcase{% if head.home %} home-showcase{% endif %}" data-row="{{ head.row.data }}" data-kind="{{ head.row.kind() }}">
+<section class="detail-showcase{% if head.home %} home-showcase{% endif %}" data-row="{{ head.data }}" data-kind="{{ head.kind }}">
   <form method="post" action="/api/queue" data-enhanced-form>
-    <input type="hidden" name="csrf" value="{{ head.row.form.csrf }}" />
-    <input type="hidden" name="return" value="{{ head.row.form.return_to }}" />
-    <input type="hidden" name="payload" value="{{ head.row.play }}" />
+    <input type="hidden" name="csrf" value="{{ head.form.csrf }}" />
+    <input type="hidden" name="return" value="{{ head.form.return_to }}" />
+    <input type="hidden" name="payload" value="{{ head.play }}" />
   {% if !head.links.is_empty() %}<div class="detail-links">{% for link in head.links %}{% if let Some(url) = link.url %}<a href="{{ url }}" target="_blank" rel="noopener noreferrer" title="{{ link.title }}" aria-label="{{ link.title }}"><img src="{{ link.image }}" alt="" /></a>{% else %}<span title="{{ link.title }}"><img src="{{ link.image }}" alt="{{ link.title }}" /></span>{% endif %}{% endfor %}</div>{% endif %}
   <div class="detail-body">
     <div class="detail-band" style="{{ head.band }}"></div>
-    <div class="detail-cover">{% if head.home %}<button type="button" class="cover-open" data-action="menu" aria-label="{{ head.row.title }}">{% endif %}<div class="cover{% if head.row.mosaic() %} cover-mosaic{% endif %}">{% for preview in head.row.preview_tiles() %}{% if head.row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if head.row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ head.row.artwork() }}" loading="lazy" alt="" /></noscript></div>{% if head.home %}</button>{% endif %}</div>
+    <div class="detail-cover">{% if head.home %}<button type="button" class="cover-open" data-action="menu" aria-label="{{ head.title }}">{% endif %}<div class="cover{% if head.mosaic %} cover-mosaic{% endif %}">{% for preview in head.tiles %}{% if head.mosaic %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if head.mosaic %}</span>{% endif %}{% endfor %}{% if !head.artwork.is_empty() %}<noscript><img src="{{ head.artwork }}" loading="lazy" alt="" /></noscript>{% endif %}</div>{% if head.home %}</button>{% endif %}</div>
     <div class="detail-text">
       <div class="detail-heading">
-        <h2 class="detail-title">{{ head.row.title }}</h2>
-        {% if head.artist %}<button type="button" class="metadata-link detail-artist" data-action="link" data-field="artist">{{ head.row.artist() }}</button>{% endif %}
+        <h2 class="detail-title">{{ head.title }}</h2>
+        {% if let Some(artist) = head.artist %}<button type="button" class="metadata-link detail-artist" data-action="link" data-field="artist">{{ artist }}</button>{% endif %}
       </div>
       <div class="detail-meta">
         <div class="detail-facts">{% for (icon, text) in head.facts %}<span>{% call icon(icon) %}{% endcall %}{{ text }}</span>{% endfor %}</div>
         {% if !head.home && !head.genres.is_empty() %}{% for (name, page) in head.genres %}<button type="button" class="detail-genre-chip" data-action="genre" data-page="{{ page }}" title="{{ name }}">{{ name }}</button>{% endfor %}<button type="button" class="detail-genre-chip detail-genre-more" title="{{ localization::tr("Genres") }}" aria-label="{{ localization::tr("Genres") }}" hidden></button>{% endif %}
       </div>
       <div class="detail-actions">
-        {% if head.row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary" title="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Play") }}</span></button>{% endif %}
-        {% if head.row.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Radio") }}</span></button>{% endif %}
-        {% if head.row.menu.favorite %}{% call favorite(head.row, "detail-round", true) %}{% endcall %}{% endif %}
-        {% if head.row.menu.edit && (head.row.kind() == "playlist" || head.row.kind() == "smart-playlist") %}<button type="button" data-action="edit" class="detail-round" title="{{ localization::tr("Edit") }}" aria-label="{{ localization::tr("Edit") }}">{% call icon("rufin-document-edit-symbolic") %}{% endcall %}</button>{% endif %}
-        {% call menu_button(head.row, "detail-round") %}{% endcall %}
+        {% if head.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary" title="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Play") }}</span></button>{% endif %}
+        {% if head.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Radio") }}</span></button>{% endif %}
+        {% if let Some(row) = head.row %}
+        {% if row.menu.favorite %}{% call favorite(row, "detail-round", true) %}{% endcall %}{% endif %}
+        {% if row.menu.edit && (head.kind == "playlist" || head.kind == "smart-playlist") %}<button type="button" data-action="edit" class="detail-round" title="{{ localization::tr("Edit") }}" aria-label="{{ localization::tr("Edit") }}">{% call icon("rufin-document-edit-symbolic") %}{% endcall %}</button>{% endif %}
+        {% call menu_button(row, "detail-round") %}{% endcall %}
+        {% else %}
+        {% if head.menu.create_playlist %}<button type="button" data-action="create-playlist" class="detail-round" title="{{ localization::tr("Create a playlist") }}" aria-label="{{ localization::tr("Create a playlist") }}">{% call icon("rufin-playlists-compact-symbolic") %}{% endcall %}</button>{% endif %}
+        {% if head.menu.download %}<button type="submit" formaction="/api/downloads" data-action="download" class="detail-round" title="{{ localization::tr("Download") }}" aria-label="{{ localization::tr("Download") }}">{% call icon("rufin-download-symbolic") %}{% endcall %}</button>{% else if head.menu.remove_download %}<button type="button" data-action="remove-download" class="detail-round" aria-pressed="true" title="{{ localization::tr("Remove Downloads") }}" aria-label="{{ localization::tr("Remove Downloads") }}">{% call icon("rufin-download-symbolic") %}{% endcall %}</button>{% endif %}
+        <button type="button" class="detail-round" data-action="menu" aria-haspopup="menu" aria-label="{{ localization::tr("More actions") }}" title="{{ localization::tr("More actions") }}">{% call icon("rufin-view-more-symbolic") %}{% endcall %}</button>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -90,7 +96,7 @@
   <button type="button" class="detail-step detail-step-previous" data-action="step-showcase" data-forward="false" title="{{ localization::tr("Previous album") }}" aria-label="{{ localization::tr("Previous album") }}">{% call icon("rufin-go-previous-symbolic") %}{% endcall %}</button>
   <button type="button" class="detail-step detail-step-next" data-action="step-showcase" data-forward="true" title="{{ localization::tr("Next album") }}" aria-label="{{ localization::tr("Next album") }}">{% call icon("rufin-go-next-symbolic") %}{% endcall %}</button>
   {% endif %}
-  {% call media_menu(head.row) %}{% endcall %}
+  {% if let Some(row) = head.row %}{% call media_menu(row) %}{% endcall %}{% endif %}
   </form>
 </section>
 {% endmacro %}

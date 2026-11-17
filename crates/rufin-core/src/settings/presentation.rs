@@ -163,6 +163,7 @@ use localization::msgid;
 pub fn home_block_title(value: HomeBlockKind) -> &'static str {
     match value {
         HomeBlockKind::Showcase => msgid("Showcase"),
+        HomeBlockKind::QuickMix => msgid("Mixes"),
         HomeBlockKind::Explore => msgid("Explore"),
         HomeBlockKind::MostPlayed => msgid("Most played"),
         HomeBlockKind::NewlyAdded => msgid("Newly added"),

@@ -734,7 +734,9 @@ impl DownloadSubject {
             (None, MemberSelection::Keys { .. } | MemberSelection::Uris(_), [uri]) => {
                 format!("track:{uri}")
             }
-            (None, MemberSelection::Members { .. }, _) => hashed_id("folder", media_uris),
+            (None, MemberSelection::Members { read, .. }, _) => {
+                hashed_id(unnamed(read).1, media_uris)
+            }
             (None, MemberSelection::Entries(_), _) => hashed_id("playlist", media_uris),
             _ => hashed_id("selection", media_uris),
         };
@@ -754,6 +756,25 @@ fn hashed_id(context: &str, media_uris: &[String]) -> String {
     format!("{context}:{}", hash_id_bytes(&encoded))
 }
 
+/// What the whole of a read is called, and its download's context when no collection page
+/// names it. A source's tracks narrowed to a folder are a folder's, else the Tracks list's.
+fn unnamed(read: &library::MemberRead) -> (&'static str, &'static str) {
+    use library::Collection as C;
+    use localization::msgid;
+    match &read.collection {
+        C::Source(_) if read.folder.is_some() => (msgid("Folder"), "folder"),
+        C::Source(_) => (msgid("Tracks"), "tracks"),
+        C::Objects { .. } => (msgid("Folder"), "folder"),
+        C::Tracks { .. } => (msgid("Mixes"), "quick-mix"),
+        C::History { .. } => (msgid("History"), "history"),
+        C::Album(_) => (msgid("Album"), "album"),
+        C::Artist { .. } => (msgid("Artist"), "artist"),
+        C::Genre(_) => (msgid("Genre"), "genre"),
+        C::Mood(_) => (msgid("Mood"), "mood"),
+        C::Playlist(_) | C::Smart { .. } => (msgid("Playlist"), "playlist"),
+    }
+}
+
 /// The whole collection `selection` reads.
 fn collection(
     catalog: &library::Catalog,
@@ -768,7 +789,7 @@ fn collection(
 }
 
 /// What `selection` is called where it is downloaded or added to a playlist: a whole
-/// collection by its kind, one track, a folder or a playlist's entries. Other selections
+/// collection by its kind, a Quick mix, one track, a folder or a playlist's entries. Other selections
 /// have no name.
 pub fn selection_title(
     catalog: &library::Catalog,
@@ -776,8 +797,9 @@ pub fn selection_title(
 ) -> Option<String> {
     use library::MemberSelection;
     let title = match selection {
-        MemberSelection::Members { ranges: None, .. } => collection(catalog, selection)
-            .map_or(localization::msgid("Folder"), |target| target.kind()),
+        MemberSelection::Members { read, ranges: None } => {
+            collection(catalog, selection).map_or_else(|| unnamed(read).0, |target| target.kind())
+        }
         MemberSelection::Keys { keys, .. } if keys.len() == 1 => localization::msgid("Track"),
         MemberSelection::Uris(uris) if uris.len() == 1 => localization::msgid("Track"),
         MemberSelection::Entries(_) => localization::msgid("Playlist"),

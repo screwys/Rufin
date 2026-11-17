@@ -255,6 +255,15 @@
                       </object>
                     </child>
                     <child>
+                      <!-- A Quick mix makes a playlist of the tracks it lists; Rust gives it the
+                           playlist actions' icon. -->
+                      <object class="GtkButton" id="create_playlist">
+                        <property name="visible">false</property>
+                        <property name="tooltip-text" translatable="yes">Create a playlist</property>
+                        <style><class name="detail-round"/></style>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkButton" id="download">
                         <property name="visible">false</property>
                         <property name="icon-name">rufin-download-symbolic</property>

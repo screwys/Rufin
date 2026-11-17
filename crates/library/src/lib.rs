@@ -68,6 +68,8 @@ mod waveform;
 pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
 mod mix;
+mod quick_mix;
+pub use quick_mix::{QuickMixPress, QuickMixRow};
 mod radio;
 mod scroll_sections;
 pub use scroll_sections::ScrollSection;
@@ -113,7 +115,7 @@ pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, Use
 pub use fingerprint::FingerprintRow;
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
-    HomeSectionKind, HomeSectionRows, HomeShowcase, HomeTrackRow,
+    HomeQuickMix, HomeSectionKind, HomeSectionRows, HomeShowcase, HomeTrackRow,
 };
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
@@ -129,7 +131,7 @@ pub use local::{
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
-pub use mix::{MixCriteria, MixPick, PlayedFilter};
+pub use mix::{MixCriteria, MixKind, MixPick};
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,

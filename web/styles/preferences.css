@@ -363,6 +363,88 @@ button.pref-row:hover {
   background: color-mix(in srgb, var(--accent) 10%, var(--card-bg-color, var(--surface)));
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+/* Quick mix's one container: chips that wrap, its entries first, then the templates and the
+   smart playlists it does not hold, faded. A hovered entry shows its drag handle. */
+.quick-mix-editor {
+  padding: 12px;
+}
+.quick-mix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-mix-heading {
+  margin: 12px -12px 8px;
+  padding: 12px 12px 0;
+  box-shadow: inset 0 1px var(--border-color, var(--line));
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.quick-mix-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  height: 34px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  font-weight: 500;
+}
+.quick-mix-chip.added {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  font-weight: 600;
+}
+.quick-mix-chip > .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.quick-mix-chip:not(.added) > .icon,
+.quick-mix-chip:not(.added) > .quick-mix-chip-title {
+  opacity: 0.5;
+}
+.quick-mix-chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quick-mix-chip .icon-button {
+  width: 26px;
+  height: 26px;
+  padding: 6px;
+  border-radius: 999px;
+}
+.quick-mix-chip .icon-button .icon {
+  width: 14px;
+  height: 14px;
+}
+.quick-mix-chip.added .icon-button {
+  background: var(--blue);
+  color: #fff;
+}
+.quick-mix-chip.added .icon-button:hover {
+  background: color-mix(in srgb, var(--blue) 85%, #fff);
+}
+.quick-mix-chip:has(> .quick-mix-handle) {
+  cursor: grab;
+  touch-action: none;
+}
+.quick-mix-handle,
+.quick-mix-chip:hover:has(> .quick-mix-handle) > .icon:first-child {
+  display: none;
+}
+.quick-mix-chip:hover > .quick-mix-handle {
+  display: block;
+  opacity: 0.8;
+}
+.quick-mix-chip.reorder-dragging {
+  position: relative;
+  z-index: 1;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
 /* A Home block's own choices, under its row and in line with its title. */
 .pref-list-row:has(.pref-block-options) {
   flex-wrap: wrap;

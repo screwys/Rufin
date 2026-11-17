@@ -95,6 +95,7 @@ import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
 import io.github.screwys.rufin.core.AndroidSortField
 import io.github.screwys.rufin.core.AndroidHomeSectionKind
+import io.github.screwys.rufin.core.AndroidQuickMixTile
 import io.github.screwys.rufin.shared.library.Row as LibraryRow
 import io.github.screwys.rufin.shared.rufin_core.playsContext
 import kotlinx.coroutines.launch
@@ -362,6 +363,8 @@ private fun HomeContent(
         items(sections, key = { it.index.toString() + it.title }) { section ->
             if (section.kind == AndroidHomeSectionKind.SHOWCASE) {
                 HomeBand(section, player, onMenu, onFavorite, { shuffled -> onPlay(section, shuffled) }, onRadio, onStep)
+            } else if (section.kind == AndroidHomeSectionKind.QUICK_MIX) {
+                QuickMixTiles(section.quickMix, player, onMenu)
             } else {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -401,6 +404,60 @@ private fun HomeContent(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Home's Quick mix, with no header: two columns of filled tiles, each the mosaic of the albums its next press
+ *  starts with, its page's cover, its glyph and name, and the tracks it plays. A tap opens the tracks it plays; Play over the
+ *  cover plays them; a hold opens its menu, core's Quick mix menu. */
+@Composable
+private fun QuickMixTiles(tiles: List<AndroidQuickMixTile>, player: PlayerConnection, onMenu: (BrowseItem) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        tiles.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { tile -> QuickMixTile(tile, player, Modifier.weight(1f), onMenu) }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickMixTile(tile: AndroidQuickMixTile, player: PlayerConnection, modifier: Modifier, onMenu: (BrowseItem) -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val scheme = MaterialTheme.colorScheme
+    val browse = player.model.browse
+    // Its menu plays the entry as Play does, it being shuffled already, and takes the tracks its page lists.
+    val menu = {
+        browse.library?.quickMixMenu(tile.firstTrack, null)?.let { offered ->
+            onMenu(BrowseItem(tile.row, 0UL, null, quickMix = QuickMixMenu(offered, { placement, _ -> browse.playQuickMix(tile.entry, placement) }) {
+                browse.library?.routeSelection(Route.QuickMix(tile.entry))
+            }))
+        }
+    }
+    Row(modifier.height(64.dp).focusRing(shape).clip(shape).background(scheme.surfaceContainerHigh)
+        .combinedClickable(onClick = { browse.openRoute(Route.QuickMix(tile.entry), tile.title) }, onLongClick = { menu() })
+        .padding(start = 8.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // A phone has no hover to show GTK's Play over the cover, so it is always there; the whole cover takes the tap.
+        Box(Modifier.size(48.dp).focusRing(CoverShape).clip(CoverShape).clickable { browse.playQuickMix(tile.entry) },
+            contentAlignment = Alignment.Center) {
+            val pixels = with(LocalDensity.current) { 48.dp.roundToPx() }
+            Artwork(rememberArtwork(tile.artworkIdentity, player, pixels), Modifier.fillMaxSize())
+            Box(Modifier.size(26.dp).background(Color.Black.copy(alpha = .52f), CircleShape), contentAlignment = Alignment.Center) {
+                RufinIcon("rufin-media-playback-start-symbolic", translate("Play"), Modifier.size(14.dp), OnBand)
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                RufinIcon(tile.icon, null, Modifier.size(16.dp), scheme.onSurfaceVariant)
+                Text(tile.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold)
+            }
+            Text(trackCountText(tile.tracks.toULong()), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
         }
     }
 }

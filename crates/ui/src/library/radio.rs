@@ -27,6 +27,7 @@ use crate::widgets::interactions::ContextMenuSurface;
 use crate::widgets::layout::width_allocation_owner;
 use crate::widgets::library_fields::opaque_artwork;
 use crate::widgets::mounted_route::{MountedRoute, MountedRouteSearchTarget};
+use crate::widgets::reorder::{ChildReorder, install_child_reorder};
 
 /// The narrowest card of the grid; narrower pages show one column.
 const CARD_MIN_WIDTH: i32 = 320;
@@ -449,8 +450,7 @@ struct RadioRoute {
     station_cards: RefCell<Vec<StationCard>>,
     suggested_cards: RefCell<Vec<StationCard>>,
     /// The stations' cards in the order the grid shows them, which a drag changes.
-    order: RefCell<Vec<gtk::FlowBoxChild>>,
-    dragged: RefCell<Option<gtk::FlowBoxChild>>,
+    order: ChildReorder,
     shown: RefCell<Option<RadioPage>>,
     /// The newest read; an older one that answers later is dropped.
     read: Cell<u64>,
@@ -560,6 +560,7 @@ impl RadioRoute {
             .collect::<Vec<_>>();
 
         let route = Rc::new_cyclic(|route: &Weak<Self>| {
+            let order = Self::install_reorder(route, &stations);
             let weak = route.clone();
             let page = width_allocation_owner(
                 &library_route_inset(content.clone().upcast()),
@@ -616,15 +617,13 @@ impl RadioRoute {
                 filter_toggle,
                 station_cards: RefCell::new(Vec::new()),
                 suggested_cards: RefCell::new(Vec::new()),
-                order: RefCell::new(Vec::new()),
-                dragged: RefCell::new(None),
+                order,
                 shown: RefCell::new(None),
                 read: Cell::new(0),
                 columns: Cell::new(0),
             }
         });
         route.lay_out(catalog.route_width() - PRIMARY_ROUTE_HORIZONTAL_INSET);
-        route.install_reorder();
         let weak = Rc::downgrade(&route);
         on_air_toggle.connect_clicked(move |_| {
             let Some(route) = weak.upgrade() else {
@@ -788,9 +787,12 @@ impl RadioRoute {
                 })
                 .collect::<Vec<StationCard>>();
             if grid == &self.stations {
-                self.dragged.take();
-                self.order
-                    .replace(built.iter().map(|card| card.child.clone()).collect());
+                self.order.set_order(
+                    built
+                        .iter()
+                        .map(|card| card.child.clone().upcast())
+                        .collect(),
+                );
             }
             cards.replace(built);
         }
@@ -820,108 +822,47 @@ impl RadioRoute {
 
     /// Lets a station be dragged by its handle to another's place. The card moves among the
     /// others while it is dragged, and the order is kept when it is let go.
-    fn install_reorder(self: &Rc<Self>) {
-        let weak = Rc::downgrade(self);
-        self.stations.set_sort_func(move |a, b| {
+    fn install_reorder(route: &Weak<Self>, stations: &gtk::FlowBox) -> ChildReorder {
+        let weak = route.clone();
+        stations.set_sort_func(move |a, b| {
             let Some(route) = weak.upgrade() else {
                 return gtk::Ordering::Equal;
             };
-            let order = route.order.borrow();
-            let place = |child: &gtk::FlowBoxChild| order.iter().position(|placed| placed == child);
-            place(a).cmp(&place(b)).into()
+            route.order.position(a).cmp(&route.order.position(b)).into()
         });
-        // The grid hears the drag, so a card that changes place under the pointer does not
-        // end it.
-        let drag = gtk::GestureDrag::new();
-        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let weak = Rc::downgrade(self);
-        drag.connect_drag_begin(move |gesture, x, y| {
-            let Some(route) = weak.upgrade() else {
-                return;
-            };
-            let mut picked = route.stations.pick(x, y, gtk::PickFlags::DEFAULT);
-            let mut on_handle = false;
-            let child = loop {
-                let Some(widget) = picked else {
-                    break None;
-                };
-                on_handle |= widget.has_css_class("station-card-drag");
-                if let Some(child) = widget.downcast_ref::<gtk::FlowBoxChild>() {
-                    break Some(child.clone());
-                }
-                picked = widget.parent();
-            };
-            let Some(child) = child.filter(|_| on_handle) else {
-                return;
-            };
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            child.add_css_class("station-dragging");
-            route.dragged.replace(Some(child));
-        });
-        let weak = Rc::downgrade(self);
-        drag.connect_drag_update(move |gesture, offset_x, offset_y| {
-            let (Some(route), Some((x, y))) = (weak.upgrade(), gesture.start_point()) else {
-                return;
-            };
-            let Some(dragged) = route.dragged.borrow().clone() else {
-                return;
-            };
-            let Some(over) = route
-                .stations
-                .child_at_pos((x + offset_x) as i32, (y + offset_y) as i32)
-                .filter(|over| *over != dragged)
-            else {
-                return;
-            };
-            {
-                let mut order = route.order.borrow_mut();
-                let (Some(from), Some(to)) = (
-                    order.iter().position(|placed| *placed == dragged),
-                    order.iter().position(|placed| *placed == over),
-                ) else {
+        let weak = route.clone();
+        install_child_reorder(
+            stations,
+            |stations, _| stations.invalidate_sort(),
+            move |_, order| {
+                let Some(route) = weak.upgrade() else {
                     return;
                 };
-                let moved = order.remove(from);
-                order.insert(to, moved);
-            }
-            route.stations.invalidate_sort();
-        });
-        let weak = Rc::downgrade(self);
-        drag.connect_drag_end(move |_, _, _| {
-            let Some(route) = weak.upgrade() else {
-                return;
-            };
-            let Some(dragged) = route.dragged.take() else {
-                return;
-            };
-            dragged.remove_css_class("station-dragging");
-            let (Some(shell), cards) = (route.shell.upgrade(), route.station_cards.borrow()) else {
-                return;
-            };
-            let key_of = |child: &gtk::FlowBoxChild| {
-                cards
+                let (Some(shell), cards) = (route.shell.upgrade(), route.station_cards.borrow())
+                else {
+                    return;
+                };
+                let key_of = |child: &gtk::Widget| {
+                    cards
+                        .iter()
+                        .find(|card| card.child.upcast_ref::<gtk::Widget>() == child)
+                        .and_then(|card| card.station.borrow().key)
+                };
+                let shown = cards
                     .iter()
-                    .find(|card| card.child == *child)
-                    .and_then(|card| card.station.borrow().key)
-            };
-            let shown = cards.iter().filter_map(|card| key_of(&card.child));
-            let keys = route
-                .order
-                .borrow()
-                .iter()
-                .filter_map(key_of)
-                .collect::<Vec<_>>();
-            if keys.iter().copied().eq(shown) {
-                return;
-            }
-            let source = shell.products.source.clone();
-            run(
-                &shell,
-                async move { stations::reorder(&source, keys).await },
-                |_| {},
-            );
-        });
-        self.stations.add_controller(drag);
+                    .filter_map(|card| key_of(card.child.upcast_ref()));
+                let keys = order.iter().filter_map(key_of).collect::<Vec<_>>();
+                if keys.iter().copied().eq(shown) {
+                    return;
+                }
+                let source = shell.products.source.clone();
+                run(
+                    &shell,
+                    async move { stations::reorder(&source, keys).await },
+                    |_| {},
+                );
+            },
+        )
     }
 
     /// Plays `station`, or its channel `channel`.

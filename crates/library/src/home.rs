@@ -29,6 +29,7 @@ fn first<T>(mut items: Vec<T>, order: impl Fn(&T, &T) -> std::cmp::Ordering) -> 
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum HomeBlockKind {
     Showcase,
+    QuickMix,
     Explore,
     MostPlayed,
     NewlyAdded,
@@ -47,9 +48,10 @@ pub enum HomeSectionKind {
 }
 
 impl HomeBlockKind {
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::Showcase,
+            Self::QuickMix,
             Self::Explore,
             Self::MostPlayed,
             Self::NewlyAdded,
@@ -66,7 +68,7 @@ impl HomeBlockKind {
             Self::NewlyAdded => Some(HomeSectionKind::NewlyAdded),
             Self::RecentlyPlayed => Some(HomeSectionKind::RecentlyPlayed),
             Self::RecentlyReleased => Some(HomeSectionKind::RecentlyReleased),
-            Self::Showcase | Self::Genres => None,
+            Self::Showcase | Self::QuickMix | Self::Genres => None,
         }
     }
 }
@@ -169,9 +171,23 @@ pub struct HomeShowcase {
     pub next: HomeAlbumRow,
 }
 
+/// A Quick mix entry as Home shows it: the tracks its next press plays, under the mosaic of
+/// the albums they start with, the one its page shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HomeQuickMix {
+    /// Its place among the entries Home was asked for.
+    pub entry: u32,
+    pub tracks: u32,
+    pub artwork_binding: Option<Vec<u8>>,
+    /// The media URI of the first track its press plays, which its radio starts from.
+    pub first_track: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HomePage {
     pub showcase: Option<HomeShowcase>,
+    /// The Quick mix entries that match something, in their order.
+    pub quick_mix: Vec<HomeQuickMix>,
     pub explore: Vec<HomeAlbumRow>,
     pub most_played: HomeSectionRows,
     pub newly_added: HomeSectionRows,
@@ -201,6 +217,8 @@ impl Catalog {
         showcase_position: i64,
         explore_variation: i64,
         blocks: &[HomeBlockKind],
+        quick_mix: &[crate::SmartPlaylistDefinition],
+        quick_mix_seeds: &[i64],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<HomePage> {
         let mut connection = self.acquire_loaded(cancellation).await?;
@@ -232,12 +250,40 @@ impl Catalog {
             }
         }
         // A server that lists its own sections, as Plex does, leads Home with them: of Rufin's
-        // blocks only the showcase stays.
-        let showcase_only = [HomeBlockKind::Showcase];
+        // blocks only the showcase and Quick mix stay.
+        let leading = [HomeBlockKind::Showcase, HomeBlockKind::QuickMix]
+            .into_iter()
+            .filter(|block| blocks.contains(block))
+            .collect::<Vec<_>>();
         let blocks = if provider.keys().any(|section| !rufin_section(section)) {
-            &showcase_only[..usize::from(blocks.contains(&HomeBlockKind::Showcase))]
+            &leading[..]
         } else {
             blocks
+        };
+        let quick_mix = if blocks.contains(&HomeBlockKind::QuickMix) && !quick_mix.is_empty() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs() as i64);
+            let faces = self
+                .quick_mix_faces(&mut transaction, folder, quick_mix, quick_mix_seeds, now)
+                .await?;
+            let mut tiles = Vec::with_capacity(faces.len());
+            for face in faces {
+                let picks = crate::quick_mix::cover_uris(&mut transaction, &face.covers).await?;
+                tiles.push(HomeQuickMix {
+                    entry: face.entry,
+                    tracks: face.tracks,
+                    first_track: picks.first().cloned(),
+                    artwork_binding: crate::quick_mix::quick_mix_binding(
+                        &quick_mix[face.entry as usize],
+                        face.entry,
+                        picks,
+                    ),
+                });
+            }
+            tiles
+        } else {
+            Vec::new()
         };
         let (chosen, rows, reads_plays, sections, genres) = {
             let snapshot = self.snapshot();
@@ -567,6 +613,7 @@ impl Catalog {
         let showcase = showcase_rows(chosen.showcase, &album_rows);
         let page = HomePage {
             showcase,
+            quick_mix,
             explore: home_albums(chosen.explore),
             most_played: section_rows(most_played),
             newly_added: section_rows(newly_added),

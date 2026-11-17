@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/app.css" />
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
     <noscript><style>
-      [data-action="radio"], .station-tools, [data-action="station-add"], [data-action="station-search"], [data-action="play-home"], [data-action="shuffle-home"], .home-paging, #mix, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
+      [data-action="radio"], [data-action="create-playlist"], .station-tools, [data-action="station-add"], [data-action="station-search"], [data-action="play-home"], [data-action="shuffle-home"], .home-paging, #mix, #new-playlist, #play-collection, #queue-lyrics-divider, [data-open-source] { display: none !important; }
     </style></noscript>
     <script src="/htmx.min.js" defer></script>
     <script type="module" src="/app.js"></script>
@@ -455,18 +455,18 @@
       aria-labelledby="mix-title"
     >
       <form id="mix-form">
-        <h2 id="mix-title">{{ localization::tr("Mix") }}</h2>
+        <div class="mix-heading">
+          <h2 id="mix-title">{{ localization::tr("Quick Mix") }}</h2>
+          <span id="mix-dots" aria-hidden="true"></span>
+          <button type="button" class="icon-button" id="mix-previous" aria-label="{{ localization::tr("Previous page") }}" title="{{ localization::tr("Previous page") }}">{% call m::icon("rufin-go-previous-symbolic") %}{% endcall %}</button>
+          <button type="button" class="icon-button" id="mix-next" aria-label="{{ localization::tr("Next page") }}" title="{{ localization::tr("Next page") }}">{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+        </div>
         <div class="segmented" role="radiogroup" aria-labelledby="mix-title">
           <label><input type="radio" name="mix-unit" value="0" checked />{{ localization::tr("Tracks") }}</label>
           <label><input type="radio" name="mix-unit" value="1" />{{ localization::tr("Albums") }}</label>
         </div>
-        <div id="mix-played" class="chips" role="group" aria-labelledby="mix-title">
-          <button type="button" class="wide" value="NotPlayedRecently" aria-pressed="false">{{ localization::tr("Not played recently") }}</button>
-          <button type="button" value="All" aria-pressed="true">{{ localization::tr("Random") }}</button>
-          <button type="button" value="Unplayed" aria-pressed="false">{{ localization::tr("Unplayed") }}</button>
-          <button type="button" value="Played" aria-pressed="false">{{ localization::tr("Played") }}</button>
-          <button type="button" value="RecentlyAdded" aria-pressed="false">{{ localization::tr("Recently added") }}</button>
-        </div>
+        <!-- Pages of three-column kind tiles, which mix.js builds from core's kinds. -->
+        <div id="mix-played" role="group" aria-labelledby="mix-title"></div>
         <div class="pref-group">
           <div class="pref-row">
             <span class="pref-label"><span id="mix-genre-label">{{ localization::tr("Genre") }}</span></span>
@@ -484,6 +484,10 @@
               <input id="mix-min-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Minimum year") }}" />–<input id="mix-max-year" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="{{ localization::tr("Any") }}" aria-label="{{ localization::tr("Maximum year") }}" />
             </span>
           </div>
+          <label class="pref-row">
+            <span class="pref-label"><span>{{ localization::tr("Favorites only") }}</span></span>
+            <input id="mix-favorites" type="checkbox" role="switch" />
+          </label>
           <div class="pref-row">
             <span class="pref-label" id="mix-count-label"><span>{{ localization::tr("Tracks") }}</span><span hidden>{{ localization::tr("Albums") }}</span><small hidden>{{ localization::tr("Each plays whole") }}</small></span>
             <div class="spin" role="group" aria-labelledby="mix-count-label">
@@ -506,10 +510,10 @@
           </div>
         </div>
         <div class="dialog-actions">
-          <button type="submit" value="next">
-            {% call m::icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
           <button type="submit" value="replace" class="primary">
             {% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
+          <button type="submit" value="next">
+            {% call m::icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
           <button type="submit" value="append">
             {% call m::icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
         </div>
@@ -643,13 +647,12 @@
     </dialog>
     <dialog id="name-dialog" aria-labelledby="name-title">
       <form id="name-form">
-        <h2 id="name-title">{{ localization::tr("New Playlist") }}</h2>
+        <header><h2 id="name-title">{{ localization::tr("New Playlist") }}</h2><button type="button" class="icon-button" data-close="name-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
         <label for="playlist-name">{{ localization::tr("Name") }}</label>
         <div class="playlist-name-field">
           <input id="playlist-name" required />
           <button type="button" id="playlist-owner" class="icon-button" aria-pressed="false"></button>
         </div>
-        <label id="playlist-public-row" hidden><input type="checkbox" role="switch" id="playlist-public" />{{ localization::tr("Public") }}</label>
         <fieldset id="playlist-file-options" hidden>
           <legend>{{ localization::tr("Linked file") }}</legend>
           <div class="playlist-link-fields">
@@ -680,8 +683,8 @@
           </div>
         </fieldset>
         <div class="dialog-actions">
-          <button type="button" data-close="name-dialog">{{ localization::tr("Cancel") }}</button
-          ><button id="playlist-apply" class="primary">{{ localization::tr("Save") }}</button>
+          <label id="playlist-public-row" hidden><input type="checkbox" role="switch" id="playlist-public" />{{ localization::tr("Public") }}</label>
+          <button id="playlist-apply" class="primary">{{ localization::tr("Save") }}</button>
         </div>
       </form>
     </dialog>

@@ -41,6 +41,7 @@ pub mod metadata;
 pub mod open;
 pub mod playlist_files;
 pub mod playlists;
+pub mod quick_mix;
 pub mod sharing;
 
 pub use playback::equalizer::{

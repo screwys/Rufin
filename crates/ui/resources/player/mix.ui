@@ -16,11 +16,36 @@
     <property name="margin-end">6</property>
     <property name="width-request">340</property>
     <child>
-      <object class="GtkLabel">
-        <property name="label" translatable="yes">Mix</property>
-        <property name="xalign">0</property>
-        <property name="margin-start">4</property>
-        <style><class name="heading"/></style>
+      <object class="GtkBox">
+        <property name="spacing">6</property>
+        <child>
+          <object class="GtkLabel">
+            <property name="label" translatable="yes">Quick Mix</property>
+            <property name="xalign">0</property>
+            <property name="hexpand">true</property>
+            <property name="margin-start">4</property>
+            <style><class name="heading"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="AdwCarouselIndicatorDots">
+            <property name="carousel">kinds</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="previous_kinds">
+            <property name="icon-name">rufin-go-previous-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Previous page</property>
+            <style><class name="flat"/><class name="circular"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="next_kinds">
+            <property name="icon-name">rufin-go-next-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Next page</property>
+            <style><class name="flat"/><class name="circular"/></style>
+          </object>
+        </child>
       </object>
     </child>
     <child>
@@ -41,49 +66,9 @@
       </object>
     </child>
     <child>
-      <object class="GtkGrid">
-        <property name="column-homogeneous">true</property>
-        <property name="column-spacing">6</property>
-        <property name="row-spacing">6</property>
-        <child>
-          <object class="GtkToggleButton" id="kind_not_played_recently">
-            <property name="label" translatable="yes">Not played recently</property>
-            <property name="group">kind_all</property>
-            <style><class name="mix-kind"/></style>
-            <layout><property name="column">0</property><property name="row">0</property><property name="column-span">2</property></layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkToggleButton" id="kind_all">
-            <property name="label" translatable="yes">Random</property>
-            <style><class name="mix-kind"/></style>
-            <layout><property name="column">0</property><property name="row">1</property></layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkToggleButton" id="kind_unplayed">
-            <property name="label" translatable="yes">Unplayed</property>
-            <property name="group">kind_all</property>
-            <style><class name="mix-kind"/></style>
-            <layout><property name="column">1</property><property name="row">1</property></layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkToggleButton" id="kind_played">
-            <property name="label" translatable="yes">Played</property>
-            <property name="group">kind_all</property>
-            <style><class name="mix-kind"/></style>
-            <layout><property name="column">0</property><property name="row">2</property></layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkToggleButton" id="kind_recently_added">
-            <property name="label" translatable="yes">Recently added</property>
-            <property name="group">kind_all</property>
-            <style><class name="mix-kind"/></style>
-            <layout><property name="column">1</property><property name="row">2</property></layout>
-          </object>
-        </child>
+      <!-- Pages of three-column kind tiles, which Rust builds from core's kinds. -->
+      <object class="AdwCarousel" id="kinds">
+        <property name="spacing">12</property>
       </object>
     </child>
     <child>
@@ -137,6 +122,11 @@
           </object>
         </child>
         <child>
+          <object class="AdwSwitchRow" id="favorites">
+            <property name="title" translatable="yes">Favorites only</property>
+          </object>
+        </child>
+        <child>
           <object class="AdwSpinRow" id="limit">
             <property name="adjustment">
               <object class="GtkAdjustment">
@@ -155,29 +145,6 @@
         <property name="spacing">8</property>
         <property name="halign">center</property>
         <child>
-          <object class="GtkButton" id="play_next">
-            <style>
-              <class name="pill-button"/>
-              <class name="pill"/>
-            </style>
-            <property name="child">
-              <object class="GtkBox">
-                <property name="spacing">6</property>
-                <child>
-                  <object class="GtkImage">
-                    <property name="icon-name">rufin-mail-forward-symbolic</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="play_next_label">
-                    <property name="label" translatable="yes">Play Next</property>
-                  </object>
-                </child>
-              </object>
-            </property>
-          </object>
-        </child>
-        <child>
           <object class="GtkButton" id="play_now">
             <style>
               <class name="pill-button"/>
@@ -195,6 +162,29 @@
                 <child>
                   <object class="GtkLabel" id="play_now_label">
                     <property name="label" translatable="yes">Play</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="play_next">
+            <style>
+              <class name="pill-button"/>
+              <class name="pill"/>
+            </style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">rufin-mail-forward-symbolic</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="play_next_label">
+                    <property name="label" translatable="yes">Play Next</property>
                   </object>
                 </child>
               </object>

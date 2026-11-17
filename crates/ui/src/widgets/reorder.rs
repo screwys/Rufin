@@ -1,15 +1,14 @@
-//! Dragging a row of a list to another place by its handle. The row moves among the others while
-//! it is dragged, as a Radio station's card does, and its new place is committed when it is let
-//! go.
+//! Dragging a row of a list, or a child of a grid, to another place by its handle. It moves among
+//! the others while it is dragged, and its new place is committed when it is let go.
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::glib;
 use gtk::prelude::*;
 
-/// On the widget a row is dragged by.
+/// On the widget a row or a grid's child is dragged by.
 const HANDLE_CLASS: &str = "reorder-handle";
-/// On the row while it is dragged.
+/// On the row or the grid's child while it is dragged.
 const DRAGGING_CLASS: &str = "reorder-dragging";
 
 type Dropped = Rc<dyn Fn(String, bool) -> bool>;
@@ -254,4 +253,134 @@ fn install_gesture(list: &gtk::ListBox, state: &Rc<List>) {
         }
     });
     list.add_controller(drag);
+}
+
+/// The children of a grid that move, in the order it shows them; see [`install_child_reorder`].
+#[derive(Clone)]
+pub struct ChildReorder(Rc<ChildDrag>);
+
+#[derive(Default)]
+struct ChildDrag {
+    order: RefCell<Vec<gtk::Widget>>,
+    /// The child dragged, and the order as the drag found it.
+    dragged: RefCell<Option<(gtk::Widget, Vec<gtk::Widget>)>>,
+}
+
+impl ChildReorder {
+    /// The children that move, in the order the grid shows them; it ends a drag.
+    pub fn set_order(&self, order: Vec<gtk::Widget>) {
+        self.0.dragged.take();
+        self.0.order.replace(order);
+    }
+
+    /// The place of `child` among the children that move.
+    pub fn position(&self, child: &impl IsA<gtk::Widget>) -> Option<usize> {
+        let child = child.upcast_ref::<gtk::Widget>();
+        self.0
+            .order
+            .borrow()
+            .iter()
+            .position(|placed| placed == child)
+    }
+}
+
+/// The child of `grid` that holds `widget`, and whether a reorder handle is on the way to it.
+fn grid_child(grid: &gtk::Widget, mut widget: Option<gtk::Widget>) -> Option<(gtk::Widget, bool)> {
+    let mut on_handle = false;
+    while let Some(picked) = widget {
+        on_handle |= picked.has_css_class(HANDLE_CLASS);
+        let parent = picked.parent();
+        if parent.as_ref() == Some(grid) {
+            return Some((picked, on_handle));
+        }
+        widget = parent;
+    }
+    None
+}
+
+/// Lets the children of `grid`, such as a `gtk::FlowBox` or an `adw::WrapBox`, that
+/// [`ChildReorder::set_order`] lists be dragged by a handle, a descendant with the
+/// `reorder-handle` class, to another one's place, as a Radio station's card is. While one is
+/// dragged, `show` puts them in the order it is given; when it is let go elsewhere, `dropped`
+/// gets it and the new order. The owner keeps the returned order for as long as the grid shows.
+pub fn install_child_reorder<W: IsA<gtk::Widget>>(
+    grid: &W,
+    show: impl Fn(&W, &[gtk::Widget]) + 'static,
+    dropped: impl Fn(&gtk::Widget, &[gtk::Widget]) + 'static,
+) -> ChildReorder {
+    let state = Rc::new(ChildDrag::default());
+    // The grid hears the drag, so a child that changes place under the pointer does not end it.
+    let drag = gtk::GestureDrag::new();
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = Rc::downgrade(&state);
+    drag.connect_drag_begin(move |gesture, x, y| {
+        let (Some(state), Some(grid)) = (weak.upgrade(), gesture.widget()) else {
+            return;
+        };
+        let Some((child, true)) = grid_child(&grid, grid.pick(x, y, gtk::PickFlags::DEFAULT))
+        else {
+            return;
+        };
+        let start = state.order.borrow().clone();
+        if !start.contains(&child) {
+            return;
+        }
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        child.add_css_class(DRAGGING_CLASS);
+        state.dragged.replace(Some((child, start)));
+    });
+    let weak = Rc::downgrade(&state);
+    drag.connect_drag_update(move |gesture, offset_x, offset_y| {
+        let (Some(state), Some(grid), Some((x, y))) = (
+            weak.upgrade(),
+            gesture.widget().and_downcast::<W>(),
+            gesture.start_point(),
+        ) else {
+            return;
+        };
+        let Some(dragged) = state
+            .dragged
+            .borrow()
+            .as_ref()
+            .map(|(child, _)| child.clone())
+        else {
+            return;
+        };
+        let over = grid_child(
+            grid.upcast_ref(),
+            grid.pick(x + offset_x, y + offset_y, gtk::PickFlags::DEFAULT),
+        );
+        let Some((over, _)) = over.filter(|(over, _)| *over != dragged) else {
+            return;
+        };
+        let order = {
+            let mut order = state.order.borrow_mut();
+            let (Some(from), Some(to)) = (
+                order.iter().position(|placed| *placed == dragged),
+                order.iter().position(|placed| *placed == over),
+            ) else {
+                return;
+            };
+            let moved = order.remove(from);
+            order.insert(to, moved);
+            order.clone()
+        };
+        show(&grid, &order);
+    });
+    let weak = Rc::downgrade(&state);
+    drag.connect_drag_end(move |_, _, _| {
+        let Some(state) = weak.upgrade() else {
+            return;
+        };
+        let Some((dragged, start)) = state.dragged.take() else {
+            return;
+        };
+        dragged.remove_css_class(DRAGGING_CLASS);
+        let order = state.order.borrow().clone();
+        if order != start {
+            dropped(&dragged, &order);
+        }
+    });
+    grid.add_controller(drag);
+    ChildReorder(state)
 }

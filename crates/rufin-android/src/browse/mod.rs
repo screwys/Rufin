@@ -8,8 +8,8 @@ pub use records::{
     AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink, AndroidDetailSummary,
     AndroidDiscHeading, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
     AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
-    AndroidPinPage, AndroidPlaylistImport, AndroidReading, AndroidRecentResult,
-    AndroidRouteDescriptor, AndroidRouteSetting, AndroidRowRange, AndroidRows,
+    AndroidPinPage, AndroidPlaylistImport, AndroidQuickMixTile, AndroidReading,
+    AndroidRecentResult, AndroidRouteDescriptor, AndroidRouteSetting, AndroidRowRange, AndroidRows,
     AndroidScrollSection, AndroidSortField,
 };
 
@@ -245,6 +245,7 @@ impl AndroidView {
                         })
                         .collect()
                 };
+                let mut quick_mix = Vec::new();
                 let (kind, rows) = match &section {
                     // The album before, the album shown and the album after, so a swipe can
                     // show its next page before the step lands.
@@ -254,6 +255,10 @@ impl AndroidView {
                             .map(|album| album_card(album.clone()))
                             .into(),
                     ),
+                    HomeSection::QuickMix(tiles) => {
+                        quick_mix = tiles.iter().map(AndroidQuickMixTile::from).collect();
+                        (AndroidHomeSectionKind::QuickMix, Vec::new())
+                    }
                     HomeSection::Rows { .. } | HomeSection::Provider(_) => {
                         (AndroidHomeSectionKind::Rows, items())
                     }
@@ -273,6 +278,7 @@ impl AndroidView {
                     title,
                     kind,
                     rows,
+                    quick_mix,
                     column_rows: columns.rows as u32,
                     cards: columns.cards,
                     size: home.size,

@@ -79,6 +79,7 @@ impl CollectionTarget {
             library::Collection::Smart { key, .. } => Self::SmartPlaylist(key),
             library::Collection::Source(_)
             | library::Collection::Objects { .. }
+            | library::Collection::Tracks { .. }
             | library::Collection::History { .. } => return None,
         })
     }

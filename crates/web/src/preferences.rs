@@ -83,7 +83,8 @@ const SETTINGS: &[&str] = &[
     "/cast_proxy_enabled",
 ];
 
-fn values(products: &ProductHandles) -> Result<Value, Error> {
+async fn values(products: &ProductHandles) -> Result<Value, Error> {
+    let quick_mix = completion(products.source.quick_mix_editor()).await?;
     let settings = products.settings.load();
     let stored = serde_json::to_value(&*settings).map_err(internal)?;
     let mut values = serde_json::Map::new();
@@ -127,9 +128,27 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
     let server_recommendations_shown = rufin_core::runtime::source::shows_server_recommendations(
         products.source.list_sources().sources,
     );
+    let quick_mix = json!({
+        "choices": quick_mix.choices.into_iter().map(quick_mix_choice).collect::<Vec<_>>(),
+        "playlists": quick_mix.playlists.into_iter().map(quick_mix_choice).collect::<Vec<_>>(),
+        "can_add": quick_mix.can_add,
+    });
     Ok(
-        json!({"values": values, "stream_quality": stream_quality, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
+        json!({"values": values, "stream_quality": stream_quality, "routes": routes, "home_blocks": blocks, "quick_mix": quick_mix, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
     )
+}
+
+/// A Quick mix editor choice, named by the field an edit gives back: `entry` its place,
+/// `template` a template's untranslated name, `playlist` a smart playlist's object id.
+fn quick_mix_choice(choice: rufin_core::settings::quick_mix::QuickMixChoice) -> Value {
+    use rufin_core::settings::quick_mix::QuickMixChoiceKind;
+    let mut value = json!({"title": choice.title, "icon": choice.icon, "added": choice.added});
+    match choice.kind {
+        QuickMixChoiceKind::Entry { index } => value["entry"] = json!(index),
+        QuickMixChoiceKind::Template { name } => value["template"] = json!(name),
+        QuickMixChoiceKind::Playlist { object_id } => value["playlist"] = json!(object_id),
+    }
+    value
 }
 
 /// A provider of an ordered list by its stored key, with its name and what it finds, as GTK's
@@ -222,7 +241,7 @@ fn themes(settings: &rufin_core::settings::Settings) -> (Vec<Value>, Vec<String>
 }
 
 async fn read(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
-    Ok(json_response(StatusCode::OK, values(&products)?))
+    Ok(json_response(StatusCode::OK, values(&products).await?))
 }
 
 #[derive(Deserialize)]
@@ -258,6 +277,16 @@ enum Edit {
         /// The rows its columns stack; 0 leaves that to what it holds.
         rows: Option<u8>,
     },
+    /// A Quick mix choice: the entry `entry` removed, or dropped before or after the entry
+    /// `target`; the template `template` or the smart playlist `playlist` appended.
+    QuickMix {
+        entry: Option<u32>,
+        target: Option<u32>,
+        #[serde(default)]
+        after: bool,
+        template: Option<String>,
+        playlist: Option<String>,
+    },
 }
 
 async fn write(
@@ -267,6 +296,7 @@ async fn write(
     let edit: Edit = body(request).await?;
     let settings = products.settings.clone();
     let artwork = products.artwork.clone();
+    let source = products.source.clone();
     tokio::task::spawn_blocking(move || match edit {
         Edit::Set { path, value } => {
             if !SETTINGS.contains(&path.as_str()) {
@@ -368,10 +398,36 @@ async fn write(
             }
             Ok(())
         }
+        Edit::QuickMix {
+            entry,
+            target,
+            after,
+            template,
+            playlist,
+        } => {
+            match (entry, target, template, playlist) {
+                (Some(entry), Some(target), ..) => settings
+                    .reorder_quick_mix(entry, target, after)
+                    .map_err(bad_request)?,
+                (Some(entry), None, ..) => settings.remove_quick_mix(entry).map_err(bad_request)?,
+                (None, _, Some(template), _) => settings
+                    .add_quick_mix_template(template)
+                    .map_err(bad_request)?,
+                (None, _, None, Some(playlist)) => source
+                    .add_quick_mix_playlist(playlist)
+                    .recv_blocking()
+                    .map_err(internal)?
+                    .map_err(bad_request)?,
+                (None, _, None, None) => {
+                    return Err(bad_request("entry, template or playlist is required"));
+                }
+            };
+            Ok(())
+        }
     })
     .await
     .map_err(internal)??;
-    Ok(json_response(StatusCode::OK, values(&products)?))
+    Ok(json_response(StatusCode::OK, values(&products).await?))
 }
 
 const CACHES: [(&str, CacheKind); 7] = [

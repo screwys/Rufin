@@ -376,6 +376,32 @@ dialog textarea {
   margin-top: 23px;
 }
 
+/* New Playlist fits its name field: the title with its close button, then Public at the start
+   of the button's row. */
+#name-dialog:not(.playlist-edit) {
+  width: fit-content;
+  max-width: calc(100% - 32px);
+}
+#name-form > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+#name-form > header h2 {
+  margin: 0;
+}
+#name-form > label:first-of-type {
+  margin-top: 0;
+}
+#name-form > .dialog-actions {
+  align-items: center;
+}
+#playlist-public-row {
+  margin: 0 auto 0 0;
+}
+
 dialog.playlist-edit {
   width: min(620px, calc(100% - 32px));
 }

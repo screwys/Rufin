@@ -70,8 +70,9 @@ impl PageToken {
 
 /// The page the documented parameters of `list` name; `list` is an endpoint under /api
 /// (tracks, albums, albums/tracks, artists, artists/tracks, genres/tracks, playlists,
-/// playlists/entries, smart-playlists, smart-playlists/tracks, home) or `page`, whose `page`
-/// parameter is a token. q, sort, descending, favorites, opened, source and folder apply on top.
+/// playlists/entries, smart-playlists, smart-playlists/tracks, quick-mix, home) or `page`, whose
+/// `page` parameter is a token. q, sort, descending, favorites, opened, source and folder apply on
+/// top.
 pub(super) fn token(
     products: &ProductHandles,
     list: &str,
@@ -112,6 +113,7 @@ pub(super) fn token(
         }),
         "playlists/entries" => Some(Route::PlaylistDetail(key(parameters, "id")?)),
         "smart-playlists/tracks" => Some(Route::SmartPlaylistDetail(key(parameters, "id")?)),
+        "quick-mix" => Some(Route::QuickMix(key(parameters, "entry")?)),
         _ => return Err(bad_request("Unknown library view")),
     };
     let mut token = match route {
@@ -457,6 +459,7 @@ pub(super) fn title(
         (_, Some(Header::Smart(smart))) => {
             rufin_core::playlists::smart_playlist_display_name(&smart.object_id, &smart.name)
         }
+        (_, Some(Header::QuickMix(mix))) => mix.name.clone(),
         (Route::PlaylistFolder { key, .. }, None) => products
             .library
             .playlist_folder_choices("", &[])
@@ -478,7 +481,7 @@ pub(super) fn parent(token: &PageToken) -> Option<PageToken> {
         Route::AlbumDetail(_) => Route::Albums,
         Route::ArtistTracks(_) => Route::Artists,
         Route::AlbumArtistTracks(_) => Route::AlbumArtists,
-        Route::GenreDetail(_) => Route::Home,
+        Route::GenreDetail(_) | Route::QuickMix(_) => Route::Home,
         Route::PlaylistDetail(_) | Route::PlaylistFolder { smart: false, .. } => Route::Playlists,
         Route::SmartPlaylistDetail(_) | Route::PlaylistFolder { smart: true, .. } => {
             Route::SmartPlaylists
@@ -490,7 +493,7 @@ pub(super) fn parent(token: &PageToken) -> Option<PageToken> {
 /// The navigation entry a page belongs to.
 pub(super) fn section(route: &Route) -> &'static str {
     match route {
-        Route::Home | Route::GenreDetail(_) => "Home",
+        Route::Home | Route::GenreDetail(_) | Route::QuickMix(_) => "Home",
         Route::Favorites => "Favorites",
         Route::Albums | Route::AlbumDetail(_) => "Albums",
         Route::Artists
@@ -548,6 +551,13 @@ pub(super) fn json(products: &ProductHandles, opened: &Opened, limit: usize, tot
         _ => {}
     }
     value
+}
+
+/// A Quick mix tile as `{entry, title, icon, tracks, picture}`: how many tracks its entry's
+/// next press plays, and its mosaic for `/api/artwork?picture=`.
+fn quick_mix_json(mix: &rufin_core::view::QuickMixTile) -> Value {
+    let picture = mix.artwork_binding.as_deref().map(media::picture);
+    json!({"entry":mix.entry,"title":mix.title,"icon":mix.icon,"tracks":mix.tracks,"picture":picture})
 }
 
 /// Home's sections in core's order and titles, or only `block`'s.
@@ -608,7 +618,7 @@ pub(super) fn home_rows(section: &HomeSection) -> Vec<(Row, String, &'static [Li
     }
 }
 
-/// Home's JSON: `{sections: [{block, title, items}]}`.
+/// Home's JSON: `{sections: [{block, title, items}]}`, Quick mix's with its `tiles`.
 pub(super) fn home_json(
     products: &ProductHandles,
     scope: &PageToken,
@@ -633,6 +643,9 @@ pub(super) fn home_json(
             let mut value = json!({"title":section.title(),"items":items});
             if let Some(block) = section.block() {
                 value["block"] = json!(block);
+            }
+            if let HomeSection::QuickMix(tiles) = section {
+                value["tiles"] = tiles.iter().map(quick_mix_json).collect();
             }
             value
         })

@@ -251,7 +251,9 @@ impl CatalogUi {
                     read,
                 ),
             Route::PlaylistDetail(key) => self.playlist_detail_route(key, read),
-            Route::SmartPlaylistDetail(_) => self.smart_playlist_detail_route(read),
+            Route::SmartPlaylistDetail(_) | Route::QuickMix(_) => {
+                self.smart_playlist_detail_route(read)
+            }
             Route::GenreDetail(key) => {
                 self.named_detail_view(super::named_detail::NamedDetailId::Genre(key), read)
             }

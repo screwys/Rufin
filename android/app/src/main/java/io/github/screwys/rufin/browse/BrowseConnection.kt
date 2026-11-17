@@ -7,9 +7,11 @@ import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.shared.library.SearchMode
 import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.library.RadioSeed
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchResult
+import io.github.screwys.rufin.shared.rufin_core.QuickMixEditor
 import io.github.screwys.rufin.shared.rufin_core.ShareOptions
 import io.github.screwys.rufin.shared.rufin_core.ShareTarget
 import android.content.Context
@@ -47,7 +49,9 @@ internal data class BrowseLocation(
 internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val view: AndroidView?,
     val displaySettings: AndroidBrowseDisplay? = null,
     val searchResult: Boolean = false, val contextTitle: String? = null,
-    val downloads: Int = 0, val favorite: Boolean = false)
+    val downloads: Int = 0, val favorite: Boolean = false,
+    /** A Quick mix entry's menu, which its menu offers instead of the row's. */
+    val quickMix: QuickMixMenu? = null)
 /** A remembered search result as saved, and its library row while the library holds it. */
 internal class RecentSearch(val result: RecentSearchResult, val item: BrowseItem?, val route: Route?)
 
@@ -324,9 +328,27 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val target = item.row.target ?: return
         connection.runAction { connection.sourceOwner?.setFavoriteWithResult(target, value) }
     }
-    fun radio(item: BrowseItem, placement: QueuePlacement) = connection.runAction {
+    /** Plays Quick mix's entry `entry` at `placement`, as its Home tile does; says so when nothing matched, as Mix
+     *  does. */
+    fun playQuickMix(entry: UInt, placement: QueuePlacement = QueuePlacement.Replace(0UL)) = connection.runAction {
+        val library = library ?: return@runAction
         connection.connectedService().playRequest {
-            library?.playRadio(item.row, placement)
+            if (library.playQuickMix(entry, placement)) error(translate("No matching tracks found"))
+        }
+    }
+    /** Quick mix as its editor lists it; none without a library, or when the read fails, which says so. */
+    suspend fun quickMixEditor(): QuickMixEditor? = try { library?.quickMixEditor() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { connection.runAction { throw error }; null }
+    /** Appends a copy of the smart playlist `objectId` to Quick mix; the saved settings then show it. */
+    fun addQuickMixPlaylist(objectId: String) = connection.runAction { library?.addQuickMixPlaylist(objectId) }
+    fun radio(item: BrowseItem, placement: QueuePlacement) {
+        library?.radioSeed(item.row)?.let { radio(it, placement) }
+    }
+    /** Plays the radio `seed`, as a row's menu offers it. */
+    fun radio(seed: RadioSeed, placement: QueuePlacement) = connection.runAction {
+        connection.connectedService().playRequest {
+            library?.playRadio(seed, placement)
         }
     }
     fun pin(item: BrowseItem, pinned: Boolean) { item.row.pin?.let { pin(it, pinned) } }

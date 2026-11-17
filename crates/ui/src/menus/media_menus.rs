@@ -1053,6 +1053,57 @@ fn confirm_delete(shell: &Rc<Shell>, target: &gtk::Widget, payload: MediaDragSou
     dialog.present(Some(target));
 }
 
+/// The menu of a Quick mix entry, as core's Quick mix `menu` offers it: `play` plays it,
+/// and `media`, the tracks it lists, makes the playlist titled `title` and the downloads.
+pub fn present_quick_mix_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    menu: &Menu,
+    (title, media): (String, MediaDragSource),
+    play: CollectionPlay,
+    position: Option<(f64, f64)>,
+) {
+    let surface = ContextMenuSurface::new(target, "quick-mix", position);
+    surface.append_play_actions(menu, move |placement, shuffled| play(placement, shuffled));
+    if let Some(seed) = &menu.radio {
+        append_radio(&surface, shell, radio_label(seed), seed.clone());
+    }
+    if menu.create_playlist {
+        let (shell, media) = (Rc::clone(shell), media.clone());
+        surface.append_configurable_action(
+            ContextMenuItem::AddToPlaylist,
+            msgid("Create a playlist"),
+            crate::widgets::interactions::ADD_TO_PLAYLIST_ICON,
+            move || create_playlist(&shell, title.clone(), &media),
+        );
+    }
+    append_download_actions(&surface, shell, menu, &media, false);
+    surface.popup();
+}
+
+/// Opens New Playlist named `title`, holding the tracks of `media` once they are read.
+pub(crate) fn create_playlist(shell: &Rc<Shell>, title: String, media: &MediaDragSource) {
+    let media = media.clone();
+    let source = shell.products.source.clone();
+    let task = shell.products.runtime.spawn(async move {
+        media
+            .track_selection(&source, rufin_core::view::SelectionScope::Page)
+            .await
+    });
+    let shell = Rc::downgrade(shell);
+    glib::spawn_future_local(async move {
+        let selection = task
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|read| read);
+        let Some(shell) = shell.upgrade() else { return };
+        match selection {
+            Ok(selection) => shell.new_playlist_dialog_with(title, selection),
+            Err(error) => shell.control_feedback.show_feedback_toast(error),
+        }
+    });
+}
+
 fn append_radio(surface: &ContextMenuSurface, shell: &Shell, label: &str, seed: RadioSeed) {
     let radio = shell.products.playback.clone();
     surface.append_radio(label, move |placement| {

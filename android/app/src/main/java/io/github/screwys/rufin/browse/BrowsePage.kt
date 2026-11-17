@@ -21,7 +21,8 @@ import kotlinx.coroutines.flow.*
 
 /** A Home section: its title, rows, and the block its refresh reads again. */
 internal data class HomeSectionItems(val index: ULong, val title: String, val kind: AndroidHomeSectionKind,
-    val items: List<BrowseItem>, val columnRows: Int, val cards: Boolean, val size: DisplaySize, val spacing: DisplaySize)
+    val items: List<BrowseItem>, val columnRows: Int, val cards: Boolean, val size: DisplaySize, val spacing: DisplaySize,
+    val quickMix: List<AndroidQuickMixTile>)
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class BrowsePage(
@@ -171,6 +172,20 @@ internal class BrowsePage(
         connection.connectedService().playRequest { view.playAll(placement, shuffled, title) }
     }
 
+    /** A Quick mix page's menu, core's Quick mix menu of what the page lists, or with [header] its header's
+     *  buttons, every entry shown: it plays the page whole, and its radio starts from the first track listed.
+     *  None on other pages. */
+    fun quickMixMenu(header: Boolean = false): QuickMixMenu? {
+        val opened = openedPage?.takeIf { location.route is Route.QuickMix } ?: return null
+        val row = summary?.row ?: return null
+        val first = opened.rows.firstOrNull()?.track?.mediaUri
+        val library = browse.library ?: return null
+        val menu = if (header) library.quickMixSwipes(first, row.downloaded) else library.quickMixMenu(first, row.downloaded)
+        return QuickMixMenu(menu, { placement, shuffled -> play(placement, shuffled, row.title) }) {
+            currentView?.rowsSelection(listOf(AndroidRowRange(0UL, opened.count)))
+        }
+    }
+
     fun playSection(section: HomeSectionItems, shuffled: Boolean = false) = connection.runAction {
         val view = currentView ?: return@runAction
         connection.connectedService().playRequest { view.playSection(section.index, shuffled, section.title) }
@@ -182,7 +197,7 @@ internal class BrowsePage(
             HomeSectionItems(section.toULong(), home.title, home.kind, home.rows.mapIndexed { index, row ->
                 BrowseItem(row, index.toULong(), view, display, contextTitle = home.title,
                     downloads = revision)
-            }, home.columnRows.toInt(), home.cards, home.size, home.spacing)
+            }, home.columnRows.toInt(), home.cards, home.size, home.spacing, home.quickMix)
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::{PlaylistKey, PlaylistRow, SmartPlaylistRow};
+use library::{PlaylistKey, PlaylistRow, QuickMixRow, SmartPlaylistRow};
 use localization::{msgid, track_count_text};
 use rufin_core::artwork::ArtworkBinding;
 
@@ -12,17 +12,19 @@ use crate::library::routes::PageReads;
 use crate::library::{LibraryListKey, LibraryListSettings};
 use crate::widgets::mounted_route::MountedRoute;
 use crate::widgets::view_model::Rows;
-use rufin_core::settings::presentation::format_duration_units;
+use rufin_core::route::Route;
+use rufin_core::settings::presentation::{format_duration_units, home_block_title};
 use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, source_link,
+    DetailShowcaseView, ShowcaseCover, ShowcaseMount, ShowcaseShape, ShowcaseSubject,
+    quick_mix_menu, source_link,
 };
 use crate::library::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_showcase_cover_size,
 };
-use crate::menus::media_menus::present_row_menu;
+use crate::menus::media_menus::{present_quick_mix_menu, present_row_menu};
 use crate::widgets::library_fields::playlist_artwork;
 use library::PlaylistListRow;
 
@@ -35,6 +37,10 @@ enum PlaylistDetailOwner {
     Smart {
         summary: SmartPlaylistRow,
     },
+    /// A Quick mix entry, shown as a smart playlist: the tracks its next press plays.
+    QuickMix {
+        summary: QuickMixRow,
+    },
 }
 
 impl PlaylistDetailOwner {
@@ -43,6 +49,7 @@ impl PlaylistDetailOwner {
         match self {
             Self::Saved { summary, .. } => library::Header::Playlist(Box::new(summary.clone())),
             Self::Smart { summary, .. } => library::Header::Smart(Box::new(summary.clone())),
+            Self::QuickMix { summary } => library::Header::QuickMix(Box::new(summary.clone())),
         }
     }
 
@@ -60,7 +67,7 @@ impl PlaylistDetailOwner {
     fn source_label(&self, catalog: &CatalogUi) -> (&'static str, String) {
         let source_id = match self {
             Self::Saved { summary, .. } => summary.source_id.as_deref(),
-            Self::Smart { .. } => None,
+            Self::Smart { .. } | Self::QuickMix { .. } => None,
         };
         catalog.source_label(source_id)
     }
@@ -68,7 +75,7 @@ impl PlaylistDetailOwner {
     fn key(&self) -> LibraryListKey {
         match self {
             Self::Saved { .. } => LibraryListKey::PlaylistTracks,
-            Self::Smart { .. } => LibraryListKey::SmartPlaylistTracks,
+            Self::Smart { .. } | Self::QuickMix { .. } => LibraryListKey::SmartPlaylistTracks,
         }
     }
 
@@ -76,6 +83,7 @@ impl PlaylistDetailOwner {
         match self {
             Self::Saved { summary, .. } => &summary.name,
             Self::Smart { summary, .. } => &summary.name,
+            Self::QuickMix { summary } => &summary.name,
         }
     }
 
@@ -83,6 +91,7 @@ impl PlaylistDetailOwner {
         match self {
             Self::Saved { summary, .. } => summary.track_count,
             Self::Smart { summary, .. } => summary.track_count,
+            Self::QuickMix { summary } => summary.track_count,
         }
     }
 
@@ -90,24 +99,22 @@ impl PlaylistDetailOwner {
         match self {
             Self::Saved { summary, .. } => summary.duration_millis,
             Self::Smart { summary, .. } => summary.duration_millis,
+            Self::QuickMix { summary } => summary.duration_millis,
         }
     }
 
     fn artwork(&self) -> Vec<ArtworkBinding> {
         match self {
             Self::Saved { summary, .. } => playlist_artwork(summary),
-            Self::Smart { summary, .. } => summary
-                .artwork_binding
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
+            Self::Smart { summary } => smart_artwork(&summary.artwork_binding),
+            Self::QuickMix { summary } => smart_artwork(&summary.artwork_binding),
         }
     }
 
     fn saved_key(&self) -> Option<PlaylistKey> {
         match self {
             Self::Saved { key, .. } => Some(*key),
-            Self::Smart { .. } => None,
+            Self::Smart { .. } | Self::QuickMix { .. } => None,
         }
     }
 
@@ -121,16 +128,30 @@ impl PlaylistDetailOwner {
             (Self::Smart { .. }, library::Header::Smart(summary)) => {
                 Self::Smart { summary: *summary }
             }
+            (Self::QuickMix { .. }, library::Header::QuickMix(summary)) => {
+                Self::QuickMix { summary: *summary }
+            }
             _ => return None,
         })
     }
 
-    /// The row its menu and header buttons act on.
-    fn row(&self) -> library::Row {
-        library::Row::Playlist(match self {
-            Self::Saved { summary, .. } => PlaylistListRow::Playlist(summary.clone()),
-            Self::Smart { summary, .. } => PlaylistListRow::SmartPlaylist(summary.clone()),
-        })
+    /// What its menu and header buttons act on; a smart playlist and a Quick mix start their
+    /// radio from the first of `rows`, the tracks the page lists.
+    fn subject(&self, rows: &Rows<library::Row>) -> ShowcaseSubject {
+        match self {
+            Self::Saved { summary, .. } => ShowcaseSubject::Row(library::Row::Playlist(
+                PlaylistListRow::Playlist(summary.clone()),
+            )),
+            Self::Smart { summary, .. } => ShowcaseSubject::Smart(
+                library::Row::Playlist(PlaylistListRow::SmartPlaylist(summary.clone())),
+                rows.clone(),
+            ),
+            Self::QuickMix { summary } => ShowcaseSubject::QuickMix {
+                name: summary.name.clone(),
+                rows: rows.clone(),
+                downloaded: summary.downloaded(),
+            },
+        }
     }
 
     /// Its facts: tracks and duration.
@@ -161,22 +182,34 @@ impl PlaylistDetailOwner {
                 .iter()
                 .map(|genre| (genre.name.as_str(), genre.genre_key))
                 .collect(),
-            Self::Smart { .. } => Vec::new(),
+            Self::Smart { .. } | Self::QuickMix { .. } => Vec::new(),
         }
     }
 }
 
 impl CatalogUi {
+    /// A smart playlist's page, and a Quick mix entry's, which shows as one.
     pub fn smart_playlist_detail_route(self: &Rc<Self>, mut read: Opened) -> MountedRoute {
-        let (false, Some(library::Header::Smart(summary))) =
-            (read.view.is_missing(), read.header.take())
-        else {
-            return MountedRoute::static_widget(crate::library::route_layout::placeholder_view(
-                msgid("Smart Playlist"),
-                msgid("This isn't available"),
-            ));
+        let owner = match (read.view.is_missing(), read.header.take()) {
+            (false, Some(library::Header::Smart(summary))) => {
+                PlaylistDetailOwner::Smart { summary: *summary }
+            }
+            (false, Some(library::Header::QuickMix(summary))) => {
+                PlaylistDetailOwner::QuickMix { summary: *summary }
+            }
+            _ => {
+                let title = match read.view.route() {
+                    Route::QuickMix(_) => home_block_title(library::HomeBlockKind::QuickMix),
+                    _ => msgid("Smart Playlist"),
+                };
+                return MountedRoute::static_widget(
+                    crate::library::route_layout::placeholder_view(
+                        title,
+                        msgid("This isn't available"),
+                    ),
+                );
+            }
         };
-        let owner = PlaylistDetailOwner::Smart { summary: *summary };
         let list_key = owner.key();
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let play_rows = rows.clone();
@@ -368,16 +401,30 @@ impl CatalogUi {
 
         let menu_shell = Rc::clone(self);
         let menu_owner = Rc::clone(&owner_state);
+        let menu_rows = rows.clone();
         let menu_play = Rc::clone(&play);
         let menu = Rc::new(move |target: &gtk::Widget, position| {
-            let row = menu_owner.borrow().row();
-            present_row_menu(
-                target,
-                menu_shell.shell(),
-                row,
-                Some(Rc::clone(&menu_play)),
-                position,
-            );
+            let shell = menu_shell.shell();
+            // A Quick mix's menu acts on everything its page lists.
+            let subject = menu_owner.borrow().subject(&menu_rows);
+            match subject {
+                ShowcaseSubject::Row(row) | ShowcaseSubject::Smart(row, _) => {
+                    present_row_menu(target, shell, row, Some(Rc::clone(&menu_play)), position)
+                }
+                ShowcaseSubject::QuickMix {
+                    name,
+                    rows,
+                    downloaded,
+                } => {
+                    if let Some(selection) = rows.whole_selection() {
+                        let menu = quick_mix_menu(&menu_shell, &rows, downloaded, false);
+                        let media =
+                            crate::widgets::media_drag::MediaDragSource::selection(selection);
+                        let play = Rc::clone(&menu_play);
+                        present_quick_mix_menu(target, shell, &menu, (name, media), play, position);
+                    }
+                }
+            }
         });
         let open_cover = {
             let shell = Rc::clone(self);
@@ -389,7 +436,7 @@ impl CatalogUi {
         };
         let showcase = showcase_view.mount(
             self,
-            owner.row(),
+            owner.subject(&rows),
             ShowcaseMount {
                 shape: ShowcaseShape::Detail,
                 initial_width: width,
@@ -407,6 +454,7 @@ impl CatalogUi {
             let owner = Rc::clone(&owner_state);
             let showcase = showcase_view.clone();
             let cover = cover.clone();
+            let rows = rows.clone();
             Rc::new(move |header: Option<library::Header>| {
                 let Some(shell) = shell.upgrade() else { return };
                 let Some(next) = header.and_then(|header| owner.borrow().read_from(header)) else {
@@ -419,7 +467,7 @@ impl CatalogUi {
                 showcase.replace_summary(&next.summary());
                 showcase.replace_external_links(Some(next.source(&shell)));
                 showcase.set_genres(&shell, next.genres());
-                showcase.show_row(next.row());
+                showcase.show(next.subject(&rows));
                 cover.replace(&shell.artwork, &next.artwork());
                 owner.replace(next);
             }) as Rc<dyn Fn(Option<library::Header>)>
@@ -449,6 +497,14 @@ impl CatalogUi {
             .with_rows(&rows)
             .with_header(move || Some(owner_state.borrow().header()), apply_owner)
     }
+}
+
+/// A smart playlist's mosaic, which a Quick mix's header and Home tile show too.
+pub(super) fn smart_artwork(binding: &Option<Vec<u8>>) -> Vec<ArtworkBinding> {
+    binding
+        .iter()
+        .map(|binding| ArtworkBinding::opaque(binding))
+        .collect()
 }
 
 #[cfg(test)]

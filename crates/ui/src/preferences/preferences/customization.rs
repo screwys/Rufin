@@ -12,6 +12,10 @@ use rufin_core::settings::{
 
 use super::reorder_row::{ReorderRowPresentation, reorder_row};
 use crate::shell::shell::Shell;
+use crate::widgets::reorder::{ChildReorder, install_child_reorder};
+use rufin_core::settings::quick_mix::{QuickMixChoice, QuickMixChoiceKind};
+use std::cell::Cell;
+use tracing::warn;
 
 /// The item menu's configurable entries in the menu's order: the setting (Rating's is its own),
 /// the label, whether it opens a submenu and whether a separator comes before it.
@@ -94,6 +98,10 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         home_size: adw::ToggleGroup,
         home_spacing: adw::ToggleGroup,
         home_blocks: gtk::ListBox,
+        quick_mix_group: adw::PreferencesGroup,
+        quick_mix_choices: adw::WrapBox,
+        quick_mix_playlists_part: gtk::Box,
+        quick_mix_playlists: adw::WrapBox,
         bottom_bar_rating_row: adw::SwitchRow,
         waveform_row: adw::SwitchRow,
         lyrics_panel_row: adw::SwitchRow,
@@ -239,6 +247,13 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         });
     }
     let home_blocks = HomeBlocks::new(shell, home_blocks);
+    let quick_mix = QuickMixEditor::new(
+        shell,
+        quick_mix_group,
+        quick_mix_choices,
+        quick_mix_playlists_part,
+        quick_mix_playlists,
+    );
 
     // Player
     let bottom_bar_shell = Rc::clone(shell);
@@ -315,6 +330,7 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
             // edits.
             sidebar_items.show(&settings.sidebar.route_items);
             home_blocks.sync();
+            quick_mix.refresh();
         }),
     );
     appearance_page.upcast()
@@ -629,6 +645,202 @@ impl HomeBlocks {
         }
         crate::widgets::reorder::order_rows(&self.list, &order);
         self.syncing.set(false);
+    }
+}
+
+/// Quick mix's entries in their Home order, then the templates no entry was copied from, as
+/// chips, and under them the user's smart playlists. Every edit is core's; the chips then show
+/// what it committed.
+struct QuickMixEditor {
+    shell: Rc<Shell>,
+    group: adw::PreferencesGroup,
+    choices: adw::WrapBox,
+    playlists_part: gtk::Box,
+    playlists: adw::WrapBox,
+    /// The entries' chips, by their place in Quick mix.
+    entries: RefCell<Vec<gtk::Widget>>,
+    /// The entries' chips as a drag moves them.
+    order: ChildReorder,
+    /// The newest read of the editor; an older one that answers later is dropped.
+    read: Cell<u64>,
+}
+
+impl QuickMixEditor {
+    fn new(
+        shell: &Rc<Shell>,
+        group: adw::PreferencesGroup,
+        choices: adw::WrapBox,
+        playlists_part: gtk::Box,
+        playlists: adw::WrapBox,
+    ) -> Rc<Self> {
+        Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
+            let weak = weak.clone();
+            let order = install_child_reorder(
+                &choices,
+                |choices: &adw::WrapBox, order| {
+                    let mut after = None::<&gtk::Widget>;
+                    for chip in order {
+                        choices.reorder_child_after(chip, after);
+                        after = Some(chip);
+                    }
+                },
+                move |dragged, order| {
+                    let Some(editor) = weak.upgrade() else {
+                        return;
+                    };
+                    let source = editor
+                        .entries
+                        .borrow()
+                        .iter()
+                        .position(|chip| chip == dragged);
+                    let target = order.iter().position(|chip| chip == dragged);
+                    if let (Some(source), Some(target)) = (source, target) {
+                        // It lands after the entry it passed going on, or before it going back.
+                        editor.commit(editor.shell.settings.persistence.reorder_quick_mix(
+                            source as u32,
+                            target as u32,
+                            target > source,
+                        ));
+                    }
+                },
+            );
+            Self {
+                shell: Rc::clone(shell),
+                group,
+                choices,
+                playlists_part,
+                playlists,
+                entries: RefCell::new(Vec::new()),
+                order,
+                read: Cell::new(0),
+            }
+        })
+    }
+
+    /// Reads Quick mix as its editor lists it, and shows it.
+    fn refresh(self: &Rc<Self>) {
+        let read = self.read.get() + 1;
+        self.read.set(read);
+        let answer = self.shell.products.source.quick_mix_editor();
+        let weak = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let answer = answer.recv().await;
+            let Some(editor) = weak.upgrade().filter(|editor| editor.read.get() == read) else {
+                return;
+            };
+            match answer {
+                Ok(Ok(shown)) => editor.show(shown),
+                Ok(Err(error)) => warn!(%error, "failed to read Quick mix"),
+                Err(error) => warn!(%error, "failed to read Quick mix"),
+            }
+        });
+    }
+
+    fn show(self: &Rc<Self>, editor: rufin_core::settings::quick_mix::QuickMixEditor) {
+        for wrap in [&self.choices, &self.playlists] {
+            while let Some(chip) = wrap.first_child() {
+                wrap.remove(&chip);
+            }
+        }
+        let mut entries = Vec::new();
+        for choice in editor.choices {
+            let entry = matches!(choice.kind, QuickMixChoiceKind::Entry { .. });
+            let chip = self.chip(choice, editor.can_add, entry);
+            if entry {
+                entries.push(chip.clone());
+            }
+            self.choices.append(&chip);
+        }
+        self.order.set_order(entries.clone());
+        self.entries.replace(entries);
+        self.playlists_part
+            .set_visible(!editor.playlists.is_empty());
+        for choice in editor.playlists {
+            self.playlists
+                .append(&self.chip(choice, editor.can_add, false));
+        }
+        self.group.set_visible(true);
+    }
+
+    /// A chip for `choice`: an entry's check removes it, a + adds the template or the playlist
+    /// while another entry fits. A `movable` one is dragged by the handle that takes its glyph's
+    /// place under the pointer.
+    fn chip(self: &Rc<Self>, choice: QuickMixChoice, can_add: bool, movable: bool) -> gtk::Widget {
+        let resource = "preferences/quick_mix_chip.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            chip: gtk::Box,
+            glyph: gtk::Image,
+            drag: gtk::Image,
+            title: gtk::Label,
+            remove: gtk::Button,
+            add: gtk::Button,
+        });
+        glyph.set_icon_name(Some(&choice.icon));
+        title.set_label(&choice.title);
+        if !choice.added {
+            chip.add_css_class("faded");
+        }
+        if movable {
+            chip.add_css_class("movable");
+            drag.set_visible(true);
+        }
+        remove.set_visible(choice.added);
+        add.set_visible(!choice.added);
+        add.set_sensitive(can_add);
+        let weak = Rc::downgrade(self);
+        match choice.kind {
+            QuickMixChoiceKind::Entry { index } => {
+                remove.connect_clicked(move |_| {
+                    if let Some(editor) = weak.upgrade() {
+                        editor.commit(editor.shell.settings.persistence.remove_quick_mix(index));
+                    }
+                });
+            }
+            QuickMixChoiceKind::Template { name } => {
+                add.connect_clicked(move |_| {
+                    if let Some(editor) = weak.upgrade() {
+                        let added = editor
+                            .shell
+                            .settings
+                            .persistence
+                            .add_quick_mix_template(name.clone());
+                        editor.commit(added);
+                    }
+                });
+            }
+            QuickMixChoiceKind::Playlist { object_id } => {
+                add.connect_clicked(move |_| {
+                    let Some(editor) = weak.upgrade() else {
+                        return;
+                    };
+                    let answer = editor
+                        .shell
+                        .products
+                        .source
+                        .add_quick_mix_playlist(object_id.clone());
+                    let weak = Rc::downgrade(&editor);
+                    gtk::glib::spawn_future_local(async move {
+                        // Core saves it; Home and the chips follow the saved settings.
+                        if let Ok(Err(error)) = answer.recv().await {
+                            warn!(%error, "failed to add a smart playlist to Quick mix");
+                            if let Some(editor) = weak.upgrade() {
+                                editor.refresh();
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        chip.upcast()
+    }
+
+    /// Commits an edit: Home and the chips follow it, or the chips show Quick mix again when it
+    /// changed nothing.
+    fn commit(self: &Rc<Self>, result: Result<bool, rufin_core::settings::SettingsError>) {
+        if !self.shell.commit_home_blocks(result) {
+            self.refresh();
+        }
     }
 }
 

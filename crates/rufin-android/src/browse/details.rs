@@ -9,16 +9,17 @@ impl AndroidLibrary {
         header: library::Header,
     ) -> Result<AndroidDetailSummary, AndroidError> {
         use library::{Header, PlaylistListRow, TagKind};
-        let summary = |row: Row, artwork_bindings, label: &str, links| AndroidDetailSummary {
-            row: row.into(),
-            artwork_bindings,
-            artist_text: String::new(),
-            artist_links: Vec::new(),
-            label: label.into(),
-            links,
-            genres: Vec::new(),
-            disc_titles: Vec::new(),
-        };
+        let summary =
+            |row: AndroidBrowseRow, artwork_bindings, label: &str, links| AndroidDetailSummary {
+                row,
+                artwork_bindings,
+                artist_text: String::new(),
+                artist_links: Vec::new(),
+                label: label.into(),
+                links,
+                genres: Vec::new(),
+                disc_titles: Vec::new(),
+            };
         let genres = |genres: Vec<(library::GenreKey, String)>| {
             genres
                 .into_iter()
@@ -68,7 +69,7 @@ impl AndroidLibrary {
                 AndroidDetailSummary {
                     genres: genres(listed),
                     ..summary(
-                        Row::Playlist(PlaylistListRow::Playlist(*playlist)),
+                        Row::Playlist(PlaylistListRow::Playlist(*playlist)).into(),
                         artwork,
                         "Playlist",
                         links,
@@ -78,7 +79,17 @@ impl AndroidLibrary {
             Header::Smart(smart) => {
                 let artwork = smart.artwork_binding.iter().cloned().collect();
                 summary(
-                    Row::Playlist(PlaylistListRow::SmartPlaylist(*smart)),
+                    Row::Playlist(PlaylistListRow::SmartPlaylist(*smart)).into(),
+                    artwork,
+                    "Playlist",
+                    Vec::new(),
+                )
+            }
+            // A Quick mix entry shows as a smart playlist's header facts.
+            Header::QuickMix(entry) => {
+                let artwork = entry.artwork_binding.iter().cloned().collect();
+                summary(
+                    super::records::quick_mix_row(*entry),
                     artwork,
                     "Playlist",
                     Vec::new(),
@@ -90,7 +101,7 @@ impl AndroidLibrary {
                     (None, TagKind::Genre) => (tag.representative_artwork.clone(), "Genre"),
                     (_, TagKind::Mood) => (tag.representative_artwork.clone(), "Mood"),
                 };
-                summary(Row::Tag(tag), artwork, label, Vec::new())
+                summary(Row::Tag(tag).into(), artwork, label, Vec::new())
             }
             Header::Album(album) => {
                 let credited = rufin_core::route::detail_links::album_artist_links(&album);
@@ -115,7 +126,7 @@ impl AndroidLibrary {
                     genres: genres(listed),
                     disc_titles: album.metadata.disc_titles.clone(),
                     ..summary(
-                        Row::Album(album.row.clone()),
+                        Row::Album(album.row.clone()).into(),
                         album.row.artwork_binding.iter().cloned().collect(),
                         label,
                         links,
@@ -129,7 +140,7 @@ impl AndroidLibrary {
                     &artist,
                 ));
                 let artwork = artist.row.artwork_binding.iter().cloned().collect();
-                summary(Row::Artist(artist.row), artwork, "Artist", links)
+                summary(Row::Artist(artist.row).into(), artwork, "Artist", links)
             }
         })
     }

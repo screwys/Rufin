@@ -79,7 +79,7 @@ mod route_stack_tests {
 }
 
 /// Whether a page shows its scroll position again when it opens again: the lists, Home,
-/// Search, Folders, the playlist lists and smart playlist pages.
+/// Search, Folders, the playlist lists, smart playlist and Quick mix pages.
 fn remembers_position(route: &Route) -> bool {
     route.requires_selected_source(library::SearchMode::Title)
         || matches!(
@@ -88,6 +88,7 @@ fn remembers_position(route: &Route) -> bool {
                 | Route::SmartPlaylists
                 | Route::PlaylistFolder { .. }
                 | Route::SmartPlaylistDetail(_)
+                | Route::QuickMix(_)
         )
 }
 
