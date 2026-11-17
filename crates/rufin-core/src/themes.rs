@@ -13,7 +13,8 @@ pub const CONTROLLER_COLORS: &[(&str, &str)] = &[
     ("--text", "var(--view-fg-color)"),
     ("--accent", "var(--accent-color)"),
     ("--blue", "var(--accent-bg-color)"),
-    ("--favorite", "var(--error-color)"),
+    // A favorite takes the accent, as on GTK.
+    ("--favorite", "var(--accent-color)"),
     ("--accent-foreground", "var(--accent-fg-color)"),
     ("--popover", "var(--popover-bg-color)"),
     ("--right-sidebar", "var(--secondary-sidebar-bg-color)"),

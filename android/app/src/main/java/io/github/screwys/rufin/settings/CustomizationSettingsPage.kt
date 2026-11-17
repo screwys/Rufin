@@ -62,6 +62,10 @@ private fun LayoutTab(preferences: PreferencesConnection, browse: BrowseConnecti
     SettingsGroup(translate("Accessibility")) {
         SettingsSwitch(translate("Reduce motion"), preferences.reduceMotion) { preferences.changePreference { setReduceMotion(it) } }
     }
+    SettingsGroup(translate("Grids")) {
+        SettingsSwitch(translate("Show a badge for favorited items"), preferences.gridFavoriteBadges) { preferences.changePreference { setGridFavoriteBadges(it) } }
+        SettingsSwitch(translate("Show star ratings"), preferences.gridStarRatings) { preferences.changePreference { setGridStarRatings(it) } }
+    }
     SettingsGroup(translate("Library items")) {
         SettingsReorderRows(browse.routeSettings.map { SettingsReorderItem(it.descriptor.id, it.descriptor.title, it.visible) },
             onReorder = { _, id, target, after -> browse.reorderRoute(id, target, after) },
@@ -213,7 +217,7 @@ private fun MenusTab(preferences: PreferencesConnection) {
                 }) {
                     Row(Modifier.weight(1f).alpha(if (menu.ratingVisible) 1f else .38f)) {
                         repeat(5) { index ->
-                            RufinIcon(if (index < 3) "rufin-starred-symbolic" else "rufin-non-starred-symbolic", null, Modifier.size(24.dp),
+                            RufinIcon(if (index < 3) "rufin-starred-symbolic" else "rufin-star-outline-symbolic", null, Modifier.size(24.dp),
                                 if (index < 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

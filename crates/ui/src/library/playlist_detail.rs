@@ -394,7 +394,6 @@ impl CatalogUi {
                 shape: ShowcaseShape::Detail,
                 initial_width: width,
                 cover: ShowcaseCover::Group(cover.clone(), open_cover),
-                play_label: msgid("Play playlist"),
                 play: Rc::clone(&play),
                 menu,
                 download: true,

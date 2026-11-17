@@ -791,7 +791,11 @@ fn playback_json(
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,
+            "contexts":match &current.row.provenance {
+                playback::QueueProvenance::Context { context_id, .. } => rufin_core::collection_context::playing_contexts(context_id).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            },"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None),
             "live":current.live.is_some(),"picture":live_picture(current)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},

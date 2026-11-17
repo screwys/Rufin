@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.FavoriteHeart
+import io.github.screwys.rufin.ui.rememberFavoriteMotion
 import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
@@ -563,10 +565,9 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onRadio
                 val state = player.playback
                 state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
-            IconButton(player::favorite, Modifier.size(48.dp).focusRing(CircleShape), enabled = !player.live) {
-                RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                    translate("Favorite current track"), Modifier.size(24.dp),
-                    if (favorite) MaterialTheme.colorScheme.error else LocalContentColor.current, glyph = true)
+            val motion = rememberFavoriteMotion()
+            IconButton({ motion.clicked(favorite); player.favorite() }, Modifier.size(48.dp).focusRing(CircleShape), enabled = !player.live) {
+                FavoriteHeart(favorite, motion, translate("Favorite current track"), Modifier.size(24.dp), glyph = true)
             }
         }
     }

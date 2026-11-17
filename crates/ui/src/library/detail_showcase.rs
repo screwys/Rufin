@@ -3,7 +3,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use ::library::{AlbumRow, AlbumView, ArtistView, Row};
+use ::library::{AlbumRow, AlbumView, ArtistView, PlaylistListRow, Row};
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
@@ -20,8 +20,7 @@ use crate::library::route_layout::{
 };
 use crate::menus::media_menus::{CollectionPlay, row_favorite};
 use crate::widgets::artwork::{ArtworkTile, CoverGroupProjection};
-use crate::widgets::cover_controls::{cover_hover_controls_with_favorite, showcase_cover_overlay};
-use crate::widgets::interactions::ContextMenuOpen;
+use crate::widgets::interactions::{ContextMenuOpen, install_context_menu_openers};
 use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::localization::bind_label_text_with;
 use crate::widgets::media_drag::MediaDragSource;
@@ -110,6 +109,8 @@ mod showcase_imp {
         #[template_child]
         pub favorite: TemplateChild<gtk::Button>,
         #[template_child]
+        pub edit: TemplateChild<gtk::Button>,
+        #[template_child]
         pub download: TemplateChild<gtk::Button>,
         #[template_child]
         pub more: TemplateChild<gtk::Button>,
@@ -121,8 +122,9 @@ mod showcase_imp {
         pub row: RefCell<Option<Row>>,
         pub(crate) shell: RefCell<Weak<CatalogUi>>,
         pub offers_download: Cell<bool>,
-        /// The favorite in the cover's corner on hover; it toggles the same favorite as ♡.
-        pub cover_favorite: RefCell<Option<gtk::Button>>,
+        /// The cover's Artwork button, under the pointer while the row's picture can change.
+        pub artwork_button: RefCell<Option<gtk::Button>>,
+        pub artwork_writable: Cell<bool>,
         /// Play's and Radio's widths with their labels, to tell whether the labels fit again.
         pub labelled_play: Cell<i32>,
         pub labelled_radio: Cell<i32>,
@@ -424,8 +426,6 @@ pub struct ShowcaseMount {
     pub shape: ShowcaseShape,
     pub initial_width: i32,
     pub cover: ShowcaseCover,
-    /// The cover's hover Play: "Play album".
-    pub play_label: &'static str,
     pub play: CollectionPlay,
     /// The row's menu, from ⋯, the cover's corner and a secondary click.
     pub menu: ContextMenuOpen,
@@ -438,6 +438,7 @@ impl DetailShowcaseView {
     pub fn new(title: &str) -> Self {
         let view: Self = glib::Object::new();
         let imp = view.imp();
+        crate::favorites::install_favorite_heart(&imp.favorite);
         crate::widgets::text_slide::install(&imp.title_slide, &imp.title_viewport, &*imp.title);
         crate::widgets::text_slide::install(&imp.detail_slide, &imp.detail_viewport, &*imp.detail);
         // The facts slide as the title does when they are wider than the room.
@@ -647,8 +648,8 @@ impl DetailShowcaseView {
         self.refit();
     }
 
-    /// Mounts the header for `row`: its cover with the hover controls, its buttons, and its
-    /// shape at each width.
+    /// Mounts the header for `row`: its cover, with a playlist's picture buttons on hover, its
+    /// buttons, and its shape at each width.
     pub(crate) fn mount(
         &self,
         shell: &Rc<CatalogUi>,
@@ -659,27 +660,10 @@ impl DetailShowcaseView {
             shape,
             initial_width,
             cover,
-            play_label,
             play,
             menu,
             download,
         } = mount;
-        let (controls, cover_favorite) = cover_hover_controls_with_favorite(0, play_label, false);
-        let favorite = self.imp().favorite.downgrade();
-        cover_favorite.connect_clicked(move |_| {
-            if let Some(favorite) = favorite.upgrade() {
-                favorite.emit_clicked();
-            }
-        });
-        self.imp().cover_favorite.replace(Some(cover_favorite));
-        for (button, placement) in [
-            (&controls.play, QueuePlacement::Now),
-            (&controls.play_next, QueuePlacement::Next),
-            (&controls.play_last, QueuePlacement::Last),
-        ] {
-            let play = Rc::clone(&play);
-            button.connect_clicked(move |_| play(placement, false));
-        }
         cover.set_animated();
         let weak = self.downgrade();
         cover.connect_texture(Rc::new(move |texture| {
@@ -696,11 +680,17 @@ impl DetailShowcaseView {
                 button
             }
         };
-        self.imp().cover_host.append(&showcase_cover_overlay(
-            button.upcast_ref(),
-            controls,
-            Some(Rc::clone(&menu)),
-        ));
+        let overlay = gtk::Overlay::new();
+        overlay.add_css_class("cover-frame");
+        overlay.set_halign(gtk::Align::Start);
+        overlay.set_valign(gtk::Align::Start);
+        overlay.set_child(Some(&button));
+        install_context_menu_openers(&overlay, Rc::clone(&menu));
+        // Home's showcase steps through albums; a page's own cover changes its picture.
+        if shape != ShowcaseShape::Home {
+            self.install_artwork_button(&overlay);
+        }
+        self.imp().cover_host.append(&overlay);
         self.bind_actions(shell, play, menu, download);
         self.show_row(row);
         self.present(shape, initial_width, Some(cover))
@@ -727,15 +717,13 @@ impl DetailShowcaseView {
         );
         imp.radio.set_visible(offered.radio.is_some());
         imp.favorite.set_visible(offered.favorite);
-        let cover_favorite = imp.cover_favorite.borrow().clone();
-        if let Some(cover_favorite) = &cover_favorite {
-            // Hover shows and hides it, so a row without a favorite keeps it unmapped.
-            cover_favorite.set_child_visible(offered.favorite);
-        }
         if let Some((_, favorite)) = row_favorite(&row) {
-            for button in std::iter::once(&*imp.favorite).chain(cover_favorite.as_ref()) {
-                set_favorite_button_active(button, favorite);
-            }
+            set_favorite_button_active(&imp.favorite, favorite);
+        }
+        imp.edit
+            .set_visible(offered.edit && playlist_row(&row).is_some());
+        if imp.artwork_button.borrow().is_some() {
+            self.show_artwork_writable(&shell, row.clone(), offered.edit_metadata);
         }
         let downloaded = offered.remove_download;
         imp.download
@@ -871,6 +859,21 @@ impl DetailShowcaseView {
             }
         });
         let view = self.downgrade();
+        imp.edit.connect_clicked(move |_| {
+            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+                return;
+            };
+            match playlist_row(&row) {
+                Some(PlaylistListRow::Playlist(playlist)) => shell
+                    .shell()
+                    .edit_playlist_dialog(playlist.playlist_key, playlist.name.clone()),
+                Some(PlaylistListRow::SmartPlaylist(playlist)) => {
+                    shell.shell().edit_smart_playlist_dialog(playlist.clone())
+                }
+                _ => {}
+            }
+        });
+        let view = self.downgrade();
         imp.download.connect_clicked(move |button| {
             let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
                 return;
@@ -883,6 +886,58 @@ impl DetailShowcaseView {
                 );
             }
         });
+    }
+
+    /// Puts the Artwork button on the cover; it shows under the pointer while the row's picture
+    /// can change, and opens the editor that changes it.
+    fn install_artwork_button(&self, overlay: &gtk::Overlay) {
+        let resource = "routes/cover_artwork.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, { edit_artwork: gtk::Button });
+        overlay.add_overlay(&edit_artwork);
+        let view = self.downgrade();
+        edit_artwork.connect_clicked(move |_| {
+            if let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) {
+                shell.shell().edit_row_artwork(row);
+            }
+        });
+        let (view, button) = (self.downgrade(), edit_artwork.downgrade());
+        let show = Rc::new(move |shown: bool| {
+            if let (Some(view), Some(button)) = (view.upgrade(), button.upgrade()) {
+                button.set_visible(shown && view.imp().artwork_writable.get());
+            }
+        });
+        let motion = gtk::EventControllerMotion::new();
+        let entered = Rc::clone(&show);
+        motion.connect_enter(move |_, _, _| entered(true));
+        motion.connect_leave(move |_| show(false));
+        overlay.add_controller(motion);
+        self.imp().artwork_button.replace(Some(edit_artwork));
+    }
+
+    /// Reads whether `row`'s cover can change its picture.
+    fn show_artwork_writable(&self, shell: &CatalogUi, row: Row, edit_metadata: bool) {
+        self.set_artwork_writable(false);
+        let view = self.downgrade();
+        let shell = Rc::clone(shell.shell());
+        glib::spawn_future_local(async move {
+            let writable =
+                crate::playlists::artwork::artwork_writable(&shell, &row, edit_metadata).await;
+            // A later row's own read decides for it.
+            if let Some(view) = view.upgrade()
+                && view.row().is_some_and(|shown| shown == row)
+            {
+                view.set_artwork_writable(writable);
+            }
+        });
+    }
+
+    fn set_artwork_writable(&self, writable: bool) {
+        let imp = self.imp();
+        imp.artwork_writable.set(writable);
+        if !writable && let Some(button) = imp.artwork_button.borrow().as_ref() {
+            button.set_visible(false);
+        }
     }
 
     /// The row the header shows.
@@ -1216,6 +1271,16 @@ fn media_cover_projection_with_open(
         tile,
         size: Rc::new(Cell::new(size)),
         candidates,
+    }
+}
+
+/// The playlist or smart playlist `row` is, whose picture and settings its page edits.
+fn playlist_row(row: &Row) -> Option<&PlaylistListRow> {
+    match row {
+        Row::Playlist(
+            playlist @ (PlaylistListRow::Playlist(_) | PlaylistListRow::SmartPlaylist(_)),
+        ) => Some(playlist),
+        _ => None,
     }
 }
 

@@ -936,7 +936,6 @@ fn home_showcase_page(
             shape: ShowcaseShape::Home,
             initial_width: width,
             cover: ShowcaseCover::Single(cover),
-            play_label: msgid("Play album"),
             play,
             menu,
             download: false,

@@ -156,6 +156,8 @@ impl Shell {
         }
         if previous.appearance != current.appearance
             || previous.application.reduce_motion != current.application.reduce_motion
+            || previous.application.grid_favorite_badges != current.application.grid_favorite_badges
+            || previous.application.grid_star_ratings != current.application.grid_star_ratings
         {
             self.appearance.apply(&current);
             self.publish_controller_appearance();
@@ -1236,10 +1238,9 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     install_playlist_pin_drop(&row, shell, &pin);
 
     if let Some(playback_target) = pin.playback_target() {
-        let (controls, play) =
-            cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
+        let controls = cover_play_only_hover_controls("Play");
+        let play = controls.play.clone();
         play.add_css_class("compact-sidebar-pin-play");
-        play.set_size_request(32, 32);
         play.set_tooltip_text(Some(&title));
         let playback_shell = Rc::downgrade(shell);
         play.connect_clicked(move |_| {
@@ -1253,8 +1254,7 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
                 false,
             );
         });
-        controls.add_to_overlay(&row);
-        controls.connect_hover(&row);
+        controls.attach(&row);
     }
 
     let context_shell = Rc::downgrade(shell);

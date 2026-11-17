@@ -56,7 +56,16 @@ pub(super) fn routes() -> Router<ProductHandles> {
 pub(super) fn appearance_data(products: &ProductHandles) -> Value {
     let colors = products.appearance.borrow();
     let theme = colors.get("color-scheme").map_or("System", String::as_str);
-    json!({"theme":theme,"accent":products.settings.load().appearance.accent_preference,"colors":*colors})
+    let settings = products.settings.load();
+    json!({
+        "theme": theme,
+        "accent": settings.appearance.accent_preference,
+        "colors": *colors,
+        "grids": {
+            "favorite_badges": settings.application.grid_favorite_badges,
+            "star_ratings": settings.application.grid_star_ratings,
+        },
+    })
 }
 
 async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {

@@ -46,7 +46,7 @@ impl ArtworkEditor {
             artwork_preview: gtk::Picture, artwork_status: gtk::Label,
             artwork_display: gtk::Stack, artwork_current: gtk::Box,
             artwork_actions: gtk::Box, add_image: gtk::Button, delete_image: gtk::Button,
-            regenerate_image: gtk::Button, image_chooser: gtk::FileDialog,
+            regenerate_image: gtk::Button,
             artwork_frame: gtk::AspectFrame, artwork_overlay: gtk::Overlay,
         });
         let fallback = editing
@@ -88,39 +88,12 @@ impl ArtworkEditor {
             let Some(editor) = weak.upgrade() else { return };
             editor.begin();
             let parent = button.root().and_downcast::<gtk::Window>();
-            let chosen = image_chooser.open_future(parent.as_ref());
             let weak = weak.clone();
             let owner = owner.clone();
             editor
                 .task
                 .replace(Some(gtk::glib::spawn_future_local(async move {
-                    let result = async {
-                        let file = match chosen.await {
-                            Ok(file) => file,
-                            Err(error)
-                                if error.matches(gtk::DialogError::Dismissed)
-                                    || error.matches(gtk::DialogError::Cancelled) =>
-                            {
-                                return Ok(None);
-                            }
-                            Err(error) => return Err(error.to_string()),
-                        };
-                        let (bytes, _) = file
-                            .load_contents_future()
-                            .await
-                            .map_err(|error| error.to_string())?;
-                        let Some(owner) = owner.upgrade() else {
-                            return Ok(None);
-                        };
-                        let result = rufin_core::metadata::prepare_artwork(&owner, bytes.to_vec());
-                        drop(owner);
-                        result
-                            .recv()
-                            .await
-                            .map_err(|error| error.to_string())?
-                            .map(Some)
-                    }
-                    .await;
+                    let result = choose_image(owner, parent).await;
                     finish(&weak, result).await;
                 })));
         });
@@ -209,6 +182,40 @@ impl Drop for ArtworkEditor {
             task.abort();
         }
     }
+}
+
+/// An image the user picks, prepared as artwork; `None` when they pick none.
+async fn choose_image(
+    owner: std::sync::Weak<SourceOwner>,
+    parent: Option<gtk::Window>,
+) -> Result<Option<Arc<ImageBytes>>, String> {
+    let resource = "preferences/dialogs/image_chooser.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { image_chooser: gtk::FileDialog });
+    let file = match image_chooser.open_future(parent.as_ref()).await {
+        Ok(file) => file,
+        Err(error)
+            if error.matches(gtk::DialogError::Dismissed)
+                || error.matches(gtk::DialogError::Cancelled) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let (bytes, _) = file
+        .load_contents_future()
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(owner) = owner.upgrade() else {
+        return Ok(None);
+    };
+    let result = rufin_core::metadata::prepare_artwork(&owner, bytes.to_vec());
+    drop(owner);
+    result
+        .recv()
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
 }
 
 async fn finish(editor: &Weak<ArtworkEditor>, result: Result<Option<Arc<ImageBytes>>, String>) {

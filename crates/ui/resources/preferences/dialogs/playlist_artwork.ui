@@ -41,10 +41,4 @@
   </property>
 </object>
 <object class="GtkLabel" id="artwork_status"><property name="visible">false</property><property name="xalign">0</property><property name="wrap">true</property><property name="max-width-chars">35</property><style><class name="dim-label"/></style></object>
-  <object class="GtkFileFilter" id="image_filter">
-    <property name="name" translatable="yes">Image files</property>
-    <mime-types><mime-type>image/*</mime-type></mime-types>
-    <patterns><pattern>*.jxl</pattern><pattern>*.JXL</pattern></patterns>
-  </object>
-  <object class="GtkFileDialog" id="image_chooser"><property name="title" translatable="yes">Upload artwork</property><property name="default-filter">image_filter</property></object>
 </interface>
