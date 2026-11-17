@@ -89,6 +89,8 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         narrow_right: adw::ToggleGroup,
         sidebar_group: adw::PreferencesGroup,
         saved_row: adw::SwitchRow,
+        grid_favorite_badges_row: adw::SwitchRow,
+        grid_star_ratings_row: adw::SwitchRow,
         home_size: adw::ToggleGroup,
         home_spacing: adw::ToggleGroup,
         home_blocks: gtk::ListBox,
@@ -112,6 +114,20 @@ pub(super) fn page(shell: &Rc<Shell>) -> gtk::Widget {
         "reduced motion",
         |settings| &mut settings.application.reduce_motion,
         move |settings| motion_shell.appearance.apply(settings),
+    );
+    let badges_shell = Rc::clone(shell);
+    shell.settings.bind_switch(
+        &grid_favorite_badges_row,
+        "grid favorite badges",
+        |settings| &mut settings.application.grid_favorite_badges,
+        move |settings| badges_shell.appearance.apply(settings),
+    );
+    let ratings_shell = Rc::clone(shell);
+    shell.settings.bind_switch(
+        &grid_star_ratings_row,
+        "grid star ratings",
+        |settings| &mut settings.application.grid_star_ratings,
+        move |settings| ratings_shell.appearance.apply(settings),
     );
     let layout = &settings.layout;
     bind_left(
@@ -662,8 +678,8 @@ fn populate_menu_preview(shell: &Rc<Shell>, preview: &gtk::Box) {
         "rufin-starred-symbolic",
         "rufin-starred-symbolic",
         "rufin-starred-symbolic",
-        "rufin-non-starred-symbolic",
-        "rufin-non-starred-symbolic",
+        "rufin-star-outline-symbolic",
+        "rufin-star-outline-symbolic",
     ] {
         rating.append(&gtk::Image::from_icon_name(icon));
     }

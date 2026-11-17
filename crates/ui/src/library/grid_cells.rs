@@ -1,4 +1,3 @@
-use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::LibraryField;
 use crate::menus::media_menus::present_row_menu;
@@ -31,32 +30,6 @@ use crate::widgets::view_model::{bind_row_item, unbind_row_item};
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
-
-fn set_grid_favorite(button: &gtk::Button, favorite: Option<bool>) {
-    set_favorite_button_active(button, favorite.unwrap_or(false));
-    button.set_sensitive(favorite.is_some());
-    if favorite.is_none() {
-        button.set_visible(false);
-    }
-}
-
-fn install_grid_favorite<T: 'static>(
-    shell: &Rc<CatalogUi>,
-    current: &Rc<RefCell<Option<T>>>,
-    button: &gtk::Button,
-    target: impl Fn(&T) -> FavoriteTarget + 'static,
-) {
-    let click_shell = Rc::downgrade(shell);
-    let click_current = Rc::clone(current);
-    button.connect_clicked(move |button| {
-        let Some(shell) = click_shell.upgrade() else {
-            return;
-        };
-        let current = click_current.borrow();
-        let Some(row) = current.as_ref() else { return };
-        shell.set_favorite(target(row), !favorite_button_is_active(button));
-    });
-}
 
 pub fn install_grid_context<T: Clone + 'static>(
     shell: &Rc<CatalogUi>,
@@ -472,7 +445,7 @@ pub struct TrackGridCell<T: crate::widgets::library_fields::TrackPresentation = 
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
-    favorite: gtk::Button,
+    marks: cards::CollectionGridCoverView,
     current: Rc<RefCell<Option<T>>>,
     position: Rc<Cell<u32>>,
     field: Rc<dyn Fn(u32, &T, LibraryField) -> DetailLinks>,
@@ -495,12 +468,11 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
         let position = Rc::new(Cell::new(0));
         let controls = cards::CollectionGridCoverView::new(msgid("Play track"));
         let cover_host = controls.imp().cover_host.get();
-        let menu = controls.imp().menu.get();
-        let play_now_button = controls.imp().play.get();
-        let play_next = controls.imp().play_next.get();
-        let play_last = controls.imp().play_last.get();
-        let favorite = controls.favorite();
-        let body = CollectionGridCardCell::new(shell, fields, controls.clone().upcast());
+        let menu = controls.menu();
+        let play_now_button = controls.controls().play.clone();
+        let play_next = controls.controls().play_next.clone();
+        let play_last = controls.controls().play_last.clone();
+        let body = CollectionGridCardCell::new(shell, fields, &controls);
         let cover = ArtworkTile::new_elastic_square();
         cover_host.append(&cover.widget());
         let menu_position = Rc::clone(&position);
@@ -532,7 +504,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             let position = Rc::clone(&position);
             button.connect_clicked(move |_| play(position.get(), placement));
         }
-        install_grid_favorite(shell, &current, &favorite, |row| {
+        cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Track(row.media_uri().to_string())
         });
         let drag_current = Rc::clone(&current);
@@ -553,7 +525,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             body,
             shell: Rc::downgrade(shell),
             cover,
-            favorite,
+            marks: controls,
             current,
             position,
             field,
@@ -588,7 +560,15 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
                 .bind_playing_target(&shell, Some(PlayTarget::of_track(track))),
             (None, None) => {}
         }
-        set_grid_favorite(&self.favorite, Some(row.favorite()));
+        let track = row.track_row();
+        cards::bind_cover_marks(
+            &shell,
+            self.marks.controls(),
+            Some(row.favorite()),
+            track.map(|track| track.state.rating),
+            row.media_uri(),
+            track.and_then(|track| track.source_id.as_deref()),
+        );
         self.current.replace(Some(row));
         self.position.set(position);
     }
@@ -600,7 +580,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
         if let Some(playing) = &self.playing {
             playing.unbind(self.body.title.upcast_ref());
         }
-        set_grid_favorite(&self.favorite, None);
+        cards::clear_cover_marks(self.marks.controls());
         self.current.take();
     }
     fn set_ready(&self, ready: bool) {
@@ -623,7 +603,7 @@ pub struct AlbumGridCell {
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
-    favorite: gtk::Button,
+    marks: cards::CollectionGridCoverView,
     current: Rc<RefCell<Option<AlbumRow>>>,
 }
 
@@ -651,12 +631,11 @@ impl AlbumGridCell {
         let current = Rc::new(RefCell::new(None::<AlbumRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play album"));
         let cover_host = controls.imp().cover_host.get();
-        let menu = controls.imp().menu.get();
-        let play = controls.imp().play.get();
-        let play_next = controls.imp().play_next.get();
-        let play_last = controls.imp().play_last.get();
-        let favorite = controls.favorite();
-        let body = CollectionGridCardCell::new(shell, fields, controls.clone().upcast());
+        let menu = controls.menu();
+        let play = controls.controls().play.clone();
+        let play_next = controls.controls().play_next.clone();
+        let play_last = controls.controls().play_last.clone();
+        let body = CollectionGridCardCell::new(shell, fields, &controls);
         let cover = ArtworkTile::new_elastic_square();
         cover_host.append(&cover.widget());
         let drag_current = Rc::clone(&current);
@@ -692,14 +671,14 @@ impl AlbumGridCell {
                 );
             },
         );
-        install_grid_favorite(shell, &current, &favorite, |row| {
+        cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Album(row.media_uri.clone())
         });
         Self {
             body,
             shell: Rc::downgrade(shell),
             cover,
-            favorite,
+            marks: controls,
             current,
         }
     }
@@ -733,7 +712,7 @@ pub struct ArtistGridCell {
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
-    favorite: gtk::Button,
+    marks: cards::CollectionGridCoverView,
     current: Rc<RefCell<Option<ArtistRow>>>,
 }
 
@@ -764,12 +743,11 @@ impl ArtistGridCell {
         let current = Rc::new(RefCell::new(None::<ArtistRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play artist"));
         let cover_host = controls.imp().cover_host.get();
-        let menu = controls.imp().menu.get();
-        let play = controls.imp().play.get();
-        let play_next = controls.imp().play_next.get();
-        let play_last = controls.imp().play_last.get();
-        let favorite = controls.favorite();
-        let body = CollectionGridCardCell::new(shell, fields, controls.clone().upcast());
+        let menu = controls.menu();
+        let play = controls.controls().play.clone();
+        let play_next = controls.controls().play_next.clone();
+        let play_last = controls.controls().play_last.clone();
+        let body = CollectionGridCardCell::new(shell, fields, &controls);
         let cover = ArtworkTile::new_elastic_square();
         cover_host.append(&cover.widget());
         let drag_current = Rc::clone(&current);
@@ -811,14 +789,14 @@ impl ArtistGridCell {
                 );
             },
         );
-        install_grid_favorite(shell, &current, &favorite, |row| {
+        cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Artist(row.media_uri.clone())
         });
         Self {
             body,
             shell: Rc::downgrade(shell),
             cover,
-            favorite,
+            marks: controls,
             current,
         }
     }
@@ -842,7 +820,14 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         self.body.bind(&row.name, |field| {
             DetailLinks::text(&artist_field(&row, field))
         });
-        set_grid_favorite(&self.favorite, Some(row.state.favorite));
+        cards::bind_cover_marks(
+            &shell,
+            self.marks.controls(),
+            Some(row.state.favorite),
+            Some(row.state.rating),
+            &row.media_uri,
+            None,
+        );
         self.current.replace(Some(row));
     }
     fn clear(&self) {
@@ -850,7 +835,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
             shell.artwork.clear_artwork_tile(&self.cover);
             self.body.clear();
         }
-        set_grid_favorite(&self.favorite, None);
+        cards::clear_cover_marks(self.marks.controls());
         self.current.take();
     }
     fn set_ready(&self, ready: bool) {
@@ -886,7 +871,14 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         );
         self.body
             .bind(&row.title, |field| album_field_links(&row, field));
-        set_grid_favorite(&self.favorite, Some(row.state.favorite));
+        cards::bind_cover_marks(
+            &shell,
+            self.marks.controls(),
+            Some(row.state.favorite),
+            Some(row.state.rating),
+            &row.media_uri,
+            None,
+        );
         self.current.replace(Some(row));
     }
     fn clear(&self) {
@@ -894,7 +886,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
             shell.artwork.clear_artwork_tile(&self.cover);
             self.body.clear();
         }
-        set_grid_favorite(&self.favorite, None);
+        cards::clear_cover_marks(self.marks.controls());
         self.current.take();
     }
     fn set_ready(&self, ready: bool) {
@@ -999,15 +991,36 @@ impl CollectionGridCardCell {
         }
     }
 
-    pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], cover: gtk::Widget) -> Self {
+    /// A card of `cover` over its title and `fields`. A cover with hover controls shows that
+    /// the card plays; a plain one leaves that to the title.
+    pub fn new(
+        shell: &Rc<CatalogUi>,
+        fields: &[LibraryField],
+        cover: &cards::CollectionGridCoverView,
+    ) -> Self {
+        let card = Self::with_cover(shell, fields, cover.clone().upcast());
+        cover.controls().show_playing(&card.title);
+        card
+    }
+
+    pub fn with_plain_cover(
+        shell: &Rc<CatalogUi>,
+        fields: &[LibraryField],
+        cover: gtk::Widget,
+    ) -> Self {
+        let card = Self::with_cover(shell, fields, cover);
+        crate::widgets::recycled_cells::install_playing_indicator(
+            &card.title,
+            &card.card.imp().title_row.get(),
+        );
+        card
+    }
+
+    fn with_cover(shell: &Rc<CatalogUi>, fields: &[LibraryField], cover: gtk::Widget) -> Self {
         let card = CollectionGridCardView::new();
         card.prepend(&cover);
         let title = card.imp().title.get();
         connect_label_tooltip(&title);
-        crate::widgets::recycled_cells::install_playing_indicator(
-            &title,
-            &card.imp().title_row.get(),
-        );
         let field_cells = fields
             .iter()
             .copied()

@@ -111,19 +111,25 @@ function render() {
     label.append(el("span", "pin-title", title), metadata);
     openButton.replaceChildren(artwork, label);
     const controls = el("div", "pin-controls");
-    // A pin plays what core says its row plays: a playlist folder plays nothing.
-    for (const [label, name, action] of item.play ? [
-      [tr("Play"), "rufin-media-playback-start-symbolic", "replace"],
-      [tr("Play Next"), "rufin-mail-forward-symbolic", "next"],
-      [tr("Play Later"), "rufin-go-last-symbolic", "append"],
-    ] : []) {
-      const control = el("button", "icon-button");
-      control.type = "button";
-      control.title = label;
-      control.setAttribute("aria-label", label);
-      control.dataset.action = action;
-      control.append(icon(name));
-      controls.append(control);
+    const control = (label, name, action, className) => {
+      const node = el("button", className);
+      node.type = "button";
+      node.title = label;
+      node.setAttribute("aria-label", label);
+      node.dataset.action = action;
+      node.append(icon(name));
+      return node;
+    };
+    // A pin plays what core says its row plays: a playlist folder plays nothing. Its Play group is
+    // a grid card's.
+    if (item.play) {
+      const morph = el("div", "cover-morph");
+      morph.append(
+        control(tr("Play Next"), "rufin-mail-forward-symbolic", "next", "cover-side"),
+        control(tr("Play"), "rufin-media-playback-start-symbolic", "replace", "cover-play"),
+        control(tr("Play Later"), "rufin-go-last-symbolic", "append", "cover-side"),
+      );
+      controls.append(morph);
     }
     row.append(openButton, controls);
     bindDrag(row, () => ({

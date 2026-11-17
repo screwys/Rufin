@@ -77,8 +77,15 @@ struct MetadataView {
     editor: Rc<Editor>,
 }
 
-fn build_dialog(model: Arc<MetadataEditor>, runtime: tokio::runtime::Handle) -> adw::Dialog {
+fn build_dialog(
+    model: Arc<MetadataEditor>,
+    runtime: tokio::runtime::Handle,
+    artwork_page: bool,
+) -> adw::Dialog {
     let (dialog, view) = build_editor_view(model, None, None, None, runtime);
+    if artwork_page {
+        artwork::show_artwork_page(&view.editor);
+    }
     dialog.set_child(Some(&view.content));
     let owner = RefCell::new(Some(view));
     dialog.connect_closed(move |_| {
@@ -722,7 +729,8 @@ impl Editor {
     }
 }
 
-pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
+/// Opens the editor of `item`, on its picture when `artwork_page`.
+pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId, artwork_page: bool) {
     let source = shell.products.source.clone();
     let selected = item.clone();
     if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
@@ -743,9 +751,14 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                             track_metadata_error(&shell, retry, error);
                         }
                     });
-                    build_batch_dialog(batch, shell.products.runtime.clone(), on_error)
+                    build_batch_dialog(
+                        batch,
+                        shell.products.runtime.clone(),
+                        on_error,
+                        artwork_page,
+                    )
                 } else {
-                    build_dialog(editor, shell.products.runtime.clone())
+                    build_dialog(editor, shell.products.runtime.clone(), artwork_page)
                 };
                 shell.present_selected_dialog(&dialog);
             }
@@ -755,7 +768,7 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                     &shell,
                     Rc::new(move || {
                         if let Some(shell) = retry_shell.upgrade() {
-                            present_metadata_dialog(&shell, item.clone());
+                            present_metadata_dialog(&shell, item.clone(), artwork_page);
                         }
                     }),
                     error,
@@ -791,6 +804,7 @@ pub(crate) fn present_track_metadata_dialog(
                     batch,
                     shell.products.runtime.clone(),
                     on_error,
+                    false,
                 ));
             }
             Err(error) => {

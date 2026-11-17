@@ -352,14 +352,40 @@
   background: none;
 }
 
+/* A cover under the pointer: Play in the accent, the rest on dark glass, as on GTK. The rating,
+   More and the playing bars sit at one inset from their corners; the favorite is the corner. */
 .cover-controls {
-  --cover-gap: clamp(5px, calc(50% - 63px), 12px);
+  --cover-glass: rgb(0 0 0 / 52%);
   position: absolute;
   inset: 0;
   opacity: 0;
   pointer-events: none;
-  background: rgb(0 0 0 / 34%);
+  background: rgb(0 0 0 / 55%);
   border-radius: var(--radius);
+  transition: opacity 140ms ease-out;
+}
+
+/* The sizes by the cover's width. Every corner's glyph (--glyph) sits one inset (--inset) from
+   its two edges, so the heart, the rating, More and the playing bars line up across the cover. */
+.cover-wrap {
+  container-type: inline-size;
+  --glyph: 12px;
+  --inset: 8px;
+  --corner: 36px;
+  --cover-side: 24px;
+  --cover-play: 38px;
+}
+
+@container (min-width: 128px) {
+  .cover-wrap > * { --glyph: 13px; --inset: 9px; --corner: 41px; --cover-side: 26px; --cover-play: 44px; }
+}
+
+@container (min-width: 150px) {
+  .cover-wrap > * { --glyph: 14px; --inset: 10px; --corner: 44px; --cover-side: 28px; --cover-play: 50px; }
+}
+
+@container (min-width: 184px) {
+  .cover-wrap > * { --glyph: 16px; --inset: 12px; --corner: 50px; --cover-side: 30px; --cover-play: 54px; }
 }
 
 .album-card.controls-visible .cover-controls,
@@ -367,81 +393,301 @@
   opacity: 1;
 }
 
-.cover-controls button {
-  position: absolute;
-  width: 34px;
-  height: 34px;
-  padding: 6px;
+.cover-controls button,
+.cover-morph button {
+  display: grid;
+  place-items: center;
+  padding: 0;
   border-radius: 50%;
-  --cover-scale: 1;
-  --cover-face: white;
+  color: white;
   background: transparent;
-  color: #111111;
-  box-shadow:
-    0 8px 22px rgb(0 0 0 / 26%),
-    inset 0 0 0 1px rgb(0 0 0 / 8%);
-  transition:
-    background 120ms ease-out,
-    box-shadow 120ms ease-out;
   pointer-events: none;
+  transition: background 120ms ease-out, transform 120ms ease-out;
 }
 
-.album-card.controls-visible .cover-controls button,
-.album-card.menu-open .cover-controls button {
+.album-card.controls-visible .cover-controls :is(button, .cover-rating),
+.album-card.menu-open .cover-controls :is(button, .cover-rating) {
   pointer-events: auto;
 }
 
-.cover-controls .cover-play {
-  width: 54px;
-  height: 54px;
-  padding: 13px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.cover-controls .cover-next {
-  left: calc(50% - 61px - var(--cover-gap));
-  top: calc(50% - 17px);
-}
-
-.cover-controls .cover-last {
-  right: calc(50% - 61px - var(--cover-gap));
-  top: calc(50% - 17px);
-}
-
-.cover-controls .cover-favorite {
-  top: 8px;
-  right: 4px;
-}
-
-.cover-controls .cover-menu {
-  bottom: 8px;
-  left: 4px;
-}
-
 .cover-controls .icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
-.cover-controls .cover-play .icon {
+
+.cover-glass {
+  background: var(--cover-glass);
+  color: white;
+}
+
+/* Play Next and Play Later come out of Play's sides. */
+.cover-morph {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: max-content;
+  height: max-content;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 999px;
+  transition: background 160ms ease-out, padding 200ms ease-out;
+}
+
+.cover-morph:is(:hover, :focus-within) {
+  padding: 4px;
+  background: var(--cover-glass);
+}
+
+.cover-morph .cover-play {
+  width: var(--cover-play);
+  height: var(--cover-play);
+  color: white;
+  background: var(--blue);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 32%);
+}
+
+.cover-morph .cover-play .icon {
   width: 20px;
   height: 20px;
 }
 
-.cover-controls button:hover {
-  --cover-scale: 1.04;
-  --cover-face: #f7f7f7;
-  box-shadow:
-    0 10px 26px rgb(0 0 0 / 34%),
-    inset 0 0 0 1px rgb(0 0 0 / 12%);
+.cover-morph .cover-play:hover {
+  background: color-mix(in srgb, var(--blue) 88%, white);
+  transform: scale(1.05);
 }
 
-.cover-controls button:active {
-  --cover-scale: 0.96;
-  box-shadow:
-    0 6px 18px rgb(0 0 0 / 30%),
-    inset 0 0 0 1px rgb(0 0 0 / 14%);
+.cover-morph .cover-play:active {
+  transform: scale(0.96);
+}
+
+.cover-morph .cover-side {
+  width: 0;
+  height: var(--cover-side);
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: width 220ms cubic-bezier(0.2, 0.7, 0.2, 1), margin 220ms, opacity 140ms;
+}
+
+.cover-morph .cover-side .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.cover-morph:is(:hover, :focus-within) .cover-side {
+  width: var(--cover-side);
+  margin: 0 3px;
+  opacity: 1;
+}
+
+.cover-morph .cover-side:hover {
+  background: rgb(255 255 255 / 16%);
+}
+
+/* More and the rating sit on the darkened cover as they are, with a shadow; More grows under
+   the pointer. */
+.cover-controls .cover-menu {
+  position: absolute;
+  right: calc(var(--inset) - 5px);
+  bottom: calc(var(--inset) - 5px);
+  width: calc(var(--glyph) + 10px);
+  height: calc(var(--glyph) + 10px);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 60%));
+}
+
+.cover-controls .cover-menu .icon {
+  width: var(--glyph);
+  height: var(--glyph);
+}
+
+.cover-controls .cover-menu:hover {
+  transform: scale(1.1);
+}
+
+.cover-controls .cover-menu:active {
+  transform: scale(0.9);
+}
+
+/* The rating: its five stars, white on the darkened cover; rated ones take the accent. The last
+   star ends one inset from the right edge, on the heart's line. */
+.cover-rating {
+  display: none;
+  position: absolute;
+  right: var(--inset);
+  top: var(--inset);
+  gap: 2px;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 60%));
+}
+
+html.grid-star-ratings .cover-rating {
+  display: flex;
+}
+
+.cover-controls .cover-rating button {
+  width: var(--glyph);
+  height: var(--glyph);
+  border-radius: 0;
+}
+
+.cover-rating .icon {
+  width: var(--glyph);
+  height: var(--glyph);
+}
+
+.cover-rating .rated {
+  color: color-mix(in srgb, var(--blue) 55%, white);
+}
+
+/* The bars of the media that plays, at rest and under the pointer. */
+.cover-playing {
+  display: none;
+  position: absolute;
+  left: calc(var(--inset) - 5px);
+  bottom: calc(var(--inset) - 5px);
+  width: calc(var(--glyph) + 10px);
+  height: calc(var(--glyph) + 10px);
+  place-items: center;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.album-card.playing .cover-playing {
+  display: grid;
+}
+
+.cover-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+}
+
+.cover-bars i {
+  width: 3px;
+  height: 100%;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--blue) 55%, white);
+  transform-origin: bottom;
+  animation: cover-bars 900ms ease-in-out infinite alternate;
+}
+
+.cover-bars i:nth-child(2) { animation-delay: -300ms; }
+.cover-bars i:nth-child(3) { animation-delay: -600ms; }
+
+@keyframes cover-bars {
+  from { transform: scaleY(0.3); }
+  to { transform: scaleY(1); }
+}
+
+/* The favorite's corner: a plain heart under the pointer like the other icons, and on a favorite
+   a red tab, which grows from the corner as a quarter disc and stays at rest. */
+.cover-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--corner);
+  height: var(--corner);
+  padding: 0;
+  border-radius: var(--radius) 0 100% 0;
+  color: white;
+  background: transparent;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 60%));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out, background 140ms ease-out;
+}
+
+.cover-corner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--blue);
+  transform: scale(0);
+  transform-origin: top left;
+  transition: transform 280ms cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* On a favorite the tab takes the accent and the heart the accent's own foreground, as Play. */
+.cover-corner[data-favorite-uri][aria-pressed="true"] {
+  color: var(--accent-foreground, white);
+}
+
+.cover-corner[aria-pressed="true"]::before {
+  transform: scale(1);
+}
+
+.cover-corner > .icon {
+  position: absolute;
+  top: var(--inset);
+  left: var(--inset);
+  width: var(--glyph);
+  height: var(--glyph);
+}
+
+.album-card.controls-visible .cover-corner,
+.album-card.menu-open .cover-corner {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+html.grid-favorite-badges .cover-corner[aria-pressed="true"] {
+  opacity: 1;
+  box-shadow: 2px 2px 8px rgb(0 0 0 / 22%);
+}
+
+/* Every favorite's heart pops as it becomes one and small hearts fly out of it; it shrinks back
+   as it stops being one. */
+[data-action="favorite"]:not(.cover-corner),
+#current-favorite {
+  position: relative;
+}
+
+.favorite-pop > .icon {
+  animation: favorite-pop 440ms cubic-bezier(0.2, 0.8, 0.3, 1.4);
+}
+
+.favorite-drop > .icon {
+  animation: favorite-drop 260ms ease-out;
+}
+
+@keyframes favorite-pop {
+  0% { transform: scale(0.5); }
+  55% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+@keyframes favorite-drop {
+  0% { transform: scale(0.75); }
+  100% { transform: scale(1); }
+}
+
+.favorite-burst {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  pointer-events: none;
+  z-index: 3;
+  background: var(--burst);
+  -webkit-mask: url("/icons/rufin-heart-filled-symbolic.svg") center / contain no-repeat;
+  mask: url("/icons/rufin-heart-filled-symbolic.svg") center / contain no-repeat;
+  animation: favorite-burst 640ms cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes favorite-burst {
+  0% { transform: rotate(var(--angle)) translateY(-4px) scale(0.4); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: rotate(var(--angle)) translateY(calc(-1 * var(--distance))) scale(1); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .favorite-pop > .icon,
+  .favorite-drop > .icon,
+  .cover-bars i {
+    animation: none;
+  }
 }
 
 #main {
@@ -490,12 +736,7 @@
 }
 
 [data-favorite-uri][aria-pressed="true"] {
-  color: var(--favorite, #e01b24);
-  background: transparent;
-}
-
-.cover-controls .cover-favorite[aria-pressed="true"] {
-  color: var(--favorite, #e01b24);
+  color: var(--favorite);
   background: transparent;
 }
 
@@ -824,7 +1065,7 @@ button.detail-genre-chip:hover {
 }
 
 .detail-round[aria-pressed="true"] {
-  color: #e01b24;
+  color: var(--favorite);
   background: color-mix(in srgb, var(--text) 11%, transparent);
 }
 
@@ -918,23 +1159,6 @@ button.detail-genre-chip:hover {
 
 .library-page thead {
   visibility: collapse;
-}
-
-.cover-controls button::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: var(--cover-face);
-  transform: scale(var(--cover-scale));
-  transition:
-    background 120ms ease-out,
-    transform 120ms ease-out;
-}
-.cover-controls button .icon {
-  position: relative;
-  transform: scale(var(--cover-scale));
-  transition: transform 120ms ease-out;
 }
 
 /* A Home section's entries scroll sideways in one row, the next ones peeking in at the edge.
@@ -1037,7 +1261,4 @@ button.detail-genre-chip:hover {
 .column-row b + span {
   font-size: 12.5px;
   color: var(--muted);
-}
-.column-row .pin-controls {
-  background: var(--hover);
 }

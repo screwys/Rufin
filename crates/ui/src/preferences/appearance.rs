@@ -114,6 +114,25 @@ impl ApplicationAppearance {
                 gtk_settings.reset_property("gtk-enable-animations");
             }
         }
+        // Grids read these from their window, so a change shows on every cover at once.
+        for window in gtk::Window::list_toplevels() {
+            for (class, on) in [
+                (
+                    crate::widgets::cover_controls::GRID_FAVORITE_BADGES_CLASS,
+                    settings.application.grid_favorite_badges,
+                ),
+                (
+                    crate::widgets::cover_controls::GRID_STAR_RATINGS_CLASS,
+                    settings.application.grid_star_ratings,
+                ),
+            ] {
+                if on {
+                    gtk::prelude::WidgetExt::add_css_class(&window, class);
+                } else {
+                    gtk::prelude::WidgetExt::remove_css_class(&window, class);
+                }
+            }
+        }
         let themes = self.themes.borrow();
         adw::StyleManager::default()
             .set_color_scheme(color_scheme(&settings.appearance.theme_preference, &themes));

@@ -18,7 +18,7 @@ names.workspace = true
 uniffi = { workspace = true, optional = true }
 rufin-connect.workspace = true
 age.workspace = true
-chrono.workspace = true
+time = { workspace = true, features = ["local-offset"] }
 flate2.workspace = true
 tar.workspace = true
 # Bundle age error translations in development packages too.
@@ -67,6 +67,5 @@ windows-updater.workspace = true
 workspace = true
 
 [dev-dependencies]
-axum.workspace = true
 wiremock.workspace = true
 image.workspace = true

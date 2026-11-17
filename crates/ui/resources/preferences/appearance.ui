@@ -124,6 +124,21 @@
                   </object>
                 </child>
                 <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Grids</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="grid_favorite_badges_row">
+                        <property name="title" translatable="yes">Show a badge for favorited items</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="grid_star_ratings_row">
+                        <property name="title" translatable="yes">Show star ratings</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
                   <object class="AdwPreferencesGroup" id="sidebar_group">
                     <property name="title" translatable="yes">Sidebar items</property>
                     <child>

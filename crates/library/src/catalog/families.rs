@@ -752,7 +752,7 @@ impl Row for Track {
                 Some(_) => None,
                 None => self.hidden_since,
             }
-            .or_else(|| Some(chrono::Utc::now().timestamp()))
+            .or_else(|| Some(time::OffsetDateTime::now_utc().unix_timestamp()))
         };
     }
 

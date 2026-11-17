@@ -2033,6 +2033,11 @@ msgstr "Espacement de la grille"
 msgid "Grid"
 msgstr "Grille"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Grille"
+
 msgid "Grouping"
 msgstr "Regroupement"
 
@@ -3174,15 +3179,6 @@ msgstr "Lire l’artiste"
 msgid "Play count"
 msgstr "Nombre de lectures"
 
-msgid "Play genre"
-msgstr "Lire le genre"
-
-msgid "Play mood"
-msgstr "Lire l’ambiance"
-
-msgid "Play playlist"
-msgstr "Lire la playlist"
-
 msgid "Play radio later"
 msgstr "Lire la radio plus tard"
 
@@ -3233,6 +3229,11 @@ msgstr "Lecture sur {device}"
 
 msgid "Playing stream"
 msgstr "Lecture du flux"
+
+#, fuzzy
+#| msgid "Now Playing"
+msgid "Playing"
+msgstr "En cours de lecture"
 
 msgid "Playlist File"
 msgstr "Fichier de playlist"
@@ -4063,6 +4064,9 @@ msgstr "Afficher Rufin dans l’en-tête"
 msgid "Show Rufin"
 msgstr "Afficher Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Afficher l’illustration"
 
@@ -4101,6 +4105,11 @@ msgstr "Afficher les notes dans la barre inférieure"
 
 msgid "Show sidebar"
 msgstr "Afficher la barre latérale"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Afficher l’icône dans la zone de notification"
 
 msgid "Show tray icon"
 msgstr "Afficher l’icône dans la zone de notification"
@@ -5142,6 +5151,15 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
+
+#~ msgid "Play genre"
+#~ msgstr "Lire le genre"
+
+#~ msgid "Play mood"
+#~ msgstr "Lire l’ambiance"
+
+#~ msgid "Play playlist"
+#~ msgstr "Lire la playlist"
 
 #~ msgid "Drag to reorder."
 #~ msgstr "Glisser pour réorganiser."

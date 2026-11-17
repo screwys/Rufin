@@ -2,10 +2,7 @@ use super::*;
 use crate::source::{FEED_PING_INTERVAL, FEED_SILENCE_LIMIT, RemoteItemChange};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::{
-    WebSocketStream,
-    tungstenite::{Message, protocol::Role},
-};
+use tokio_websockets::{ClientBuilder, Message};
 
 impl PlexSource {
     async fn listen_once(
@@ -38,18 +35,17 @@ impl PlexSource {
             .upgrade()
             .await
             .map_err(|error| remote_http::map_reqwest_error(error, HTTP))?;
-        let mut socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
+        let mut socket = ClientBuilder::new().take_over(upgraded);
         if !ready() {
             return Ok(false);
         }
-        let network =
-            |error: tokio_tungstenite::tungstenite::Error| SourceError::Network(error.to_string());
+        let network = |error: tokio_websockets::Error| SourceError::Network(error.to_string());
         let mut ping = tokio::time::interval(FEED_PING_INTERVAL);
         let mut heard = std::time::Instant::now();
         loop {
             let message = tokio::select! {
                 _ = ping.tick() => {
-                    socket.send(Message::Ping(Vec::new().into())).await.map_err(network)?;
+                    socket.send(Message::ping("")).await.map_err(network)?;
                     continue;
                 }
                 () = tokio::time::sleep_until((heard + FEED_SILENCE_LIMIT).into()) => {
@@ -61,19 +57,14 @@ impl PlexSource {
                 return Ok(true);
             };
             heard = std::time::Instant::now();
-            match message.map_err(network)? {
-                Message::Text(text) => {
-                    if let Some(change) = notification(&text)
-                        && !changed(change)
-                    {
-                        return Ok(false);
-                    }
-                }
-                Message::Ping(payload) => {
-                    socket.send(Message::Pong(payload)).await.map_err(network)?
-                }
-                Message::Close(_) => return Ok(true),
-                _ => {}
+            let message = message.map_err(network)?;
+            if message.is_close() {
+                return Ok(true);
+            }
+            if let Some(change) = message.as_text().and_then(notification)
+                && !changed(change)
+            {
+                return Ok(false);
             }
         }
     }

@@ -2074,6 +2074,11 @@ msgstr "Шаг сетки"
 msgid "Grid"
 msgstr "Сетка"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Сетка"
+
 msgid "Grouping"
 msgstr "Группировка"
 
@@ -3267,15 +3272,6 @@ msgstr "Воспроизвести исполнителя"
 msgid "Play count"
 msgstr "Количество воспроизведений"
 
-msgid "Play genre"
-msgstr "Воспроизвести жанр"
-
-msgid "Play mood"
-msgstr "Воспроизвести настроение"
-
-msgid "Play playlist"
-msgstr "Воспроизвести плейлист"
-
 msgid "Play radio later"
 msgstr "Воспроизвести радио позже"
 
@@ -3330,6 +3326,11 @@ msgstr "Играет на {device}"
 
 msgid "Playing stream"
 msgstr "Воспроизведение трансляции"
+
+#, fuzzy
+#| msgid "Now Playing"
+msgid "Playing"
+msgstr "Сейчас играет"
 
 msgid "Playlist File"
 msgstr "Файл плейлиста"
@@ -4202,6 +4203,9 @@ msgstr "Показать Rufin в заголовке"
 msgid "Show Rufin"
 msgstr "Показать Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Показать обложку"
 
@@ -4240,6 +4244,11 @@ msgstr "Показать оценку в нижней панели"
 
 msgid "Show sidebar"
 msgstr "Показать боковую панель"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Показывать значок в системном трее"
 
 msgid "Show tray icon"
 msgstr "Показывать значок в системном трее"
@@ -5340,6 +5349,15 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Play genre"
+#~ msgstr "Воспроизвести жанр"
+
+#~ msgid "Play mood"
+#~ msgstr "Воспроизвести настроение"
+
+#~ msgid "Play playlist"
+#~ msgstr "Воспроизвести плейлист"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

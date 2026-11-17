@@ -110,7 +110,6 @@ impl CatalogUi {
                 shape: ShowcaseShape::Detail,
                 initial_width: inner_content_width,
                 cover: ShowcaseCover::Single(cover.clone()),
-                play_label: msgid("Play album"),
                 play,
                 menu,
                 download: true,

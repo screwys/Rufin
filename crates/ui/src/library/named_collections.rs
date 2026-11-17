@@ -471,7 +471,7 @@ struct NamedCollectionGridCell<T: NamedCollectionRow> {
 impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
     fn new(shell: Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(std::cell::RefCell::new(None::<T>));
-        let controls = super::cards::CollectionGridCoverView::without_favorite(msgid("Play"));
+        let controls = super::cards::CollectionGridCoverView::without_marks(msgid("Play"));
         let cover_host = controls.imp().cover_host.get();
         let cover = shell.artwork.elastic_cover_group_projection_for_artwork(
             &[],
@@ -479,12 +479,12 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             T::MOSAIC,
         );
         cover_host.append(&cover.widget());
-        let menu = controls.imp().menu.get();
+        let menu = controls.menu();
         let overlay = controls.imp().overlay.get();
         let play_buttons = [
-            controls.imp().play.get(),
-            controls.imp().play_next.get(),
-            controls.imp().play_last.get(),
+            controls.controls().play.clone(),
+            controls.controls().play_next.clone(),
+            controls.controls().play_last.clone(),
         ];
         install_grid_play(
             &shell,
@@ -501,7 +501,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
                 }
             },
         );
-        let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
+        let body = CollectionGridCardCell::new(&shell, fields, &controls);
         let drag_current = Rc::clone(&current);
         install_compact_media_drag_source(&body.card, &cover.widget(), move || {
             let item = drag_current.borrow();
