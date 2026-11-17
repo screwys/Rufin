@@ -2388,6 +2388,11 @@ msgstr ""
 msgid "Grid"
 msgstr "Mřížka"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Mřížka"
+
 msgid "Grouping"
 msgstr ""
 
@@ -3740,15 +3745,6 @@ msgstr "Přehrát interpreta"
 msgid "Play count"
 msgstr "Počet přehrání"
 
-msgid "Play genre"
-msgstr "Přehrát žánr"
-
-msgid "Play mood"
-msgstr "Poslouchejte podle nálady"
-
-msgid "Play playlist"
-msgstr "Přehrát playlist"
-
 #, fuzzy
 #| msgid "Play radio"
 msgid "Play radio later"
@@ -3817,6 +3813,11 @@ msgstr "Přehrává se na {device}"
 #| msgid "Play random"
 msgid "Playing stream"
 msgstr "Přehrát náhodně"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "Nový playlist"
 
 #, fuzzy
 #| msgid "Playlist name"
@@ -4846,6 +4847,9 @@ msgstr "Zobrazit Rufin"
 msgid "Show Rufin"
 msgstr "Zobrazit Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr ""
 
@@ -4894,6 +4898,11 @@ msgstr "Zobrazit text skladby v pravém panelu"
 
 msgid "Show sidebar"
 msgstr "Zobrazit postranní panel"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Zobrazit ikonu v systémové liště"
 
 msgid "Show tray icon"
 msgstr "Zobrazit ikonu v systémové liště"
@@ -6096,6 +6105,15 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Play genre"
+#~ msgstr "Přehrát žánr"
+
+#~ msgid "Play mood"
+#~ msgstr "Poslouchejte podle nálady"
+
+#~ msgid "Play playlist"
+#~ msgstr "Přehrát playlist"
 
 #, fuzzy
 #~| msgid "Drag to reorder"
