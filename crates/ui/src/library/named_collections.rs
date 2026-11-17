@@ -501,6 +501,9 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
                 }
             },
         );
+        super::grid_cells::install_cover_open(&shell, &controls, &current, |item: &T| {
+            Some(item.route())
+        });
         let body = CollectionGridCardCell::new(&shell, fields, &controls);
         let drag_current = Rc::clone(&current);
         install_compact_media_drag_source(&body.card, &cover.widget(), move || {

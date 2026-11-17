@@ -277,6 +277,23 @@ impl CollectionGridCoverView {
         view
     }
 
+    /// Calls `open` on one click of the cover outside its controls, as a page header's cover
+    /// opens its page; a click with Ctrl or Shift stays with the grid's selection.
+    pub fn connect_open(&self, open: impl Fn() + 'static) {
+        let overlay = self.imp().overlay.get();
+        overlay.set_cursor_from_name(Some("pointer"));
+        let click = gtk::GestureClick::new();
+        click.set_button(gtk::gdk::BUTTON_PRIMARY);
+        click.connect_released(move |gesture, presses, _, _| {
+            let selecting =
+                gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK;
+            if presses == 1 && !gesture.current_event_state().intersects(selecting) {
+                open();
+            }
+        });
+        overlay.add_controller(click);
+    }
+
     pub fn controls(&self) -> &CoverHoverControls {
         self.imp()
             .controls

@@ -33,7 +33,8 @@ import io.github.screwys.rufin.settings.SettingsReorderRows
 import io.github.screwys.rufin.settings.SettingsReorderItem
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
-import io.github.screwys.rufin.ui.MediaNavigationSheet
+import io.github.screwys.rufin.ui.MediaNavigationPills
+import io.github.screwys.rufin.ui.rememberMediaLinks
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
@@ -56,6 +57,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.unit.IntSize
 import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -100,6 +102,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.BlendMode
@@ -278,7 +281,15 @@ internal fun BrowseMenuSheet(
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
             val offered = menu
             top?.invoke()
-            BrowseMenuHeader(item, player)
+            // Go to's places open from the header: its artists, albums and source link, as pills under it.
+            val links = if (offered?.goTo == true) rememberMediaLinks(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri },
+                player, item.row.mediaUri, item.row.route)?.getOrNull()?.takeIf { it.artistLinks.isNotEmpty() || it.albumLinks.isNotEmpty() || it.sourceLink != null }
+                else null
+            BrowseMenuHeader(item, player, navigation.takeIf { links != null }, { navigation = !navigation }) {
+                if (links != null) MediaNavigationPills(links, player, item.row.route, { route, title, source ->
+                    onDismiss(); onNavigate(route, title, source)
+                }, onDismiss, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp))
+            }
             if (offered != null) {
                 val radioLabel = offered.radio?.let { seed ->
                     when (seed) {
@@ -353,7 +364,6 @@ internal fun BrowseMenuSheet(
                 }
                 if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { download(false) }
                 if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { download(true) }
-                if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
                 offered.share?.let { share -> BrowseMenuAction("rufin-share-symbolic", "Share") { sharing = share } }
                 if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", action = onMetadata)
                 onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", action = it) }
@@ -387,9 +397,6 @@ internal fun BrowseMenuSheet(
         }
         }
     }
-    if (navigation) MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri }, player, { route, title, source ->
-        navigation = false; onDismiss(); onNavigate(route, title, source)
-    }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
     // Create a playlist makes one, named as the Quick mix entry, of what it lists.
     if (creating && quickMix != null) PlaylistCreateSheet(model, { creating = false; onDismiss() }, item.row.title) { name, sourceId, public ->
         val source = model.sourceOwner ?: return@PlaylistCreateSheet
@@ -451,9 +458,11 @@ private fun menuSubtitle(item: BrowseItem) =
         .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
 
 @Composable
-internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection) {
+internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection,
+    /** Whether the header's places show, or null when it has none to show. */
+    expanded: Boolean? = null, onToggle: () -> Unit = {}, places: @Composable () -> Unit = {}) {
     val subtitle = menuSubtitle(item)
-    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, player) {
+    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, player, expanded, onToggle, places) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface)
@@ -461,11 +470,16 @@ internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection) {
 }
 
 @Composable
-internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, player: PlayerConnection, title: @Composable () -> Unit) {
+internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, player: PlayerConnection,
+    /** Whether `places` show under the header, which a tap on it toggles; null when it has none. */
+    expanded: Boolean? = null, onToggle: () -> Unit = {}, places: @Composable () -> Unit = {},
+    title: @Composable () -> Unit) {
     val artwork = rememberArtwork(identity, player, with(LocalDensity.current) { 64.dp.roundToPx() })
     val shade = if (MaterialTheme.colorScheme.surface.luminance() < .5f) Color.Black else Color.White
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp), color = shade.copy(alpha = .18f),
+    val shape = RoundedCornerShape(12.dp)
+    Surface(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp)
+        .then(if (expanded != null) Modifier.clip(shape).clickable(onClickLabel = translate("Go to"), onClick = onToggle) else Modifier),
+        shape = shape, color = shade.copy(alpha = .18f),
         contentColor = MaterialTheme.colorScheme.onSurface) {
     Row(Modifier.fillMaxWidth().padding(12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -475,8 +489,16 @@ internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, play
             if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (expanded != null) {
+            val turn by animateFloatAsState(if (expanded) 180f else 0f, tween(if (LocalReduceMotion.current) 0 else 220), label = "placesTurn")
+            RufinIcon("rufin-go-down-symbolic", null, Modifier.size(20.dp).graphicsLayer { rotationZ = turn },
+                MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     }
+    AnimatedVisibility(expanded == true, enter = expandVertically(tween(if (LocalReduceMotion.current) 0 else 220)) + fadeIn(),
+        exit = shrinkVertically(tween(if (LocalReduceMotion.current) 0 else 180)) + fadeOut()) { places() }
+    Spacer(Modifier.height(8.dp))
     MediaMenuDivider()
 }
 

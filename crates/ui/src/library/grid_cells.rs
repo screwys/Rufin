@@ -99,6 +99,23 @@ pub fn install_grid_play<T: 'static>(
     }
 }
 
+/// Opens the page `route` gives for `current`'s row on one click of `cover`.
+pub fn install_cover_open<T: 'static>(
+    shell: &Rc<CatalogUi>,
+    cover: &cards::CollectionGridCoverView,
+    current: &Rc<RefCell<Option<T>>>,
+    route: impl Fn(&T) -> Option<rufin_core::route::Route> + 'static,
+) {
+    let shell = Rc::downgrade(shell);
+    let current = Rc::clone(current);
+    cover.connect_open(move || {
+        let route = current.borrow().as_ref().and_then(&route);
+        if let (Some(shell), Some(route)) = (shell.upgrade(), route) {
+            shell.open_route(route);
+        }
+    });
+}
+
 crate::composite_box!(
     pub CollectionGridCardView,
     collection_grid_card_view_imp,
@@ -507,6 +524,10 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
         cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Track(row.media_uri().to_string())
         });
+        install_cover_open(shell, &controls, &current, |row: &T| {
+            let album = row.track_row()?.links.album_media_uri.clone()?;
+            Some(rufin_core::route::Route::AlbumDetail(album))
+        });
         let drag_current = Rc::clone(&current);
         let drag_position = Rc::clone(&position);
         let drag_artwork = cover.drag_paintable_source();
@@ -674,6 +695,11 @@ impl AlbumGridCell {
         cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Album(row.media_uri.clone())
         });
+        install_cover_open(shell, &controls, &current, |album: &AlbumRow| {
+            Some(rufin_core::route::Route::AlbumDetail(
+                album.media_uri.clone(),
+            ))
+        });
         Self {
             body,
             shell: Rc::downgrade(shell),
@@ -791,6 +817,9 @@ impl ArtistGridCell {
         );
         cards::install_cover_marks(shell, &current, controls.controls(), |row| {
             FavoriteTarget::Artist(row.media_uri.clone())
+        });
+        install_cover_open(shell, &controls, &current, |artist: &ArtistRow| {
+            Some(rufin_core::route::Route::of_artist(artist))
         });
         Self {
             body,
