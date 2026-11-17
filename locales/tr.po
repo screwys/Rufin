@@ -2018,6 +2018,11 @@ msgstr "Izgara aralığı"
 msgid "Grid"
 msgstr "Izgara"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Izgara"
+
 msgid "Grouping"
 msgstr "Gruplama"
 
@@ -3152,15 +3157,6 @@ msgstr "Sanatçıyı çal"
 msgid "Play count"
 msgstr "Çalma sayısı"
 
-msgid "Play genre"
-msgstr "Türü çal"
-
-msgid "Play mood"
-msgstr "Ruh halini çal"
-
-msgid "Play playlist"
-msgstr "Çalma listesini çal"
-
 msgid "Play radio later"
 msgstr "Radyoyu sonra çal"
 
@@ -3211,6 +3207,11 @@ msgstr "{device} cihazında çalınıyor"
 
 msgid "Playing stream"
 msgstr "Akış çalınıyor"
+
+#, fuzzy
+#| msgid "Now Playing"
+msgid "Playing"
+msgstr "Şimdi Çalıyor"
 
 msgid "Playlist File"
 msgstr "Çalma Listesi Dosyası"
@@ -4037,6 +4038,9 @@ msgstr "Başlıkta Rufin'i göster"
 msgid "Show Rufin"
 msgstr "Rufin'i göster"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Kapak görselini göster"
 
@@ -4075,6 +4079,11 @@ msgstr "Puanlamaları alt çubukta göster"
 
 msgid "Show sidebar"
 msgstr "Kenar çubuğunu göster"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Sistem tepsisi simgesini göster"
 
 msgid "Show tray icon"
 msgstr "Sistem tepsisi simgesini göster"
@@ -5106,6 +5115,15 @@ msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Rufin Kurulumuna Hoş Geldiniz"
+
+#~ msgid "Play genre"
+#~ msgstr "Türü çal"
+
+#~ msgid "Play mood"
+#~ msgstr "Ruh halini çal"
+
+#~ msgid "Play playlist"
+#~ msgstr "Çalma listesini çal"
 
 #~ msgid "Drag to reorder."
 #~ msgstr "Yeniden sıralamak için sürükleyin."

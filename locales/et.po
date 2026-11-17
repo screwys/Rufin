@@ -2091,6 +2091,11 @@ msgstr "Vahed ruudustikus"
 msgid "Grid"
 msgstr "Ruudustik"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Ruudustik"
+
 msgid "Grouping"
 msgstr "Rühmitamine"
 
@@ -3292,15 +3297,6 @@ msgstr "Esita esitajat"
 msgid "Play count"
 msgstr "Esituskordi"
 
-msgid "Play genre"
-msgstr "Kuula žanri alusel"
-
-msgid "Play mood"
-msgstr "Kuula meeleolu alusel"
-
-msgid "Play playlist"
-msgstr "Kuula esitusloendit"
-
 msgid "Play radio later"
 msgstr "Esita hiljem raadiorežiimis"
 
@@ -3355,6 +3351,11 @@ msgstr "Esitamisel seadmes: {device}"
 
 msgid "Playing stream"
 msgstr "Voogedastus on esitamisel"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "Uus esitusloend"
 
 msgid "Playlist File"
 msgstr "Esitusloendi fail"
@@ -4232,6 +4233,9 @@ msgstr "Näita kokkuvõttes/päises Rufinit"
 msgid "Show Rufin"
 msgstr "Näita Rufinit"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Näita kaanepilte"
 
@@ -4270,6 +4274,11 @@ msgstr "Näita alumisel ribal hinnanguid"
 
 msgid "Show sidebar"
 msgstr "Näita külgriba"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Näita süsteemisalve ikooni"
 
 msgid "Show tray icon"
 msgstr "Näita süsteemisalve ikooni"
@@ -5377,6 +5386,15 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Play genre"
+#~ msgstr "Kuula žanri alusel"
+
+#~ msgid "Play mood"
+#~ msgstr "Kuula meeleolu alusel"
+
+#~ msgid "Play playlist"
+#~ msgstr "Kuula esitusloendit"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

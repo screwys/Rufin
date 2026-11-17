@@ -2337,6 +2337,11 @@ msgstr ""
 msgid "Grid"
 msgstr "網格"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "網格"
+
 msgid "Grouping"
 msgstr ""
 
@@ -3654,15 +3659,6 @@ msgstr "播放藝人"
 msgid "Play count"
 msgstr "播放次數"
 
-msgid "Play genre"
-msgstr "播放曲風"
-
-msgid "Play mood"
-msgstr "播放氛圍"
-
-msgid "Play playlist"
-msgstr "播放播放清單"
-
 #, fuzzy
 #| msgid "Play radio"
 msgid "Play radio later"
@@ -3731,6 +3727,11 @@ msgstr "在 {device} 上播放"
 #| msgid "Play random"
 msgid "Playing stream"
 msgstr "任意播放"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "新增播放清單"
 
 #, fuzzy
 #| msgid "Playlist name"
@@ -4724,6 +4725,9 @@ msgstr "顯示 Rufin"
 msgid "Show Rufin"
 msgstr "顯示 Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr ""
 
@@ -4772,6 +4776,11 @@ msgstr "顯示歌詞在右側邊欄"
 
 msgid "Show sidebar"
 msgstr "顯示側邊欄"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Show star ratings"
+msgstr "重新搜尋"
 
 msgid "Show tray icon"
 msgstr ""
@@ -5922,6 +5931,15 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Play genre"
+#~ msgstr "播放曲風"
+
+#~ msgid "Play mood"
+#~ msgstr "播放氛圍"
+
+#~ msgid "Play playlist"
+#~ msgstr "播放播放清單"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

@@ -2032,6 +2032,11 @@ msgstr "Rasterabstand"
 msgid "Grid"
 msgstr "Raster"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Raster"
+
 msgid "Grouping"
 msgstr "Gruppierung"
 
@@ -3172,15 +3177,6 @@ msgstr "Künstler abspielen"
 msgid "Play count"
 msgstr "Wiedergabezähler"
 
-msgid "Play genre"
-msgstr "Genre abspielen"
-
-msgid "Play mood"
-msgstr "Stimmung abspielen"
-
-msgid "Play playlist"
-msgstr "Playlist abspielen"
-
 msgid "Play radio later"
 msgstr "Radio später abspielen"
 
@@ -3231,6 +3227,11 @@ msgstr "Wiedergabe auf {device}"
 
 msgid "Playing stream"
 msgstr "Stream wird wiedergegeben"
+
+#, fuzzy
+#| msgid "Now Playing"
+msgid "Playing"
+msgstr "Aktuelle Wiedergabe"
 
 msgid "Playlist File"
 msgstr "Wiedergabelistendatei"
@@ -4058,6 +4059,9 @@ msgstr "Rufin in der Kopfzeile anzeigen"
 msgid "Show Rufin"
 msgstr "Rufin anzeigen"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Cover anzeigen"
 
@@ -4096,6 +4100,11 @@ msgstr "Bewertungen in der unteren Leiste anzeigen"
 
 msgid "Show sidebar"
 msgstr "Seitenleiste einblenden"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Symbol im Infobereich anzeigen"
 
 msgid "Show tray icon"
 msgstr "Symbol im Infobereich anzeigen"
@@ -5132,6 +5141,15 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Play genre"
+#~ msgstr "Genre abspielen"
+
+#~ msgid "Play mood"
+#~ msgstr "Stimmung abspielen"
+
+#~ msgid "Play playlist"
+#~ msgstr "Playlist abspielen"
 
 #, fuzzy
 #~| msgid "Drag to reorder"
