@@ -312,6 +312,23 @@ impl SearchGridCell {
             ],
             |shell, item, placement| item.play(shell, placement),
         );
+        let open_shell = Rc::downgrade(&shell);
+        let open_current = Rc::clone(&current);
+        controls.connect_open(move || {
+            let Some(shell) = open_shell.upgrade() else {
+                return;
+            };
+            let item = open_current.borrow().clone();
+            match item {
+                Some(SearchItem::Track(track, _)) => {
+                    if let Some(album) = track.links.album_media_uri {
+                        shell.open_route(rufin_core::route::Route::AlbumDetail(album));
+                    }
+                }
+                Some(item) => item.activate(&shell),
+                None => {}
+            }
+        });
         let body = CollectionGridCardCell::new(&shell, fields, &controls);
         let snippet = LyricsSnippetView::new();
         body.card.append(&snippet);
