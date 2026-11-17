@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 64;
+pub(crate) const STORE_VERSION: i64 = 65;
 
 /// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
 /// artwork binding and the details row so the Catalog load reads neither.
@@ -31,7 +31,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 64;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 65;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -510,6 +510,8 @@ CREATE TABLE lyrics_cache (
 ) STRICT;
 -- What changed lately, for a paired device that follows this device's source lyrics.
 CREATE INDEX lyrics_cache_updated_idx ON lyrics_cache(authority, updated_at);
+-- The few picked rows, in the order Connect reads them, without reading the cache.
+CREATE INDEX lyrics_cache_picked_idx ON lyrics_cache(media_uri, authority, role, language, script) WHERE picked;
 
 -- Analysis results by audio hash. Expiry and Forget leave them.
 CREATE TABLE loudness (audio_hash BLOB PRIMARY KEY, integrated_lufs REAL, true_peak REAL) STRICT, WITHOUT ROWID;

@@ -42,6 +42,9 @@ pub(crate) async fn upgrade(path: &Path) -> LibraryResult<Option<bool>> {
         if version < 64 {
             to_64(&mut *transaction).await?;
         }
+        if version < 65 {
+            to_65(&mut *transaction).await?;
+        }
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "PRAGMA user_version={STORE_VERSION}"
         )))
@@ -215,6 +218,16 @@ async fn to_64(connection: &mut SqliteConnection) -> LibraryResult<()> {
             position INTEGER NOT NULL DEFAULT 0
         ) STRICT;
         CREATE INDEX stations_source_idx ON stations(source_key, object_id);",
+    )
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+/// Picked lyrics are found without reading the lyrics cache.
+async fn to_65(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    sqlx::raw_sql(
+        "CREATE INDEX lyrics_cache_picked_idx ON lyrics_cache(media_uri, authority, role, language, script) WHERE picked;",
     )
     .execute(connection)
     .await?;
