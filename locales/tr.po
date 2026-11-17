@@ -1256,6 +1256,11 @@ msgstr "API anahtarları oluştur"
 msgid "Create a playlist from queue"
 msgstr "Kuyruktan çalma listesi oluştur"
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "Create a playlist"
+msgstr "Çalma listesi oluştur"
+
 msgid "Create playlist"
 msgstr "Çalma listesi oluştur"
 
@@ -1778,6 +1783,11 @@ msgstr "Favori"
 msgid "Favorites and ratings"
 msgstr "Favoriler ve puanlamalar"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Favoriler"
+
 msgid "Favorites"
 msgstr "Favoriler"
 
@@ -1897,6 +1907,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Kaynağı Unut"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Favoriler güncellenemedi"
 
 msgid "Format not supported"
 msgstr "Format desteklenmiyor"
@@ -2552,6 +2567,11 @@ msgstr "Karışım (sıradaki çal)"
 msgid "Mix"
 msgstr "Karışım"
 
+#, fuzzy
+#| msgid "Remixes"
+msgid "Mixes"
+msgstr "Remiksler"
+
 msgid "Mode"
 msgstr "Mod"
 
@@ -2590,6 +2610,11 @@ msgstr "En Çok Atlanan"
 
 msgid "Most played"
 msgstr "En çok çalınan"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "En Çok Atlanan"
 
 msgid "Motion"
 msgstr "Hareket"
@@ -2712,6 +2737,11 @@ msgstr "Yeni Çalma Listesi"
 
 msgid "New Smart Playlist"
 msgstr "Yeni Akıllı Çalma Listesi"
+
+#, fuzzy
+#| msgid "Never played"
+msgid "New and unplayed"
+msgstr "Hiç çalınmadı"
 
 msgid "New download rule"
 msgstr "Yeni indirme kuralı"
@@ -2925,6 +2955,11 @@ msgstr "Kapalı"
 
 msgid "Offline"
 msgstr "Çevrimdışı"
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Tekrarla"
 
 msgid "On"
 msgstr "Açık"
@@ -3372,6 +3407,9 @@ msgstr "Kuyruğa alındı"
 msgid "Quick Connect"
 msgstr "Hızlı Bağlantı"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Rufin'den Çık"
 
@@ -3425,6 +3463,11 @@ msgstr "Kayıt"
 
 msgid "Red"
 msgstr "Kırmızı"
+
+#, fuzzy
+#| msgid "Nearby discovery"
+msgid "Rediscover"
+msgstr "Yakındaki keşif"
 
 msgid "Redo"
 msgstr "Yinele"
@@ -4484,6 +4527,11 @@ msgstr "Bu çalma listesi yalnızca {source} parçalarını kabul eder"
 msgid "This source cannot edit this field"
 msgstr "Bu kaynak bu alanı düzenleyemez"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "This time last year"
+msgstr "Son parçayı bitir"
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr "Bu, yapılandırılmış tüm durumu kaldırır. Devam etmek istiyor musunuz?"
 
@@ -4515,6 +4563,11 @@ msgid "Top artists"
 msgstr "En iyi sanatçılar"
 
 msgid "Top genres"
+msgstr "En iyi türler"
+
+#, fuzzy
+#| msgid "Top genres"
+msgid "Top rated"
 msgstr "En iyi türler"
 
 msgid "Top tracks"

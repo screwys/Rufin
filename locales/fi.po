@@ -1405,6 +1405,11 @@ msgstr "Poista soittolista"
 
 #, fuzzy
 #| msgid "Export playlist"
+msgid "Create a playlist"
+msgstr "Vie soittolista"
+
+#, fuzzy
+#| msgid "Export playlist"
 msgid "Create playlist"
 msgstr "Vie soittolista"
 
@@ -2021,6 +2026,11 @@ msgstr "Suosikki"
 msgid "Favorites and ratings"
 msgstr "Suosikit ja arviot"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Suosikit"
+
 msgid "Favorites"
 msgstr "Suosikit"
 
@@ -2167,6 +2177,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Unohda lähde"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Suosikkeja ei voitu päivittää"
 
 msgid "Format not supported"
 msgstr ""
@@ -2904,6 +2919,9 @@ msgstr "Toista satunnainen (toista seuraavaksi)"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2942,6 +2960,11 @@ msgstr "Eniten ohitettu"
 
 msgid "Most played"
 msgstr "Eniten toistettu"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Eniten ohitettu"
 
 #, fuzzy
 #| msgid "More actions"
@@ -3082,6 +3105,11 @@ msgstr "Uusi soittolista"
 
 msgid "New Smart Playlist"
 msgstr "Uusi älykäs soittolista"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Ei koskaan toistettu"
 
 msgid "New download rule"
 msgstr "Uusi lataussääntö"
@@ -3342,6 +3370,11 @@ msgstr ""
 
 msgid "Offline"
 msgstr ""
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Kertaa"
 
 msgid "On"
 msgstr ""
@@ -3853,6 +3886,9 @@ msgstr "Asetettu jonoon"
 msgid "Quick Connect"
 msgstr "Yhdistä"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Lopeta Rufin"
 
@@ -3914,6 +3950,9 @@ msgstr "Ladataan"
 
 msgid "Red"
 msgstr "Punainen"
+
+msgid "Rediscover"
+msgstr ""
 
 msgid "Redo"
 msgstr "Tee uudelleen"
@@ -5181,6 +5220,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr "Lähde ei voi muokata tätä kenttää"
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -5218,6 +5260,11 @@ msgstr "Albumiesittäjät"
 #, fuzzy
 #| msgid "Any genre"
 msgid "Top genres"
+msgstr "Mikä tahansa tyylilaji"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top rated"
 msgstr "Mikä tahansa tyylilaji"
 
 #, fuzzy

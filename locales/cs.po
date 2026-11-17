@@ -1471,6 +1471,11 @@ msgstr "Smazat playlist"
 
 #, fuzzy
 #| msgid "Smart playlists"
+msgid "Create a playlist"
+msgstr "Chytré playlisty"
+
+#, fuzzy
+#| msgid "Smart playlists"
 msgid "Create playlist"
 msgstr "Chytré playlisty"
 
@@ -2107,6 +2112,11 @@ msgstr "Oblíbené"
 msgid "Favorites and ratings"
 msgstr "Oblíbené skladby"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Oblíbené"
+
 msgid "Favorites"
 msgstr "Oblíbené"
 
@@ -2257,6 +2267,11 @@ msgstr ""
 #| msgid "Forget Server"
 msgid "Forget Source"
 msgstr "Zapomenout server"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Nelze aktualizovat oblíbené"
 
 msgid "Format not supported"
 msgstr ""
@@ -3020,6 +3035,9 @@ msgstr "Přehrát náhodně (příště)"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -3058,6 +3076,11 @@ msgstr "Nejčastěji přeskakované"
 
 msgid "Most played"
 msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Nejčastěji přeskakované"
 
 #, fuzzy
 #| msgid "Position"
@@ -3204,6 +3227,11 @@ msgstr "Nový playlist"
 
 msgid "New Smart Playlist"
 msgstr "Nový chytrý playlist"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Nikdy nepřehráno"
 
 msgid "New download rule"
 msgstr "Nové pravidlo stahování"
@@ -3475,6 +3503,11 @@ msgstr "Vypnuto"
 
 msgid "Offline"
 msgstr ""
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Opakovat"
 
 msgid "On"
 msgstr ""
@@ -4012,6 +4045,9 @@ msgstr "Ve frontě"
 msgid "Quick Connect"
 msgstr "Připojit"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Ukončit Rufin"
 
@@ -4077,6 +4113,9 @@ msgstr "Stahování"
 
 msgid "Red"
 msgstr "Červená"
+
+msgid "Rediscover"
+msgstr ""
 
 msgid "Redo"
 msgstr "Opakovat"
@@ -5376,6 +5415,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr "Tento zdroj nemůže toto pole upravit"
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -5413,6 +5455,11 @@ msgstr "Interpreti alba"
 #, fuzzy
 #| msgid "Any genre"
 msgid "Top genres"
+msgstr "Všechny žánry"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top rated"
 msgstr "Všechny žánry"
 
 #, fuzzy

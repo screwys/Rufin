@@ -1267,6 +1267,11 @@ msgstr "Claves de API"
 msgid "Create a playlist from queue"
 msgstr "Crear una lista de reproducción de esta cola"
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "Create a playlist"
+msgstr "Crear lista de reproducción"
+
 msgid "Create playlist"
 msgstr "Crear lista de reproducción"
 
@@ -1803,6 +1808,11 @@ msgstr "Favorito"
 msgid "Favorites and ratings"
 msgstr "Favoritos y puntuaciones"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Favoritos"
+
 msgid "Favorites"
 msgstr "Favoritos"
 
@@ -1925,6 +1935,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Olvidar Fuente"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "No se pudieron actualizar los favoritos"
 
 msgid "Format not supported"
 msgstr "Formato no soportado"
@@ -2620,6 +2635,9 @@ msgstr "Reproducir aleatoriamente (Reproducir siguiente)"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr "Modo"
 
@@ -2658,6 +2676,11 @@ msgstr "Más saltados"
 
 msgid "Most played"
 msgstr "Más reproducidos"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Más saltados"
 
 msgid "Motion"
 msgstr "Movimiento"
@@ -2788,6 +2811,11 @@ msgstr "Nueva lista de reproducción"
 
 msgid "New Smart Playlist"
 msgstr "Nueva Lista de Reproducción Inteligente"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Nunca reproducidos"
 
 msgid "New download rule"
 msgstr "Nueva regla de descargas"
@@ -3009,6 +3037,11 @@ msgstr "Apagado"
 
 msgid "Offline"
 msgstr "Sin conexión"
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Repetir"
 
 msgid "On"
 msgstr "Encendido"
@@ -3474,6 +3507,9 @@ msgstr "Puesto en la cola"
 msgid "Quick Connect"
 msgstr "Conexión rápida"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Cerrar Rufin"
 
@@ -3529,6 +3565,11 @@ msgstr "Grabando"
 
 msgid "Red"
 msgstr "Rojo"
+
+#, fuzzy
+#| msgid "Nearby discovery"
+msgid "Rediscover"
+msgstr "Descubrimiento cercano"
 
 msgid "Redo"
 msgstr "Rehacer"
@@ -4656,6 +4697,11 @@ msgstr "Esta lista de reproducción solo acepta pistas de {source}"
 msgid "This source cannot edit this field"
 msgstr "La fuente no puede editar este campo"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "This time last year"
+msgstr "Finalizar la última pista"
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr "Esto quitará todo estado configurado. ¿Quieres continuar?"
 
@@ -4687,6 +4733,11 @@ msgid "Top artists"
 msgstr "Artistas Top"
 
 msgid "Top genres"
+msgstr "Género Top"
+
+#, fuzzy
+#| msgid "Top genres"
+msgid "Top rated"
 msgstr "Género Top"
 
 msgid "Top tracks"

@@ -1291,6 +1291,11 @@ msgstr "Ключи API"
 msgid "Create a playlist from queue"
 msgstr "Создать плейлист из очереди"
 
+#, fuzzy
+#| msgid "Create playlist"
+msgid "Create a playlist"
+msgstr "Создать плейлист"
+
 msgid "Create playlist"
 msgstr "Создать плейлист"
 
@@ -1831,6 +1836,11 @@ msgstr "Избранное"
 msgid "Favorites and ratings"
 msgstr "Избранное и оценки"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Избранные"
+
 msgid "Favorites"
 msgstr "Избранные"
 
@@ -1953,6 +1963,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Удалить источник"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Не удалось обновить список избранных"
 
 msgid "Format not supported"
 msgstr "Формат не поддерживается"
@@ -2651,6 +2666,9 @@ msgstr "Воспроизвести следующий трек"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr "Режим"
 
@@ -2689,6 +2707,11 @@ msgstr "Самые пропускаемые"
 
 msgid "Most played"
 msgstr "Наиболее часто прослушиваемые"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Самые пропускаемые"
 
 msgid "Motion"
 msgstr "Движение"
@@ -2817,6 +2840,11 @@ msgstr "Новый плейлист"
 
 msgid "New Smart Playlist"
 msgstr "Новый умный плейлист"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Ни разу не воспроизводилось"
 
 msgid "New download rule"
 msgstr "Новое правило загрузки"
@@ -3032,6 +3060,11 @@ msgstr "Выкл."
 
 msgid "Offline"
 msgstr "Оффлайн"
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Повтор"
 
 msgid "On"
 msgstr "Вкл"
@@ -3499,6 +3532,9 @@ msgstr "В очереди"
 msgid "Quick Connect"
 msgstr "Быстрое подключение"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Закрыть Rufin"
 
@@ -3554,6 +3590,11 @@ msgstr "Запись"
 
 msgid "Red"
 msgstr "Красный"
+
+#, fuzzy
+#| msgid "Nearby discovery"
+msgid "Rediscover"
+msgstr "Обнаружение поблизости"
 
 msgid "Redo"
 msgstr "Повторить"
@@ -4676,6 +4717,11 @@ msgstr "В этот плейлист можно добавлять только 
 msgid "This source cannot edit this field"
 msgstr "Этот источник не может редактировать это поле"
 
+#, fuzzy
+#| msgid "Finish the last track"
+msgid "This time last year"
+msgstr "Завершить последний трек"
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr "Это удалит все настроенные параметры. Хотите продолжить?"
 
@@ -4707,6 +4753,11 @@ msgid "Top artists"
 msgstr "Лучшие исполнители"
 
 msgid "Top genres"
+msgstr "Лучшие жанры"
+
+#, fuzzy
+#| msgid "Top genres"
+msgid "Top rated"
 msgstr "Лучшие жанры"
 
 msgid "Top tracks"
