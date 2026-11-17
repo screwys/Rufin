@@ -16,7 +16,6 @@ app-identity.workspace = true
 async-channel.workspace = true
 audio-processing.workspace = true
 desktop-integration.workspace = true
-directories.workspace = true
 gtk = { workspace = true, features = ["v4_20"] }
 library.workspace = true
 localization.workspace = true
@@ -26,7 +25,6 @@ pulldown-cmark.workspace = true
 regex.workspace = true
 roxmltree.workspace = true
 rufin-core.workspace = true
-serde.workspace = true
 sources.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

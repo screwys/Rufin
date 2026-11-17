@@ -369,7 +369,7 @@ fn row_surface(
             ContextMenuItem::EditMetadata,
             msgid("Edit metadata"),
             EDIT_ICON,
-            move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone()),
+            move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone(), false),
         );
     }
     if menu.go_to {
@@ -496,7 +496,7 @@ fn rated(row: &Row) -> Option<Rated<'_>> {
     })
 }
 
-fn metadata_item(row: &Row) -> Option<MetadataItemId> {
+pub(crate) fn metadata_item(row: &Row) -> Option<MetadataItemId> {
     Some(match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             MetadataItemId::Track(track.media_uri.clone())

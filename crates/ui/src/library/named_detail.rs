@@ -43,13 +43,6 @@ impl NamedDetailId {
         }
     }
 
-    fn play_label(self) -> &'static str {
-        match self {
-            Self::Genre(_) => msgid("Play genre"),
-            Self::Mood(_) => msgid("Play mood"),
-        }
-    }
-
     fn missing_body(self) -> &'static str {
         match self {
             Self::Genre(_) => msgid("This isn't available"),
@@ -95,7 +88,6 @@ impl CatalogUi {
             context_menu,
             rows: rows.clone(),
             table_context: id.table_context(),
-            play_label: id.play_label(),
         });
         let tracks = grouped.tracks().clone();
         // A reread, or a header read after a download, shows the header it read.

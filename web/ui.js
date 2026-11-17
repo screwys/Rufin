@@ -127,8 +127,15 @@ function applyColors(colors) {
     document.documentElement.style.setProperty(name, value);
 }
 
+// Grids mark favorites' covers and show ratings under the pointer as the settings say.
+function applyGrids(favoriteBadges, starRatings) {
+  document.documentElement.classList.toggle("grid-favorite-badges", favoriteBadges);
+  document.documentElement.classList.toggle("grid-star-ratings", starRatings);
+}
+
 function applyAppearance(appearance) {
   savedAppearance = appearance;
+  if (appearance.grids) applyGrids(appearance.grids.favorite_badges, appearance.grids.star_ratings);
   document.documentElement.dataset.theme =
     appearance.theme === "System"
       ? matchMedia("(prefers-color-scheme: dark)").matches
@@ -766,6 +773,7 @@ export {
   showFavorite,
   time,
   applyAppearance,
+  applyGrids,
   initialAppearance,
   applyColors,
   cover,

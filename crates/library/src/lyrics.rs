@@ -197,7 +197,7 @@ pub(crate) async fn put_source_lyrics_on(
     if rows.is_empty() {
         return Ok(());
     }
-    let now = chrono::Utc::now().timestamp();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
     for (uri, payload) in rows {
         let empty = serde_json::from_str::<serde_json::Value>(payload)
             .ok()

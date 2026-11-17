@@ -26,14 +26,16 @@
   <div class="cover-wrap">
     {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% else %}<a href="{{ row.href }}" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% endif %}<div class="cover{% if row.mosaic() %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork() }}" loading="lazy" alt="" /></noscript></div>{% if row.href.is_empty() %}</button>{% else %}</a>{% endif %}
     <div class="cover-controls">
-      {% if row.menu.play %}
-      <button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
-      {% endif %}
-      {% if row.menu.favorite %}{% call favorite(row, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
+      {% if row.menu.play %}<div class="cover-morph">
+        <button type="submit" name="mode" value="next" data-action="next" class="cover-side" title="{{ localization::tr("Play Next") }}" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
+        <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+        <button type="submit" name="mode" value="append" data-action="append" class="cover-side" title="{{ localization::tr("Play Later") }}" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
+      </div>{% endif %}
+      {% if row.rating.is_some() %}<div class="cover-rating" data-rating-chip="{{ row.uri() }}" data-rating="{{ row.rating_value() }}" data-half="{{ row.half_stars }}" role="group" aria-label="{{ localization::tr("Rating") }}">{% for star in 0..5 %}<button type="button" data-action="rate" data-star="{{ star }}" aria-label="{{ star + 1 }}/5">{% call icon("rufin-star-outline-symbolic") %}{% endcall %}</button>{% endfor %}</div>{% endif %}
       {% call menu_button(row, "cover-menu") %}{% endcall %}
     </div>
+    <span class="cover-playing cover-glass" role="img" aria-label="{{ localization::tr("Playing") }}"><span class="cover-bars"><i></i><i></i><i></i></span></span>
+    {% if row.rating.is_some() %}{% call favorite(row, "cover-corner", true) %}{% endcall %}{% endif %}
   </div>
   {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="collection-title" data-action="open">{{ row.title }}</button>{% else %}<a class="collection-title" href="{{ row.href }}" data-action="open">{% if row.kind() == "playlist-folder" %}{% call icon("rufin-folders-symbolic") %}{% endcall %}{% endif %}{{ row.title }}</a>{% endif %}
   {% for (field, text) in row.labels() %}{% if field == LibraryField::Artist || field == LibraryField::AlbumArtist %}<button type="button" class="metadata-link" data-action="link" data-field="{% if field == LibraryField::AlbumArtist %}album_artist{% else %}artist{% endif %}">{{ text }}</button>{% else if field == LibraryField::Album %}<button type="button" class="metadata-link" data-action="link" data-field="album">{{ text }}</button>{% else if field == LibraryField::UserRating %}<p data-rating-uri="{{ row.uri() }}">{{ text }}</p>{% else %}<p>{{ text }}</p>{% endif %}{% endfor %}
@@ -48,11 +50,11 @@
     <input type="hidden" name="return" value="{{ row.form.return_to }}" />
     <input type="hidden" name="payload" value="{{ row.play }}" />
     {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open">{% else %}<a href="{{ row.href }}" class="cover-open" data-action="open">{% endif %}<div class="cover{% if row.mosaic() %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork() }}" loading="lazy" alt="" /></noscript></div><span><b>{{ row.title }}</b><span>{% for (_, text) in row.labels() %}{% if !loop.first %} · {% endif %}{{ text }}{% endfor %}</span></span>{% if row.href.is_empty() %}</button>{% else %}</a>{% endif %}
-    {% if row.menu.play %}<div class="pin-controls">
-      <button type="submit" name="mode" value="replace" data-action="replace" class="icon-button" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="next" data-action="next" class="icon-button" title="{{ localization::tr("Play Next") }}" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="append" data-action="append" class="icon-button" title="{{ localization::tr("Play Later") }}" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
-    </div>{% endif %}
+    {% if row.menu.play %}<div class="pin-controls"><div class="cover-morph">
+      <button type="submit" name="mode" value="next" data-action="next" class="cover-side" title="{{ localization::tr("Play Next") }}" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" title="{{ localization::tr("Play") }}" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="append" data-action="append" class="cover-side" title="{{ localization::tr("Play Later") }}" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
+    </div></div>{% endif %}
   </form>
 </article>
 {% endmacro %}
@@ -79,6 +81,7 @@
         {% if head.row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="detail-pill detail-pill-primary" title="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Play") }}</span></button>{% endif %}
         {% if head.row.menu.radio.is_some() %}<button type="button" data-action="radio" class="detail-pill" title="{{ localization::tr("Play radio") }}">{% call icon("rufin-audio-only-symbolic") %}{% endcall %}<span class="pill-label">{{ localization::tr("Radio") }}</span></button>{% endif %}
         {% if head.row.menu.favorite %}{% call favorite(head.row, "detail-round", true) %}{% endcall %}{% endif %}
+        {% if head.row.menu.edit && (head.row.kind() == "playlist" || head.row.kind() == "smart-playlist") %}<button type="button" data-action="edit" class="detail-round" title="{{ localization::tr("Edit") }}" aria-label="{{ localization::tr("Edit") }}">{% call icon("rufin-document-edit-symbolic") %}{% endcall %}</button>{% endif %}
         {% call menu_button(head.row, "detail-round") %}{% endcall %}
       </div>
     </div>

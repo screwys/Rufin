@@ -215,10 +215,11 @@ impl JellyfinEmbySource {
         progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<Option<i64>> {
-        let after = since.map(|since| {
-            chrono::DateTime::from_timestamp(since - crate::source::SYNC_MARGIN, 0)
-                .unwrap_or_default()
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        let after = since.and_then(|since| {
+            time::OffsetDateTime::from_unix_timestamp(since - crate::source::SYNC_MARGIN)
+                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
         });
         let known = observation
             .catalog

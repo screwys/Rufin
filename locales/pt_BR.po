@@ -2076,6 +2076,11 @@ msgstr "Espaçamento de grade"
 msgid "Grid"
 msgstr "Grade"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Grade"
+
 msgid "Grouping"
 msgstr "Agrupamento"
 
@@ -3288,15 +3293,6 @@ msgstr "Reproduzir artista"
 msgid "Play count"
 msgstr "Contagem de reproduções"
 
-msgid "Play genre"
-msgstr "Reproduzir gênero"
-
-msgid "Play mood"
-msgstr "Reproduzir humor"
-
-msgid "Play playlist"
-msgstr "Reproduzir playlist"
-
 msgid "Play radio later"
 msgstr "Reproduzir rádio depois"
 
@@ -3351,6 +3347,11 @@ msgstr "Reproduzindo em {device}"
 
 msgid "Playing stream"
 msgstr "Transmitindo fluxo"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "Nova playlist"
 
 msgid "Playlist File"
 msgstr "Arquivo de playlist"
@@ -4236,6 +4237,9 @@ msgstr "Mostrar Rufin no título"
 msgid "Show Rufin"
 msgstr "Mostrar Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Mostrar capas"
 
@@ -4274,6 +4278,11 @@ msgstr "Mostrar avaliações na barra inferior"
 
 msgid "Show sidebar"
 msgstr "Mostrar barra lateral"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Mostrar ícone na bandeja"
 
 msgid "Show tray icon"
 msgstr "Mostrar ícone na bandeja"
@@ -5377,6 +5386,15 @@ msgstr "A opção de atualização automática do {app_name} é inválida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bem-vindo à configuração do Rufin"
+
+#~ msgid "Play genre"
+#~ msgstr "Reproduzir gênero"
+
+#~ msgid "Play mood"
+#~ msgstr "Reproduzir humor"
+
+#~ msgid "Play playlist"
+#~ msgstr "Reproduzir playlist"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

@@ -73,7 +73,7 @@ fn initialize<'local>(
     crate::network::initialize(env, &context)?;
     let process = env.new_global_ref(&context)?;
     rustls_platform_verifier::android::init_with_env(env, context)?;
-    // netdev, which lists network interfaces for Connect, reads the context through ndk-context.
+    // netdev, which iroh lists network interfaces with, reads the context through ndk-context.
     #[allow(unsafe_code)]
     // SAFETY: Kotlin initializes once per process, and the global reference stays alive.
     unsafe {

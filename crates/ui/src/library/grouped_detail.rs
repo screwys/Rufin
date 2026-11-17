@@ -29,7 +29,6 @@ pub struct GroupedDetailData {
     pub context_menu: Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>,
     pub rows: Rows<Row>,
     pub table_context: &'static str,
-    pub play_label: &'static str,
 }
 
 #[derive(Clone)]
@@ -91,7 +90,6 @@ impl CatalogUi {
             context_menu,
             rows,
             table_context,
-            play_label,
         } = data;
         let content_width = crate::library::route_layout::detail_route_inner_width_for_viewport(
             self.route_width(),
@@ -148,7 +146,6 @@ impl CatalogUi {
                 shape: ShowcaseShape::Detail,
                 initial_width: content_width,
                 cover: ShowcaseCover::Group(cover.clone(), open_cover),
-                play_label,
                 play,
                 menu,
                 download: true,

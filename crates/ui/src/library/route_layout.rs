@@ -30,11 +30,14 @@ pub fn detail_route_inner_width_for_viewport(viewport_width: i32, horizontal_ins
         .max(1)
 }
 
-/// A showcase cover's side at `width`: never narrower than its hover controls when narrow,
+/// A showcase cover's side at `width`: never narrower than a grid's cover when narrow,
 /// growing to 224 px from [`DETAIL_SHOWCASE_NARROW_WIDTH`].
 pub fn detail_showcase_cover_size(width: i32) -> i32 {
     if width < DETAIL_SHOWCASE_NARROW_WIDTH {
-        ((width - 32) * 3 / 10).clamp(crate::widgets::cover_controls::cover_hover_min_width(), 150)
+        ((width - 32) * 3 / 10).clamp(
+            crate::widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH,
+            150,
+        )
     } else {
         164 + (width - DETAIL_SHOWCASE_NARROW_WIDTH).min(200) * 60 / 200
     }

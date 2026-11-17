@@ -7,6 +7,9 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use serde::Deserialize;
+use time::format_description::BorrowedFormatItem;
+use time::macros::format_description;
+use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 use crate::catalog::views::Context;
 use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey};
@@ -213,11 +216,10 @@ fn import_id(track: &Named, started_at: i64) -> String {
 }
 
 fn local_period(started_at: i64) -> String {
-    chrono::DateTime::from_timestamp(started_at, 0)
-        .unwrap_or_default()
-        .with_timezone(&chrono::Local)
-        .format("%Y-%m")
-        .to_string()
+    let time =
+        OffsetDateTime::from_unix_timestamp(started_at).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let time = time.to_offset(UtcOffset::local_offset_at(time).unwrap_or(UtcOffset::UTC));
+    format!("{:04}-{:02}", time.year(), u8::from(time.month()))
 }
 
 #[derive(Clone)]
@@ -554,17 +556,22 @@ fn moment(text: &str) -> Option<i64> {
         };
         return Some(seconds as i64);
     }
-    if let Ok(time) = chrono::DateTime::parse_from_rfc3339(text) {
-        return Some(time.timestamp());
+    if let Some(time) = crate::catalog::records::rfc3339(text) {
+        return Some(time.unix_timestamp());
     }
-    [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%d %b %Y %H:%M",
-        "%d %b %Y, %H:%M",
-    ]
-    .iter()
-    .find_map(|format| chrono::NaiveDateTime::parse_from_str(text, format).ok())
-    .map(|time| time.and_utc().timestamp())
+    let formats: [&[BorrowedFormatItem<'_>]; 3] = [
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none][first [T][ ]][hour padding:none]:[minute padding:none]:[second padding:none]"
+        ),
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none] [hour padding:none]:[minute padding:none]"
+        ),
+        format_description!(
+            "[day padding:none] [month repr:short case_sensitive:false] [year][optional [,]] [hour padding:none]:[minute padding:none]"
+        ),
+    ];
+    formats
+        .iter()
+        .find_map(|format| PrimitiveDateTime::parse(text, format).ok())
+        .map(|time| time.assume_utc().unix_timestamp())
 }

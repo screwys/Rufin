@@ -559,7 +559,6 @@ fn artist_detail_header_restored(
             shape: ShowcaseShape::Detail,
             initial_width: width,
             cover: ShowcaseCover::Single(cover.clone()),
-            play_label: msgid("Play artist"),
             play,
             menu,
             download: true,

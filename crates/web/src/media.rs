@@ -11,6 +11,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/mix", get(mix_settings))
         .route("/api/queue/mix", post(mix))
         .route("/api/favorite", get(selection_favorite).post(favorite))
+        .route("/api/rating", post(rating))
         .route("/api/queue/radio", post(radio))
         .route("/api/share", post(share))
         .route("/api/delete", post(delete))
@@ -119,6 +120,32 @@ pub(super) async fn favorite(
         .await
         .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
+}
+
+/// Rates a track, album or artist: 1 to 10 in half stars, or none.
+pub(super) async fn rating(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        kind: String,
+        uri: String,
+        rating: Option<u8>,
+    }
+    let input: Input = body(request).await?;
+    let target = match input.kind.as_str() {
+        "track" => library::FavoriteTarget::Track(input.uri),
+        "album" => library::FavoriteTarget::Album(input.uri),
+        "artist" => library::FavoriteTarget::Artist(input.uri),
+        _ => return Err(bad_request("Unknown rating type")),
+    };
+    let rating = input
+        .rating
+        .filter(|rating| *rating > 0)
+        .map(|rating| rating.min(10));
+    products.source.set_rating(target, rating);
+    Ok(json_response(StatusCode::OK, json!({"rating":rating})))
 }
 
 /// The link that shares the target a row's menu offers, made with the share dialog's choices.

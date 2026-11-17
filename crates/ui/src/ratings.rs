@@ -87,6 +87,8 @@ impl RatingControl {
         let began_stars = Rc::clone(&self.stars);
         let began_step = Rc::clone(&self.step);
         drag.connect_drag_begin(move |gesture, x, _| {
+            // The stars take the press, so a row or card under them does not act on it.
+            gesture.set_state(gtk::EventSequenceState::Claimed);
             began_start.set(x);
             preview_at(
                 gesture.widget(),
@@ -164,8 +166,8 @@ fn set_rating_icons(stars: &[gtk::Image; 5], rating: u8) {
             star.add_css_class("rated");
         }
         star.set_icon_name(Some(match value {
-            0 => "rufin-non-starred-symbolic",
-            1 => "rufin-semi-starred-symbolic",
+            0 => "rufin-star-outline-symbolic",
+            1 => "rufin-star-half-symbolic",
             _ => "rufin-starred-symbolic",
         }));
     }

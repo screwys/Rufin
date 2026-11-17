@@ -17,6 +17,11 @@ struct SearchResult {
     image: Option<Arc<ImageBytes>>,
 }
 
+/// Shows the editor's picture page, as a cover's Artwork button opens it.
+pub(super) fn show_artwork_page(editor: &Editor) {
+    editor.pages.set_visible_child(&editor.artwork_page.child());
+}
+
 pub(super) struct ArtworkEditor {
     controls: gtk::Box,
     preview: gtk::Picture,
