@@ -40,17 +40,21 @@ import kotlinx.coroutines.flow.*
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class RufinConnection(application: Application) : AndroidViewModel(application) {
-    internal data class FeedbackMessage(val message: String, val artworkIdentity: ByteArray?)
+    internal class FeedbackAction(val label: String, val run: () -> Unit)
+    internal data class FeedbackMessage(val message: String, val artworkIdentity: ByteArray?, val action: FeedbackAction? = null)
     internal var feedback by mutableStateOf<FeedbackMessage?>(null)
         private set
     internal var controlNotifications = true
     private var feedbackTimeout: Job? = null
-    internal fun showFeedback(message: String, artworkIdentity: ByteArray? = null, control: Boolean = false) {
+    internal fun showFeedback(message: String, artworkIdentity: ByteArray? = null, control: Boolean = false,
+        action: FeedbackAction? = null) {
         if (control && !controlNotifications) return
         feedbackTimeout?.cancel()
-        feedback = FeedbackMessage(message, artworkIdentity)
-        feedbackTimeout = viewModelScope.launch { delay(2000); feedback = null }
+        feedback = FeedbackMessage(message, artworkIdentity, action)
+        // An offer stays as long as GTK's toast does, long enough to reach its button.
+        feedbackTimeout = viewModelScope.launch { delay(if (action == null) 2000 else 5000); feedback = null }
     }
+    internal fun dismissFeedback() { feedbackTimeout?.cancel(); feedback = null }
     internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
     /// Work in progress, shown until its result's message replaces it.
     internal fun showWorking(message: String) {

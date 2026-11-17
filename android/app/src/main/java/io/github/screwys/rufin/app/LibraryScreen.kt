@@ -201,7 +201,10 @@ internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection, bot
                     io.github.screwys.rufin.ui.Artwork(io.github.screwys.rufin.ui.rememberArtwork(identity, player, pixels),
                         Modifier.size(40.dp).clip(CoverShape))
                 }
-                Text(feedback.message, style = MaterialTheme.typography.bodyMedium)
+                Text(feedback.message, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
+                feedback.action?.let { action ->
+                    TextButton({ model.dismissFeedback(); action.run() }) { Text(action.label) }
+                }
             }
         }
     }
@@ -572,13 +575,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         Column(Modifier.fillMaxSize()) {
             if (browse.section != AppSection.Browse) shellBar()
             val refreshState = rememberPullToRefreshState()
-            val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
-                it.sourceId == model.sources?.selectedSourceId
-            } == true
             // Pull-to-refresh stays on route roots; on detail pages a pull shows the Find field.
             val canRefresh = model.ready && model.sources?.selectedSourceId != null &&
                 browse.section == AppSection.Browse && !browse.detail && !fullPlayer
-            Box(Modifier.weight(1f).nestedScroll(dockScroll).nestedScroll(homeScroll).pullToRefresh(isRefreshing = refreshing, state = refreshState,
+            Box(Modifier.weight(1f).nestedScroll(dockScroll).nestedScroll(homeScroll).pullToRefresh(isRefreshing = false, state = refreshState,
                 enabled = canRefresh && !model.sourceBusy, onRefresh = model::refresh)) {
                 // Each side of a transition shows the root it was composed for.
                 val rootContent: @Composable (String, Boolean) -> Unit = { root, shown ->
