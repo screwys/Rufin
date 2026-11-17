@@ -10,8 +10,8 @@ use adw::prelude::*;
 use gtk::glib;
 use localization::tr;
 use playback::{
-    MAX_CROSSFADE_SECONDS, MAX_PLAYBACK_RATE, MIN_CROSSFADE_SECONDS, MIN_PLAYBACK_RATE,
-    PlaybackTransitionMode,
+    CROSSFADE_MARKS, MAX_CROSSFADE_SECONDS, MAX_PLAYBACK_RATE, MIN_CROSSFADE_SECONDS,
+    MIN_PLAYBACK_RATE, PLAYBACK_RATE_MARKS, PlaybackTransitionMode,
 };
 
 use crate::player::PlayerUi;
@@ -192,13 +192,9 @@ fn crossfade_duration_row(
     scale.set_width_request(scale_width);
     scale.set_valign(gtk::Align::Center);
     install_sliding_value_bubble(&scale, |seconds| format!("{seconds:.0}"));
-    scale.add_mark(1.0, gtk::PositionType::Bottom, Some("1"));
-    scale.add_mark(5.0, gtk::PositionType::Bottom, Some("5"));
-    scale.add_mark(10.0, gtk::PositionType::Bottom, Some("10"));
-    scale.add_mark(15.0, gtk::PositionType::Bottom, Some("15"));
-    scale.add_mark(20.0, gtk::PositionType::Bottom, Some("20"));
-    scale.add_mark(25.0, gtk::PositionType::Bottom, Some("25"));
-    scale.add_mark(30.0, gtk::PositionType::Bottom, Some("30"));
+    for mark in CROSSFADE_MARKS {
+        scale.add_mark(mark, gtk::PositionType::Bottom, Some(&mark.to_string()));
+    }
     scale.set_value(f64::from(initial_seconds));
     let crossfade_shell = Rc::clone(shell);
     scale.connect_value_changed(move |scale| {
@@ -227,13 +223,9 @@ pub fn playback_rate_row(
     install_scale_scroll_forwarding(&scale);
     scale.set_width_request(scale_width);
     install_sliding_value_bubble(&scale, playback_rate_value);
-    scale.add_mark(0.5, gtk::PositionType::Bottom, Some("0.5"));
-    scale.add_mark(0.75, gtk::PositionType::Bottom, Some("0.75"));
-    scale.add_mark(1.0, gtk::PositionType::Bottom, Some("1"));
-    scale.add_mark(1.25, gtk::PositionType::Bottom, Some("1.25"));
-    scale.add_mark(1.5, gtk::PositionType::Bottom, Some("1.5"));
-    scale.add_mark(1.75, gtk::PositionType::Bottom, Some("1.75"));
-    scale.add_mark(2.0, gtk::PositionType::Bottom, Some("2"));
+    for mark in PLAYBACK_RATE_MARKS {
+        scale.add_mark(mark, gtk::PositionType::Bottom, Some(&mark.to_string()));
+    }
     scale.set_value(initial_rate);
     scale.update_property(&[gtk::accessible::Property::Label(&title_text)]);
     row.add_suffix(&scale);

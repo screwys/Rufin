@@ -4,11 +4,16 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_EBU_R128_TARGET_LUFS: f64 = -23.0;
 pub const MIN_EBU_R128_TARGET_LUFS: f64 = -48.0;
 pub const MAX_EBU_R128_TARGET_LUFS: f64 = 0.0;
+/// Labelled stops of each slider, shown under it by every client.
+pub const EBU_R128_TARGET_MARKS: [f64; 7] = [-48.0, -36.0, -30.0, -23.0, -18.0, -12.0, 0.0];
+pub const DEFAULT_CROSSFADE_SECONDS: u8 = 5;
 pub const MIN_CROSSFADE_SECONDS: u8 = 1;
 pub const MAX_CROSSFADE_SECONDS: u8 = 30;
+pub const CROSSFADE_MARKS: [f64; 7] = [1.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0];
 pub const MIN_PLAYBACK_RATE: f64 = 0.5;
 pub const MAX_PLAYBACK_RATE: f64 = 2.0;
 pub const DEFAULT_PLAYBACK_RATE: f64 = 1.0;
+pub const PLAYBACK_RATE_MARKS: [f64; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 pub const DEFAULT_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MIN_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MAX_AUTO_DJ_REFILL_THRESHOLD: u8 = 10;
@@ -83,7 +88,7 @@ macro_rules! playback_preference_fields {
                 #[serde(default)]
                 transition_mode: PlaybackTransitionMode = PlaybackTransitionMode::Gapless => set_transition_mode;
                 #[serde(default = "default_crossfade_seconds")]
-                crossfade_seconds: u8 = default_crossfade_seconds() => set_crossfade_seconds;
+                crossfade_seconds: u8 = DEFAULT_CROSSFADE_SECONDS => set_crossfade_seconds;
                 #[serde(default)]
                 skip_same_album_crossfade: bool = false => set_skip_same_album_crossfade;
                 #[serde(default = "default_true")]
@@ -293,7 +298,7 @@ fn sanitize_volume(volume: f64) -> f64 {
 }
 
 fn default_crossfade_seconds() -> u8 {
-    5
+    DEFAULT_CROSSFADE_SECONDS
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.player
 
-import io.github.screwys.rufin.ui.RufinSlider
+import io.github.screwys.rufin.settings.SettingsSliderNumber
 
 import io.github.screwys.rufin.ui.ChoiceChip
 
@@ -233,8 +233,8 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 if (profile.automaticPreamp) SettingsRow(translate("Preamp"), trailing = {
                     Text(if (view.sampleRate == null) "-" else "${number(view.preampDb)} dB")
                 })
-                else EqNumber(translate("Preamp"), profile.manualPreampDb, -36.0..12.0, "dB", .1, listOf(-36.0, -24.0, -12.0, 0.0, 12.0),
-                    preview = { preview(EqEdit.Preamp(it)) }, commit = ::commit)
+                else SettingsSliderNumber(translate("Preamp"), profile.manualPreampDb, -36.0..12.0, .1, unit = "dB", default = 0.0, marks = listOf(-36.0, -24.0, -12.0, 0.0, 12.0), origin = 0.0,
+                    preview = { preview(EqEdit.Preamp(it)) }, save = { commit() })
                 val peak = view.peakDb.maxOrNull()
                 if (!view.cast || peak != null) SettingsRow(translate(if (view.cast) "Encoding peak" else "Peak"), trailing = {
                     Text(if (clippingUntil > 0) translate("Clipping") else peak?.let { "${number(it)} dBFS" } ?: "-",
@@ -247,9 +247,9 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
         }
         if (!receiverProcessing) SettingsGroup(translate("Audio effects")) {
             val tone = listOf(-12.0, -6.0, 0.0, 6.0, 12.0)
-            EqNumber(translate("Bass"), profile.bassDb, -12.0..12.0, "dB", .1, tone, preview = { preview(EqEdit.Bass(it)) }, commit = ::commit)
-            EqNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, "dB", .1, tone, preview = { preview(EqEdit.Treble(it)) }, commit = ::commit)
-            EqNumber(translate("Balance"), view.balance, -1.0..1.0, "", .01, listOf(-1.0, -.5, 0.0, .5, 1.0), preview = { preview(EqEdit.Balance(it)) }, commit = ::commit)
+            SettingsSliderNumber(translate("Bass"), profile.bassDb, -12.0..12.0, .1, unit = "dB", default = 0.0, marks = tone, origin = 0.0, preview = { preview(EqEdit.Bass(it)) }, save = { commit() })
+            SettingsSliderNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, .1, unit = "dB", default = 0.0, marks = tone, origin = 0.0, preview = { preview(EqEdit.Treble(it)) }, save = { commit() })
+            SettingsSliderNumber(translate("Balance"), view.balance, -1.0..1.0, .01, default = 0.0, marks = listOf(-1.0, -.5, 0.0, .5, 1.0), origin = 0.0, preview = { preview(EqEdit.Balance(it)) }, save = { commit() })
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 EqToggle(translate("Crossfeed"), view.crossfeed, Modifier.weight(1f)) { change(EqEdit.Crossfeed(it)) }
                 EqToggle(translate("Mono"), view.mono, Modifier.weight(1f)) { change(EqEdit.Mono(it)) }
@@ -423,8 +423,8 @@ internal fun EqualizerEditor(view: EqView, parametric: Boolean, frequencies: Lis
                         }
                     }
                 }
-                EqNumber(translate("Gain"), band.gainDb, -24.0..12.0, "dB", .1, listOf(-24.0, -12.0, 0.0, 12.0),
-                    preview = { preview(EqEdit.BandGain(index.toUInt(), it)) }, commit = commit)
+                SettingsSliderNumber(translate("Gain"), band.gainDb, -24.0..12.0, .1, unit = "dB", default = 0.0, marks = listOf(-24.0, -12.0, 0.0, 12.0), origin = 0.0,
+                    preview = { preview(EqEdit.BandGain(index.toUInt(), it)) }, save = { commit() })
                 if (view.sampleRate != null && band.frequencyHz >= view.sampleRate!!.toDouble() / 2) Text(translate("Inactive at this sample rate"), style = MaterialTheme.typography.labelSmall)
             } else TextButton({ change(EqEdit.AddBand) }) { Text(translate("Add band")) }
         }
@@ -435,29 +435,6 @@ private fun filterName(kind: FilterKind) = when (kind) {
     FilterKind.PEAK -> "Peak"
     FilterKind.LOW_SHELF -> "Low shelf"
     FilterKind.HIGH_SHELF -> "High shelf"
-}
-
-/** A level that goes both ways from zero: its value opens exact entry, Reset shows once it leaves zero, and the
- *  slider fills from zero and sticks to the marks under it, which jump to their value when tapped. */
-@Composable
-private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, unit: String, step: Double,
-    marks: List<Double>, preview: (Double) -> Unit, commit: () -> Unit) {
-    var draft by remember(value) { mutableDoubleStateOf(value) }
-    val stops = remember(marks) { marks.map { it.toFloat() } }
-    val span = range.start.toFloat()..range.endInclusive.toFloat()
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            if (draft != 0.0) PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { draft = 0.0; preview(0.0); commit() }, iconSize = 18.dp)
-            EqValue(title, draft, range, unit) { preview(it); commit() }
-        }
-        RufinSlider(draft.toFloat(), {
-            draft = (round(it / step) * step).coerceIn(range)
-            preview(draft)
-        }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" },
-            valueRange = span, onValueChangeFinished = commit, marks = stops, origin = 0f)
-        SliderMarks(span, stops, default = 0f) { draft = it.toDouble(); preview(draft); commit() }
-    }
 }
 
 /** An effect that is on or off, as half of a row. */

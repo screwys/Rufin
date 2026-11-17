@@ -39,9 +39,11 @@ import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.player.PlayerIconButton
+import io.github.screwys.rufin.player.SliderMarks
 import androidx.compose.ui.text.style.TextAlign
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
+import kotlin.math.abs
 import kotlin.math.round
 import kotlin.math.roundToInt
 
@@ -85,11 +87,19 @@ internal fun SettingsNumber(title: String, value: Double, range: ClosedFloatingP
         dismissButton = { TextButton({ edit = false }) { Text(translate("Cancel")) } })
 }
 
+/** A number on a slider: its value opens exact entry, Reset shows once it leaves [default], and the slider sticks
+ *  to [marks], labelled under it, which jump to their value when tapped. [origin] fills a value that goes both ways
+ *  from there. [preview] follows the drag; [save] gets the value it settles on. */
 @Composable
-internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>,
-    step: Double, integer: Boolean = false, unit: String? = null, enabled: Boolean = true, continuous: Boolean = false,
-    marks: (@Composable () -> Unit)? = null, save: (Any) -> Unit) {
+internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, step: Double,
+    unit: String? = null, default: Double? = null, marks: List<Double> = emptyList(), origin: Double? = null,
+    enabled: Boolean = true, preview: (Double) -> Unit = {}, save: (Double) -> Unit) {
     var draft by remember(value) { mutableDoubleStateOf(value) }
+    var editing by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf("") }
+    fun snap(raw: Double) = java.math.BigDecimal.valueOf(step).multiply(java.math.BigDecimal.valueOf(round(raw / step)))
+        .toDouble().coerceIn(range)
+    fun settle(next: Double) { draft = next; preview(next); save(next) }
     val numberFormat = remember(step) {
         java.text.NumberFormat.getNumberInstance().apply {
             maximumFractionDigits = java.math.BigDecimal.valueOf(step).stripTrailingZeros().scale().coerceAtLeast(0)
@@ -97,29 +107,39 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
         }
     }
     val displayValue = numberFormat.format(draft) + unit?.let { " $it" }.orEmpty()
+    val span = range.start.toFloat()..range.endInclusive.toFloat()
+    val stops = remember(marks) { marks.map { it.toFloat() } }
+    val count = ((range.endInclusive - range.start) / step).roundToInt()
     val colors = MaterialTheme.colorScheme
     Surface(Modifier.fillMaxWidth(), color = colors.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
                     color = colors.onSurface.copy(alpha = if (enabled) 1f else .38f))
-                Surface(color = if (enabled) colors.secondaryContainer else Color.Transparent,
-                    shape = MaterialTheme.shapes.small) {
+                if (enabled && default != null && abs(draft - default) > step / 2)
+                    PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { settle(default) }, iconSize = 18.dp)
+                Surface({ text = numberFormat.format(draft); editing = true }, enabled = enabled,
+                    color = if (enabled) colors.secondaryContainer else Color.Transparent, shape = MaterialTheme.shapes.small) {
                     Text(displayValue, Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
                         color = if (enabled) colors.onSecondaryContainer else colors.onSurface.copy(alpha = .38f))
                 }
             }
-            RufinSlider(draft.toFloat(), {
-                draft = java.math.BigDecimal.valueOf(step).multiply(java.math.BigDecimal.valueOf(round(it.toDouble() / step)))
-                    .toDouble().coerceIn(range)
-            }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = displayValue },
-                enabled = enabled, valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
-                steps = if (continuous) 0 else ((range.endInclusive - range.start) / step).roundToInt().minus(1).coerceAtLeast(0),
-                onValueChangeFinished = { save(if (integer) draft.toInt() else draft) })
-            marks?.invoke()
+            RufinSlider(draft.toFloat(), { draft = snap(it.toDouble()); preview(draft) },
+                Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = displayValue },
+                enabled = enabled, valueRange = span,
+                // A fine range drags freely and snaps to its step as it goes.
+                steps = if (count > 1000) 0 else (count - 1).coerceAtLeast(0),
+                onValueChangeFinished = { save(draft) }, marks = stops, origin = origin?.toFloat())
+            if (stops.isNotEmpty()) SliderMarks(span, stops, default?.toFloat()) { if (enabled) settle(it.toDouble()) }
         }
     }
+    val parsed = text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in range }
+    if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text(title) }, text = {
+        OutlinedTextField(text, { text = it }, singleLine = true, colors = settingsTextFieldColors(), suffix = unit?.let { { Text(it) } },
+            keyboardOptions = KeyboardOptions(keyboardType = if (range.start < 0) KeyboardType.Text else KeyboardType.Decimal))
+    }, confirmButton = { TextButton({ parsed?.let { settle(snap(it)) }; editing = false }, enabled = parsed != null) { Text(translate("Apply")) } },
+        dismissButton = { TextButton({ editing = false }) { Text(translate("Cancel")) } })
 }
 
 @Composable

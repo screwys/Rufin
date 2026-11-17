@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.player
 
-import io.github.screwys.rufin.ui.RufinSlider
 
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceSummary
@@ -133,14 +132,15 @@ private fun TransitionAndSpeed(player: PlayerConnection) {
         exit = shrinkVertically(tween(transitionDuration)) + fadeOut(tween(transitionDuration))) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(),
-                options.minCrossfadeSeconds.toDouble()..options.maxCrossfadeSeconds.toDouble(), 1.0, integer = true, unit = "s") {
-                change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
+                options.minCrossfadeSeconds.toDouble()..options.maxCrossfadeSeconds.toDouble(), 1.0, unit = "s",
+                default = options.defaultCrossfadeSeconds.toDouble(), marks = options.crossfadeMarks) {
+                change { setCrossfadeSeconds(it.toInt().toUByte()) }
             }
             PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
         }
     }
-    SettingsSliderNumber(translate("Playback speed"), playback.playbackRate,
-        options.minPlaybackRate..options.maxPlaybackRate, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
+    SettingsSliderNumber(translate("Playback speed"), playback.playbackRate, options.minPlaybackRate..options.maxPlaybackRate, .05,
+        unit = "×", default = options.defaultPlaybackRate, marks = options.playbackRateMarks) { change { setPlaybackRate(it) } }
     PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
 }
 
@@ -206,7 +206,8 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
                             listOf(LoudnessNormalizationScope.TRACK.name to translate("Track"), LoudnessNormalizationScope.ALBUM.name to translate("Album")),
                             select = { change { setLoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it)) } })
                         SettingsSliderNumber(translate("Target loudness"), playback.ebuR128TargetLufs,
-                            options.minEbuR128TargetLufs..options.maxEbuR128TargetLufs, .1, unit = "LUFS") { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
+                            options.minEbuR128TargetLufs..options.maxEbuR128TargetLufs, .1, unit = "LUFS",
+                            default = options.defaultEbuR128TargetLufs, marks = options.ebuR128TargetMarks) { change { setEbuR128TargetLufs(it) } }
                         PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change { setWriteEbuR128Tags(it) } }
                         PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
                             listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
@@ -270,13 +271,13 @@ private fun LyricsSettings(player: PlayerConnection) {
     SettingsText(translate("Font family"), lyrics.fullscreenLyricsFontFamily.orEmpty(), lyrics.fullscreenLyricsFontFamily.orEmpty().ifBlank { translate("System default") }) {
         change { setFullscreenLyricsFontFamily(it.ifBlank { null }) }
     }
-    PreferenceSlider("Font size (px)", (lyrics.fullscreenLyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) {
+    PreferenceSlider("Font size (px)", lyrics.fullscreenLyricsFontSize?.toDouble() ?: 19.0, 12.0..28.0, 1.0, 19.0, listOf(12.0, 16.0, 20.0, 24.0, 28.0)) {
         change { setFullscreenLyricsFontSize(it.toInt().toUShort()) }
     }
     }
     SettingsGroup(translate("Sidebar")) {
     SettingsText(translate("Font family"), lyrics.lyricsFontFamily.orEmpty(), lyrics.lyricsFontFamily.orEmpty().ifBlank { translate("System default") }) { change { setLyricsFontFamily(it.ifBlank { null }) } }
-    PreferenceSlider("Font size (px)", (lyrics.lyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) { change { setLyricsFontSize(it.toInt().toUShort()) } }
+    PreferenceSlider("Font size (px)", lyrics.lyricsFontSize?.toDouble() ?: 19.0, 12.0..28.0, 1.0, 19.0, listOf(12.0, 16.0, 20.0, 24.0, 28.0)) { change { setLyricsFontSize(it.toInt().toUShort()) } }
     }
     if (highlightEdit) PlayerColorDialog("Karaoke highlight color",
         lyrics.lyricsHighlightColor?.let(::playerLyricsColor) ?: accent,
@@ -300,6 +301,8 @@ private fun VisualizerSettings(player: PlayerConnection) {
     val settings = player.settings ?: return
     val visualizer = settings.visualizer
     val appearance = visualizer.appearance
+    val options = player.preferenceOptions ?: return
+    val defaults = options.defaultVisualizerAppearance
     fun change(edit: SettingsOwner.() -> Unit) { player.visualizerAppearance(edit) }
     val slot = visualizer.selectedPreset?.toInt() ?: -1
     var colorEdit by remember { mutableStateOf<Int?>(null) }
@@ -349,29 +352,25 @@ private fun VisualizerSettings(player: PlayerConnection) {
                 VisualizerFrequencyScale.LOGARITHMIC -> "Logarithmic"
                 VisualizerFrequencyScale.LINEAR -> "Linear"
             }) }, select = { change { setVisualizerFrequencyScale(VisualizerFrequencyScale.valueOf(it)) } })
-        val minFrequencyRange = 20f..(appearance.maxFrequency - 1).toFloat()
-        val maxFrequencyRange = (appearance.minFrequency + 1).toFloat()..20000f
-        PreferenceSlider("Minimum frequency (Hz)", appearance.minFrequency.toFloat(), minFrequencyRange,
-            (minFrequencyRange.endInclusive - minFrequencyRange.start).toInt() - 1,
-            marks = listOf(minFrequencyRange.start, (minFrequencyRange.start + minFrequencyRange.endInclusive) / 2, minFrequencyRange.endInclusive), continuous = true) {
-            change { setVisualizerMinFrequency(it.toDouble()) }
+        val minFrequencyRange = 20.0..appearance.maxFrequency - 1
+        val maxFrequencyRange = appearance.minFrequency + 1..20000.0
+        PreferenceSlider("Minimum frequency (Hz)", appearance.minFrequency, minFrequencyRange, 1.0, defaults.minFrequency,
+            listOf(minFrequencyRange.start, (minFrequencyRange.start + minFrequencyRange.endInclusive) / 2, minFrequencyRange.endInclusive)) {
+            change { setVisualizerMinFrequency(it) }
         }
-        PreferenceSlider("Maximum frequency (Hz)", appearance.maxFrequency.toFloat(), maxFrequencyRange,
-            (maxFrequencyRange.endInclusive - maxFrequencyRange.start).toInt() - 1,
-            marks = listOf(maxFrequencyRange.start, (maxFrequencyRange.start + maxFrequencyRange.endInclusive) / 2, maxFrequencyRange.endInclusive), continuous = true) {
-            change { setVisualizerMaxFrequency(it.toDouble()) }
+        PreferenceSlider("Maximum frequency (Hz)", appearance.maxFrequency, maxFrequencyRange, 1.0, defaults.maxFrequency,
+            listOf(maxFrequencyRange.start, (maxFrequencyRange.start + maxFrequencyRange.endInclusive) / 2, maxFrequencyRange.endInclusive)) {
+            change { setVisualizerMaxFrequency(it) }
         }
-        val minLevelRange = -120f..(appearance.maxDecibels - 1).toFloat()
-        val maxLevelRange = (appearance.minDecibels + 1).toFloat()..0f
-        PreferenceSlider("Minimum level (dB)", appearance.minDecibels.toFloat(), minLevelRange,
-            (minLevelRange.endInclusive - minLevelRange.start).toInt() - 1,
-            marks = listOf(minLevelRange.start, -60f, minLevelRange.endInclusive).distinct().filter { it in minLevelRange }) {
-            change { setVisualizerMinDecibels(it.toDouble()) }
+        val minLevelRange = -120.0..appearance.maxDecibels - 1
+        val maxLevelRange = appearance.minDecibels + 1..0.0
+        PreferenceSlider("Minimum level (dB)", appearance.minDecibels, minLevelRange, 1.0, defaults.minDecibels,
+            listOf(minLevelRange.start, -60.0, minLevelRange.endInclusive).distinct().filter { it in minLevelRange }) {
+            change { setVisualizerMinDecibels(it) }
         }
-        PreferenceSlider("Maximum level (dB)", appearance.maxDecibels.toFloat(), maxLevelRange,
-            (maxLevelRange.endInclusive - maxLevelRange.start).toInt() - 1,
-            marks = listOf(maxLevelRange.start, -40f, maxLevelRange.endInclusive).distinct().filter { it in maxLevelRange }) {
-            change { setVisualizerMaxDecibels(it.toDouble()) }
+        PreferenceSlider("Maximum level (dB)", appearance.maxDecibels, maxLevelRange, 1.0, defaults.maxDecibels,
+            listOf(maxLevelRange.start, -40.0, maxLevelRange.endInclusive).distinct().filter { it in maxLevelRange }) {
+            change { setVisualizerMaxDecibels(it) }
         }
         PreferenceChoice(translate("Weighting"), appearance.weighting.name,
             VisualizerWeighting.entries.map { it.name to when (it) {
@@ -394,23 +393,14 @@ private fun VisualizerSettings(player: PlayerConnection) {
         VisualizerStyle.HALO -> "Halo"
     }) },
         select = { change { setVisualizerStyle(VisualizerStyle.valueOf(it)) } })
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        var bars by remember(appearance.barCount) { mutableFloatStateOf(appearance.barCount.toFloat()) }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(translate("Bar count"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Text(bars.toInt().toString(), style = MaterialTheme.typography.labelLarge)
-        }
-        RufinSlider(bars, { bars = it }, valueRange = 8f..256f, steps = 247,
-            onValueChangeFinished = { change { setVisualizerBarCount(bars.toUInt()) } },
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = translate("Bar count"); stateDescription = bars.toInt().toString() })
-        SliderMarks(8f..256f, listOf(8f, 64f, 128f, 192f, 256f))
-    }
+    PreferenceSlider("Bar count", appearance.barCount.toDouble(), 8.0..256.0, 1.0, defaults.barCount.toDouble(),
+        listOf(8.0, 64.0, 128.0, 192.0, 256.0)) { change { setVisualizerBarCount(it.toUInt()) } }
     PreferenceSwitch("Mirrored", appearance.mirrored) { change { setVisualizerMirrored(it) } }
     PreferenceSwitch("Shadow", appearance.shadow) { change { setVisualizerShadow(it) } }
     if (appearance.shadow) {
-        PreferenceSlider("Height (%)", (appearance.shadowRatio * 100).toFloat(), 0f..95f, 94, marks = listOf(0f, 50f, 95f)) { change { setVisualizerShadowRatio(it / 100.0) } }
-        PreferenceSlider("Opacity (%)", (appearance.shadowOpacity * 100).toFloat(), 0f..100f, 99, marks = listOf(0f, 50f, 100f)) { change { setVisualizerShadowOpacity(it / 100.0) } }
-        PreferenceSlider("Brightness (%)", (appearance.shadowBrightness * 100).toFloat(), 0f..200f, 199, marks = listOf(0f, 100f, 200f)) { change { setVisualizerShadowBrightness(it / 100.0) } }
+        PreferenceSlider("Height (%)", appearance.shadowRatio * 100, 0.0..95.0, 1.0, defaults.shadowRatio * 100, listOf(0.0, 50.0, 95.0)) { change { setVisualizerShadowRatio(it / 100.0) } }
+        PreferenceSlider("Opacity (%)", appearance.shadowOpacity * 100, 0.0..100.0, 1.0, defaults.shadowOpacity * 100, listOf(0.0, 50.0, 100.0)) { change { setVisualizerShadowOpacity(it / 100.0) } }
+        PreferenceSlider("Brightness (%)", appearance.shadowBrightness * 100, 0.0..200.0, 1.0, defaults.shadowBrightness * 100, listOf(0.0, 100.0, 200.0)) { change { setVisualizerShadowBrightness(it / 100.0) } }
         PreferenceSwitch("Fit to height", appearance.shadowFit) { change { setVisualizerShadowFit(it) } }
     }
     val accent = MaterialTheme.colorScheme.primary
@@ -430,22 +420,21 @@ private fun VisualizerSettings(player: PlayerConnection) {
                 Color(color[0], color[1], color[2])) { colorEdit = index }
         }
     }
-    PreferenceSlider("Bar spacing (px)", appearance.spacing.toFloat(), 0f..12f, 23, marks = listOf(0f, 6f, 12f)) { change { setVisualizerSpacing(it.toDouble()) } }
-    PreferenceSlider("Opacity (%)", (appearance.opacity * 100).toFloat(), 0f..100f, 99, marks = listOf(0f, 50f, 100f)) { change { setVisualizerOpacity(it / 100.0) } }
-    PreferenceSlider("Frame rate limit", visualizer.fpsLimit.toFloat(), 1f..180f, 178) {
-        player.visualizerFrameLimit(it.toInt())
-    }
+    PreferenceSlider("Bar spacing (px)", appearance.spacing, 0.0..12.0, .5, defaults.spacing, listOf(0.0, 6.0, 12.0)) { change { setVisualizerSpacing(it) } }
+    PreferenceSlider("Opacity (%)", appearance.opacity * 100, 0.0..100.0, 1.0, defaults.opacity * 100, listOf(0.0, 50.0, 100.0)) { change { setVisualizerOpacity(it / 100.0) } }
+    PreferenceSlider("Frame rate limit", visualizer.fpsLimit.toDouble(), 1.0..180.0, 1.0, options.defaultVisualizerFpsLimit.toDouble(),
+        listOf(1.0, 30.0, 60.0, 120.0, 180.0)) { player.visualizerFrameLimit(it.toInt()) }
     }
     SettingsGroup(translate("Motion")) {
-    PreferenceSlider("Rise speed (%)", (appearance.rise * 100).toFloat(), 1f..100f, 98, marks = listOf(1f, 50f, 100f)) { change { setVisualizerRise(it / 100.0) } }
-    PreferenceSlider("Fall speed (%)", (appearance.fall * 100).toFloat(), 1f..100f, 98, marks = listOf(1f, 50f, 100f)) { change { setVisualizerFall(it / 100.0) } }
+    PreferenceSlider("Rise speed (%)", appearance.rise * 100, 1.0..100.0, 1.0, defaults.rise * 100, listOf(1.0, 50.0, 100.0)) { change { setVisualizerRise(it / 100.0) } }
+    PreferenceSlider("Fall speed (%)", appearance.fall * 100, 1.0..100.0, 1.0, defaults.fall * 100, listOf(1.0, 50.0, 100.0)) { change { setVisualizerFall(it / 100.0) } }
     PreferenceSwitch("Show peak markers", appearance.peaks) { change { setVisualizerPeaks(it) } }
-    PreferenceSlider("Peak hold (seconds)", appearance.peakHold.toFloat(), 0f..5f, 49, marks = listOf(0f, 2.5f, 5f)) { change { setVisualizerPeakHold(it.toDouble()) } }
-    PreferenceSlider("Peak fall speed (% per second)", (appearance.peakFall * 100).toFloat(), 1f..200f, 198, marks = listOf(1f, 100f, 200f)) { change { setVisualizerPeakFall(it / 100.0) } }
+    PreferenceSlider("Peak hold (seconds)", appearance.peakHold, 0.0..5.0, .1, defaults.peakHold, listOf(0.0, 2.5, 5.0)) { change { setVisualizerPeakHold(it) } }
+    PreferenceSlider("Peak fall speed (% per second)", appearance.peakFall * 100, 1.0..200.0, 1.0, defaults.peakFall * 100, listOf(1.0, 100.0, 200.0)) { change { setVisualizerPeakFall(it / 100.0) } }
     }
     SettingsGroup(translate("Lyrics background opacity")) {
-        PreferenceSlider("Fullscreen", (appearance.fullscreenLyricsOpacity * 100).toFloat(), 0f..100f, 99, marks = listOf(0f, 50f, 100f)) { change { setVisualizerFullscreenLyricsOpacity(it / 100.0) } }
-        PreferenceSlider("Sidebar", (appearance.sidebarLyricsOpacity * 100).toFloat(), 0f..100f, 99, marks = listOf(0f, 50f, 100f)) { change { setVisualizerSidebarLyricsOpacity(it / 100.0) } }
+        PreferenceSlider("Fullscreen", appearance.fullscreenLyricsOpacity * 100, 0.0..100.0, 1.0, defaults.fullscreenLyricsOpacity * 100, listOf(0.0, 50.0, 100.0)) { change { setVisualizerFullscreenLyricsOpacity(it / 100.0) } }
+        PreferenceSlider("Sidebar", appearance.sidebarLyricsOpacity * 100, 0.0..100.0, 1.0, defaults.sidebarLyricsOpacity * 100, listOf(0.0, 50.0, 100.0)) { change { setVisualizerSidebarLyricsOpacity(it / 100.0) } }
     }
     SettingsGroup {
         SettingsRow(translate("Reset appearance"),
@@ -496,11 +485,11 @@ private fun PreferenceSwitch(label: String, checked: Boolean, change: (Boolean) 
 }
 
 @Composable
-private fun PreferenceSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, steps: Int, marks: List<Float>? = null, continuous: Boolean = false, change: (Float) -> Unit) {
-    SettingsSliderNumber(translate(label), value.toString().toDouble(), range.start.toDouble()..range.endInclusive.toDouble(),
-        if (range.endInclusive == range.start) 1.0 else (range.endInclusive - range.start).toDouble() / (steps + 1),
-        enabled = range.endInclusive > range.start, continuous = continuous,
-        marks = marks?.takeIf { range.endInclusive > range.start }?.let { values -> { SliderMarks(range, values) } }) { change((it as Number).toFloat()) }
+private fun PreferenceSlider(label: String, value: Double, range: ClosedFloatingPointRange<Double>, step: Double, default: Double?,
+    marks: List<Double> = emptyList(), change: (Double) -> Unit) {
+    val open = range.endInclusive > range.start
+    SettingsSliderNumber(translate(label), value, range, step, default = default?.takeIf { it in range },
+        marks = if (open) marks else emptyList(), enabled = open, save = change)
 }
 
 @Composable
@@ -511,9 +500,9 @@ private fun PlayerColorDialog(label: String, initial: Color, onDismiss: () -> Un
     AlertDialog(onDismissRequest = onDismiss, title = { Text(translate(label)) }, text = {
         Column {
             Surface(Modifier.fillMaxWidth().height(64.dp), color = Color(red, green, blue)) {}
-            PreferenceSlider("Red", red * 255, 0f..255f, 254) { red = it / 255 }
-            PreferenceSlider("Green", green * 255, 0f..255f, 254) { green = it / 255 }
-            PreferenceSlider("Blue", blue * 255, 0f..255f, 254) { blue = it / 255 }
+            PreferenceSlider("Red", red * 255.0, 0.0..255.0, 1.0, null) { red = it.toFloat() / 255 }
+            PreferenceSlider("Green", green * 255.0, 0.0..255.0, 1.0, null) { green = it.toFloat() / 255 }
+            PreferenceSlider("Blue", blue * 255.0, 0.0..255.0, 1.0, null) { blue = it.toFloat() / 255 }
         }
     }, confirmButton = { TextButton({ save(Color(red, green, blue)) }) { Text(translate("Save")) } },
         dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } })

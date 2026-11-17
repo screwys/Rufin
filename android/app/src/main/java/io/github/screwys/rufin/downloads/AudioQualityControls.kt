@@ -6,6 +6,7 @@ import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsSliderNumber
 import io.github.screwys.rufin.shared.library.*
 import io.github.screwys.rufin.shared.library.AudioQuality
+import io.github.screwys.rufin.shared.rufin_core.audioBitrateMarks
 import io.github.screwys.rufin.shared.rufin_core.audioBitrates
 import io.github.screwys.rufin.shared.rufin_core.audioCodecLabel
 import io.github.screwys.rufin.shared.rufin_core.audioQualityShowsBitrate
@@ -13,6 +14,7 @@ import io.github.screwys.rufin.shared.rufin_core.audioQualityShowsChannels
 import io.github.screwys.rufin.shared.rufin_core.audioQualityWithBitrate
 import io.github.screwys.rufin.shared.rufin_core.audioQualityWithChannels
 import io.github.screwys.rufin.shared.rufin_core.audioQualityWithCodec
+import io.github.screwys.rufin.shared.rufin_core.defaultAudioBitrate
 
 /**
  * The format, bitrate and channels of a download or stream quality. With [follows], a first
@@ -31,11 +33,13 @@ internal fun AudioQualityControls(quality: AudioQuality?, enabled: Boolean = tru
     if (quality == null) return
     if (audioQualityShowsBitrate(quality)) {
         val rates = audioBitrates()
-        val rate = encoding?.bitrateKbps ?: 128u
+        val fallback = defaultAudioBitrate()
+        val rate = encoding?.bitrateKbps ?: fallback
         SettingsSliderNumber(translate("Bitrate"), rate.toDouble(),
             minOf(rates.first(), rate).toDouble()..maxOf(rates.last(), rate).toDouble(),
-            (rates[1] - rates[0]).toDouble(), integer = true, unit = "kbps", enabled = enabled) {
-            change(audioQualityWithBitrate(quality, (it as Number).toInt().toUInt()))
+            (rates[1] - rates[0]).toDouble(), unit = "kbps", default = fallback.toDouble(),
+            marks = audioBitrateMarks().map { it.toDouble() }, enabled = enabled) {
+            change(audioQualityWithBitrate(quality, it.toInt().toUInt()))
         }
     }
     if (audioQualityShowsChannels(quality)) PreferenceChoice(translate("Channels"), encoding?.channels,
