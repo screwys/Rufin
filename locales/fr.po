@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-15 20:07+0000\n"
+"PO-Revision-Date: 2026-11-16 20:42+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -296,6 +296,23 @@ msgid ""
 msgstr ""
 "Morceau égalise chaque chanson, tandis qu’Album préserve les différences "
 "prévues au sein de chaque album"
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For Flatpak and MacOS users this means the logins will not "
+"migrate automatically, and Android users will need to re download the app.\n"
+"\n"
+"        There should likely be no problems for other packages, but in either "
+"case, it is recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For flatpak users this means the logins will not migrate "
+"automatically, and Android users will need to re download the app. There "
+"should likely be no problems for other packages, but in either case, it is "
+"recommended to export a backup to restore from it."
+msgstr ""
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
@@ -775,7 +792,7 @@ msgid "Bitstream"
 msgstr "Flux"
 
 msgid "Blocks"
-msgstr ""
+msgstr "Blocs"
 
 msgid "Blue"
 msgstr "Bleu"
@@ -1717,6 +1734,11 @@ msgstr "Exporter en PNG"
 msgid "Export Playlist"
 msgstr "Exporter la playlist"
 
+#, fuzzy
+#| msgid "Export Backup"
+msgid "Export a Backup"
+msgstr "Exporter la sauvegarde"
+
 msgid "Export format"
 msgstr "Format d’exportation"
 
@@ -2144,10 +2166,8 @@ msgstr "L’élément n’est plus disponible"
 msgid "Item menus"
 msgstr "Menus des éléments"
 
-#, fuzzy
-#| msgid "Item ID"
 msgid "Items"
-msgstr "ID de l’élément"
+msgstr "Éléments"
 
 msgid "January {year}"
 msgstr "Janvier {year}"
@@ -2940,10 +2960,8 @@ msgstr ""
 msgid "One path per line"
 msgstr "Un chemin par ligne"
 
-#, fuzzy
-#| msgid "Service icons on album and artist pages"
 msgid "One row shows albums and artists as cards"
-msgstr "Icônes des services sur les pages d’album et d’artiste"
+msgstr "Une ligne affiche les albums et les artistes sous forme de cartes"
 
 msgid "Online Lookups"
 msgstr "Recherches en ligne"
@@ -3058,10 +3076,8 @@ msgstr "Barres de contour"
 msgid "Output gain"
 msgstr "Gain de sortie"
 
-#, fuzzy
-#| msgid "Use server recommendations"
 msgid "Override server recommendations"
-msgstr "Utiliser les recommandations serveur"
+msgstr "Ignorer les recommandations du serveur"
 
 msgid "Overview"
 msgstr "Aperçu"
@@ -3147,7 +3163,7 @@ msgid "Play Next"
 msgstr "Lire ensuite"
 
 msgid "Play Rufin's picks instead of the server's own"
-msgstr ""
+msgstr "Lire les sélections de Rufin plutôt que celles du serveur"
 
 msgid "Play album"
 msgstr "Lire l’album"
@@ -4271,10 +4287,8 @@ msgstr "Source"
 msgid "Sources"
 msgstr "Sources"
 
-#, fuzzy
-#| msgid "Grid spacing"
 msgid "Spacing"
-msgstr "Espacement de la grille"
+msgstr "Espacement"
 
 msgid "Spectrum · dBFS"
 msgstr "Spectre · dBFS"
@@ -4341,10 +4355,8 @@ msgstr ""
 msgid "Stream address"
 msgstr "Adresse du flux"
 
-#, fuzzy
-#| msgid "Stream quality"
 msgid "Stream quality on mobile data"
-msgstr "Qualité du flux"
+msgstr "Qualité du flux sur données mobiles"
 
 msgid "Stream quality"
 msgstr "Qualité du flux"

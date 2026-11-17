@@ -291,6 +291,23 @@ msgstr ""
 "farklılıkları korur"
 
 msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For Flatpak and MacOS users this means the logins will not "
+"migrate automatically, and Android users will need to re download the app.\n"
+"\n"
+"        There should likely be no problems for other packages, but in either "
+"case, it is recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For flatpak users this means the logins will not migrate "
+"automatically, and Android users will need to re download the app. There "
+"should likely be no problems for other packages, but in either case, it is "
+"recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
@@ -1704,6 +1721,11 @@ msgstr "PNG Dışa Aktar"
 
 msgid "Export Playlist"
 msgstr "Çalma Listesini Dışa Aktar"
+
+#, fuzzy
+#| msgid "Export Backup"
+msgid "Export a Backup"
+msgstr "Yedeği Dışa Aktar"
 
 msgid "Export format"
 msgstr "Dışa aktarma formatı"

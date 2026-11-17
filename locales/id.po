@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-16 14:05+0000\n"
+"PO-Revision-Date: 2026-11-17 06:23+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Indonesian <https://hosted.weblate.org/projects/rufin/app/id/>"
 "\n"
@@ -293,6 +293,23 @@ msgid ""
 msgstr ""
 "Opsi Lagu membuat semua lagu terdengar sama rata, sedangkan Album menjaga "
 "perbedaan volume asli di setiap album"
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For Flatpak and MacOS users this means the logins will not "
+"migrate automatically, and Android users will need to re download the app.\n"
+"\n"
+"        There should likely be no problems for other packages, but in either "
+"case, it is recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For flatpak users this means the logins will not migrate "
+"automatically, and Android users will need to re download the app. There "
+"should likely be no problems for other packages, but in either case, it is "
+"recommended to export a backup to restore from it."
+msgstr ""
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
@@ -1374,13 +1391,12 @@ msgstr "Desember {year}"
 msgid "Decrease"
 msgstr "Kurangi"
 
-#, fuzzy
-#| msgid "Default"
 msgid "Default channel"
-msgstr "Bawaan"
+msgstr "Kanal default"
 
+#, fuzzy
 msgid "Default"
-msgstr "Bawaan"
+msgstr "Default"
 
 #, fuzzy
 #| msgid "Delete preset"
@@ -1783,6 +1799,11 @@ msgstr "Ekspor PNG"
 
 msgid "Export Playlist"
 msgstr "Ekspor Playlist"
+
+#, fuzzy
+#| msgid "Export Backup"
+msgid "Export a Backup"
+msgstr "Ekspor Cadangan"
 
 msgid "Export format"
 msgstr "Ekspor format"
@@ -3713,94 +3734,97 @@ msgid "Removed from"
 msgstr "Dihapus dari"
 
 msgid "Rename file"
-msgstr ""
+msgstr "Ganti nama file"
 
 msgid "Rename folder"
-msgstr ""
+msgstr "Ganti nama folder"
 
 msgid "Rename preset"
-msgstr ""
+msgstr "Ganti nama preset"
 
 msgid "Rename"
-msgstr ""
+msgstr "Ganti nama"
 
 msgid "Repeat all"
-msgstr ""
+msgstr "Ulangi semua"
 
 msgid "Repeat off"
-msgstr ""
+msgstr "Ulangi nonaktif"
 
 msgid "Repeat one"
-msgstr ""
+msgstr "Ulangi satu"
 
 msgid "Repeat"
-msgstr ""
+msgstr "Ulangi"
 
 msgid "Replace file contents"
 msgstr "Ganti isi file"
 
 msgid "Replace saved custom headers"
-msgstr ""
+msgstr "Ganti header kustom tersimpan"
 
 msgid "ReplayGain tags"
-msgstr ""
+msgstr "Tag ReplayGain"
 
+#, fuzzy
 msgid "ReplayGain"
-msgstr ""
+msgstr "ReplayGain"
 
 msgid "Request failed ({status})"
-msgstr ""
+msgstr "Permintaan gagal ({status})"
 
 msgid "Require SMB encryption"
-msgstr ""
+msgstr "Memerlukan enkripsi SMB"
 
 msgid "Reset appearance"
-msgstr ""
+msgstr "Reset tampilan"
 
 msgid "Reset to defaults"
-msgstr ""
+msgstr "Reset ke default"
 
+#, fuzzy
 msgid "Reset"
-msgstr ""
+msgstr "Reset"
 
 msgid "Response"
-msgstr ""
+msgstr "Respons"
 
 msgid "Restart now"
-msgstr ""
+msgstr "Mulai ulang sekarang"
 
 msgid "Restore User State"
-msgstr ""
+msgstr "Pulihkan Status Pengguna"
 
 msgid "Restore defaults without deleting saved presets"
-msgstr ""
+msgstr "Pulihkan default tanpa menghapus preset tersimpan"
 
 msgid "Restore player layout"
-msgstr ""
+msgstr "Pulihkan tata letak pemutar"
 
 msgid "Restore"
-msgstr ""
+msgstr "Pulihkan"
 
 msgid "Results from radio-browser.info."
-msgstr ""
+msgstr "Hasil dari radio-browser.info."
 
 msgid "Results per section"
-msgstr ""
+msgstr "Hasil per bagian"
 
 msgid "Resume"
-msgstr ""
+msgstr "Lanjutkan"
 
 msgid "Resync Library"
 msgstr "Sinkronkan Ulang Pustaka"
 
 msgid "Retry"
-msgstr ""
+msgstr "Coba lagi"
 
 msgid "Reverse order"
-msgstr ""
+msgstr "Urutan terbalik"
 
+#, fuzzy
 msgid "Ribbon"
-msgstr ""
+msgstr "Ribbon"
 
 #, fuzzy
 msgid "Rich Presence on"
@@ -3812,49 +3836,54 @@ msgid "Right sidebar"
 msgstr "Sembunyikan sidebar"
 
 msgid "Rise speed (%)"
-msgstr ""
+msgstr "Kecepatan naik (%)"
 
+#, fuzzy
 msgid "Rock"
-msgstr ""
+msgstr "Rock"
 
+#, fuzzy
 msgid "Romaji"
-msgstr ""
+msgstr "Romaji"
 
 msgid "Rounded bars"
-msgstr ""
+msgstr "Bar membulat"
 
 msgid "Rounded spectrum"
-msgstr ""
+msgstr "Spektrum membulat"
 
 msgid "Row borders"
-msgstr ""
+msgstr "Garis tepi baris"
 
 msgid "Rows"
-msgstr ""
+msgstr "Baris"
 
+#, fuzzy
 msgid "Rufin Connect"
-msgstr ""
+msgstr "Rufin Connect"
 
+#, fuzzy
 msgid "Rufin JSON"
-msgstr ""
+msgstr "Rufin JSON"
 
 msgid "Rufin data folder"
-msgstr ""
+msgstr "Folder data Rufin"
 
 msgid "Rufin host"
-msgstr ""
+msgstr "Host Rufin"
 
 msgid "Rufin needs local access to {path}"
 msgstr "Rufin butuh akses lokal ke {path}"
 
 msgid "Rule actions"
-msgstr ""
+msgstr "Tindakan aturan"
 
+#, fuzzy
 msgid "SMB / Samba"
-msgstr ""
+msgstr "SMB / Samba"
 
 msgid "SMB Domain"
-msgstr ""
+msgstr "Domain SMB"
 
 #, fuzzy
 #| msgid "Album artist"
@@ -3862,43 +3891,43 @@ msgid "Same artist"
 msgstr "Artis album"
 
 msgid "Sample peak"
-msgstr ""
+msgstr "Puncak sampel"
 
 msgid "Sample rate"
-msgstr ""
+msgstr "Laju sampel"
 
 msgid "Saturday"
-msgstr ""
+msgstr "Sabtu"
 
 msgid "Save Diagnostic Log"
-msgstr ""
+msgstr "Simpan Log Diagnostik"
 
 msgid "Save Lyrics"
-msgstr ""
+msgstr "Simpan Lirik"
 
 msgid "Save Server Settings"
-msgstr ""
+msgstr "Simpan Pengaturan Server"
 
 msgid "Save action saves the lyrics directly to your source"
-msgstr ""
+msgstr "Tombol Simpan langsung menyimpan lirik ke sumber Anda"
 
 msgid "Save changes automatically"
-msgstr ""
+msgstr "Simpan perubahan otomatis"
 
 msgid "Save in folder"
-msgstr ""
+msgstr "Simpan di folder"
 
 msgid "Save lyrics automatically"
-msgstr ""
+msgstr "Simpan lirik otomatis"
 
 msgid "Save playlist changes automatically"
-msgstr ""
+msgstr "Simpan perubahan playlist otomatis"
 
 msgid "Save preset"
-msgstr ""
+msgstr "Simpan preset"
 
 msgid "Save"
-msgstr ""
+msgstr "Simpan"
 
 msgid "Saved Plex Login"
 msgstr "Informasi masuk Plex Tersimpan"
@@ -3911,236 +3940,238 @@ msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] "Pemetaan tersimpan. {matched} dari {total} jalur server cocok"
 
 msgid "Saved preset"
-msgstr ""
+msgstr "Preset tersimpan"
 
 msgid "Saved to"
-msgstr ""
+msgstr "Tersimpan di"
 
 msgid "Saved"
-msgstr ""
+msgstr "Tersimpan"
 
 msgid "Saved..."
-msgstr ""
+msgstr "Tersimpan..."
 
 msgid "Saves lyrics to your source"
-msgstr ""
+msgstr "Menyimpan lirik ke sumber Anda"
 
 msgid "Saving..."
-msgstr ""
+msgstr "Menyimpan..."
 
 msgid "Scanning tracks"
-msgstr ""
+msgstr "Memindai lagu"
 
 msgid "Schedule"
-msgstr ""
+msgstr "Jadwal"
 
 msgid "Scheduled Backup Failed"
-msgstr ""
+msgstr "Cadangan Terjadwal Gagal"
 
 msgid "Scheduled Backup Password"
-msgstr ""
+msgstr "Kata sandi Cadangan Terjadwal"
 
 msgid "Scheduled backup password saved"
-msgstr ""
+msgstr "Kata sandi cadangan terjadwal tersimpan"
 
 msgid "Scrobble plays"
-msgstr ""
+msgstr "Scrobble pemutaran"
 
 #, fuzzy
 msgid "Scrobbling"
 msgstr "Last.fm scrobbling"
 
 msgid "Search Again"
-msgstr ""
+msgstr "Cari Lagi"
 
 msgid "Search Lyrics"
-msgstr ""
+msgstr "Cari Lirik"
 
 msgid "Search MusicBrainz"
-msgstr ""
+msgstr "Cari MusicBrainz"
 
 msgid "Search artwork"
-msgstr ""
+msgstr "Cari sampul"
 
 msgid "Search by AcoustID"
-msgstr ""
+msgstr "Cari dengan AcoustID"
 
 msgid "Search current folder"
-msgstr ""
+msgstr "Cari di folder ini"
 
 msgid "Search genres"
-msgstr ""
+msgstr "Cari genre"
 
 msgid "Search in page"
-msgstr ""
+msgstr "Cari di halaman"
 
 msgid "Search is unavailable"
-msgstr ""
+msgstr "Pencarian tidak tersedia"
 
 msgid "Search lyrics"
-msgstr ""
+msgstr "Cari lirik"
 
 msgid "Search playlists"
-msgstr ""
+msgstr "Cari playlist"
 
 msgid "Search preferences"
-msgstr ""
+msgstr "Cari preferensi"
 
 msgid "Search queue"
-msgstr ""
+msgstr "Cari antrean"
 
 msgid "Search stations"
-msgstr ""
+msgstr "Cari stasiun"
 
 msgid "Search this network"
-msgstr ""
+msgstr "Cari di jaringan ini"
 
 msgid "Search unavailable"
-msgstr ""
+msgstr "Pencarian tidak tersedia"
 
 msgid "Search"
-msgstr ""
+msgstr "Cari"
 
 msgid "Search..."
-msgstr ""
+msgstr "Cari..."
 
 msgid "Searching AcoustID..."
-msgstr ""
+msgstr "Mencari di AcoustID..."
 
 msgid "Searching Local Network"
-msgstr ""
+msgstr "Mencari di Jaringan Lokal"
 
 msgid "Searching MusicBrainz..."
-msgstr ""
+msgstr "Mencari di MusicBrainz..."
 
 msgid "Searching for devices..."
-msgstr ""
+msgstr "Mencari perangkat..."
 
 msgid "Searching for {provider} servers on the local network..."
-msgstr ""
+msgstr "Mencari server {provider} di jaringan lokal..."
 
 msgid "Searching will start automatically"
-msgstr ""
+msgstr "Pencarian akan dimulai otomatis"
 
 msgid "Searching..."
-msgstr ""
+msgstr "Mencari..."
 
 msgid "Secondary release types"
-msgstr ""
+msgstr "Jenis rilis sekunder"
 
 msgid "Secret storage"
-msgstr ""
+msgstr "Penyimpanan rahasia"
 
 msgid "Seek Backward"
-msgstr ""
+msgstr "Mundur"
 
 msgid "Seek Forward"
-msgstr ""
+msgstr "Maju"
 
 msgid "Seek playback"
-msgstr ""
+msgstr "Geser posisi pemutaran"
 
 msgid "Seek to {time}"
-msgstr ""
+msgstr "Lompat ke {time}"
 
 msgid "Seekbar"
-msgstr ""
+msgstr "Bilah proses"
 
 msgid "Segment end"
-msgstr ""
+msgstr "Akhir segmen"
 
 msgid "Segment start"
-msgstr ""
+msgstr "Awal segmen"
 
 msgid "Segmented bars"
-msgstr ""
+msgstr "Bar tersegmen"
 
 msgid "Select All"
-msgstr ""
+msgstr "Pilih Semua"
 
 msgid "Select Download Folder"
-msgstr ""
+msgstr "Pilih Folder Unduhan"
 
 msgid "Select Music Folder"
-msgstr ""
+msgstr "Pilih Folder Musik"
 
 msgid "Select Source"
-msgstr ""
+msgstr "Pilih Sumber"
 
 msgid "Select all"
-msgstr ""
+msgstr "Pilih semua"
 
 msgid "Select an entry to show or hide it."
-msgstr ""
+msgstr "Pilih entri untuk ditampilkan atau sembunyikan."
 
 msgid "Select {title}"
-msgstr ""
+msgstr "Pilih {title}"
 
 msgid "Selected folders"
-msgstr ""
+msgstr "Folder terpilih"
 
 msgid "Selected items: {count}"
-msgstr ""
+msgstr "Item terpilih: {count}"
 
 msgid "Selected"
-msgstr ""
+msgstr "Terpilih"
 
 msgid "Selection"
-msgstr ""
+msgstr "Pilihan"
 
 msgid "Self-host an Iroh Relay"
-msgstr ""
+msgstr "Jalankan Iroh Relay sendiri"
 
 #, fuzzy
 msgid "Self-hosted scrobbling"
 msgstr "Last.fm scrobbling"
 
 msgid "September {year}"
-msgstr ""
+msgstr "September {year}"
 
 msgid "Server Actions"
-msgstr ""
+msgstr "Tindakan Server"
 
 msgid "Server Address Override"
-msgstr ""
+msgstr "Penggatian Alamat Server"
 
 msgid "Server Address"
-msgstr ""
+msgstr "Alamat Server"
 
 msgid "Server Library"
 msgstr "Pustaka Server"
 
 msgid "Server Prefix"
-msgstr ""
+msgstr "Awalan Server"
 
 msgid "Server Sample"
-msgstr ""
+msgstr "Sampel Server"
 
 msgid "Server Settings"
-msgstr ""
+msgstr "Pengaturan Server"
 
 #, fuzzy
 #| msgid "Server Library"
 msgid "Server URL"
 msgstr "Pustaka Server"
 
+#, fuzzy
 msgid "Server default"
-msgstr ""
+msgstr "Server default"
 
 msgid "Server discovery failed: {error}"
-msgstr ""
+msgstr "Pencarian server gagal: {error}"
 
 msgid "Server is unreachable"
-msgstr ""
+msgstr "Server tidak dapat dijangkau"
 
 msgid "Server prefix doesn't match"
-msgstr ""
+msgstr "Awalan server tidak cocok"
 
+#, fuzzy
 msgid "Server"
-msgstr ""
+msgstr "Server"
 
 msgid "Service icons on album and artist pages"
-msgstr ""
+msgstr "Layanan ikon di halaman album dan artis"
 
 #, fuzzy
 #| msgid "Device"
@@ -4148,7 +4179,7 @@ msgid "Services"
 msgstr "Perangkat"
 
 msgid "Set the Discord activity type to Listening"
-msgstr ""
+msgstr "Atur jenis aktivitas Discord menjadi Mendengarkan"
 
 #, fuzzy
 #| msgid "Delete {count} playlist?"
@@ -4544,7 +4575,7 @@ msgid "Synced lyrics, some word by word"
 msgstr ""
 
 msgid "System default"
-msgstr ""
+msgstr "Sistem default"
 
 msgid "System flatpak:"
 msgstr ""
@@ -4828,7 +4859,7 @@ msgid "Use current artwork"
 msgstr ""
 
 msgid "Use default folder"
-msgstr ""
+msgstr "Gunakan folder default"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
