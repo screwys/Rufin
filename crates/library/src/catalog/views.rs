@@ -1877,8 +1877,10 @@ enum Fact<'a> {
 }
 
 pub(crate) fn date_text(seconds: u32) -> Option<String> {
-    chrono::DateTime::from_timestamp(i64::from(seconds), 0)
-        .map(|time| time.format("%Y-%m-%d").to_string())
+    time::OffsetDateTime::from_unix_timestamp(i64::from(seconds))
+        .ok()?
+        .format(time::macros::format_description!("[year]-[month]-[day]"))
+        .ok()
 }
 
 impl Context<'_> {

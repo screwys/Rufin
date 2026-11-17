@@ -5,10 +5,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::{
-    WebSocketStream,
-    tungstenite::{Message, protocol::Role},
-};
+use tokio_websockets::{ClientBuilder, Message};
 
 use crate::{SourceError, SourceResult};
 
@@ -73,15 +70,14 @@ pub async fn listen_moe_songs(
         });
     }
     let upgraded = response.upgrade().await.map_err(network)?;
-    let mut socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
-    let closed =
-        |error: tokio_tungstenite::tungstenite::Error| SourceError::Network(error.to_string());
+    let mut socket = ClientBuilder::new().take_over(upgraded);
+    let closed = |error: tokio_websockets::Error| SourceError::Network(error.to_string());
     // The feed names the interval of the heartbeat it expects, and ends without one.
     let mut beat = tokio::time::interval(Duration::from_secs(30));
     loop {
         let message = tokio::select! {
             _ = beat.tick() => {
-                socket.send(Message::Text(r#"{"op":9}"#.into())).await.map_err(closed)?;
+                socket.send(Message::text(r#"{"op":9}"#)).await.map_err(closed)?;
                 continue;
             }
             message = socket.next() => message,
@@ -89,30 +85,29 @@ pub async fn listen_moe_songs(
         let Some(message) = message else {
             return Ok(());
         };
-        match message.map_err(closed)? {
-            Message::Text(text) => {
-                let Ok(message) = serde_json::from_str::<serde_json::Value>(&text) else {
-                    continue;
-                };
-                match message["op"].as_u64() {
-                    Some(0) => {
-                        if let Some(millis) = message["d"]["heartbeat"].as_u64().filter(|n| *n > 0)
-                        {
-                            beat = tokio::time::interval(Duration::from_millis(millis));
-                        }
-                    }
-                    Some(1) => {
-                        if let Some(song) = song(&message["d"])
-                            && !heard(song)
-                        {
-                            return Ok(());
-                        }
-                    }
-                    _ => {}
+        let message = message.map_err(closed)?;
+        if message.is_close() {
+            return Ok(());
+        }
+        let Some(Ok(message)) = message
+            .as_text()
+            .map(serde_json::from_str::<serde_json::Value>)
+        else {
+            continue;
+        };
+        match message["op"].as_u64() {
+            Some(0) => {
+                if let Some(millis) = message["d"]["heartbeat"].as_u64().filter(|n| *n > 0) {
+                    beat = tokio::time::interval(Duration::from_millis(millis));
                 }
             }
-            Message::Ping(payload) => socket.send(Message::Pong(payload)).await.map_err(closed)?,
-            Message::Close(_) => return Ok(()),
+            Some(1) => {
+                if let Some(song) = song(&message["d"])
+                    && !heard(song)
+                {
+                    return Ok(());
+                }
+            }
             _ => {}
         }
     }
@@ -123,9 +118,12 @@ pub async fn listen_moe_songs(
 fn song(update: &serde_json::Value) -> Option<ListenMoeSong> {
     let song = &update["song"];
     let duration_millis = song["duration"].as_u64().filter(|seconds| *seconds > 0)? * 1000;
-    let ends = chrono::DateTime::parse_from_rfc3339(update["startTime"].as_str()?)
-        .ok()?
-        .timestamp_millis();
+    let ends = time::OffsetDateTime::parse(
+        update["startTime"].as_str()?,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .ok()?;
+    let ends = i64::try_from(ends.unix_timestamp_nanos() / 1_000_000).ok()?;
     let named = |values: &[&serde_json::Value]| {
         values
             .iter()
@@ -180,9 +178,7 @@ mod tests {
         assert_eq!(song.duration_millis, 316_000);
         assert_eq!(
             song.started_unix_millis,
-            chrono::DateTime::parse_from_rfc3339("2026-11-15T05:40:45Z")
-                .unwrap()
-                .timestamp_millis()
+            time::macros::datetime!(2026-11-15 05:40:45 UTC).unix_timestamp() * 1000
         );
         assert_eq!(
             listen_moe_feed("https://listen.moe/kpop/fallback"),

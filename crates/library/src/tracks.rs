@@ -119,9 +119,8 @@ impl From<TrackView> for crate::TrackRow {
                 .metadata
                 .date_added
                 .as_deref()
-                .and_then(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
-                .and_then(|day| day.and_hms_opt(0, 0, 0))
-                .map(|time| time.and_utc().timestamp()),
+                .and_then(|day| time::Date::parse(day, crate::catalog::records::DAY).ok())
+                .map(|day| day.midnight().assume_utc().unix_timestamp()),
             source_format: track.metadata.source_format,
             state: track.state,
             is_downloaded: track.access.is_downloaded,

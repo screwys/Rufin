@@ -200,8 +200,7 @@ fn tokens(text: &str) -> Vec<(usize, usize, String)> {
         if crate::lyrics_tokenizer::character_token(character) {
             tokens.push((offset, end, character.to_string()));
             open = false;
-        } else if character.is_alphanumeric()
-            && !unicode_normalization::char::is_combining_mark(character)
+        } else if character.is_alphanumeric() && !names::combining_mark(character)
             || open && names::diacritic(character)
         {
             if !open {

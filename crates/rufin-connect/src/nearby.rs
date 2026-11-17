@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     fmt,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
     sync::Mutex,
     time::Duration,
 };
@@ -15,10 +15,13 @@ use iroh::{
     EndpointId,
     address_lookup::{AddressLookup, EndpointData, EndpointInfo, Error, Item},
 };
-use swarm_discovery::{Discoverer, DropGuard, IpClass, Peer};
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::network::Routes;
+
+/// A device publishes one instance per port of its direct addresses, named `<id>-<port>`.
+const SERVICE: &str = "_rufin-connect._udp.local.";
 
 pub(crate) enum Discovery {
     /// A device seen for the first time since it expired, or at new addresses.
@@ -26,10 +29,12 @@ pub(crate) enum Discovery {
     Expired(EndpointId),
 }
 
-/// The nearby address lookup. Multicast discovery runs while the endpoint does.
+/// The nearby address lookup. Multicast discovery, on every interface, runs while the
+/// endpoint does.
 pub(crate) struct Nearby {
-    discovery: DropGuard,
-    interfaces: Mutex<BTreeSet<Ipv4Addr>>,
+    daemon: ServiceDaemon,
+    name: String,
+    published: Mutex<BTreeSet<String>>,
     changes: broadcast::Sender<EndpointInfo>,
 }
 
@@ -37,6 +42,20 @@ impl fmt::Debug for Nearby {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Nearby").finish_non_exhaustive()
     }
+}
+
+impl Drop for Nearby {
+    fn drop(&mut self) {
+        let _ = self.daemon.shutdown();
+    }
+}
+
+/// What one instance of a device announces.
+#[derive(Default)]
+struct Instance {
+    addrs: BTreeSet<SocketAddr>,
+    relay: Option<String>,
+    user_data: Option<String>,
 }
 
 impl Nearby {
@@ -47,65 +66,114 @@ impl Nearby {
         let (found, receiver) = mpsc::unbounded_channel();
         let (changes, _) = broadcast::channel(64);
         let discovered = changes.clone();
-        let interfaces = multicast_interfaces();
-        // Each device answers every query; only what changed is news.
-        let mut seen = HashMap::<EndpointId, EndpointData>::new();
-        let discovery = Discoverer::new(
-            "rufin-connect".into(),
-            data_encoding::BASE32_NOPAD
-                .encode(id.as_bytes())
-                .to_ascii_lowercase(),
-        )
-        .with_ip_class(IpClass::Auto)
-        .with_multicast_interfaces_v4(interfaces.iter().copied().collect())
-        .with_callback(move |peer_id: &str, peer: &Peer| {
-            let Ok(peer_id) = peer_id.parse::<EndpointId>() else {
-                return;
-            };
-            if peer_id == id {
-                return;
-            }
-            let event = if peer.is_expiry() {
-                seen.remove(&peer_id);
-                Discovery::Expired(peer_id)
-            } else {
-                let mut data = EndpointData::from(
-                    peer.addrs()
-                        .iter()
-                        .map(|(ip, port)| SocketAddr::new(*ip, *port))
-                        .collect::<BTreeSet<_>>(),
-                );
-                if let Some(Some(relay)) = peer.txt_attribute("relay")
-                    && let Ok(relay) = relay.parse()
-                {
-                    data.add_relay_url(crate::network::canonical_relay(relay));
+        let daemon = ServiceDaemon::new()?;
+        let events = daemon.browse(SERVICE)?;
+        std::thread::Builder::new()
+            .name("connect-nearby".into())
+            .spawn(move || {
+                let mut instances = HashMap::<EndpointId, HashMap<String, Instance>>::new();
+                // Devices answer every query; only what changed is news.
+                let mut seen = HashMap::<EndpointId, EndpointData>::new();
+                while let Ok(event) = events.recv() {
+                    let peer = match event {
+                        ServiceEvent::ServiceResolved(service) => {
+                            let Some(peer) = device(&service.fullname) else {
+                                continue;
+                            };
+                            let property = |key: &str| {
+                                service
+                                    .get_property_val_str(key)
+                                    .filter(|value| !value.is_empty())
+                                    .map(str::to_owned)
+                            };
+                            let instance = Instance {
+                                addrs: service
+                                    .get_addresses()
+                                    .iter()
+                                    .map(|ip| SocketAddr::new(ip.to_ip_addr(), service.port))
+                                    .collect(),
+                                relay: property("relay"),
+                                user_data: property("user-data"),
+                            };
+                            instances
+                                .entry(peer)
+                                .or_default()
+                                .insert(service.fullname.clone(), instance);
+                            peer
+                        }
+                        ServiceEvent::ServiceRemoved(_, fullname) => {
+                            let Some(peer) = device(&fullname) else {
+                                continue;
+                            };
+                            if let Some(parts) = instances.get_mut(&peer) {
+                                parts.remove(&fullname);
+                                if parts.is_empty() {
+                                    instances.remove(&peer);
+                                }
+                            }
+                            peer
+                        }
+                        _ => continue,
+                    };
+                    if peer == id {
+                        continue;
+                    }
+                    let event = match instances.get(&peer) {
+                        None => {
+                            if seen.remove(&peer).is_none() {
+                                continue;
+                            }
+                            Discovery::Expired(peer)
+                        }
+                        Some(parts) => {
+                            let mut data = EndpointData::from(
+                                parts
+                                    .values()
+                                    .flat_map(|part| part.addrs.iter().copied())
+                                    .collect::<BTreeSet<_>>(),
+                            );
+                            if let Some(relay) = parts
+                                .values()
+                                .find_map(|part| part.relay.as_deref()?.parse().ok())
+                            {
+                                data.add_relay_url(crate::network::canonical_relay(relay));
+                            }
+                            data.set_user_data(
+                                parts
+                                    .values()
+                                    .find_map(|part| part.user_data.as_deref()?.parse().ok()),
+                            );
+                            if seen.get(&peer) == Some(&data) {
+                                continue;
+                            }
+                            seen.insert(peer, data.clone());
+                            let info = EndpointInfo::from_parts(peer, data);
+                            routes.take(info.to_endpoint_addr());
+                            let _ = discovered.send(info.clone());
+                            Discovery::Found(info)
+                        }
+                    };
+                    let _ = found.send(event);
                 }
-                data.set_user_data(
-                    peer.txt_attribute("user-data")
-                        .flatten()
-                        .and_then(|name| name.parse().ok()),
-                );
-                if seen.get(&peer_id) == Some(&data) {
-                    return;
-                }
-                seen.insert(peer_id, data.clone());
-                let info = EndpointInfo::from_parts(peer_id, data);
-                routes.take(info.to_endpoint_addr());
-                let _ = discovered.send(info.clone());
-                Discovery::Found(info)
-            };
-            let _ = found.send(event);
-        })
-        .spawn(&tokio::runtime::Handle::current())?;
+            })?;
         Ok((
             Self {
-                discovery,
-                interfaces: Mutex::new(interfaces),
+                daemon,
+                name: data_encoding::BASE32_NOPAD
+                    .encode(id.as_bytes())
+                    .to_ascii_lowercase(),
+                published: Mutex::default(),
                 changes,
             },
             receiver,
         ))
     }
+}
+
+/// The device an instance's full name belongs to.
+fn device(fullname: &str) -> Option<EndpointId> {
+    let instance = fullname.strip_suffix(SERVICE)?.strip_suffix('.')?;
+    instance.rsplit_once('-')?.0.parse().ok()
 }
 
 impl AddressLookup for Nearby {
@@ -131,53 +199,40 @@ impl AddressLookup for Nearby {
     }
 
     fn publish(&self, data: &EndpointData) {
-        // A VPN can own the default route while nearby peers are on Wi-Fi or Ethernet.
-        // Endpoint updates also refresh the interfaces after a network change.
-        let interfaces = multicast_interfaces();
-        let mut previous = self.interfaces.lock().unwrap();
-        for ip in previous.difference(&interfaces) {
-            self.discovery.remove_interface_v4(*ip);
+        let mut ports = HashMap::<u16, Vec<IpAddr>>::new();
+        for address in data.ip_addrs() {
+            ports.entry(address.port()).or_default().push(address.ip());
         }
-        for ip in interfaces.difference(&previous) {
-            self.discovery.add_interface_v4(*ip);
-        }
-        *previous = interfaces;
-        advertise(&self.discovery, data);
-    }
-}
-
-fn advertise(discovery: &DropGuard, data: &EndpointData) {
-    let mut addresses = HashMap::<u16, Vec<IpAddr>>::new();
-    for address in data.ip_addrs() {
-        addresses
-            .entry(address.port())
-            .or_default()
-            .push(address.ip());
-    }
-    discovery.remove_all();
-    for (port, ips) in addresses {
-        discovery.add(port, ips);
-    }
-    for (key, value) in [
-        ("relay", data.relay_urls().next().map(ToString::to_string)),
-        ("user-data", data.user_data().map(ToString::to_string)),
-    ] {
-        if let Some(value) = value {
-            if let Err(error) = discovery.set_txt_attribute(key.into(), Some(value)) {
-                tracing::warn!(%error, key, "Could not publish nearby device attribute");
-            }
-        } else {
-            discovery.remove_txt_attribute(key.into());
-        }
-    }
-}
-
-fn multicast_interfaces() -> BTreeSet<Ipv4Addr> {
-    netdev::get_interfaces()
+        let properties = [
+            ("relay", data.relay_urls().next().map(ToString::to_string)),
+            ("user-data", data.user_data().map(ToString::to_string)),
+        ]
         .into_iter()
-        .filter(|interface| {
-            interface.is_up() && interface.is_multicast() && !interface.is_loopback()
-        })
-        .flat_map(|interface| interface.ipv4.into_iter().map(|address| address.addr()))
-        .collect()
+        .filter_map(|(key, value)| Some((key, value?)))
+        .collect::<Vec<_>>();
+        let mut published = self.published.lock().unwrap();
+        let mut current = BTreeSet::new();
+        for (port, ips) in ports {
+            let instance = format!("{}-{port}", self.name);
+            let info = ServiceInfo::new(
+                SERVICE,
+                &instance,
+                &format!("{instance}.local."),
+                &ips[..],
+                port,
+                &properties[..],
+            )
+            .and_then(|info| {
+                current.insert(info.get_fullname().to_owned());
+                self.daemon.register(info)
+            });
+            if let Err(error) = info {
+                tracing::warn!(%error, port, "Could not publish this device nearby");
+            }
+        }
+        for gone in published.difference(&current) {
+            let _ = self.daemon.unregister(gone);
+        }
+        *published = current;
+    }
 }

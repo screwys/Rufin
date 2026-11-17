@@ -492,7 +492,7 @@ impl Shape {
     pub(crate) fn of(read: Option<&Read>) -> Self {
         let mut shape = Self {
             activity: false,
-            now: chrono::Utc::now().timestamp(),
+            now: time::OffsetDateTime::now_utc().unix_timestamp(),
             folder: None,
             list: None,
             positions: HashMap::new(),
