@@ -414,8 +414,13 @@ async fn resolve_album(
     };
     // Kept to the second: the album's date added orders albums, and readers show its date.
     let date_added = added
-        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
-        .map(|time| time.format("%Y-%m-%dT%H:%M:%S").to_string());
+        .and_then(|seconds| time::OffsetDateTime::from_unix_timestamp(seconds).ok())
+        .and_then(|time| {
+            time.format(time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second]"
+            ))
+            .ok()
+        });
     merge_patch(
         &mut resolved,
         &json!({"date_added": date_added, "release_types": release_types}),

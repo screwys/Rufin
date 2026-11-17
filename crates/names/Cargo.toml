@@ -1,0 +1,18 @@
+[package]
+name = "names"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+
+[lints]
+workspace = true

@@ -1152,7 +1152,7 @@ impl Heard {
         heard.songs.insert(
             0,
             HeardSong {
-                at_unix_seconds: chrono::Utc::now().timestamp(),
+                at_unix_seconds: time::OffsetDateTime::now_utc().unix_timestamp(),
                 title: metadata.title.clone(),
                 artist: metadata.artist.clone(),
             },

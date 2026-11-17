@@ -1,11 +1,13 @@
 import { api, browserHeaders, state } from "./connection.js";
-import { qualityControls } from "./download-quality.js";
+import { qualityControls } from "./audio-quality.js";
 import { closeIntegration, init as initIntegrations, integrationOpen, showIntegrations } from "./integrations.js";
 import { openSource, sourceIcon, updateSources } from "./sources.js";
-import { $, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
+import { $, applyGrids, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
 
 let values = {};
 let shown = null;
+// The quality every source streams in, and the one the shown source streams in.
+let streamQuality = null;
 
 // Rows that only apply while another setting is on, as GTK makes them insensitive.
 const dependencies = {
@@ -38,12 +40,17 @@ function show(preferences) {
     else node.value = value;
     if (node.type === "range") node.nextElementSibling.textContent = node.value;
   }
+  if (streamQuality) streamQuality.set(preferences.stream_quality);
+  else streamQuality = qualityControls($("pref-stream-quality"), preferences.stream_quality,
+    async (edit) => (await api("/stream/quality", "POST", { edit })).stream_quality);
+  $("pref-server-recommendations").hidden = !preferences.server_recommendations_shown;
   for (const node of document.querySelectorAll("[data-when]")) {
     const [, path, not, expected] = node.dataset.when.match(/^(.*?)(!?)=(.*)$/);
     node.hidden = (values[path] === expected) === !!not;
   }
   for (const [path, owner] of Object.entries(dependencies))
     for (const node of document.querySelectorAll(`[data-setting="${path}"]`)) setSensitive(node.closest(".pref-row"), values[owner] !== false);
+  applyGrids(values["/grid_favorite_badges"] !== false, values["/grid_star_ratings"] === true);
   showCustomization(preferences);
   showIntegrations(preferences);
   // The sidebar follows its entries' order and visibility, as GTK's does.
@@ -157,11 +164,8 @@ function accentMenu(theme, anchor) {
   openPopup(menu, anchor, "end");
 }
 
-// Customization: the Layout tab's navigation rows, the Lists tab and the item menu preview.
+// Customization: the Layout tab's sidebar items, Home's blocks and the item menu preview.
 function showCustomization(preferences) {
-  const count = (rows) => tr("{shown} of {total} shown", { shown: rows.filter((row) => row.visible).length, total: rows.length });
-  $("pref-sidebar-items").querySelector("small").textContent = count(preferences.routes);
-  $("pref-home-blocks").querySelector("small").textContent = count(preferences.home_blocks);
   const routes = preferences.routes;
   listRows($("pref-routes"), routes.map((entry, index) => ({
     key: entry.item, title: entry.title, subtitle: entry.subtitle, icon: entry.icon, visible: entry.visible,
@@ -173,7 +177,8 @@ function showCustomization(preferences) {
   const blocks = preferences.home_blocks;
   const shownBlocks = blocks.filter((entry) => entry.visible).length;
   listRows($("pref-home-blocks-list"), blocks.map((entry, index) => ({
-    key: entry.block, title: entry.title, visible: entry.visible, can_toggle: entry.can_toggle,
+    key: entry.block, title: entry.title, visible: entry.visible, can_toggle: entry.can_toggle, movable: entry.visible,
+    options: entry.visible && entry.has_options ? blockOptions(entry) : null,
     up: entry.visible && index > 0, down: entry.visible && index + 1 < shownBlocks,
   })), (entry, change) => save(change.source
     ? { operation: "home_block", block: change.source, target: entry.key, after: change.after }
@@ -183,18 +188,55 @@ function showCustomization(preferences) {
   document.querySelector("[data-menu-rating]").setAttribute("aria-pressed", String(values["/context_menu/rating_visible"] !== false));
 }
 
+// A shown Home block's own choices, under its row: how many items it lists and the rows its
+// columns stack.
+function blockOptions(entry) {
+  const options = el("div", "pref-block-options");
+  const items = el("label");
+  const count = el("input");
+  count.type = "number";
+  count.min = 1;
+  count.max = 24;
+  count.step = 1;
+  count.value = entry.items;
+  count.onchange = () => save({ operation: "home_block", block: entry.block, items: Number(count.value) });
+  items.append(el("span", "", tr("Items")), count);
+  const rows = el("div", "pref-block-rows");
+  const group = el("div", "segmented");
+  group.role = "radiogroup";
+  group.title = tr("One row shows albums and artists as cards");
+  group.setAttribute("aria-label", tr("Rows"));
+  for (const value of [0, 1, 2, 3]) {
+    const choice = el("label");
+    const radio = el("input");
+    radio.type = "radio";
+    radio.name = `home-block-rows-${entry.block}`;
+    radio.checked = value === (entry.rows ?? 0);
+    radio.onchange = () => save({ operation: "home_block", block: entry.block, rows: value });
+    choice.append(radio, value ? String(value) : tr("Automatic"));
+    group.append(choice);
+  }
+  rows.append(el("span", "", tr("Rows")), group);
+  options.append(items, rows);
+  return options;
+}
+
 // The rows of an ordered list, as GTK's reorder rows: a drag handle, the entry, buttons that
-// move it and the switch that shows it. `edit` takes {visible}, {delta}, or {source, after}
-// when another entry of the list is dropped before or after this one.
-const reorderType = "application/x-rufin-reorder";
-let dragged = null;
+// move it and the switch that shows it, with the entry's `options` under them. `edit` takes
+// {visible}, {delta}, or {source, after} when another entry of the list is let go before or
+// after this one. A row dragged by its handle moves among the others as it goes, as GTK's
+// does; an entry that is not `movable` stays where it is.
 function listRows(host, entries, edit) {
+  const byRow = new Map();
+  const movable = (row) => byRow.get(row)?.movable !== false;
   host.replaceChildren(
     ...entries.map((entry) => {
       const row = el("div", "pref-row pref-list-row");
       row.dataset.key = entry.key;
+      byRow.set(row, entry);
       const handle = icon("rufin-list-drag-handle-symbolic");
       handle.classList.add("pref-drag");
+      handle.classList.toggle("insensitive", entry.movable === false);
       handle.title = tr("Drag to reorder");
       row.append(handle);
       if (entry.icon) row.append(icon(entry.icon));
@@ -215,7 +257,6 @@ function listRows(host, entries, edit) {
         move.onclick = () => edit(entry, { delta });
         row.append(move);
       }
-      if (entry.suffix) row.append(entry.suffix);
       const visible = el("input");
       visible.type = "checkbox";
       visible.role = "switch";
@@ -224,21 +265,52 @@ function listRows(host, entries, edit) {
       visible.setAttribute("aria-label", entry.title);
       visible.onchange = () => edit(entry, { visible: visible.checked });
       row.append(visible);
-      row.draggable = true;
-      row.addEventListener("dragstart", (event) => {
-        dragged = { host, key: entry.key };
-        event.dataTransfer.setData(reorderType, "");
-        event.dataTransfer.effectAllowed = "move";
-      });
-      row.addEventListener("dragend", () => (dragged = null));
-      row.addEventListener("dragover", (event) => {
-        if (dragged?.host === host && event.dataTransfer.types.includes(reorderType)) event.preventDefault();
-      });
-      row.addEventListener("drop", (event) => {
-        if (dragged?.host !== host || dragged.key === entry.key) return;
+      if (entry.options) row.append(entry.options);
+      handle.addEventListener("pointerdown", (event) => {
+        if (!movable(row) || event.button) return;
         event.preventDefault();
-        const rect = row.getBoundingClientRect();
-        edit(entry, { source: dragged.key, after: event.clientY > rect.top + rect.height / 2 });
+        row.classList.add("reorder-dragging");
+        const start = [...host.children];
+        const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const drag = (event) => {
+          const over = [...host.children].find((other) => {
+            const rect = other.getBoundingClientRect();
+            return other !== row && movable(other) && event.clientY >= rect.top && event.clientY < rect.bottom;
+          });
+          if (!over) return;
+          // The row takes the other's place once the pointer is past its middle, so rows of
+          // different heights do not trade places back and forth.
+          const rect = over.getBoundingClientRect();
+          const below = Boolean(row.compareDocumentPosition(over) & Node.DOCUMENT_POSITION_FOLLOWING);
+          if (below !== event.clientY > rect.top + rect.height / 2) return;
+          const tops = new Map([...host.children].map((other) => [other, other.getBoundingClientRect().top]));
+          host.insertBefore(row, below ? over.nextSibling : over);
+          if (calm) return;
+          for (const [other, top] of tops) {
+            const moved = top - other.getBoundingClientRect().top;
+            if (other !== row && moved)
+              other.animate([{ transform: `translateY(${moved}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
+          }
+        };
+        const end = (event) => {
+          removeEventListener("pointermove", drag);
+          removeEventListener("pointerup", end);
+          removeEventListener("pointercancel", end);
+          row.classList.remove("reorder-dragging");
+          const order = [...host.children];
+          if (order.every((other, index) => other === start[index])) return;
+          // The dragged row lands before the row that follows it, or after the one it follows.
+          const place = order.indexOf(row);
+          const next = order[place + 1];
+          const previous = order[place - 1];
+          if (event.type === "pointerup" && next && movable(next)) edit(byRow.get(next), { source: entry.key, after: false });
+          else if (event.type === "pointerup" && previous && movable(previous)) edit(byRow.get(previous), { source: entry.key, after: true });
+          else host.replaceChildren(...start);
+        };
+        // The window hears the drag: a row that changes place would let go of a captured pointer.
+        addEventListener("pointermove", drag);
+        addEventListener("pointerup", end);
+        addEventListener("pointercancel", end);
       });
       return row;
     }),
@@ -421,8 +493,8 @@ function init() {
       }
       set(path, value);
     }
-    if (event.target.name === "customization-tab")
-      for (const tab of document.querySelectorAll("[data-customization-tab]")) tab.hidden = tab.dataset.customizationTab !== event.target.value;
+    // A page's tabs: the radios named for them show the part each names.
+    for (const tab of document.querySelectorAll(`[data-tabs="${event.target.name}"]`)) tab.hidden = tab.dataset.tab !== event.target.value;
   });
   // Each item menu entry shows or hides itself, as GTK's preview.
   for (const entry of document.querySelectorAll("[data-menu-item]"))
@@ -433,8 +505,6 @@ function init() {
     });
   document.querySelector("[data-menu-rating]").addEventListener("click", (event) =>
     set("/context_menu/rating_visible", event.currentTarget.getAttribute("aria-pressed") !== "true"));
-  $("pref-sidebar-items").addEventListener("click", () => $("sidebar-items-dialog").showModal());
-  $("pref-home-blocks").addEventListener("click", () => $("home-blocks-dialog").showModal());
   initIntegrations();
   document.addEventListener("input", (event) => {
     if (event.target.matches(".pref-range input")) event.target.nextElementSibling.textContent = event.target.value;

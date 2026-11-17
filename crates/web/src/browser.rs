@@ -103,6 +103,10 @@ struct Shown<'a> {
     index: usize,
     menu_id: String,
     form: &'a Form,
+    /// A track's, album's or artist's rating, 0 to 10; other rows take none.
+    rating: Option<i64>,
+    /// Whether its stars take halves, as its source rates.
+    half_stars: bool,
 }
 
 /// A row's JSON for the page's script: what the API lists for it, with `art` its pictures'
@@ -129,6 +133,9 @@ pub(super) fn row_data(
         value["page"] = json!(scope.at(web_page(route)));
     }
     if let Some(PlayTarget::Route(route)) = target {
+        // The collection the card plays, which shows it playing while the page's playback
+        // names it among its contexts.
+        value["playing_context"] = json!(rufin_core::view::context_base(&route));
         value["play"] = json!(scope.at(route));
     }
     value
@@ -160,6 +167,27 @@ impl<'a> Shown<'a> {
         form: &'a Form,
     ) -> Self {
         let menu = rufin_core::menu::menu(&products.source, settings, &row);
+        let (rating, half_stars) = match &row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => (
+                Some(track.state.rating.unwrap_or(0)),
+                Some((track.media_uri.as_str(), track.source_id.as_deref())),
+            ),
+            Row::Album(album) | Row::AlbumHeading(album) => (
+                Some(album.state.rating.unwrap_or(0)),
+                Some((album.media_uri.as_str(), None)),
+            ),
+            Row::Artist(artist) => (
+                Some(artist.state.rating.unwrap_or(0)),
+                Some((artist.media_uri.as_str(), None)),
+            ),
+            _ => (None, None),
+        };
+        let half_stars = half_stars.is_some_and(|(uri, source)| {
+            products
+                .source
+                .list_sources()
+                .half_stars_enabled(uri, source)
+        });
         let mut data = row_data(products, &row, art, &menu, list, view);
         if let Some(title) = &title {
             data[if matches!(row, Row::Tag(_)) {
@@ -214,7 +242,14 @@ impl<'a> Shown<'a> {
             menu_id,
             form,
             row,
+            rating,
+            half_stars,
         }
+    }
+
+    /// Its rating, 0 to 10; 0 when unrated.
+    fn rating_value(&self) -> i64 {
+        self.rating.unwrap_or(0)
     }
 
     fn kind(&self) -> &'static str {
@@ -725,14 +760,17 @@ struct Section<'a> {
     /// The showcase's header; other sections show rows.
     head: Option<Head<'a>>,
     rows: Vec<Shown<'a>>,
-    /// The rows each column shows: two rows, or one card.
-    column_rows: usize,
+    /// The rows each column stacks, and whether a column is one card.
+    columns: rufin_core::view::HomeColumns,
 }
 
 #[derive(Template)]
 #[template(path = "home.html")]
 struct Home<'a> {
     sections: Vec<Section<'a>>,
+    /// Home's Size and Spacing, as the styles name them.
+    size: &'static str,
+    spacing: &'static str,
     page: String,
     title: String,
     /// What committed while Home read, as JSON; empty when nothing did.
@@ -757,7 +795,15 @@ pub(super) fn home(
 ) -> Result<String, Error> {
     let token = &opened.token;
     let settings = products.settings.load();
+    let home = opened.view.home_settings();
+    let named = |size| match size {
+        rufin_core::settings::layout::DisplaySize::Compact => "compact",
+        rufin_core::settings::layout::DisplaySize::Default => "default",
+        rufin_core::settings::layout::DisplaySize::Large => "large",
+    };
     Home {
+        size: named(home.size),
+        spacing: named(home.spacing),
         sections: sections
             .iter()
             .enumerate()
@@ -786,7 +832,7 @@ pub(super) fn home(
                             form,
                         )),
                         rows: Vec::new(),
-                        column_rows: 1,
+                        columns: section.columns(home),
                         block,
                     };
                 }
@@ -812,7 +858,7 @@ pub(super) fn home(
                             )
                         })
                         .collect(),
-                    column_rows: if section.shows_rows() { 2 } else { 1 },
+                    columns: section.columns(home),
                     block,
                 }
             })
@@ -1269,6 +1315,24 @@ impl Page {
             .as_str()
             .unwrap_or_else(|| self.appearance["theme"].as_str().unwrap_or("System"))
             .to_lowercase()
+    }
+    /// The classes that mark favorites' covers and show ratings, for the first paint.
+    pub fn grid_classes(&self) -> String {
+        let grids = &self.appearance["grids"];
+        [
+            (
+                grids["favorite_badges"].as_bool() != Some(false),
+                "grid-favorite-badges",
+            ),
+            (
+                grids["star_ratings"].as_bool() == Some(true),
+                "grid-star-ratings",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(on, class)| on.then_some(class))
+        .collect::<Vec<_>>()
+        .join(" ")
     }
     pub fn color_style(&self) -> String {
         self.appearance["colors"]

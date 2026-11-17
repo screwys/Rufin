@@ -492,7 +492,7 @@ impl Shape {
     pub(crate) fn of(read: Option<&Read>) -> Self {
         let mut shape = Self {
             activity: false,
-            now: chrono::Utc::now().timestamp(),
+            now: time::OffsetDateTime::now_utc().unix_timestamp(),
             folder: None,
             list: None,
             positions: HashMap::new(),
@@ -1155,7 +1155,7 @@ impl<'a> Builder<'a> {
             None => {
                 let mut sum = Totals::default();
                 for (_, record) in snapshot.playlists.iter() {
-                    if record.folders.contains(&key.raw()) && self.context.listed_playlist(record) {
+                    if record.folders.contains(&key.raw()) && snapshot.listed_playlist(record) {
                         let totals = self.context.playlist_totals(record);
                         sum.tracks += totals.tracks;
                         sum.duration += totals.duration;
@@ -1947,7 +1947,7 @@ impl Snapshot {
             }
             CatalogKind::Playlist => {
                 for (_, playlist) in self.playlists.iter() {
-                    if !self.text(playlist.name).is_empty() {
+                    if self.listed_playlist(playlist) {
                         look(playlist.source, playlist.object, playlist.key);
                     }
                 }

@@ -243,6 +243,15 @@ impl SidebarSettings {
         self.pins.len() != previous_len
     }
 
+    /// Pins `pin` first, where the sidebar's drop area for new pins stands.
+    pub fn pin_first(&mut self, pin: SidebarPin) -> bool {
+        if self.pins.contains(&pin) {
+            return false;
+        }
+        self.pins.insert(0, pin);
+        true
+    }
+
     pub fn reorder_pin(&mut self, moved: &SidebarPin, target: &SidebarPin, after: bool) -> bool {
         if moved == target {
             return false;
@@ -450,6 +459,106 @@ mod tests {
     }
 }
 
+/// The most items a Home block lists: what a source's own sections are synced to.
+pub const MAX_HOME_BLOCK_ITEMS: u8 = 24;
+
+/// Whether `block` has an item count and rows to choose: every block but the showcase, which
+/// shows one album.
+const fn has_home_block_options(block: library::HomeBlockKind) -> bool {
+    !matches!(block, library::HomeBlockKind::Showcase)
+}
+
+/// How many items `block` lists until it is chosen: featured genres list half as many.
+const fn home_block_items(block: library::HomeBlockKind) -> u8 {
+    match block {
+        library::HomeBlockKind::Genres => MAX_HOME_BLOCK_ITEMS / 2,
+        _ => MAX_HOME_BLOCK_ITEMS,
+    }
+}
+/// The most rows a Home block stacks in a column.
+pub const MAX_HOME_BLOCK_ROWS: u8 = 3;
+
+/// One Home block's own choices.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct HomeBlockOptions {
+    pub block: library::HomeBlockKind,
+    /// How many items it lists.
+    #[serde(default = "default_home_block_items")]
+    pub items: u8,
+    /// The rows each of its columns stacks. Unset, tracks and genres stack two rows and
+    /// albums and artists show as cards.
+    #[serde(default)]
+    pub rows: Option<u8>,
+}
+
+fn default_home_block_items() -> u8 {
+    MAX_HOME_BLOCK_ITEMS
+}
+
+/// How Home shows its blocks.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct HomeSettings {
+    pub size: super::layout::DisplaySize,
+    pub spacing: super::layout::DisplaySize,
+    /// The blocks whose choices differ from the defaults.
+    pub blocks: Vec<HomeBlockOptions>,
+}
+
+impl HomeSettings {
+    /// `block`'s choices; the defaults for the showcase and a server's own sections.
+    pub fn block(&self, block: Option<library::HomeBlockKind>) -> HomeBlockOptions {
+        let block = block.unwrap_or(library::HomeBlockKind::Showcase);
+        self.blocks
+            .iter()
+            .find(|options| options.block == block)
+            .cloned()
+            .unwrap_or(HomeBlockOptions {
+                block,
+                items: home_block_items(block),
+                rows: None,
+            })
+    }
+
+    /// Changes `block`'s choices; false when it has none or they stay as they are.
+    pub(crate) fn edit_block(
+        &mut self,
+        block: library::HomeBlockKind,
+        edit: impl FnOnce(&mut HomeBlockOptions),
+    ) -> bool {
+        if !has_home_block_options(block) {
+            return false;
+        }
+        let before = self.clone();
+        let mut options = self.block(Some(block));
+        edit(&mut options);
+        self.blocks.retain(|options| options.block != block);
+        self.blocks.push(options);
+        self.sanitize();
+        *self != before
+    }
+
+    pub(crate) fn sanitize(&mut self) {
+        let mut seen = Vec::new();
+        self.blocks.retain_mut(|options| {
+            options.items = options.items.clamp(1, MAX_HOME_BLOCK_ITEMS);
+            options.rows = options.rows.map(|rows| rows.clamp(1, MAX_HOME_BLOCK_ROWS));
+            let kept = has_home_block_options(options.block)
+                && !seen.contains(&options.block)
+                && (options.items != home_block_items(options.block) || options.rows.is_some());
+            seen.push(options.block);
+            kept
+        });
+        self.blocks.sort_by_key(|options| {
+            library::HomeBlockKind::all()
+                .iter()
+                .position(|block| *block == options.block)
+        });
+    }
+}
+
 /// A Home block as the block editor lists it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -460,20 +569,31 @@ pub struct HomeBlockRow {
     pub visible: bool,
     /// Whether it can be shown or hidden: the last visible block stays.
     pub can_toggle: bool,
+    /// Whether it has an item count and rows to choose.
+    pub has_options: bool,
+    pub items: u8,
+    pub rows: Option<u8>,
 }
 
 /// The visible blocks in their order, then the hidden ones in their default order.
-pub(crate) fn home_block_rows(visible: &[library::HomeBlockKind]) -> Vec<HomeBlockRow> {
+pub(crate) fn home_block_rows(
+    visible: &[library::HomeBlockKind],
+    home: &HomeSettings,
+) -> Vec<HomeBlockRow> {
     let order = home_block_order(visible);
     order
         .into_iter()
         .map(|block| {
             let shown = visible.contains(&block);
+            let options = home.block(Some(block));
             HomeBlockRow {
                 block,
                 title: super::presentation::home_block_title(block).into(),
                 visible: shown,
                 can_toggle: !shown || visible.len() > 1,
+                has_options: has_home_block_options(block),
+                items: options.items,
+                rows: options.rows,
             }
         })
         .collect()

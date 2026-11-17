@@ -930,7 +930,7 @@ impl PlaybackOwner {
             return false;
         };
         let request = request.clone();
-        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let seed = library::RadioSeed::Track(request.anchor_media_uri.clone());
         let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
             let result = async {
@@ -1360,7 +1360,7 @@ impl PlaybackOwner {
                 .ok_or("The current Plex track is not available locally")?;
             let mut request = StreamRequest::new(
                 (&row.track).media_uri.clone(),
-                self.settings.playback_stream_quality(),
+                self.settings.stream_quality(),
             );
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);

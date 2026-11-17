@@ -421,7 +421,7 @@ jobs:
             stalled-download-timeout = 90
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           prefix-key: v2-rust
@@ -470,6 +470,7 @@ jobs:
           persist-credentials: false
 
       - name: Install test dependencies
+        id: packages
         run: |
           brew install adwaita-icon-theme cargo-nextest chromaprint cmake gettext game-music-emu gstreamer \
             gtk4 libadwaita libbs2b libnice-gstreamer libopenmpt libsoup librsvg meson ninja openssl@3 \
@@ -477,6 +478,8 @@ jobs:
           gettext_prefix="$(brew --prefix gettext)"
           echo "GETTEXT_DIR=$gettext_prefix" >> "$GITHUB_ENV"
           echo "$gettext_prefix/bin" >> "$GITHUB_PATH"
+          # Cached build outputs hold these packages' versioned install paths.
+          echo "versions=$(brew list --versions | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Select Xcode 26
         run: |
@@ -501,12 +504,12 @@ jobs:
           echo "GST_PLUGIN_PATH=$GITHUB_WORKSPACE/.local/build/cmake/development/gst-plugins" >> "$GITHUB_ENV"
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           prefix-key: v1-rust
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          shared-key: macos-arm64
+          shared-key: macos-arm64-${{ steps.packages.outputs.versions }}
           workspaces: ". -> .local/target"
 
       - name: Test platform packages or warm their cache
@@ -540,6 +543,9 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          # No package cache: downloading the packages is as fast as restoring them, and each
+          # copy takes 530 MB of the repository's 10 GB.
+          cache: false
           install: >-
             base-devel
             git
@@ -587,7 +593,7 @@ jobs:
           cmake --build --preset development --target rufin-runtime-check
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"

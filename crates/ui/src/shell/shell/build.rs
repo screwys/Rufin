@@ -40,7 +40,7 @@ use super::layout::{
 };
 use super::navigation::{
     NavigationState, NavigationWidgets, build_compact_navigation, build_normal_navigation,
-    install_normal_navigation_activation,
+    install_normal_navigation_activation, install_sidebar_drop_feedback,
 };
 use super::route::RouteViewport;
 use super::selected_ui::SelectedUiState;
@@ -411,6 +411,7 @@ pub async fn build(
     install_normal_navigation_activation(&shell);
     build_normal_navigation(&shell);
     build_compact_navigation(&shell);
+    install_sidebar_drop_feedback(&shell);
     connect_shell_actions(&shell);
     super::drop_import::install(&shell);
     let weak = Rc::downgrade(&shell);

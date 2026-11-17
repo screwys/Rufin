@@ -35,6 +35,8 @@ struct BatchView {
     on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
     opening_lookup: Cell<bool>,
     restoring_selection: Cell<bool>,
+    /// Whether the first editor shown opens on its picture, from a cover's Artwork button.
+    artwork_page: Cell<bool>,
 }
 
 impl Drop for BatchView {
@@ -49,6 +51,7 @@ pub fn build_batch_dialog(
     batch: Arc<MetadataBatch>,
     runtime: tokio::runtime::Handle,
     on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
+    artwork_page: bool,
 ) -> adw::Dialog {
     let resource = "preferences/dialogs/metadata_batch.ui";
     let builder = crate::ui_resource::builder(resource);
@@ -131,6 +134,7 @@ pub fn build_batch_dialog(
         on_error,
         opening_lookup: Cell::new(false),
         restoring_selection: Cell::new(false),
+        artwork_page: Cell::new(artwork_page),
     });
     let weak = Rc::downgrade(&view);
     let all_button = select_all.downgrade();
@@ -226,6 +230,9 @@ impl BatchView {
             Some(changed),
             self.runtime.clone(),
         );
+        if self.artwork_page.take() {
+            super::artwork::show_artwork_page(&view.editor);
+        }
         view.editor
             .lookup
             .bind_property("sensitive", &self.lookup, "sensitive")

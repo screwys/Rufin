@@ -112,14 +112,14 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let configuration = |id: &str, server: &str, profile: &str| {
         sources::SourceConfiguration {
         source_id:sources::SourceId::new(id),kind:"plex".into(),name:id.into(),
-        provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":profile,"base_url":"http://127.0.0.1:1","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string(),
+        provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":profile,"base_url":"http://127.0.0.1:1","address_override":"http://127.0.0.1:1","local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string(),
     }
     };
     let first = configuration("first", "server-a", "profile-a");
     let login=serde_json::json!({"client_id":"source-switch-fixture","token":"fixture-token","account_id":"user","profiles":{},"resources":{},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
     let root = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Handle::current();
-    let settings = SettingsFile::open(root.path().join("settings.json")).unwrap();
+    let settings = SettingsFile::open(root.path().join("rufin.toml")).unwrap();
     let credential = crate::settings::Credential::new("plex-fixture");
     settings
         .update(|stored| {

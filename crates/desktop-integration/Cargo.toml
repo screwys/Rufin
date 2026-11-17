@@ -50,7 +50,6 @@ objc2-media-player.workspace = true
 
 [dev-dependencies]
 library.workspace = true
-tempfile.workspace = true
 
 [lints]
 workspace = true

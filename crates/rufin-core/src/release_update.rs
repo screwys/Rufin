@@ -1013,7 +1013,7 @@ mod tests {
     #[test]
     fn seen_release_update_preserves_other_settings_and_reopens() {
         let directory = tempfile::tempdir().expect("temporary settings directory");
-        let path = directory.path().join("settings.json");
+        let path = directory.path().join("rufin.toml");
         let settings = SettingsFile::open(path.clone()).expect("open settings");
         settings
             .update(|stored| {
@@ -1038,7 +1038,7 @@ mod tests {
     fn update_feedback_owns_the_same_release_notification() {
         let directory = tempfile::tempdir().expect("temporary settings directory");
         let settings =
-            SettingsFile::open(directory.path().join("settings.json")).expect("open settings");
+            SettingsFile::open(directory.path().join("rufin.toml")).expect("open settings");
         let cache = ReleaseCache {
             notes: vec![note("2.0.0")],
         };

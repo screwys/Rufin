@@ -565,7 +565,6 @@ row:focus {
 
 .flat:focus,
 .album-cover-button:focus,
-.cover-hover-button:focus,
 .pill-button:focus,
 .detail-genre-chip:focus,
 .detail-pill:focus,
@@ -1180,18 +1179,6 @@ gridview.album-grid {
   box-shadow: none;
 }
 
-.icon-button.cover-play-button.compact-sidebar-pin-play {
-  min-width: 32px;
-  min-height: 32px;
-  -gtk-icon-size: 16px;
-}
-
-.cover-play-button.compact-sidebar-pin-play .cover-hover-face,
-.cover-play-button.compact-sidebar-pin-play .action-button-shadow {
-  min-width: 32px;
-  min-height: 32px;
-}
-
 .sidebar-pin-activate {
   min-width: 0;
   padding: 4px;
@@ -1229,26 +1216,65 @@ gridview.album-grid {
   opacity: 0.72;
 }
 
+/* Where a new pin drops while a drag is over the sidebar; the pins that cannot take it are
+   insensitive and fade as libadwaita fades them. */
+.sidebar-new-pin-area {
+  margin: 0 8px;
+  /* A pin row's height: its button's 4px padding around the cover, less this border. */
+  padding: 3px;
+  border: 1px dashed color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 9px;
+}
+
+.sidebar-new-pin-area.compact {
+  margin: 0 6px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.sidebar-new-pin-area image {
+  opacity: 0.62;
+}
+
+.sidebar-pin-activate,
+.compact-sidebar-pin-activate {
+  transition: filter 200ms ease-out;
+}
+
 .sidebar-pin-row.playing .sidebar-pin-title {
   color: var(--accent-color);
 }
 
-.row-transport-controls {
+/* A row's play controls at its end: one block in the row's hover colour, so the row's text ends
+   under it, holding the grid cover's Play group at a row's size. */
+.row-play-group {
+  min-width: 102px;
   min-height: 40px;
-  padding-left: 4px;
+  margin-right: 2px;
   border-radius: 7px;
   background: color-mix(in srgb, currentColor 8%, var(--shell-panel-bg-color));
 }
 
-.icon-button.row-transport-control {
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border-radius: 7px;
+.row-play-group .cover-morph.open {
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.row-transport-control:hover {
-  background: color-mix(in srgb, currentColor 3%, transparent);
+.row-play-group button.cover-play-button {
+  min-width: 30px;
+  min-height: 30px;
+  -gtk-icon-size: 14px;
+  box-shadow: none;
+}
+
+.row-play-group button.cover-side-button {
+  min-width: 26px;
+  min-height: 26px;
+  margin: 0 2px;
+  color: inherit;
+}
+
+.row-play-group button.cover-side-button:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 button:disabled,
@@ -1536,142 +1562,325 @@ dialog.alert.playlist-delete-dialog .message-area {
   box-shadow: none;
 }
 
+/* A cover under the pointer: Play in the accent, the rest on dark glass. The rating, More and
+   the playing bars sit at one inset from their corners; the favorite is the corner itself. */
 .cover-hover-layer {
   border-radius: var(--radius);
-  background: color-mix(in srgb, black 34%, transparent);
+  background: rgb(0 0 0 / 55%);
 }
 
-.cover-hover-button {
-  border-radius: 999px;
-  background: white;
-  box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.26),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-  transform: scale(1);
-  transition:
-    background 120ms ease-out,
-    transform 120ms ease-out;
-}
-
-.cover-hover-button:hover {
-  background: #f7f7f7;
-  transform: scale(1.08);
-}
-
-.cover-hover-button:active {
-  transform: scale(0.96);
-}
-
-.cover-hover-button.cover-hover-animated {
-  background: transparent;
+.cover-glass {
+  color: white;
+  background: rgb(0 0 0 / 52%);
   box-shadow: none;
-  transform: none;
+}
+
+button.cover-glass {
+  padding: 0;
+  -gtk-icon-size: 14px;
   transition: background 120ms ease-out;
 }
 
-.cover-hover-face {
-  border-radius: 999px;
-  background: white;
-  color: #111111;
+button.cover-glass:hover {
+  background: rgb(36 36 36 / 72%);
+}
+
+button.cover-glass:active {
+  background: rgb(56 56 56 / 76%);
+}
+
+button.cover-play-button {
+  padding: 0;
+  -gtk-icon-size: 20px;
+  color: var(--accent-fg-color);
+  background: var(--accent-bg-color);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 32%);
   transform: scale(1);
   transition:
-    background 120ms ease-out,
-    transform 120ms ease-out;
+    transform 120ms ease-out,
+    background 120ms ease-out;
 }
 
-.action-button-shadow {
-  border-radius: 999px;
-  background: transparent;
-  transition: none;
+button.cover-play-button:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 88%, white);
+  transform: scale(1.05);
 }
 
-.cover-hover-button.cover-hover-animated .action-button-shadow {
-  box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.26),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.cover-hover-button.cover-hover-animated:hover {
-  background: transparent;
-  box-shadow: none;
-  transform: none;
-}
-
-.cover-hover-button.cover-hover-animated:hover .cover-hover-face {
-  background: #f7f7f7;
-  transform: scale(1.08);
-}
-
-.cover-hover-button.cover-hover-animated:active {
-  box-shadow: none;
-  transform: none;
-}
-
-.cover-hover-button.cover-hover-animated:active .cover-hover-face {
+button.cover-play-button:active {
   transform: scale(0.96);
 }
 
-.cover-side-button .cover-hover-face,
-.cover-menu-button .cover-hover-face,
-.cover-favorite-button .cover-hover-face,
-.cover-side-button .action-button-shadow,
-.cover-menu-button .action-button-shadow,
-.cover-favorite-button .action-button-shadow {
-  min-width: 34px;
-  min-height: 34px;
+button.cover-play-button.compact-sidebar-pin-play {
+  min-width: 32px;
+  min-height: 32px;
+  -gtk-icon-size: 16px;
 }
 
-.cover-play-button .cover-hover-face,
-.cover-play-button .action-button-shadow {
-  min-width: 54px;
-  min-height: 54px;
-}
-
-.cover-hover-transport {
+/* Play Next and Play Later come out of Play's sides onto glass. */
+.cover-morph {
+  border-radius: 999px;
+  padding: 0;
   background: transparent;
+  transition:
+    background 160ms ease-out,
+    padding 200ms ease-out;
 }
 
-.cover-favorite-button {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
+.cover-morph.open {
+  padding: 4px;
+  background: rgb(0 0 0 / 52%);
 }
 
-.cover-menu-button {
+button.cover-side-button {
+  margin: 0 3px;
+  padding: 0;
+  -gtk-icon-size: 16px;
+  color: white;
+  background: transparent;
+  box-shadow: none;
+}
+
+button.cover-side-button:hover {
+  background: rgb(255 255 255 / 16%);
+}
+
+button.cover-side-button:active {
+  background: rgb(255 255 255 / 24%);
+}
+
+/* More and the rating sit on the darkened cover as they are, with a shadow; More grows under
+   the pointer. */
+button.cover-menu-button {
+  padding: 0;
+  -gtk-icon-shadow: 0 1px 3px rgb(0 0 0 / 60%);
+  color: white;
+  background: transparent;
+  box-shadow: none;
+  transform: scale(1);
+  transition: transform 120ms ease-out;
+}
+
+button.cover-menu-button:hover {
+  background: transparent;
+  transform: scale(1.1);
+}
+
+button.cover-menu-button:active {
+  background: transparent;
+  transform: scale(0.9);
+}
+
+/* The rating: its five stars, white on the darkened cover; rated ones take the accent. */
+.cover-rating .rating-star {
+  color: white;
+  -gtk-icon-shadow: 0 1px 3px rgb(0 0 0 / 60%);
+}
+
+.cover-rating .rating-star.rated {
+  color: color-mix(in srgb, var(--accent-bg-color) 55%, white);
+}
+
+/* The bars of the media that plays. */
+.cover-playing {
+  border-radius: 999px;
+}
+
+/* The favorite's corner: a plain heart under the pointer like the other icons, and on a favorite
+   an accent tab with the heart in the accent's own foreground, as Play draws its symbol. The tab
+   grows from the corner as a quarter disc and stays at rest. */
+button.cover-corner {
+  border-radius: var(--radius) 0 100% 0;
+  color: white;
+  -gtk-icon-shadow: 0 1px 3px rgb(0 0 0 / 60%);
+  background-color: transparent;
+  background-image: radial-gradient(circle farthest-corner at left top,
+    var(--accent-bg-color) 70%, transparent 71%);
+  background-repeat: no-repeat;
+  background-position: left top;
+  background-size: 0 0;
+  box-shadow: none;
+  transition:
+    background-size 280ms cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+button.cover-corner.active-toggle {
+  color: var(--accent-fg-color);
+  -gtk-icon-shadow: none;
+  background-size: 100% 100%;
+}
+
+button.cover-corner:hover {
+  background-color: transparent;
+}
+
+/* At rest the corner stays only on favorites, while the window's badges are on. */
+window:not(.grid-favorite-badges) button.cover-corner.resting {
+  opacity: 0;
+}
+
+button.cover-corner.resting.active-toggle {
+  box-shadow: 2px 2px 8px rgb(0 0 0 / 22%);
+}
+
+/* The sizes by the cover's width. Every corner's glyph sits one inset from its two edges, so
+   the heart, the rating, More and the playing bars line up across the cover. The corner's tab is
+   its min-width plus its inset padding: 36, 41, 44 and 50 px, as the web and Android draw it. */
+.cover-tier-tiny button.cover-play-button { min-width: 38px; min-height: 38px; }
+.cover-tier-tiny button.cover-side-button { min-width: 24px; min-height: 24px; }
+.cover-tier-tiny button.cover-corner { min-width: 28px; min-height: 28px; padding: 8px 0 0 8px; -gtk-icon-size: 12px; }
+.cover-tier-tiny .cover-rating { margin: 8px 8px 0 0; }
+.cover-tier-tiny .cover-rating .rating-star { -gtk-icon-size: 12px; }
+.cover-tier-tiny button.cover-menu-button { min-width: 22px; min-height: 22px; margin: 3px; -gtk-icon-size: 12px; }
+.cover-tier-tiny .cover-playing { min-width: 22px; min-height: 22px; margin: 3px; }
+
+.cover-tier-small button.cover-play-button { min-width: 44px; min-height: 44px; }
+.cover-tier-small button.cover-side-button { min-width: 26px; min-height: 26px; }
+.cover-tier-small button.cover-corner { min-width: 32px; min-height: 32px; padding: 9px 0 0 9px; -gtk-icon-size: 13px; }
+.cover-tier-small .cover-rating { margin: 9px 9px 0 0; }
+.cover-tier-small .cover-rating .rating-star { -gtk-icon-size: 13px; }
+.cover-tier-small button.cover-menu-button { min-width: 23px; min-height: 23px; margin: 4px; -gtk-icon-size: 13px; }
+.cover-tier-small .cover-playing { min-width: 23px; min-height: 23px; margin: 4px; }
+
+.cover-tier-medium button.cover-play-button { min-width: 50px; min-height: 50px; }
+.cover-tier-medium button.cover-side-button { min-width: 28px; min-height: 28px; }
+.cover-tier-medium button.cover-corner { min-width: 34px; min-height: 34px; padding: 10px 0 0 10px; -gtk-icon-size: 14px; }
+.cover-tier-medium .cover-rating { margin: 10px 10px 0 0; }
+.cover-tier-medium .cover-rating .rating-star { -gtk-icon-size: 14px; }
+.cover-tier-medium button.cover-menu-button { min-width: 24px; min-height: 24px; margin: 5px; -gtk-icon-size: 14px; }
+.cover-tier-medium .cover-playing { min-width: 24px; min-height: 24px; margin: 5px; }
+
+.cover-tier-large button.cover-play-button { min-width: 54px; min-height: 54px; }
+.cover-tier-large button.cover-side-button { min-width: 30px; min-height: 30px; }
+.cover-tier-large button.cover-corner { min-width: 38px; min-height: 38px; padding: 12px 0 0 12px; -gtk-icon-size: 16px; }
+.cover-tier-large .cover-rating { margin: 12px 12px 0 0; }
+.cover-tier-large .cover-rating .rating-star { -gtk-icon-size: 16px; }
+.cover-tier-large button.cover-menu-button { min-width: 26px; min-height: 26px; margin: 7px; -gtk-icon-size: 16px; }
+.cover-tier-large .cover-playing { min-width: 26px; min-height: 26px; margin: 7px; }
+
+.cover-tier-tiny button.cover-play-button {
+  -gtk-icon-size: 16px;
+}
+
+/* A page's Artwork button in its cover's bottom-right corner. */
+button.cover-artwork-button {
   min-width: 28px;
   min-height: 28px;
-  padding: 0;
+  margin: 0 8px 8px 0;
 }
+
+/* Every favorite's heart pops as it becomes one and small hearts fly out of it; it shrinks back
+   as it stops being one. */
+button.favorite-heart.pop image:not(.favorite-burst) {
+  animation: favorite-pop 440ms cubic-bezier(0.2, 0.8, 0.3, 1.4);
+}
+
+button.favorite-heart.drop image:not(.favorite-burst) {
+  animation: favorite-drop 260ms ease-out;
+}
+
+@keyframes favorite-pop {
+  0% { -gtk-icon-transform: scale(0.5); }
+  55% { -gtk-icon-transform: scale(1.35); }
+  100% { -gtk-icon-transform: scale(1); }
+}
+
+@keyframes favorite-drop {
+  0% { -gtk-icon-transform: scale(0.75); }
+  100% { -gtk-icon-transform: scale(1); }
+}
+
+image.favorite-burst {
+  -gtk-icon-size: 8px;
+  color: var(--accent-bg-color);
+  opacity: 0;
+}
+
+image.favorite-burst-1,
+image.favorite-burst-3,
+image.favorite-burst-5 {
+  color: color-mix(in srgb, var(--accent-bg-color) 55%, white);
+}
+
+button.favorite-heart.pop image.favorite-burst-0 {
+  animation: favorite-burst-0 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-0 {
+  0% { opacity: 1; transform: rotate(90deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(90deg) translateY(-14px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-1 {
+  animation: favorite-burst-1 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-1 {
+  0% { opacity: 1; transform: rotate(141deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(141deg) translateY(-18px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-2 {
+  animation: favorite-burst-2 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-2 {
+  0% { opacity: 1; transform: rotate(192deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(192deg) translateY(-22px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-3 {
+  animation: favorite-burst-3 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-3 {
+  0% { opacity: 1; transform: rotate(244deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(244deg) translateY(-14px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-4 {
+  animation: favorite-burst-4 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-4 {
+  0% { opacity: 1; transform: rotate(295deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(295deg) translateY(-18px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-5 {
+  animation: favorite-burst-5 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-5 {
+  0% { opacity: 1; transform: rotate(347deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(347deg) translateY(-22px) scale(1); }
+}
+
+button.favorite-heart.pop image.favorite-burst-6 {
+  animation: favorite-burst-6 640ms cubic-bezier(0.1, 0.7, 0.3, 1);
+}
+
+@keyframes favorite-burst-6 {
+  0% { opacity: 1; transform: rotate(398deg) translateY(-4px) scale(0.4); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(398deg) translateY(-14px) scale(1); }
+}
+
 
 .favorite-toggle {
   font-size: 17px;
   font-weight: 700;
 }
 
+/* A favorite takes the theme's accent, as Play does. */
 .favorite-toggle.active-toggle {
-  color: var(--error-color);
+  color: var(--accent-color);
   background: transparent;
-}
-
-.cover-hover-button.favorite-toggle.active-toggle {
-  background: white;
-}
-
-.cover-hover-button.cover-hover-animated.favorite-toggle.active-toggle {
-  background: transparent;
-}
-
-.cover-hover-button.cover-hover-animated.favorite-toggle.active-toggle .cover-hover-face {
-  background: white;
-  color: var(--error-color);
-}
-
-.cover-hover-button.cover-hover-animated.favorite-toggle.active-toggle:hover .cover-hover-face {
-  background: #f7f7f7;
-}
-
-.cover-favorite-button.favorite-toggle {
-  font-size: 13px;
 }
 
 .player-title {
@@ -2049,8 +2258,7 @@ scale.volume-slider.vertical trough fill {
   transform: scale(0.96);
   transition:
     color 180ms ease,
-    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .lyrics-instrumental {
@@ -2182,20 +2390,6 @@ button.download-queue-pause image {
   min-height: 18px;
 }
 
-.icon-button.cover-play-button {
-  min-width: 54px;
-  min-height: 54px;
-  padding: 0;
-  -gtk-icon-size: 20px;
-}
-
-.icon-button.cover-side-button {
-  min-width: 34px;
-  min-height: 34px;
-  padding: 0;
-  -gtk-icon-size: 16px;
-}
-
 .icon-button.player-transport-button,
 .player-button-row > button.player-favorite-button,
 .player-button-row > menubutton > button {
@@ -2225,6 +2419,11 @@ button.download-queue-pause image {
 
 .detail-showcase-small .detail-title {
   font-size: 26px;
+}
+
+/* The header as a strip, above the list of a page that scrolled it away. */
+.detail-strip .detail-title {
+  font-size: 20px;
 }
 
 .detail-showcase-large .detail-artist {
@@ -2358,7 +2557,7 @@ button.download-queue-pause image {
 }
 
 .detail-round.favorite-toggle.active-toggle {
-  color: var(--error-color);
+  color: var(--accent-color);
   background: color-mix(in srgb, var(--window-fg-color) 11%, transparent);
 }
 
@@ -3265,6 +3464,12 @@ button.menu-preview-entry:not(.menu-preview-shown) label {
 
 .station-card-drag:hover {
   background: color-mix(in srgb, var(--window-fg-color) 16%, transparent);
+}
+
+/* The list row that is being dragged to another place. */
+row.reorder-dragging {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 10%, var(--card-bg-color));
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
 }
 
 /* The card that is being dragged to another place. */

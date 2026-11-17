@@ -7,52 +7,69 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2026-11-16 14:05+0000\n"
+"Last-Translator: Kariga <karigaa@users.noreply.hosted.weblate.org>\n"
+"Language-Team: Polish <https://hosted.weblate.org/projects/rufin/app/pl/>\n"
 "Language: pl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=3; plural=n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 "
-"|| n%100>=20) ? 1 : 2;\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 "
+"|| n%100>=20) ? 1 : 2);\n"
+"X-Generator: Weblate 2026.12.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
 "setting also increases resource usage."
 msgstr ""
+"Do wyświetlania furigany i odczytów w romaji pobierany jest słownik "
+"japoński. To ustawienie zwiększa też zużycie zasobów."
 
 msgid ""
 "Approving gives this device access to your profile and saved source logins."
 msgstr ""
+"Zatwierdzenie da temu urządzeniu dostęp do Twojego profilu i zapisanych "
+"danych logowania do źródeł."
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
+"Plik kopii zapasowej może zawierać poufne informacje. Czy chcesz ustawić "
+"hasło?"
 
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
 msgstr ""
+"Kopia zapasowa została przywrócona. Pominięte wpisy playlist: {entries}, "
+"pominięte odsłuchania: {listens}."
 
 msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
+"Połączenie z istniejącym profilem usunie wszystkie dane z tego urządzenia. "
+"Czy na pewno chcesz kontynuować?"
 
 msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
+"Urządzenia korzystające z Rufin Connect nie są już kompatybilne. Zaktualizuj "
+"aplikację Rufin."
 
 msgid ""
 "Do you want to cache all lyrics automatically? You can also enable this from "
 "Preferences -> Storage"
 msgstr ""
+"Czy chcesz automatycznie zapisywać wszystkie teksty utworów w pamięci "
+"podręcznej? Możesz to też włączyć w Ustawienia -> Pamięć"
 
 msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
+"Pobrane pliki z tego źródła zostaną usunięte, a reguły automatyczne "
+"wyłączone."
 
 msgid ""
 "GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
@@ -211,6 +228,23 @@ msgid ""
 msgstr ""
 
 msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For Flatpak and MacOS users this means the logins will not "
+"migrate automatically, and Android users will need to re download the app.\n"
+"\n"
+"        There should likely be no problems for other packages, but in either "
+"case, it is recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For flatpak users this means the logins will not migrate "
+"automatically, and Android users will need to re download the app. There "
+"should likely be no problems for other packages, but in either case, it is "
+"recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
@@ -249,25 +283,13 @@ msgstr ""
 msgid "12 hours"
 msgstr ""
 
-msgid "128 kbps"
-msgstr ""
-
 msgid "18 bands"
-msgstr ""
-
-msgid "192 kbps"
 msgstr ""
 
 msgid "24 hours"
 msgstr ""
 
-msgid "256 kbps"
-msgstr ""
-
 msgid "31 bands"
-msgstr ""
-
-msgid "320 kbps"
 msgstr ""
 
 msgid "5 Latest Albums"
@@ -325,6 +347,9 @@ msgid "Add SMB folder"
 msgstr ""
 
 msgid "Add Source"
+msgstr ""
+
+msgid "Add Station"
 msgstr ""
 
 msgid "Add WebDAV folder"
@@ -387,6 +412,9 @@ msgstr ""
 msgid "Add to library"
 msgstr ""
 
+msgid "Add to {saved_on}"
+msgstr ""
+
 msgid "Add tracks when fewer than this many remain"
 msgstr ""
 
@@ -394,6 +422,9 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to"
+msgstr ""
+
+msgid "Added"
 msgstr ""
 
 msgid "Album Artists"
@@ -682,6 +713,9 @@ msgid "Bitrate"
 msgstr ""
 
 msgid "Bitstream"
+msgstr ""
+
+msgid "Blocks"
 msgstr ""
 
 msgid "Blue"
@@ -1229,6 +1263,9 @@ msgstr ""
 msgid "Decrease"
 msgstr ""
 
+msgid "Default channel"
+msgstr ""
+
 msgid "Default"
 msgstr ""
 
@@ -1236,6 +1273,9 @@ msgid "Delete Permanently?"
 msgstr ""
 
 msgid "Delete Playlist"
+msgstr ""
+
+msgid "Delete Station"
 msgstr ""
 
 #, python-brace-format
@@ -1252,6 +1292,9 @@ msgid "Delete playlist file"
 msgstr ""
 
 msgid "Delete preset"
+msgstr ""
+
+msgid "Delete this station?"
 msgstr ""
 
 msgid "Delete {count} playlist?"
@@ -1311,6 +1354,9 @@ msgid "Disabled"
 msgstr ""
 
 msgid "Disc number"
+msgstr ""
+
+msgid "Disc subtitle"
 msgstr ""
 
 msgid "Disc {number}"
@@ -1420,9 +1466,6 @@ msgstr ""
 msgid "Drag to reorder"
 msgstr ""
 
-msgid "Drag to reorder."
-msgstr ""
-
 msgid "Duplicate preset"
 msgstr ""
 
@@ -1469,6 +1512,9 @@ msgid "Edit Smart Playlist"
 msgstr ""
 
 msgid "Edit Source"
+msgstr ""
+
+msgid "Edit Station"
 msgstr ""
 
 msgid "Edit lyrics"
@@ -1600,6 +1646,9 @@ msgstr ""
 msgid "Export Playlist"
 msgstr ""
 
+msgid "Export a Backup"
+msgstr ""
+
 msgid "Export format"
 msgstr ""
 
@@ -1682,6 +1731,9 @@ msgid "Fetching metadata..."
 msgstr ""
 
 msgid "Fetching playlists"
+msgstr ""
+
+msgid "Few"
 msgstr ""
 
 msgid "Field"
@@ -1885,6 +1937,9 @@ msgstr ""
 msgid "Grid"
 msgstr ""
 
+msgid "Grids"
+msgstr ""
+
 msgid "Grouping"
 msgstr ""
 
@@ -1892,6 +1947,9 @@ msgid "Guest / public access"
 msgstr ""
 
 msgid "Halo"
+msgstr ""
+
+msgid "Heard"
 msgstr ""
 
 msgid "Height (%)"
@@ -1924,10 +1982,10 @@ msgstr ""
 msgid "Home Profile"
 msgstr ""
 
-msgid "Home blocks"
+msgid "Home"
 msgstr ""
 
-msgid "Home"
+msgid "Homepage"
 msgstr ""
 
 msgid "Hour"
@@ -2014,6 +2072,9 @@ msgstr ""
 msgid "Item menus"
 msgstr ""
 
+msgid "Items"
+msgstr ""
+
 msgid "January {year}"
 msgstr ""
 
@@ -2062,6 +2123,9 @@ msgstr ""
 msgid "LED spectrum"
 msgstr ""
 
+msgid "LIVE"
+msgstr ""
+
 msgid "LRCLIB"
 msgstr ""
 
@@ -2099,6 +2163,9 @@ msgid "Layout"
 msgstr ""
 
 msgid "Leave empty for an unencrypted archive."
+msgstr ""
+
+msgid "Leave out tracks rated two stars or lower"
 msgstr ""
 
 msgid "Leave the password empty to keep the saved credential"
@@ -2253,6 +2320,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+
 msgid "Lookup"
 msgstr ""
 
@@ -2293,6 +2363,9 @@ msgid "MP3"
 msgstr ""
 
 msgid "Manage"
+msgstr ""
+
+msgid "Many"
 msgstr ""
 
 msgid "Mapped Local Path"
@@ -2488,6 +2561,9 @@ msgid "Muted"
 msgstr ""
 
 msgid "My music"
+msgstr ""
+
+msgid "Name or stream address"
 msgstr ""
 
 msgid "Name"
@@ -2769,6 +2845,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "One row shows albums and artists as cards"
+msgstr ""
+
 msgid "Online Lookups"
 msgstr ""
 
@@ -2797,6 +2876,9 @@ msgid "Open custom themes folder"
 msgstr ""
 
 msgid "Open fullscreen player"
+msgstr ""
+
+msgid "Open homepage"
 msgstr ""
 
 msgid "Open on Emby"
@@ -2877,13 +2959,13 @@ msgstr ""
 msgid "Output gain"
 msgstr ""
 
+msgid "Override server recommendations"
+msgstr ""
+
 msgid "Overview"
 msgstr ""
 
 msgid "Page links"
-msgstr ""
-
-msgid "Pages"
 msgstr ""
 
 msgid "Parametric"
@@ -2961,6 +3043,9 @@ msgstr ""
 msgid "Play Next"
 msgstr ""
 
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
 msgid "Play album"
 msgstr ""
 
@@ -2968,15 +3053,6 @@ msgid "Play artist"
 msgstr ""
 
 msgid "Play count"
-msgstr ""
-
-msgid "Play genre"
-msgstr ""
-
-msgid "Play mood"
-msgstr ""
-
-msgid "Play playlist"
 msgstr ""
 
 msgid "Play radio later"
@@ -3028,6 +3104,9 @@ msgid "Playing on {device}"
 msgstr ""
 
 msgid "Playing stream"
+msgstr ""
+
+msgid "Playing"
 msgstr ""
 
 msgid "Playlist File"
@@ -3175,9 +3254,6 @@ msgid "Q"
 msgstr ""
 
 msgid "Queue a track to begin"
-msgstr ""
-
-msgid "Queue and transitions"
 msgstr ""
 
 msgid "Queue tracks to show"
@@ -3378,6 +3454,9 @@ msgstr ""
 msgid "Remove group"
 msgstr ""
 
+msgid "Remove image"
+msgstr ""
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3465,6 +3544,9 @@ msgstr ""
 msgid "Restore"
 msgstr ""
 
+msgid "Results from radio-browser.info."
+msgstr ""
+
 msgid "Results per section"
 msgstr ""
 
@@ -3532,6 +3614,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Same artist"
 msgstr ""
 
 msgid "Sample peak"
@@ -3660,6 +3745,9 @@ msgid "Search preferences"
 msgstr ""
 
 msgid "Search queue"
+msgstr ""
+
+msgid "Search stations"
 msgstr ""
 
 msgid "Search this network"
@@ -3845,6 +3933,9 @@ msgstr ""
 msgid "Show Rufin"
 msgstr ""
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr ""
 
@@ -3882,6 +3973,9 @@ msgid "Show ratings in the bottom bar"
 msgstr ""
 
 msgid "Show sidebar"
+msgstr ""
+
+msgid "Show star ratings"
 msgstr ""
 
 msgid "Show tray icon"
@@ -3956,6 +4050,9 @@ msgstr ""
 msgid "Signing in..."
 msgstr ""
 
+msgid "Similar artists from ListenBrainz"
+msgstr ""
+
 msgid "Similar artists"
 msgstr ""
 
@@ -3972,6 +4069,9 @@ msgid "Size"
 msgstr ""
 
 msgid "Skip count"
+msgstr ""
+
+msgid "Skip low-rated tracks"
 msgstr ""
 
 msgid "Skip same-album crossfade"
@@ -4011,6 +4111,9 @@ msgid "Solid bars"
 msgstr ""
 
 msgid "Some playlist entries could not be imported"
+msgstr ""
+
+msgid "Some"
 msgstr ""
 
 msgid "Song and artist links"
@@ -4058,6 +4161,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Spacing"
+msgstr ""
+
 msgid "Spectrum · dBFS"
 msgstr ""
 
@@ -4091,6 +4197,12 @@ msgstr ""
 msgid "Static"
 msgstr ""
 
+msgid "Stations are saved on {saved_on}."
+msgstr ""
+
+msgid "Stations"
+msgstr ""
+
 msgid "Status display"
 msgstr ""
 
@@ -4110,6 +4222,12 @@ msgid "Storage"
 msgstr ""
 
 msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
+msgid "Stream address"
+msgstr ""
+
+msgid "Stream quality on mobile data"
 msgstr ""
 
 msgid "Stream quality"
@@ -4322,6 +4440,9 @@ msgstr ""
 msgid "Tracks from your five latest albums"
 msgstr ""
 
+msgid "Tracks per refill"
+msgstr ""
+
 msgid "Tracks"
 msgstr ""
 
@@ -4424,9 +4545,6 @@ msgstr ""
 msgid "Use API key"
 msgstr ""
 
-msgid "Use Instant Mix for recommendations"
-msgstr ""
-
 msgid "Use Rufin data folder"
 msgstr ""
 
@@ -4476,9 +4594,6 @@ msgid "Use sort tags"
 msgstr ""
 
 msgid "Use source setting"
-msgstr ""
-
-msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
 
 msgid "User flatpak:"
@@ -4572,6 +4687,9 @@ msgid "Weighting"
 msgstr ""
 
 msgid "Welcome to Rufin"
+msgstr ""
+
+msgid "What Auto DJ and radio pick"
 msgstr ""
 
 msgid "While your library loads"
@@ -4677,9 +4795,6 @@ msgid "is not"
 msgstr ""
 
 msgid "is"
-msgstr ""
-
-msgid "kbps"
 msgstr ""
 
 msgid "not in the last"
@@ -4792,9 +4907,6 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "{minutes} min"
-msgstr ""
-
-msgid "{shown} of {total} shown"
 msgstr ""
 
 msgid "{stage} ({completed} of {total}, {cached} cached)"

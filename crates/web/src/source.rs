@@ -10,6 +10,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
         .route("/api/downloads", post(download))
         .route("/api/downloads/quality", post(download_quality))
+        .route("/api/stream/quality", post(stream_quality))
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
         .route("/api/sources/local", post(add))
@@ -70,42 +71,51 @@ async fn download(
     Ok(accepted())
 }
 
-/// A download quality as its control shows it: the quality and which of its parts it offers.
-fn quality_view(quality: sources::DownloadQuality) -> Value {
-    json!({"value":quality,"bitrate":rufin_core::downloads::download_quality_shows_bitrate(quality),"channels":rufin_core::downloads::download_quality_shows_channels(quality)})
+/// A download or stream quality as its control shows it: the quality and which of its parts it
+/// offers.
+pub(super) fn quality_view(quality: sources::AudioQuality) -> Value {
+    use rufin_core::downloads::{audio_quality_shows_bitrate, audio_quality_shows_channels};
+    json!({"value":quality,"bitrate":audio_quality_shows_bitrate(quality),"channels":audio_quality_shows_channels(quality)})
+}
+
+/// A whole quality, or one change to the saved one, so edits sent one after another hold.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum QualityEdit {
+    Quality(sources::AudioQuality),
+    Codec(Option<library::AudioCodec>),
+    BitrateKbps(u32),
+    Channels(library::AudioChannels),
+}
+
+impl QualityEdit {
+    fn apply(self, saved: sources::AudioQuality) -> sources::AudioQuality {
+        use rufin_core::downloads::{
+            audio_quality_with_bitrate, audio_quality_with_channels, audio_quality_with_codec,
+        };
+        match self {
+            Self::Quality(quality) => quality,
+            Self::Codec(codec) => audio_quality_with_codec(saved, codec),
+            Self::BitrateKbps(kbps) => audio_quality_with_bitrate(saved, kbps),
+            Self::Channels(channels) => audio_quality_with_channels(saved, channels),
+        }
+    }
 }
 
 async fn download_quality(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
-    /// A whole quality, or one change to the saved one, so edits sent one after another hold.
-    #[derive(Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum Edit {
-        Quality(sources::DownloadQuality),
-        Codec(Option<library::AudioCodec>),
-        BitrateKbps(u32),
-        Channels(library::AudioChannels),
-    }
     #[derive(Deserialize)]
     struct Input {
         source: sources::SourceId,
-        edit: Edit,
+        edit: QualityEdit,
     }
     let input: Input = body(request).await?;
-    use rufin_core::downloads::{
-        download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
-    };
-    let mut quality = sources::DownloadQuality::Original;
+    let mut quality = sources::AudioQuality::Original;
     let edit = |ui: &mut rufin_core::settings::Settings| {
         let saved = ui.download_settings(&input.source).quality;
-        quality = match input.edit {
-            Edit::Quality(quality) => quality,
-            Edit::Codec(codec) => download_quality_with_codec(saved, codec),
-            Edit::BitrateKbps(kbps) => download_quality_with_bitrate(saved, kbps),
-            Edit::Channels(channels) => download_quality_with_channels(saved, channels),
-        };
+        quality = input.edit.apply(saved);
         ui.set_download_quality(input.source.clone(), quality);
         Ok(())
     };
@@ -114,6 +124,30 @@ async fn download_quality(
     Ok(json_response(
         StatusCode::ACCEPTED,
         json!({"accepted":true,"quality":quality,"download_quality":quality_view(quality)}),
+    ))
+}
+
+/// The quality streams are asked for.
+async fn stream_quality(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        edit: QualityEdit,
+    }
+    let input: Input = body(request).await?;
+    let mut quality = sources::AudioQuality::Original;
+    let edit = |ui: &mut rufin_core::settings::Settings| {
+        quality = input.edit.apply(ui.playback.stream_quality);
+        ui.playback.stream_quality = quality;
+        Ok(())
+    };
+    let settings = &products.settings;
+    settings.update_preferences(edit).map_err(bad_request)?;
+    Ok(json_response(
+        StatusCode::ACCEPTED,
+        json!({"accepted":true,"stream_quality":quality_view(quality)}),
     ))
 }
 

@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.FavoriteHeart
+import io.github.screwys.rufin.ui.rememberFavoriteMotion
 import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
@@ -129,7 +131,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val application = player.settings
     var artworkPixels by remember { mutableIntStateOf(0) }
     // Flip covers have no room for the cover: it becomes the player's blurred background.
-    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, if (tiny) 256 else artworkPixels)
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, if (tiny) 256 else artworkPixels, animated = true)
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
@@ -465,7 +467,7 @@ private fun PlayerContext(player: PlayerConnection, modifier: Modifier) {
     val context by remember(player) { derivedStateOf { player.currentContext } }
     val title = context?.first ?: when (context?.second) {
         "manual" -> translate("Queue")
-        "random" -> translate("Mix")
+        "mix" -> translate("Mix")
         "radio" -> translate("Radio")
         "auto_dj" -> translate("Auto DJ")
         else -> null
@@ -563,10 +565,9 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onRadio
                 val state = player.playback
                 state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
-            IconButton(player::favorite, Modifier.size(48.dp).focusRing(CircleShape), enabled = !player.live) {
-                RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                    translate("Favorite current track"), Modifier.size(24.dp),
-                    if (favorite) MaterialTheme.colorScheme.error else LocalContentColor.current, glyph = true)
+            val motion = rememberFavoriteMotion()
+            IconButton({ motion.clicked(favorite); player.favorite() }, Modifier.size(48.dp).focusRing(CircleShape), enabled = !player.live) {
+                FavoriteHeart(favorite, motion, translate("Favorite current track"), Modifier.size(24.dp), glyph = true)
             }
         }
     }

@@ -127,8 +127,15 @@ function applyColors(colors) {
     document.documentElement.style.setProperty(name, value);
 }
 
+// Grids mark favorites' covers and show ratings under the pointer as the settings say.
+function applyGrids(favoriteBadges, starRatings) {
+  document.documentElement.classList.toggle("grid-favorite-badges", favoriteBadges);
+  document.documentElement.classList.toggle("grid-star-ratings", starRatings);
+}
+
 function applyAppearance(appearance) {
   savedAppearance = appearance;
+  if (appearance.grids) applyGrids(appearance.grids.favorite_badges, appearance.grids.star_ratings);
   document.documentElement.dataset.theme =
     appearance.theme === "System"
       ? matchMedia("(prefers-color-scheme: dark)").matches
@@ -252,9 +259,13 @@ function releaseCovers() {
     if (!node.isConnected) entry.dispose();
 }
 
-async function coverGroup(node, query, count, signal, previews = []) {
+// A single cover plays when `animated` and it is an animated image; a mosaic's quadrants stay still.
+async function coverGroup(node, query, count, signal, previews = [], animated = false) {
   node.classList.toggle("cover-mosaic", count > 1);
-  if (count <= 1) return cover(node, query, signal, previews[0]);
+  if (count <= 1) {
+    const single = typeof query === "string" ? { uri: query } : query;
+    return cover(node, animated ? { ...single, animated: true } : query, signal, previews[0]);
+  }
   let tiles = [...node.children].filter((tile) => tile.classList.contains("cover-quadrant"));
   if (tiles.length !== 4) {
     node.replaceChildren();
@@ -345,10 +356,10 @@ function placeBarButtons(bar, up) {
   const row = document.querySelector(".transport-buttons");
   const seekRow = document.querySelector(".seek-row");
   const volumeBox = document.querySelector(".volume");
-  const extras = ["auto-dj", "random-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
-  const [dj, random, sleep, settings, volume, favorite] = extras;
+  const extras = ["auto-dj", "mix-buttons", "sleep-timer-button", "playback-settings-button", "mute", "current-favorite"].map($);
+  const [dj, mix, sleep, settings, volume, favorite] = extras;
   row.prepend(dj);
-  row.append(random);
+  row.append(mix);
   document.querySelector(".player-actions").prepend(sleep, settings);
   volumeBox.prepend(favorite);
   volumeBox.insertBefore(volume, $("volume"));
@@ -358,7 +369,7 @@ function placeBarButtons(bar, up) {
   } else if (bar === "strip") row.prepend(volume);
   else if (bar === "controls") {
     const raised = (button) => extras.indexOf(button) < up;
-    const start = [sleep, volume, dj], end = [random, favorite, settings];
+    const start = [sleep, volume, dj], end = [mix, favorite, settings];
     row.prepend(...start.filter(raised));
     row.append(...end.filter(raised));
     seekRow.prepend(...start.filter((button) => !raised(button)));
@@ -762,6 +773,7 @@ export {
   showFavorite,
   time,
   applyAppearance,
+  applyGrids,
   initialAppearance,
   applyColors,
   cover,

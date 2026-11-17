@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.more
 
 import io.github.screwys.rufin.settings.CustomizationSettingsPage
+import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.settings.ThemeSettingsPage
 import io.github.screwys.rufin.settings.StorageSettingsPage
 import io.github.screwys.rufin.settings.OverviewSettingsPage
@@ -14,18 +15,25 @@ import io.github.screwys.rufin.ui.pageMotion
 import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.browse.BrowseConnection
-import io.github.screwys.rufin.settings.RouteSettingsPage
 import io.github.screwys.rufin.controller.ControllerPage
 import io.github.screwys.rufin.connect.ConnectPage
 import io.github.screwys.rufin.sources.SourcesPage
 import io.github.screwys.rufin.settings.AppSettingsPage
-import io.github.screwys.rufin.settings.HomeSettingsPage
 import io.github.screwys.rufin.settings.IntegrationDetailPage
 import io.github.screwys.rufin.settings.IntegrationPage
 import io.github.screwys.rufin.settings.IntegrationsPage
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
-import io.github.screwys.rufin.settings.SettingsLink
+import io.github.screwys.rufin.settings.SettingsRow
+import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.shared.playback.PlaybackTransitionMode
+import io.github.screwys.rufin.shared.playback.LoudnessNormalization
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.downloads.DownloadsPage
 import io.github.screwys.rufin.downloads.DownloadSettingsPage
@@ -44,13 +52,12 @@ internal enum class MoreDestination(val title: String) {
     General("General"), Customization("Customization"), Theme("Theme"), Integrations("Integrations"), Integration("Integrations"),
     Playback("Playback"), Equalizer("Equalizer"), Library("Library"), Downloads("Downloads"),
     Connect("Connect"), Controller("Controller"), Storage("Storage"), Privacy("Privacy & Security"),
-    Routes("Library items"), DownloadSettings("Downloads"),
-    BackupSettings("Backup Settings"), HomeSettings("Home blocks");
+    DownloadSettings("Downloads"),
+    BackupSettings("Backup Settings");
 
-    // The sidebar's ☰ menu opens Settings and these three pages directly.
+    // The sidebar's rail opens Settings and these three pages directly.
     val parent get() = when (this) {
         Root, Overview, Versions, Troubleshooting -> null
-        Routes, HomeSettings -> Customization
         Integration -> Integrations
         BackupSettings -> Privacy
         OverviewSettings -> General
@@ -83,24 +90,48 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
     destinations.SaveableStateProvider(visible.name) {
     when (visible) {
         MoreDestination.Root -> SettingsPage {
+            // Each page's row says what is set on it, where one line can.
+            val language = preferences.state?.let { state ->
+                state.languages.firstOrNull { it.id == state.language && it.id != "system" }?.title ?: translate("System default")
+            }
+            val start = preferences.applicationSettings?.let { settings -> browse.routes.firstOrNull { it.item.name == settings.startingPage.name }?.title }
+            val playback = player.settings?.playback?.let { playback ->
+                listOf(translate(if (playback.transitionMode == PlaybackTransitionMode.CROSSFADE) "Crossfade" else "Gapless"),
+                    when (playback.loudnessNormalization) {
+                        LoudnessNormalization.OFF -> null
+                        LoudnessNormalization.REPLAY_GAIN -> "ReplayGain"
+                        LoudnessNormalization.EBU_R128 -> "EBU R128"
+                    })
+            }
             SettingsGroup {
-                SettingsLink("rufin-preferences-system-symbolic", translate("General")) { navigate(MoreDestination.General) }
-                SettingsLink("rufin-sliders-2-symbolic", translate("Customization")) { navigate(MoreDestination.Customization) }
-                SettingsLink("rufin-preferences-desktop-appearance-symbolic", translate("Theme")) { navigate(MoreDestination.Theme) }
-                SettingsLink("rufin-network-workgroup-symbolic", translate("Integrations")) { navigate(MoreDestination.Integrations) }
-                SettingsLink("rufin-music-queue-symbolic", translate("Playback")) { navigate(MoreDestination.Playback) }
-                SettingsLink("rufin-sliders-vertical-symbolic", translate("Equalizer")) { navigate(MoreDestination.Equalizer) }
-                SettingsLink("rufin-library-symbolic", translate("Library")) { navigate(MoreDestination.Library) }
-                SettingsLink("rufin-download-symbolic", translate("Downloads")) { navigate(MoreDestination.Downloads) }
-                SettingsLink("rufin-network-hotspot-symbolic", translate("Connect")) { navigate(MoreDestination.Connect) }
-                SettingsLink("rufin-phonelink-symbolic", translate("Controller")) { navigate(MoreDestination.Controller) }
-                SettingsLink("rufin-drive-harddisk-symbolic", translate("Storage")) { navigate(MoreDestination.Storage) }
-                SettingsLink("rufin-system-lock-screen-symbolic", translate("Privacy & Security")) { navigate(MoreDestination.Privacy) }
+                SettingsCategory("rufin-preferences-system-symbolic", "General", listOfNotNull(language, start)) { navigate(MoreDestination.General) }
+                SettingsCategory("rufin-sliders-2-symbolic", "Customization") { navigate(MoreDestination.Customization) }
+                SettingsCategory("rufin-preferences-desktop-appearance-symbolic", "Theme") { navigate(MoreDestination.Theme) }
+            }
+            SettingsGroup {
+                SettingsCategory("rufin-network-workgroup-symbolic", "Integrations") { navigate(MoreDestination.Integrations) }
+            }
+            SettingsGroup {
+                SettingsCategory("rufin-music-queue-symbolic", "Playback", playback.orEmpty().filterNotNull()) { navigate(MoreDestination.Playback) }
+                SettingsCategory("rufin-sliders-vertical-symbolic", "Equalizer") { navigate(MoreDestination.Equalizer) }
+            }
+            SettingsGroup {
+                SettingsCategory("rufin-library-symbolic", "Library", model.sources?.sources.orEmpty().map { it.name }.filter { it.isNotBlank() }, ", ") { navigate(MoreDestination.Library) }
+                SettingsCategory("rufin-download-symbolic", "Downloads") { navigate(MoreDestination.Downloads) }
+            }
+            SettingsGroup {
+                SettingsCategory("rufin-network-hotspot-symbolic", "Connect") { navigate(MoreDestination.Connect) }
+                SettingsCategory("rufin-phonelink-symbolic", "Controller") { navigate(MoreDestination.Controller) }
+            }
+            SettingsGroup {
+                SettingsCategory("rufin-drive-harddisk-symbolic", "Storage") { navigate(MoreDestination.Storage) }
+                SettingsCategory("rufin-system-lock-screen-symbolic", "Privacy & Security") { navigate(MoreDestination.Privacy) }
             }
         }
         MoreDestination.Library -> SourcesPage(model, onAddSource, onEditSource)
-        MoreDestination.General, MoreDestination.Playback,
-        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, onOutput, navigate)
+        MoreDestination.General,
+        MoreDestination.Privacy -> AppSettingsPage(visible, model, preferences, player, browse, navigate)
+        MoreDestination.Playback -> PlaybackPreferences(player, preferences, model.sources?.sources.orEmpty(), onOutput)
         MoreDestination.Integrations -> IntegrationsPage(model, preferences, player, openIntegration)
         MoreDestination.Integration -> integration?.let { page -> key(page.id) {
             IntegrationDetailPage(model, preferences, player, page, openIntegration, back)
@@ -109,11 +140,9 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
         MoreDestination.DownloadSettings -> DownloadSettingsPage(model, preferences)
         MoreDestination.BackupSettings -> BackupSettingsPage(model, preferences)
         MoreDestination.OverviewSettings -> OverviewSettingsPage(preferences)
-        MoreDestination.HomeSettings -> HomeSettingsPage(preferences)
-        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player, navigate)
+        MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player)
         MoreDestination.Theme -> ThemeSettingsPage(preferences)
         MoreDestination.Storage -> StorageSettingsPage(model, preferences)
-        MoreDestination.Routes -> RouteSettingsPage(browse)
         MoreDestination.Equalizer -> PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER)
         MoreDestination.Controller -> ControllerPage(model)
         MoreDestination.Connect -> ConnectPage(model)
@@ -123,4 +152,15 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
     }
     }
     }
+}
+
+/** A page of Settings on its root: its icon on a tonal tile, its name, and what is set there. */
+@Composable
+private fun SettingsCategory(icon: String, title: String, facts: List<String> = emptyList(), separator: String = " · ", open: () -> Unit) {
+    SettingsRow(translate(title), summary = facts.joinToString(separator).takeIf { it.isNotEmpty() }, leading = {
+        Box(Modifier.size(36.dp).background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center) {
+            RufinIcon(icon, null, Modifier.size(20.dp), MaterialTheme.colorScheme.primary)
+        }
+    }, modifier = Modifier.clickable(onClick = open))
 }

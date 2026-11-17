@@ -21,18 +21,23 @@ import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.browse.BrowseSwipeAction
 import io.github.screwys.rufin.browse.MediaMenuDivider
 import io.github.screwys.rufin.core.translate
-import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.shared.rufin_core.ContextMenuItem
+import io.github.screwys.rufin.shared.rufin_core.DisplaySize
+import io.github.screwys.rufin.shared.rufin_core.HomeBlockRow
+import io.github.screwys.rufin.ui.RufinSlider
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import kotlin.math.roundToInt
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SegmentedPill
 
-private enum class CustomizationTab(val title: String) { Layout("Layout"), Player("Player"), Menus("Menus") }
+private enum class CustomizationTab(val title: String) { Layout("Layout"), Home("Home"), Player("Player"), Menus("Menus") }
 
 @Composable
-internal fun CustomizationSettingsPage(preferences: PreferencesConnection, browse: BrowseConnection,
-    player: PlayerConnection, navigate: (MoreDestination) -> Unit) {
+internal fun CustomizationSettingsPage(preferences: PreferencesConnection, browse: BrowseConnection, player: PlayerConnection) {
     var tab by rememberSaveable { mutableStateOf(CustomizationTab.Layout) }
     Column(Modifier.fillMaxSize()) {
         SegmentedPill(CustomizationTab.entries, tab, { tab = it }, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
@@ -43,7 +48,8 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
             if (preferences.state == null || player.settings == null)
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             else when (tab) {
-                CustomizationTab.Layout -> LayoutTab(preferences, browse, navigate)
+                CustomizationTab.Layout -> LayoutTab(preferences, browse)
+                CustomizationTab.Home -> HomeTab(preferences)
                 CustomizationTab.Player -> PlayerTab(player)
                 CustomizationTab.Menus -> MenusTab(preferences)
             }
@@ -52,16 +58,19 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
 }
 
 @Composable
-private fun LayoutTab(preferences: PreferencesConnection, browse: BrowseConnection, navigate: (MoreDestination) -> Unit) {
+private fun LayoutTab(preferences: PreferencesConnection, browse: BrowseConnection) {
     SettingsGroup(translate("Accessibility")) {
         SettingsSwitch(translate("Reduce motion"), preferences.reduceMotion) { preferences.changePreference { setReduceMotion(it) } }
     }
-    SettingsGroup(translate("Navigation")) {
-        val routes = browse.routeSettings
-        SettingsLink(null, translate("Library items"), shownCount(routes.count { it.visible }, routes.size)) { navigate(MoreDestination.Routes) }
-        val blocks = preferences.applicationSettings?.homeBlocks
-        val rows = remember(blocks) { if (blocks == null) emptyList() else preferences.nativeSettings().homeBlockRows() }
-        SettingsLink(null, translate("Home blocks"), shownCount(rows.count { it.visible }, rows.size)) { navigate(MoreDestination.HomeSettings) }
+    SettingsGroup(translate("Grids")) {
+        SettingsSwitch(translate("Show a badge for favorited items"), preferences.gridFavoriteBadges) { preferences.changePreference { setGridFavoriteBadges(it) } }
+        SettingsSwitch(translate("Show star ratings"), preferences.gridStarRatings) { preferences.changePreference { setGridStarRatings(it) } }
+    }
+    SettingsGroup(translate("Library items")) {
+        SettingsReorderRows(browse.routeSettings.map { SettingsReorderItem(it.descriptor.id, it.descriptor.title, it.visible) },
+            onReorder = { _, id, target, after -> browse.reorderRoute(id, target, after) },
+            onStep = browse::moveRoute,
+            onToggle = browse::setRouteVisible)
     }
     SettingsGroup(translate("Swipe on a row")) {
         val swipeActions = BrowseSwipeAction.entries.map { it.name to it.label }
@@ -73,8 +82,55 @@ private fun LayoutTab(preferences: PreferencesConnection, browse: BrowseConnecti
     }
 }
 
-private fun shownCount(shown: Int, total: Int) =
-    translate("{shown} of {total} shown").replace("{shown}", shown.toString()).replace("{total}", total.toString())
+/** Home's Size and Spacing, and its blocks: their order, which show, and each one's item count and rows. */
+@Composable
+private fun HomeTab(preferences: PreferencesConnection) {
+    val application = preferences.applicationSettings ?: return
+    val home = application.home
+    val rows = remember(application.homeBlocks, home) { preferences.nativeSettings().homeBlockRows() }
+    val block = { id: String -> rows.first { it.block.name == id }.block }
+    SettingsGroup(translate("Display")) {
+        PreferenceChoice(translate("Size"), home.size, listOf(DisplaySize.COMPACT to translate("Compact"),
+            DisplaySize.DEFAULT to translate("Default"), DisplaySize.LARGE to translate("Large"))) { size ->
+            preferences.changePreference { setHomeSize(size) }
+        }
+        PreferenceChoice(translate("Spacing"), home.spacing, listOf(DisplaySize.COMPACT to translate("Small"),
+            DisplaySize.DEFAULT to translate("Default"), DisplaySize.LARGE to translate("Wide"))) { spacing ->
+            preferences.changePreference { setHomeSpacing(spacing) }
+        }
+    }
+    SettingsGroup(translate("Blocks")) {
+        SettingsReorderRows(rows.map { SettingsReorderItem(it.block.name, translate(it.title), it.visible, it.visible, it.canToggle, details = it.visible && it.hasOptions) },
+            onReorder = { _, id, target, after -> preferences.changePreference { reorderHomeBlock(block(id), block(target), after) } },
+            onToggle = { id, on -> preferences.changePreference { setHomeBlockVisible(block(id), on) } },
+            details = { id -> rows.find { it.block.name == id }?.let { HomeBlockOptions(preferences, it) } })
+    }
+}
+
+/** A shown Home block's own choices, under its row: how many items it lists and the rows its columns stack. */
+@Composable
+private fun HomeBlockOptions(preferences: PreferencesConnection, row: HomeBlockRow) {
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val muted = MaterialTheme.colorScheme.onSurfaceVariant
+        var items by remember(row.items) { mutableFloatStateOf(row.items.toFloat()) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(translate("Items"), Modifier.width(48.dp), style = MaterialTheme.typography.bodyMedium, color = muted)
+            RufinSlider(items, { items = it.roundToInt().toFloat() }, Modifier.weight(1f).semantics { contentDescription = translate("Items") },
+                valueRange = 1f..24f, steps = 22,
+                onValueChangeFinished = { preferences.changePreference { setHomeBlockItems(row.block, items.roundToInt().toUByte()) } })
+            Text(items.roundToInt().toString(), Modifier.width(24.dp), style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                textAlign = TextAlign.End)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(translate("Rows"), Modifier.width(48.dp), style = MaterialTheme.typography.bodyMedium, color = muted)
+            SegmentedPill(listOf(0, 1, 2, 3), row.rows?.toInt() ?: 0, { rows ->
+                preferences.changePreference { setHomeBlockRows(row.block, rows.takeIf { it > 0 }?.toUByte()) }
+            }) { rows, _ ->
+                Text(if (rows == 0) translate("Automatic") else rows.toString(), style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            }
+        }
+    }
+}
 
 /** The fullscreen player's switches and the seekbar, as GTK's Player tab has them. */
 @Composable
@@ -161,7 +217,7 @@ private fun MenusTab(preferences: PreferencesConnection) {
                 }) {
                     Row(Modifier.weight(1f).alpha(if (menu.ratingVisible) 1f else .38f)) {
                         repeat(5) { index ->
-                            RufinIcon(if (index < 3) "rufin-starred-symbolic" else "rufin-non-starred-symbolic", null, Modifier.size(24.dp),
+                            RufinIcon(if (index < 3) "rufin-starred-symbolic" else "rufin-star-outline-symbolic", null, Modifier.size(24.dp),
                                 if (index < 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

@@ -9,7 +9,7 @@ use reqwest::header::{
     LAST_MODIFIED, RANGE,
 };
 use serde::{Deserialize, Serialize};
-use sources::DownloadQuality;
+use sources::AudioQuality;
 use sources::{SourceError, SourceId, SourceResult};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -33,7 +33,7 @@ pub(super) struct ReleasedDownloadRecord {
     pub(super) version: u32,
     pub(super) media_uri: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) quality: Option<sources::DownloadQuality>,
+    pub(super) quality: Option<sources::AudioQuality>,
     #[serde(default)]
     pub(super) owners: HashSet<DownloadOwner>,
     #[serde(flatten)]
@@ -202,13 +202,13 @@ impl TransferClients {
 fn representation_key(
     source_id: Option<&SourceId>,
     media_uri: &str,
-    quality: DownloadQuality,
+    quality: AudioQuality,
     redacted_uri: &str,
 ) -> String {
     #[derive(Serialize)]
     struct StoredDownload<'a> {
         media_uri: &'a str,
-        quality: DownloadQuality,
+        quality: AudioQuality,
     }
     let value = serde_json::to_vec(&(
         source_id,
@@ -630,7 +630,7 @@ pub(super) async fn prepare_download_directories(paths: &DownloadPaths) -> Sourc
 pub(super) async fn run_transfer(
     source_id: Option<&SourceId>,
     media_uri: &str,
-    quality: DownloadQuality,
+    quality: AudioQuality,
     stream: &ResolvedStream,
     paths: &DownloadPaths,
     transfers: &TransferClients,
@@ -1480,8 +1480,8 @@ mod tests {
             matchers::{header, method, path},
         };
         for quality in [
-            DownloadQuality::Original,
-            DownloadQuality::Transcoded(library::AudioEncoding {
+            AudioQuality::Original,
+            AudioQuality::Transcoded(library::AudioEncoding {
                 codec: library::AudioCodec::Opus,
                 bitrate_kbps: Some(64),
                 channels: library::AudioChannels::Preserve,

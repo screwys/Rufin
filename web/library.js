@@ -433,6 +433,8 @@ function showChanged(value) {
     showState(changed.uri, changed.favorite);
     for (const node of document.querySelectorAll("[data-rating-uri]"))
       if (node.dataset.ratingUri === changed.uri) node.textContent = changed.rating_text;
+    for (const chip of document.querySelectorAll("[data-rating-chip]"))
+      if (chip.dataset.ratingChip === changed.uri) showRating(chip, changed.rating || 0);
   }
   if (value.page_refresh) run(() => refreshPage(value.page_refresh));
 }
@@ -458,6 +460,74 @@ async function refreshPage(verdict) {
 }
 
 // Turns a row's favorite over, and shows it on every row and heart that shows its media.
+// Every favorite's heart pops as it becomes one, and small hearts fly out of it; it shrinks
+// back as it stops being one.
+function celebrateFavorite(button, favorite) {
+  button.classList.remove("favorite-pop", "favorite-drop");
+  void button.offsetWidth;
+  button.classList.add(favorite ? "favorite-pop" : "favorite-drop");
+  setTimeout(() => button.classList.remove("favorite-pop", "favorite-drop"), 700);
+  if (!favorite || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const box = button.getBoundingClientRect();
+  const heart = button.querySelector(".icon").getBoundingClientRect();
+  for (let k = 0; k < 7; k++) {
+    const spark = el("span", "favorite-burst");
+    spark.style.left = `${heart.left + heart.width / 2 - box.left}px`;
+    spark.style.top = `${heart.top + heart.height / 2 - box.top}px`;
+    spark.style.setProperty("--angle", `${90 + Math.floor((k * 360) / 7)}deg`);
+    spark.style.setProperty("--distance", `${[14, 18, 22][k % 3]}px`);
+    spark.style.setProperty("--burst", k % 2 ? "color-mix(in srgb, var(--blue) 55%, white)" : "var(--blue)");
+    button.append(spark);
+    setTimeout(() => spark.remove(), 700);
+  }
+}
+document.addEventListener(
+  "click",
+  (event) => {
+    const button = event.target.closest('[data-action="favorite"], #current-favorite');
+    if (button && !button.disabled) celebrateFavorite(button, button.getAttribute("aria-pressed") !== "true");
+  },
+  true,
+);
+
+// A cover's rating: its value, 0 to 10, as five stars.
+// Outlines and solid fills, which stay clear on a darkened cover.
+const starIcon = (left) =>
+  left <= 0 ? "rufin-star-outline-symbolic" : left === 1 ? "rufin-star-half-symbolic" : "rufin-starred-symbolic";
+function paintRating(chip, value) {
+  chip.querySelectorAll("[data-star]").forEach((star, index) => {
+    const left = value - index * 2;
+    star.classList.toggle("rated", left > 0);
+    setIcon(star.firstElementChild, starIcon(left));
+  });
+}
+function showRating(chip, value) {
+  chip.dataset.rating = String(value);
+  paintRating(chip, value);
+}
+// The rating a star stands for under the pointer at `x`: its left half is a half star when its
+// source rates in halves.
+function starValue(chip, star, x) {
+  const box = star.getBoundingClientRect();
+  const whole = Number(star.dataset.star) * 2 + 2;
+  return chip.dataset.half === "true" && x - box.left < box.width / 2 ? whole - 1 : whole;
+}
+function bindRatingChip(chip) {
+  showRating(chip, Number(chip.dataset.rating));
+  chip.addEventListener("pointermove", (event) => {
+    const star = event.target.closest("[data-star]");
+    if (star) paintRating(chip, starValue(chip, star, event.clientX));
+  });
+  chip.addEventListener("pointerleave", () => paintRating(chip, Number(chip.dataset.rating)));
+}
+// Rates the row from a star; the star already shown clears the rating.
+async function setRating(chip, star, x, kind, uri) {
+  const value = starValue(chip, star, x);
+  const rating = Number(chip.dataset.rating) === value ? 0 : value;
+  showRating(chip, rating);
+  await api("/rating", "POST", { kind, uri, rating: rating || null });
+}
+
 async function setFavorite(row, kind = "track") {
   const result = await api("/favorite", "POST", { kind, uri: row.uri, favorite: !row.favorite });
   row.favorite = result.favorite;
@@ -554,7 +624,7 @@ function bindTracks(host, signal) {
     tr.setAttribute("aria-rowindex", index + 2);
     bindDrag(tr, () => selected(index)
       ? { kind: "track", row, page: opened, ranges: selection }
-      : mediaSelection("track", row), false);
+      : mediaSelection("track", row));
     tr.classList.toggle("selected", selected(index));
     tr.setAttribute("aria-selected", String(selected(index)));
     tr.addEventListener(
@@ -638,14 +708,29 @@ function playCollection() {
 }
 
 function markCurrent() {
+  const current = state.playback?.current;
   document
     .querySelectorAll("tr[data-uri]")
     .forEach((row) =>
       row.classList.toggle(
         "current",
-        row.dataset.uri === state.playback?.current?.track?.uri,
+        row.dataset.uri === current?.track?.uri,
       ),
     );
+  // A card plays while its track plays, or while playback names its collection among the
+  // contexts core lists for what plays.
+  const playing = ["playing", "resolving", "buffering"].includes(state.playback?.state);
+  for (const card of document.querySelectorAll(".album-card[data-row]")) {
+    const row = mediaRow(card);
+    card.classList.toggle(
+      "playing",
+      playing &&
+        !!current &&
+        (row.playing_context
+          ? (current.contexts || []).includes(row.playing_context)
+          : card.dataset.kind === "track" && row.uri === current.track?.uri),
+    );
+  }
 }
 
 function init() {
@@ -774,10 +859,11 @@ function bindCard(card) {
   {
     const host = card.parentElement;
     bindHoverControls(card);
+    for (const chip of card.querySelectorAll("[data-rating-chip]")) bindRatingChip(chip);
     const row = mediaRow(card),
       kind = card.dataset.kind;
     if (!card.classList.contains("pin-row")) {
-      bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
+      bindDrag(card, () => mediaSelection(kind, row));
       bindPlaylistDrop(card, kind, row);
     }
     const open = () => {
@@ -850,6 +936,9 @@ function bindCard(card) {
         if (action === "step-showcase") return stepShowcase(card, button.dataset.forward === "true");
         if (action === "link") return openLinks(row, button.dataset.field, button);
         if (action === "favorite") return setFavorite(row, kind);
+        if (action === "rate")
+          return setRating(button.closest("[data-rating-chip]"), button, event.detail ? event.clientX : Infinity, kind, row.uri);
+        if (action === "edit") return kind === "playlist" ? openName(row) : openSmartPlaylist({ key: row.id });
         if (action === "radio") return playRadio(row.menu.radio);
         if (action === "menu") return menu(button);
         return play(action);
@@ -929,6 +1018,7 @@ function loadCardCovers(host, signal) {
         row.artwork_count || 1,
         signal,
         row.artwork_previews,
+        card.classList.contains("detail-showcase"),
       );
     }
   };

@@ -51,6 +51,8 @@ pub(crate) enum CueRead {
     },
     Rejected,
     Unreadable,
+    /// As `MediaRead::Deferred`, for the sheet or a file it plays.
+    Deferred,
 }
 
 pub(crate) trait FileSource: Sync {
@@ -280,6 +282,27 @@ fn parseable(kind: LocalFileKind) -> bool {
     matches!(kind, LocalFileKind::Media | LocalFileKind::Cue)
 }
 
+/// What a system keeps on a volume or share for itself: recycle bins, snapshots, indexes.
+fn system_folder(name: &str) -> bool {
+    const NAMES: [&str; 13] = [
+        "$recycle.bin",
+        "system volume information",
+        "lost+found",
+        ".trash",
+        ".trashes",
+        ".fseventsd",
+        ".spotlight-v100",
+        ".temporaryitems",
+        "@eadir",
+        "#recycle",
+        "@recycle",
+        "#snapshot",
+        "@recently-snapshot",
+    ];
+    let name = name.to_ascii_lowercase();
+    NAMES.contains(&name.as_str()) || name.starts_with(".trash-")
+}
+
 impl<F: FileSource> Walker<'_, '_, F> {
     fn fail(&mut self, failure: String) {
         tracing::warn!(failure, "File source walk is incomplete");
@@ -288,6 +311,11 @@ impl<F: FileSource> Walker<'_, '_, F> {
 
     fn check(&self) -> SourceResult<()> {
         crate::file::check_cancelled(self.cancelled)
+    }
+
+    /// A path the walk leaves out: an excluded folder, or one inside a system folder.
+    fn skipped(&self, root: &str, relative: &str) -> bool {
+        self.files.excluded(root, relative) || relative.split('/').any(system_folder)
     }
 
     async fn peek(&mut self) -> SourceResult<Option<&StoredFile>> {
@@ -623,7 +651,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
             }
             self.seek(&root, &relative);
             let key = walk_key(&relative);
-            let entry = if self.files.excluded(&root, &relative) {
+            let entry = if self.skipped(&root, &relative) {
                 Err(SourceError::NotFound)
             } else {
                 self.files.stat(&root, &native).await
@@ -692,6 +720,12 @@ impl<F: FileSource> Walker<'_, '_, F> {
             let entries = match self.files.list(root, native).await {
                 Ok(entries) => entries,
                 Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
+                // A folder this user may not open is no part of the library, and no reason to
+                // fail the walk; what the Store holds below it stays.
+                Err(SourceError::Denied(error)) if !relative.is_empty() => {
+                    tracing::warn!(relative, error, "Skipped a folder that denies access");
+                    return self.keep_subtree(root, &key).await;
+                }
                 Err(error) => {
                     // A directory that fails to list keeps its rows, its revision included.
                     self.fail(format!("Could not list {relative}: {error}"));
@@ -712,7 +746,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
             }
             let mut entries = entries
                 .into_iter()
-                .filter(|entry| !self.files.excluded(root, &join(relative, &entry.name)))
+                .filter(|entry| !self.skipped(root, &join(relative, &entry.name)))
                 .collect::<Vec<_>>();
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             entries.dedup_by(|later, earlier| later.name == earlier.name);
@@ -827,6 +861,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 }
                 Ok(CueRead::Rejected) => LocalFileState::Rejected,
                 Ok(CueRead::Unreadable) => LocalFileState::Unreadable,
+                Ok(CueRead::Deferred) => continue,
                 Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
                 Err(error) => {
                     tracing::warn!(%error, "Could not read a CUE sheet");
@@ -897,6 +932,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 }
                 Ok(MediaRead::Rejected) => LocalFileState::Rejected,
                 Ok(MediaRead::Unreadable) => LocalFileState::Unreadable,
+                Ok(MediaRead::Deferred) => continue,
                 Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
                 Err(error) => {
                     tracing::warn!(%error, "Could not read a media file");
@@ -1070,7 +1106,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
             );
             for entry in entries.iter().filter(|entry| !entry.directory) {
                 let child = join(&relative, &entry.name);
-                if self.files.excluded(&root, &child) {
+                if self.skipped(&root, &child) {
                     continue;
                 }
                 let child_native = join(&native, &entry.native);

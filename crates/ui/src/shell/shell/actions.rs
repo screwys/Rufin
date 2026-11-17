@@ -9,7 +9,7 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::preferences::preferences::present_preferences_dialog;
 use crate::preferences::preferences::source::selector::install_source_menu_actions;
-use crate::shell::player::play_saved_random;
+use crate::shell::player::play_saved_mix;
 use crate::widgets::popup::present_light_dismiss_dialog;
 #[cfg(any(target_os = "macos", test))]
 use localization::tr_with;
@@ -265,28 +265,28 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || shell.player_ui.clear_queue()
     });
     #[cfg(target_os = "macos")]
-    let random_accels = &["<Alt><Meta>r"][..];
+    let mix_accels = &["<Alt><Meta>r"][..];
     #[cfg(not(target_os = "macos"))]
-    let random_accels = &["<Control><Shift>r"][..];
-    add_window_action(shell, "play-random", random_accels, {
+    let mix_accels = &["<Control><Shift>r"][..];
+    add_window_action(shell, "play-mix", mix_accels, {
         let shell = Rc::clone(shell);
-        move || play_saved_random(&shell, QueuePlacement::Now)
+        move || play_saved_mix(&shell, QueuePlacement::Now)
     });
     #[cfg(target_os = "macos")]
-    let random_next_accels = &["<Alt><Meta>n"][..];
+    let mix_next_accels = &["<Alt><Meta>n"][..];
     #[cfg(not(target_os = "macos"))]
-    let random_next_accels = &["<Control><Shift>n"][..];
-    add_window_action(shell, "play-random-next", random_next_accels, {
+    let mix_next_accels = &["<Control><Shift>n"][..];
+    add_window_action(shell, "play-mix-next", mix_next_accels, {
         let shell = Rc::clone(shell);
-        move || play_saved_random(&shell, QueuePlacement::Next)
+        move || play_saved_mix(&shell, QueuePlacement::Next)
     });
     #[cfg(target_os = "macos")]
-    let random_later_accels = &["<Alt><Meta>t"][..];
+    let mix_later_accels = &["<Alt><Meta>t"][..];
     #[cfg(not(target_os = "macos"))]
-    let random_later_accels = &["<Control><Shift>t"][..];
-    add_window_action(shell, "play-random-later", random_later_accels, {
+    let mix_later_accels = &["<Control><Shift>t"][..];
+    add_window_action(shell, "play-mix-later", mix_later_accels, {
         let shell = Rc::clone(shell);
-        move || play_saved_random(&shell, QueuePlacement::Last)
+        move || play_saved_mix(&shell, QueuePlacement::Last)
     });
     #[cfg(target_os = "macos")]
     let gapless_accels = &["<Alt><Meta>g"][..];

@@ -1982,13 +1982,11 @@ impl Records {
                                 {
                                     stored.ui.set_download_quality(
                                         id.clone(),
-                                        sources::DownloadQuality::Transcoded(
-                                            library::AudioEncoding {
-                                                codec: library::AudioCodec::Opus,
-                                                bitrate_kbps: Some(128),
-                                                channels: library::AudioChannels::Preserve,
-                                            },
-                                        ),
+                                        sources::AudioQuality::Transcoded(library::AudioEncoding {
+                                            codec: library::AudioCodec::Opus,
+                                            bitrate_kbps: Some(128),
+                                            channels: library::AudioChannels::Preserve,
+                                        }),
                                     );
                                 }
                                 let list = match integration {

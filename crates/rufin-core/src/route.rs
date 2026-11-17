@@ -86,6 +86,27 @@ impl Route {
         })
     }
 
+    /// The item of the collection this page shows, when a pin keeps it: an album, an artist in
+    /// the page's role, a genre, a playlist, a smart playlist or a playlist folder.
+    pub fn pinned_item(&self, catalog: &library::Catalog) -> Option<library::Item> {
+        use library::Item;
+        Some(match self {
+            Self::AlbumDetail(uri) => catalog.item(uri)?,
+            Self::ArtistDetail(uri) | Self::AlbumArtistDetail(uri) => match catalog.item(uri)? {
+                Item::Artist { key, .. } => Item::Artist {
+                    key,
+                    album_artist: matches!(self, Self::AlbumArtistDetail(_)),
+                },
+                _ => return None,
+            },
+            Self::GenreDetail(key) => Item::Genre(*key),
+            Self::PlaylistDetail(key) => Item::Playlist(*key),
+            Self::SmartPlaylistDetail(key) => Item::Smart(*key),
+            Self::PlaylistFolder { key, .. } => Item::PlaylistFolder(*key),
+            _ => return None,
+        })
+    }
+
     /// The page a genre or mood row opens.
     pub fn of_tag(tag: &library::TagRow) -> Self {
         match tag.kind {

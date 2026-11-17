@@ -156,7 +156,6 @@ function showQueue(value) {
         ...mediaSelection("track", row.track),
         queuePositions: [row.position],
       }),
-      false,
     );
     li.addEventListener("dragover", (event) => {
       if (!acceptsMedia(event)) return;

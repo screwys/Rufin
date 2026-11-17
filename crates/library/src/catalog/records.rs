@@ -2,6 +2,10 @@
 //! the Snapshot packs their resident part. Every field is a column the Store holds, so a staged
 //! row and the row the Store holds compare column by column.
 
+use time::format_description::BorrowedFormatItem;
+use time::macros::format_description;
+use time::{Date, OffsetDateTime, PrimitiveDateTime};
+
 use crate::tags::TagKind;
 use crate::{
     AlbumKey, AlbumMetadata, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, NativeUserState,
@@ -25,32 +29,47 @@ pub(crate) fn picture_flag(binding: Option<&[u8]>) -> i64 {
     i64::from(pictured(binding)) * crate::schema::HAS_PICTURE
 }
 
+/// RFC 3339, its date and time parted by `T` or by a space as the RFC allows.
+pub(crate) fn rfc3339(text: &str) -> Option<OffsetDateTime> {
+    const OFFSET: &[BorrowedFormatItem<'_>] = format_description!(
+        "[year]-[month]-[day][first [T][t][ ]][hour]:[minute]:[second][optional [.[subsecond]]][offset_hour sign:mandatory]:[offset_minute]"
+    );
+    const UTC: &[BorrowedFormatItem<'_>] = format_description!(
+        "[year]-[month]-[day][first [T][t][ ]][hour]:[minute]:[second][optional [.[subsecond]]][first [Z][z]]"
+    );
+    OffsetDateTime::parse(text, OFFSET)
+        .ok()
+        .or_else(|| Some(PrimitiveDateTime::parse(text, UTC).ok()?.assume_utc()))
+}
+
 /// A unix time as SQLite's unixepoch() reads ISO-8601 text.
 pub(crate) fn unix_time(text: &str) -> Option<i64> {
-    use chrono::{DateTime, NaiveDate, NaiveDateTime};
     let text = text.trim();
-    if let Ok(time) = DateTime::parse_from_rfc3339(text) {
-        return Some(time.timestamp());
+    if let Some(time) = rfc3339(text) {
+        return Some(time.unix_timestamp());
     }
-    for format in [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M",
-        "%Y-%m-%d %H:%M",
-    ] {
-        if let Ok(time) = NaiveDateTime::parse_from_str(text, format) {
-            return Some(time.and_utc().timestamp());
-        }
+    let formats: [&[BorrowedFormatItem<'_>]; 2] = [
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none][first [T][ ]][hour padding:none]:[minute padding:none]:[second padding:none][optional [.[subsecond]]]"
+        ),
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none][first [T][ ]][hour padding:none]:[minute padding:none]"
+        ),
+    ];
+    if let Some(time) = formats
+        .iter()
+        .find_map(|format| PrimitiveDateTime::parse(text, format).ok())
+    {
+        return Some(time.assume_utc().unix_timestamp());
     }
-    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+    Date::parse(text, DAY)
         .ok()
-        .map(|date| {
-            date.and_hms_opt(0, 0, 0)
-                .unwrap_or_default()
-                .and_utc()
-                .timestamp()
-        })
+        .map(|date| date.midnight().assume_utc().unix_timestamp())
 }
+
+/// A day as `%Y-%m-%d` reads it, its month and day of one or two digits.
+pub(crate) const DAY: &[BorrowedFormatItem<'_>] =
+    format_description!("[year]-[month padding:none]-[day padding:none]");
 
 /// Packs a release date as [`crate::normalized_date`] reads it, as yyyymmdd. Missing parts are
 /// zero.

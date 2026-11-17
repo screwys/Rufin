@@ -56,6 +56,10 @@ pub struct PlaylistEntriesView {
 }
 
 impl PlaylistEntriesView {
+    pub fn scroll_parts(&self) -> (gtk::ScrolledWindow, gtk::Widget) {
+        self.collection.scroll_parts()
+    }
+
     pub fn play(
         &self,
         queue: &rufin_core::playback::PlaybackOwner,
@@ -714,8 +718,8 @@ impl PlaylistEntryGridCell {
         playing: TrackRowPlayingIndicator,
     ) -> Self {
         let cover = crate::widgets::artwork::ArtworkTile::new_elastic_square();
-        let cover_frame = super::cards::square_cover_frame(&cover.widget(), None);
-        let body = CollectionGridCardCell::new(&shell, fields, cover_frame.upcast());
+        let cover_frame = super::cards::square_cover_frame(&cover.widget());
+        let body = CollectionGridCardCell::with_plain_cover(&shell, fields, cover_frame.upcast());
         let current = Rc::new(RefCell::new(None));
         let context_current = Rc::clone(&current);
         install_playlist_entry_context(

@@ -156,13 +156,14 @@ fn library_uri(keys: &[String]) -> SourceResult<String> {
 
 impl PlexSource {
     pub(crate) async fn companion_context(&self, source_id: &SourceId) -> PlexCompanionContext {
+        let connection = self.connection().await;
         PlexCompanionContext {
             source_id: source_id.clone(),
             server_id: self.config.server_id.clone(),
             profile_id: self.config.profile_id.clone(),
-            base_url: self.config.base_url.clone(),
+            trust_invalid_certificate: self.trust_invalid_certificate(&connection),
+            base_url: connection.address.into(),
             client_id: self.login.lock().await.client_id().to_string(),
-            trust_invalid_certificate: self.config.trust_invalid_certificate(),
         }
     }
 

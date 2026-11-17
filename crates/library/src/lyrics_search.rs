@@ -191,36 +191,6 @@ fn expressions(query: &str) -> Vec<Vec<Phrase>> {
 /// Tokens per excerpt, as `snippet()` was asked for.
 const EXCERPT_TOKENS: i64 = 32;
 
-/// A combining mark that `unicode61` folds away inside a word.
-fn diacritic(character: char) -> bool {
-    let code = character as u32;
-    match code {
-        768..=799 => 0x0802_9FDF_u32 >> (code - 768) & 1 == 1,
-        800..=817 => 0x0003_61F8_u32 >> (code - 800) & 1 == 1,
-        _ => false,
-    }
-}
-
-/// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
-/// letter with diacritics becomes its base letter.
-pub(crate) fn fold(character: char, folded: &mut String) {
-    for lower in character.to_lowercase() {
-        let mut base = None;
-        let mut marks = true;
-        unicode_normalization::char::decompose_canonical(lower, |part| match base {
-            None => base = Some(part),
-            Some(_) => marks &= unicode_normalization::char::is_combining_mark(part),
-        });
-        match base {
-            _ if diacritic(lower) => {}
-            Some(base) if u32::from(lower) < 0x2000 && base.is_ascii_alphabetic() && marks => {
-                folded.push(base);
-            }
-            _ => folded.push(lower),
-        }
-    }
-}
-
 /// The tokens `rufin_lyrics` splits a text into: byte range and folded text.
 fn tokens(text: &str) -> Vec<(usize, usize, String)> {
     let mut tokens: Vec<(usize, usize, String)> = Vec::new();
@@ -230,9 +200,8 @@ fn tokens(text: &str) -> Vec<(usize, usize, String)> {
         if crate::lyrics_tokenizer::character_token(character) {
             tokens.push((offset, end, character.to_string()));
             open = false;
-        } else if character.is_alphanumeric()
-            && !unicode_normalization::char::is_combining_mark(character)
-            || open && diacritic(character)
+        } else if character.is_alphanumeric() && !names::combining_mark(character)
+            || open && names::diacritic(character)
         {
             if !open {
                 tokens.push((offset, end, String::new()));
@@ -240,7 +209,7 @@ fn tokens(text: &str) -> Vec<(usize, usize, String)> {
             }
             let token = tokens.last_mut().expect("an open token");
             token.1 = end;
-            fold(character, &mut token.2);
+            names::fold(character, &mut token.2);
         } else {
             open = false;
         }

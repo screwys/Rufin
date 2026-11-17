@@ -14,6 +14,7 @@ pub(crate) mod cards;
 mod collection_context;
 mod collections;
 pub(crate) mod columns;
+mod detail_scroll;
 mod detail_showcase;
 pub mod folders;
 pub(crate) mod grid_cells;

@@ -791,7 +791,11 @@ fn playback_json(
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,
+            "contexts":match &current.row.provenance {
+                playback::QueueProvenance::Context { context_id, .. } => rufin_core::collection_context::playing_contexts(context_id).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            },"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview),"labels":rufin_core::settings::presentation::now_playing_labels(Some(current), None),
             "live":current.live.is_some(),"picture":live_picture(current)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},
@@ -897,7 +901,8 @@ fn error(status: StatusCode, message: impl std::fmt::Display) -> Error {
     (status, axum::Json(json!({"error":message.to_string()})))
 }
 struct Authorization {
-    token: String,
+    /// The Authorization header's hash; `blake3::Hash` compares in constant time.
+    bearer: blake3::Hash,
     failures: Mutex<VecDeque<(IpAddr, Instant, u8)>>,
     browser_key: [u8; 32],
 }
@@ -968,7 +973,7 @@ mod authentication_tests {
 impl Authorization {
     fn new(token: &str) -> Self {
         Self {
-            token: format!("Bearer {token}"),
+            bearer: blake3::hash(format!("Bearer {token}").as_bytes()),
             failures: Mutex::new(VecDeque::new()),
             browser_key: blake3::derive_key("Rufin browser authentication v1", token.as_bytes()),
         }
@@ -999,9 +1004,7 @@ impl Authorization {
                 return Err(Box::new(response));
             }
         }
-        if token.is_some_and(|token| {
-            constant_time_eq::constant_time_eq(token.as_bytes(), self.token.as_bytes())
-        }) {
+        if token.is_some_and(|token| blake3::hash(token.as_bytes()) == self.bearer) {
             if let Some(index) = previous {
                 failures.remove(index);
             }

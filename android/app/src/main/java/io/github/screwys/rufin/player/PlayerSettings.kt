@@ -3,7 +3,11 @@ package io.github.screwys.rufin.player
 import io.github.screwys.rufin.ui.RufinSlider
 
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
+import io.github.screwys.rufin.shared.rufin_core.SourceSummary
+import io.github.screwys.rufin.shared.rufin_core.showsServerRecommendations
+import io.github.screwys.rufin.shared.library.SameArtist
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.SegmentedPill
 import io.github.screwys.rufin.ui.PagerTabIndicator
 import io.github.screwys.rufin.ui.showPage
 import androidx.activity.compose.BackHandler
@@ -42,7 +46,7 @@ import io.github.screwys.rufin.shared.playback.PlaybackTransitionMode
 import io.github.screwys.rufin.shared.playback.LoudnessNormalization
 import io.github.screwys.rufin.shared.playback.LoudnessNormalizationScope
 import io.github.screwys.rufin.shared.playback.VolumeScale
-import io.github.screwys.rufin.shared.playback.StreamQuality
+import io.github.screwys.rufin.downloads.AudioQualityControls
 import io.github.screwys.rufin.shared.rufin_core.VisualizerStyle
 import io.github.screwys.rufin.shared.rufin_core.VisualizerFrequencyScale
 import io.github.screwys.rufin.shared.rufin_core.VisualizerWeighting
@@ -140,46 +144,87 @@ private fun TransitionAndSpeed(player: PlayerConnection) {
     PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
 }
 
+private enum class PlaybackTab(val title: String) { Queue("Queue"), AutoDj("Auto DJ"), Audio("Audio") }
+
 @Composable
-internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection, output: () -> Unit) {
+internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection, sources: List<SourceSummary>, output: () -> Unit) {
     val state = player.settings ?: return
     val options = player.preferenceOptions ?: return
     val playback = state.playback
     var confirmEbu by remember { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(PlaybackTab.Queue) }
     fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
-    SettingsGroup {
-        TransitionAndSpeed(player)
-        PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
-        PreferenceSwitch("Skip unplayable tracks", playback.skipUnplayableTracks) { change { setSkipUnplayableTracks(it) } }
-        preferences.applicationSettings?.let { application ->
-            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(),
-                options.minAutoDjRefillThreshold.toDouble()..options.maxAutoDjRefillThreshold.toDouble()) {
-                preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) }
+    Column(Modifier.fillMaxSize()) {
+        SegmentedPill(PlaybackTab.entries, tab, { tab = it }, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+            equal = true) { option, _ ->
+            Text(translate(option.title), style = MaterialTheme.typography.titleSmall, maxLines = 1)
+        }
+        SettingsPage(Modifier.weight(1f)) {
+            when (tab) {
+                PlaybackTab.Queue -> {
+                    SettingsGroup {
+                        TransitionAndSpeed(player)
+                        PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
+                        PreferenceSwitch("Skip unplayable tracks", playback.skipUnplayableTracks) { change { setSkipUnplayableTracks(it) } }
+                        PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
+                    }
+                }
+                PlaybackTab.AutoDj -> {
+                    preferences.applicationSettings?.let { application ->
+                        SettingsGroup(description = translate("What Auto DJ and radio pick")) {
+                            // The choice shows where a configured server recommends; unset reads as on.
+                            if (showsServerRecommendations(sources)) SettingsSwitch(translate("Override server recommendations"), application.overrideServerRecommendations != false,
+                                summary = translate("Play Rufin's picks instead of the server's own")) { preferences.changePreference { setOverrideServerRecommendations(it) } }
+                            SettingsSwitch(translate("Similar artists from ListenBrainz"), application.autoDjSimilarArtists,
+                                summary = translate("Look up the artists that listeners play alongside the current one")) { preferences.changePreference { setAutoDjSimilarArtists(it) } }
+                            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(),
+                                options.minAutoDjRefillThreshold.toDouble()..options.maxAutoDjRefillThreshold.toDouble()) {
+                                preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) }
+                            }
+                            SettingsNumber(translate("Tracks per refill"), application.autoDjRefillCount.toDouble(),
+                                options.minAutoDjRefillCount.toDouble()..options.maxAutoDjRefillCount.toDouble()) {
+                                preferences.changePreference { setAutoDjRefillCount((it as Number).toInt().toUByte()) }
+                            }
+                            PreferenceChoice(translate("Same artist"), application.autoDjSameArtist.name,
+                                listOf(SameArtist.FEW.name to translate("Few"), SameArtist.SOME.name to translate("Some"), SameArtist.MANY.name to translate("Many")),
+                                select = { preferences.changePreference { setAutoDjSameArtist(SameArtist.valueOf(it)) } })
+                            SettingsSwitch(translate("Skip low-rated tracks"), application.autoDjSkipLowRated,
+                                summary = translate("Leave out tracks rated two stars or lower")) { preferences.changePreference { setAutoDjSkipLowRated(it) } }
+                        }
+                    }
+                }
+                PlaybackTab.Audio -> {
+                    SettingsGroup {
+                        SettingsRow(translate("Audio output"), modifier = Modifier.clickable(onClick = output))
+                        PreferenceChoice(translate("Loudness normalization"), playback.loudnessNormalization.name,
+                            listOf(LoudnessNormalization.OFF.name to translate("Off"), LoudnessNormalization.REPLAY_GAIN.name to "ReplayGain", LoudnessNormalization.EBU_R128.name to "EBU R128"), select = {
+                                val mode = LoudnessNormalization.valueOf(it)
+                                if (mode == LoudnessNormalization.EBU_R128 && playback.loudnessNormalization != mode) confirmEbu = true
+                                else change { setLoudnessNormalization(mode) }
+                            })
+                        PreferenceChoice(translate("Normalization scope"), playback.loudnessNormalizationScope.name,
+                            listOf(LoudnessNormalizationScope.TRACK.name to translate("Track"), LoudnessNormalizationScope.ALBUM.name to translate("Album")),
+                            select = { change { setLoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it)) } })
+                        SettingsSliderNumber(translate("Target loudness"), playback.ebuR128TargetLufs,
+                            options.minEbuR128TargetLufs..options.maxEbuR128TargetLufs, .1, unit = "LUFS") { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
+                        PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change { setWriteEbuR128Tags(it) } }
+                        PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
+                            listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
+                            select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
+                    }
+                    SettingsGroup(translate("Stream quality")) {
+                        AudioQualityControls(playback.streamQuality) { quality -> quality?.let { change { setStreamQuality(it) } } }
+                    }
+                    preferences.applicationSettings?.let { application ->
+                        SettingsGroup(translate("Stream quality on mobile data")) {
+                            AudioQualityControls(application.mobileDataStreamQuality, follows = true) { quality ->
+                                preferences.changePreference { setMobileDataStreamQuality(quality) }
+                            }
+                        }
+                    }
+                }
             }
         }
-        PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
-        PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
-            listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
-            select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
-    }
-    SettingsGroup(translate("Audio")) {
-        SettingsRow(translate("Audio output"), modifier = Modifier.clickable(onClick = output))
-        PreferenceChoice(translate("Loudness normalization"), playback.loudnessNormalization.name,
-            listOf(LoudnessNormalization.OFF.name to translate("Off"), LoudnessNormalization.REPLAY_GAIN.name to "ReplayGain", LoudnessNormalization.EBU_R128.name to "EBU R128"), select = {
-                val mode = LoudnessNormalization.valueOf(it)
-                if (mode == LoudnessNormalization.EBU_R128 && playback.loudnessNormalization != mode) confirmEbu = true
-                else change { setLoudnessNormalization(mode) }
-            })
-        PreferenceChoice(translate("Normalization scope"), playback.loudnessNormalizationScope.name,
-            listOf(LoudnessNormalizationScope.TRACK.name to translate("Track"), LoudnessNormalizationScope.ALBUM.name to translate("Album")),
-            select = { change { setLoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it)) } })
-        SettingsSliderNumber(translate("Target loudness"), playback.ebuR128TargetLufs,
-            options.minEbuR128TargetLufs..options.maxEbuR128TargetLufs, .1, unit = "LUFS") { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
-        PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change { setWriteEbuR128Tags(it) } }
-        val bitrate = (playback.streamQuality as? StreamQuality.MaxBitrateKbps)?.v1?.toString() ?: "original"
-        PreferenceChoice(translate("Stream quality"), bitrate,
-            listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
-            select = { change { setStreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt())) } })
     }
     if (confirmEbu) AlertDialog(onDismissRequest = { confirmEbu = false },
         title = { Text(translate("Enable EBU R128 Analysis?")) },

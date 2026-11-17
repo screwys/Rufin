@@ -125,27 +125,82 @@
                 </child>
                 <child>
                   <object class="AdwPreferencesGroup">
-                    <property name="title" translatable="yes">Navigation</property>
+                    <property name="title" translatable="yes">Grids</property>
                     <child>
-                      <object class="AdwActionRow" id="sidebar_items_row">
-                        <property name="title" translatable="yes">Sidebar items</property>
-                        <property name="activatable">true</property>
+                      <object class="AdwSwitchRow" id="grid_favorite_badges_row">
+                        <property name="title" translatable="yes">Show a badge for favorited items</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="grid_star_ratings_row">
+                        <property name="title" translatable="yes">Show star ratings</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="sidebar_group">
+                    <property name="title" translatable="yes">Sidebar items</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="saved_row">
+                        <property name="title" translatable="yes">Saved</property>
+                        <property name="subtitle" translatable="yes">Fixed position</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStackPage">
+            <property name="name">home</property>
+            <property name="title" translatable="yes">Home</property>
+            <property name="child">
+              <object class="AdwPreferencesPage">
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Display</property>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title" translatable="yes">Size</property>
                         <child type="suffix">
-                          <object class="GtkImage">
-                            <property name="icon-name">rufin-go-next-symbolic</property>
+                          <object class="AdwToggleGroup" id="home_size">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Compact</property></object></child>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Default</property></object></child>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Large</property></object></child>
                           </object>
                         </child>
                       </object>
                     </child>
                     <child>
-                      <object class="AdwActionRow" id="home_blocks_row">
-                        <property name="title" translatable="yes">Home blocks</property>
-                        <property name="activatable">true</property>
+                      <object class="AdwActionRow">
+                        <property name="title" translatable="yes">Spacing</property>
                         <child type="suffix">
-                          <object class="GtkImage">
-                            <property name="icon-name">rufin-go-next-symbolic</property>
+                          <object class="AdwToggleGroup" id="home_spacing">
+                            <property name="valign">center</property>
+                            <property name="can-shrink">true</property>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Small</property></object></child>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Default</property></object></child>
+                            <child><object class="AdwToggle"><property name="label" translatable="yes">Wide</property></object></child>
                           </object>
                         </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title" translatable="yes">Blocks</property>
+                    <child>
+                      <object class="GtkListBox" id="home_blocks">
+                        <property name="selection-mode">none</property>
+                        <style>
+                          <class name="boxed-list" />
+                        </style>
                       </object>
                     </child>
                   </object>

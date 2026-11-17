@@ -251,7 +251,7 @@ impl CatalogUi {
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
             ArtistReleaseRoutePreamble {
-                header: artist_subroute_header(self, &summary, msgid("Discography")),
+                header: artist_subroute_header(self, &summary, msgid("Discography")).1,
                 favorite: None,
                 favorite_present: false,
                 empty: crate::library::route_layout::route_empty_view(msgid(
@@ -358,17 +358,16 @@ impl CatalogUi {
             self.scrolling_track_projection(rows.clone(), key, context);
         let root = crate::library::route_layout::detail_route_wrapper(18);
         root.set_margin_top(crate::library::route_layout::ROUTE_TOP_MARGIN);
-        root.append(&super::collections::library_route_inset(
-            artist_subroute_header(
-                self,
-                &summary,
-                if favorites_only {
-                    msgid("Favorite tracks")
-                } else {
-                    msgid("Tracks")
-                },
-            ),
-        ));
+        let (header, header_widget) = artist_subroute_header(
+            self,
+            &summary,
+            if favorites_only {
+                msgid("Favorite tracks")
+            } else {
+                msgid("Tracks")
+            },
+        );
+        root.append(&super::collections::library_route_inset(header_widget));
         root.append(&tracks_widget);
         let layout_cycle = toolbar.layout_cycle();
         let reads = tracks.page_reads(|_| {}, |_| {});
@@ -383,7 +382,7 @@ impl CatalogUi {
                 reads.resume(&shell.settings.current.borrow());
             })
         };
-        MountedRoute::new(root.upcast(), resume)
+        MountedRoute::new(header.scrolling_page(&root, tracks.scroll_parts()), resume)
             .with_rows(&rows)
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(tracks.search())
@@ -560,7 +559,6 @@ fn artist_detail_header_restored(
             shape: ShowcaseShape::Detail,
             initial_width: width,
             cover: ShowcaseCover::Single(cover.clone()),
-            play_label: msgid("Play artist"),
             play,
             menu,
             download: true,
@@ -577,12 +575,12 @@ fn artist_detail_header_restored(
     }
 }
 
-/// An artist sub-page's band: the artist and the page under the name.
+/// An artist sub-page's band, and the band mounted: the artist and the page under the name.
 fn artist_subroute_header(
     shell: &Rc<CatalogUi>,
     artist: &ArtistView,
     kind_text: &'static str,
-) -> gtk::Widget {
+) -> (DetailShowcaseView, gtk::Widget) {
     let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
         shell.route_width(),
         PRIMARY_ROUTE_MARGIN_START,
@@ -598,7 +596,8 @@ fn artist_subroute_header(
             .map(ArtworkBinding::opaque)
             .unwrap_or_default(),
     );
-    header.mount_plain(width)
+    let mounted = header.mount_plain(width);
+    (header, mounted)
 }
 
 fn artist_count_button(icon_name: &str, text: &str) -> (gtk::Button, gtk::Label) {

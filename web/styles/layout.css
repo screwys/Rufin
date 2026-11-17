@@ -199,6 +199,7 @@ nav .icon {
   display: flex;
   align-items: center;
   border-radius: 7px;
+  transition: opacity 200ms ease-out;
 }
 
 .pin-row:hover,
@@ -270,28 +271,50 @@ nav .icon {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A row's play controls at its end: one block in the row's hover colour, so the row's text ends
+   under it, holding the grid card's Play group at a row's size. */
 .pin-controls {
-  display: flex;
+  --cover-play: 30px;
+  --cover-side: 26px;
+  --cover-glass: color-mix(in srgb, currentColor 10%, transparent);
   position: absolute;
   right: 2px;
-  gap: 5px;
-  padding: 3px;
-  background: var(--sidebar);
-  border-radius: 6px;
+  width: 102px;
+  height: 40px;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 8%, var(--sidebar));
   visibility: hidden;
+}
+
+.pin-controls .cover-morph button {
+  pointer-events: auto;
+}
+
+.pin-controls .cover-morph .cover-play {
+  box-shadow: none;
+}
+
+.pin-controls .cover-morph .cover-play .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.pin-controls .cover-morph .cover-side {
+  color: inherit;
+}
+
+.pin-controls .cover-morph:is(:hover, :focus-within) .cover-side {
+  margin: 0 2px;
+}
+
+.pin-controls .cover-morph .cover-side:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 .pin-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pin-controls > .icon-button {
-  flex-shrink: 0;
-  width: 28px;
-  min-width: 28px;
-  padding: 5px;
 }
 
 .pin-row.controls-visible .pin-controls,
@@ -303,6 +326,29 @@ nav .icon {
 
 .pin-drop {
   outline: 2px solid var(--accent);
+}
+
+/* While a drag is over the sidebar: where a new pin drops, and the pins that cannot take it. */
+#pin-new {
+  gap: 8px;
+  max-height: 0;
+  padding: 0 5px;
+  border: 0 dashed color-mix(in srgb, currentColor 32%, transparent);
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 200ms ease-out, padding 200ms ease-out, opacity 200ms ease-out;
+}
+#pin-new.open {
+  max-height: 52px;
+  padding: 5px;
+  border-width: 1px;
+  opacity: 1;
+}
+#pin-new .pin-cover {
+  opacity: 0.62;
+}
+.pin-row.drop-unavailable {
+  opacity: 0.45;
 }
 
 /* The compact rail: GTK's 72px column of icons over their names, and pinned covers. */
@@ -335,11 +381,17 @@ nav .icon {
 }
 #app[data-left="compact"] #pins h2,
 #app[data-left="compact"] .pin-label,
-#app[data-left="compact"] .pin-controls {
+#app[data-left="compact"] .pin-row .pin-controls {
   display: none;
 }
 #app[data-left="compact"] .pin-row .pin-open {
   justify-content: center;
+}
+#app[data-left="compact"] #pin-new {
+  justify-content: center;
+}
+#app[data-left="compact"] #pin-new .pin-title {
+  display: none;
 }
 
 /* A hidden sidebar opens over the page from the top bar's sidebar button. */

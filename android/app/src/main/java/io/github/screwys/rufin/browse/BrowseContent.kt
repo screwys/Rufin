@@ -21,6 +21,8 @@ import io.github.screwys.rufin.ui.Cover
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.FallbackCover
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.FavoriteHeart
+import io.github.screwys.rufin.ui.rememberFavoriteMotion
 import io.github.screwys.rufin.ui.PlayingIndicator
 import io.github.screwys.rufin.ui.rufinMarquee
 import io.github.screwys.rufin.player.PlayerIconButton
@@ -43,6 +45,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.CircleShape
+import io.github.screwys.rufin.settings.LocalGridFavoriteBadges
+import io.github.screwys.rufin.settings.LocalGridStarRatings
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -79,6 +85,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Velocity
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -366,27 +373,30 @@ private fun HomeContent(
                             ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
                         }
                     }
-                    // Genres wrap as chips, track blocks page through columns of two rows, and the rest
-                    // are cards.
-                    // Tracks and genres page through columns of two rows; a genre row opens the genre, a
-                    // track row its menu, as Home's cards do.
-                    if (section.kind == AndroidHomeSectionKind.GENRES || section.kind == AndroidHomeSectionKind.TRACKS) LazyRow(
+                    // Core says how a block's columns show: the rows each stacks, or one card. A genre row
+                    // opens the genre, any other its menu, as Home's cards do. Home's Size and Spacing set
+                    // the widths and gaps.
+                    if (!section.cards) LazyRow(
                         modifier = Modifier.nestedScroll(sectionScroll),
-                        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(when (section.spacing) { DisplaySize.COMPACT -> 8.dp; DisplaySize.LARGE -> 24.dp; else -> 16.dp })) {
                         val genres = section.kind == AndroidHomeSectionKind.GENRES
-                        items(section.items.chunked(2), key = { column -> browseItemKey(column.first()) }) { column ->
-                            Column(Modifier.width(300.dp)) {
+                        val cover = when (section.size) { DisplaySize.COMPACT -> 44.dp; DisplaySize.LARGE -> 64.dp; else -> 56.dp }
+                        items(section.items.chunked(section.columnRows), key = { column -> browseItemKey(column.first()) }) { column ->
+                            Column(Modifier.width(when (section.size) { DisplaySize.COMPACT -> 260.dp; DisplaySize.LARGE -> 340.dp; else -> 300.dp })) {
                                 column.forEach { item ->
                                     if (genres) HomeRow(item, player, { onActivate(item) }, onMenu,
-                                        item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "))
-                                    else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle)
+                                        item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "), cover)
+                                    else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle, cover)
                                 }
                             }
                         }
                     } else LazyRow(modifier = Modifier.nestedScroll(sectionScroll),
-                        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(when (section.spacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp })) {
+                        val width = when (section.size) { DisplaySize.COMPACT -> 120.dp; DisplaySize.LARGE -> 180.dp; else -> 150.dp }
                         items(section.items, key = ::browseItemKey) { item ->
-                            CoverCard(item, player, Modifier.width(150.dp), onMenu, onMenu, oneLine = true)
+                            CoverCard(item, player, Modifier.width(width), onMenu, onMenu, oneLine = true)
                         }
                     }
                 }
@@ -418,15 +428,15 @@ private fun PaneRow(item: BrowseItem, player: PlayerConnection, onActivate: (Bro
     }
 }
 
-/** A row in a Home block (a track or a genre): cover, title and its line, and ⋯ for its menu. */
+/** A row in a Home block: cover, title and its line, and ⋯ for its menu. */
 @Composable
 private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    line: String) {
+    line: String, cover: Dp) {
     val shown = favoriteItem(player.model, item)
-    val artwork = rememberBrowseArtwork(item, player, 56.dp)
-    Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
+    val artwork = rememberBrowseArtwork(item, player, cover)
+    Row(Modifier.fillMaxWidth().height(cover + 16.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        BrowseCover(item, artwork, Modifier.size(56.dp).clip(CoverShape))
+        BrowseCover(item, artwork, Modifier.size(cover).clip(CoverShape))
         Column(Modifier.weight(1f)) {
             BrowseTitle(shown, maxLines = 1, style = MaterialTheme.typography.bodyLarge, player = player, showDownloadBadge = false)
             if (line.isNotBlank()) Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -490,7 +500,7 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         // Phones: a 120 dp cover; wider panes grow it to 196 dp, as GTK's Home does.
         val cover = ((maxWidth - 32.dp) * .3f).coerceIn(112.dp, 196.dp)
-        val artwork = rememberBrowseArtwork(item, player, cover)
+        val artwork = rememberBrowseArtwork(item, player, cover, animated = true)
         // The bar over the band draws this band, at its place and size, once the page moves under it.
         var bandSize by remember { mutableStateOf(Size.Zero) }
         val bandSlot = LocalHomeBand.current
@@ -519,8 +529,7 @@ private fun HomeBandPage(item: BrowseItem, player: PlayerConnection, onMenu: (Br
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ShowcasePill("rufin-media-playback-start-symbolic", "Play", true, { onPlay(false) }, { onPlay(true) })
                 ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) })
-                ShowcaseRound(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
-                    { onFavorite(projected) }, if (projected.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
+                ShowcaseRound("rufin-heart-outline-symbolic", "Favorite", { onFavorite(projected) }, favorite = projected.row.favorite)
             }
         }
         BrowseCover(item, artwork, Modifier.padding(start = 16.dp, top = bar + 24.dp, bottom = 16.dp).size(cover)
@@ -550,22 +559,31 @@ internal fun ShowcasePill(icon: String, label: String, primary: Boolean, onClick
 
 /** A round button beside the pills; `onBand` is its fill on a band. */
 @Composable
-internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current, onBand: Boolean = false) {
+/** A round header button. With `favorite`, it is a favorite toggle in that state and shows its [FavoriteHeart]. */
+internal fun ShowcaseRound(icon: String, label: String, onClick: () -> Unit, tint: Color = LocalContentColor.current, onBand: Boolean = false,
+    favorite: Boolean? = null) {
+    val motion = rememberFavoriteMotion()
     Box(Modifier.size(40.dp).focusRing(androidx.compose.foundation.shape.CircleShape).clip(androidx.compose.foundation.shape.CircleShape)
-        .background(if (onBand) Color.White.copy(alpha = .17f) else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f)).clickable(onClick = onClick),
+        .background(if (onBand) Color.White.copy(alpha = .17f) else MaterialTheme.colorScheme.onSurface.copy(alpha = .11f))
+        .clickable { favorite?.let(motion::clicked); onClick() },
         contentAlignment = Alignment.Center) {
-        RufinIcon(icon, translate(label), Modifier.size(20.dp), tint)
+        if (favorite != null) FavoriteHeart(favorite, motion, translate(label), Modifier.size(20.dp))
+        else RufinIcon(icon, translate(label), Modifier.size(20.dp), tint)
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shuffle: (() -> Unit)? = null,
-    tint: Color = LocalContentColor.current,
+    /** A favorite toggle's state: the button then shows its [FavoriteHeart]. */
+    favorite: Boolean? = null,
 ) {
-    Box(Modifier.size(48.dp).focusRing(androidx.compose.foundation.shape.CircleShape).combinedClickable(onClick = action, onLongClick = shuffle,
+    val motion = rememberFavoriteMotion()
+    Box(Modifier.size(48.dp).focusRing(androidx.compose.foundation.shape.CircleShape).combinedClickable(
+        onClick = { favorite?.let(motion::clicked); action() }, onLongClick = shuffle,
         onLongClickLabel = if (shuffle == null) null else translate("{action} (Shuffle)").replace("{action}", translate(label))), contentAlignment = Alignment.Center) {
-        RufinIcon(icon, translate(label), Modifier.size(24.dp), tint, glyph = true)
+        if (favorite != null) FavoriteHeart(favorite, motion, translate(label), Modifier.size(24.dp), glyph = true)
+        else RufinIcon(icon, translate(label), Modifier.size(24.dp), glyph = true)
     }
 }
 
@@ -576,11 +594,9 @@ private fun browseItemKey(item: BrowseItem): String = "${item.row.sourceId.orEmp
 internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem =
     model.browse.shown(item)
 
+/** Whether `item` plays: its track, or its collection among what plays. */
 @Composable
-internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
-    maxLines: Int = 1, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge,
-    player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true,
-    title: String = item.row.title) {
+private fun rememberPlaying(item: BrowseItem, player: PlayerConnection?): Boolean {
     val row = item.row
     val occurrence = row.track?.entry != null
     val track = row.isTrack
@@ -595,9 +611,21 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
                 target != null && context != null && playsContext(target, context)
             }
     } }
+    return playing
+}
+
+@Composable
+internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
+    maxLines: Int = 1, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge,
+    player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true,
+    title: String = item.row.title,
+    /** Whether the title shows the playing bars; a grid card shows them on its cover. */
+    playingIndicator: Boolean = true) {
+    val row = item.row
+    val playing = rememberPlaying(item, player)
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (row.playlistFolder != null) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
-        if (playing) PlayingIndicator()
+        if (playing && playingIndicator) PlayingIndicator()
         Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,
             color = if (playing) MaterialTheme.colorScheme.secondary else LocalContentColor.current)
@@ -691,9 +719,9 @@ internal fun showcasePaint(key: String): Modifier {
 }
 
 @Composable
-private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp): Cover {
+private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, size: Dp, animated: Boolean = false): Cover {
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    return rememberArtwork(item.row.artworkIdentity, player, pixels)
+    return rememberArtwork(item.row.artworkIdentity, player, pixels, animated)
 }
 
 @Composable
@@ -713,18 +741,23 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
 ) {
     val shown = favoriteItem(player.model, item)
     BoxWithConstraints(modifier) {
-        val artwork = rememberBrowseArtwork(item, player, maxWidth)
+        val width = maxWidth
+        val artwork = rememberBrowseArtwork(item, player, width)
         BrowseSwipeActions(item, !oneLine) {
         Column(Modifier.fillMaxWidth().focusRing(CoverShape).combinedClickable(onClick = { onActivate(item) },
             onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
+                // Home's cards carry neither of the Grids settings' marks.
+                if (!oneLine) CoverMarks(shown, width)
+                if (rememberPlaying(item, player)) CoverPlaying(width)
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Cards carry no download badge; list rows do.
                 BrowseTitle(shown, Modifier.weight(1f), maxLines = if (oneLine) 1 else 2,
-                    style = MaterialTheme.typography.titleSmall, player = player, showDownloadBadge = false)
+                    style = MaterialTheme.typography.titleSmall, player = player, showDownloadBadge = false,
+                    playingIndicator = false)
             }
             // The labels under the title: the list's grid fields, one per line.
             shown.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
@@ -734,6 +767,65 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
             }
         }
         }
+    }
+}
+
+/** The sizes a cover's marks take by its width, as on GTK: every corner's glyph, `glyph` wide, sits `inset`
+ *  from its two edges, so the favorite's heart, the rating and the playing bars line up; the favorite is
+ *  the corner tab itself, `tab` wide. */
+private data class CoverMarkSizes(val glyph: Dp, val inset: Dp, val tab: Dp)
+
+private fun coverMarkSizes(width: Dp) = when {
+    width >= 184.dp -> CoverMarkSizes(16.dp, 12.dp, 50.dp)
+    width >= 150.dp -> CoverMarkSizes(14.dp, 10.dp, 44.dp)
+    width >= 128.dp -> CoverMarkSizes(13.dp, 9.dp, 41.dp)
+    else -> CoverMarkSizes(12.dp, 8.dp, 36.dp)
+}
+
+/** A grid cover's marks, as the Grids settings show them: a favorite's corner tab on the top left and
+ *  a rating's stars on the top right. Tracks, albums and artists alone carry either. */
+@Composable
+private fun BoxScope.CoverMarks(item: BrowseItem, width: Dp) {
+    val favorite = LocalGridFavoriteBadges.current && item.row.favorite
+    val rating = item.row.rating?.toInt()?.takeIf { LocalGridStarRatings.current && it > 0 }
+    if (!favorite && rating == null) return
+    val sizes = coverMarkSizes(width)
+    Box(Modifier.matchParentSize().clip(CoverShape)) {
+        if (favorite) {
+            val shape = RoundedCornerShape(topStart = CoverShape.topStart, topEnd = CornerSize(0),
+                bottomEnd = CornerSize(100), bottomStart = CornerSize(0))
+            Box(Modifier.align(Alignment.TopStart).size(sizes.tab).shadow(4.dp, shape).background(MaterialTheme.colorScheme.primary, shape)
+                .semantics { contentDescription = translate("Favorite") }) {
+                RufinIcon("rufin-heart-filled-symbolic", null,
+                    Modifier.align(Alignment.TopStart).padding(top = sizes.inset, start = sizes.inset).size(sizes.glyph),
+                    MaterialTheme.colorScheme.onPrimary)
+            }
+        }
+        if (rating != null) {
+            // The pill shows at rest, where nothing darkens the cover; its last star ends on the heart's line.
+            Row(Modifier.align(Alignment.TopEnd).padding(top = sizes.inset - 4.dp, end = sizes.inset - 5.dp)
+                .height(sizes.glyph + 8.dp)
+                .background(Color.Black.copy(alpha = .52f), RoundedCornerShape(50)).padding(horizontal = 5.dp)
+                .clearAndSetSemantics { contentDescription = translate("Rating") },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                for (star in 0 until 5) {
+                    val left = rating - star * 2
+                    RufinIcon(when { left <= 0 -> "rufin-star-outline-symbolic"; left == 1 -> "rufin-star-half-symbolic"
+                        else -> "rufin-starred-symbolic" }, null, Modifier.size(sizes.glyph - 2.dp),
+                        if (left > 0) MaterialTheme.colorScheme.primary else Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** The playing bars on a grid cover's bottom left, on the glass the cover's other marks sit on. */
+@Composable
+private fun BoxScope.CoverPlaying(width: Dp) {
+    val sizes = coverMarkSizes(width)
+    Box(Modifier.align(Alignment.BottomStart).padding(sizes.inset - 5.dp).size(sizes.glyph + 10.dp)
+        .background(Color.Black.copy(alpha = .52f), CircleShape), contentAlignment = Alignment.Center) {
+        PlayingIndicator()
     }
 }
 
@@ -778,8 +870,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                     }
                     FlowRow {
                         ShowcaseAction("rufin-media-playback-start-symbolic", "Play album", { onPlay(false) }, { onPlay(true) })
-                        ShowcaseAction(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                            "Favorite", { onFavorite(projected) }, tint = if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        ShowcaseAction("rufin-heart-outline-symbolic", "Favorite", { onFavorite(projected) }, favorite = projected.row.favorite)
 
                     }
                 }

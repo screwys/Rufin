@@ -504,7 +504,7 @@ fn latin(name: &str) -> bool {
 fn folded(text: &str) -> String {
     let mut lower = String::with_capacity(text.len());
     for character in text.chars() {
-        crate::lyrics_search::fold(character, &mut lower);
+        names::fold(character, &mut lower);
     }
     lower
 }
@@ -1120,6 +1120,11 @@ impl Snapshot {
                 self.download_keys.remove(&record.key);
             }
         }
+    }
+
+    /// Whether a playlist is listed: it has a name and its source still lists it.
+    pub(crate) fn listed_playlist(&self, record: &PlaylistRec) -> bool {
+        !self.text(record.name).is_empty() && (record.flags & SOURCE_OWNED == 0 || record.indexed())
     }
 
     pub(crate) fn playlist(&self, key: i64) -> Option<Playlist> {

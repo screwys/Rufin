@@ -529,13 +529,6 @@ fn owned_old_helper_files(path: &Path, version: &str) -> Option<Vec<PathBuf>> {
     Some(files)
 }
 
-#[cfg(any(target_os = "windows", test))]
-fn release_asset_url(version: &str) -> String {
-    format!(
-        "https://github.com/screwys/Rufin/releases/download/v{version}/Rufin-{version}-setup.exe"
-    )
-}
-
 #[cfg(target_os = "windows")]
 fn release_api_url(version: &str) -> String {
     format!("https://api.github.com/repos/screwys/Rufin/releases/tags/v{version}")
@@ -546,16 +539,21 @@ fn installer_asset_name(version: &str) -> String {
     format!("Rufin-{version}-setup.exe")
 }
 
+/// The installer's download address and SHA-256 digest, as the release lists them.
 #[cfg(any(target_os = "windows", test))]
-fn release_digest(release: &GitHubRelease, version: &str) -> Result<String, UpdateError> {
+fn release_installer<'a>(
+    release: &'a GitHubRelease,
+    version: &str,
+) -> Result<(&'a str, String), UpdateError> {
     let expected_name = installer_asset_name(version);
-    let expected_url = release_asset_url(version);
     release
         .assets
         .iter()
-        .find(|asset| asset.name == expected_name && asset.browser_download_url == expected_url)
-        .and_then(|asset| asset.digest.as_deref())
-        .and_then(parse_sha256)
+        .find(|asset| asset.name == expected_name)
+        .and_then(|asset| {
+            let digest = parse_sha256(asset.digest.as_deref()?)?;
+            Some((asset.browser_download_url.as_str(), digest))
+        })
         .ok_or(UpdateError::MissingDigest)
 }
 
@@ -599,7 +597,7 @@ fn download_installer(version: &str, update_root: &Path) -> Result<PathBuf, Upda
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
         .and_then(reqwest::blocking::Response::json::<GitHubRelease>)?;
-    let expected_digest = release_digest(&release, version)?;
+    let (installer_url, expected_digest) = release_installer(&release, version)?;
 
     let downloads = update_root.join("downloads").join(version);
     fs::create_dir_all(&downloads)?;
@@ -608,10 +606,7 @@ fn download_installer(version: &str, update_root: &Path) -> Result<PathBuf, Upda
     remove_file_if_present(&partial)?;
 
     let download_result = (|| {
-        let mut response = client
-            .get(release_asset_url(version))
-            .send()?
-            .error_for_status()?;
+        let mut response = client.get(installer_url).send()?.error_for_status()?;
         if let Some(length) = response.content_length() {
             validate_installer_size(length)?;
         }
@@ -746,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn release_digest_requires_a_valid_digest_for_the_exact_asset() {
+    fn release_installer_requires_a_valid_digest_for_the_exact_asset() {
         let digest = "a".repeat(64);
         let release: GitHubRelease = serde_json::from_value(serde_json::json!({
             "assets": [
@@ -758,9 +753,15 @@ mod tests {
             ]
         }))
         .expect("release fixture");
-        assert_eq!(release_digest(&release, "1.2.3").unwrap(), digest);
+        assert_eq!(
+            release_installer(&release, "1.2.3").unwrap(),
+            (
+                "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+                digest
+            )
+        );
         assert!(matches!(
-            release_digest(&release, "1.2.4"),
+            release_installer(&release, "1.2.4"),
             Err(UpdateError::MissingDigest)
         ));
 
@@ -775,7 +776,7 @@ mod tests {
         }))
         .expect("release fixture");
         assert!(matches!(
-            release_digest(&malformed, "1.2.3"),
+            release_installer(&malformed, "1.2.3"),
             Err(UpdateError::MissingDigest)
         ));
         for digest in [
@@ -785,14 +786,14 @@ mod tests {
         ] {
             let mut asset = serde_json::json!({
                 "name": "Rufin-1.2.3-setup.exe",
-                "browser_download_url": release_asset_url("1.2.3"),
+                "browser_download_url": "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
             });
             if let Some(digest) = digest {
                 asset["digest"] = digest;
             }
             let release = serde_json::from_value(serde_json::json!({"assets": [asset]})).unwrap();
             assert!(matches!(
-                release_digest(&release, "1.2.3"),
+                release_installer(&release, "1.2.3"),
                 Err(UpdateError::MissingDigest)
             ));
         }

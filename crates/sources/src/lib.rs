@@ -12,7 +12,8 @@ extern crate self as sources;
 
 mod address;
 mod download;
-pub use download::{DownloadQuality, ResolvedDownload, downloaded_codec};
+pub use download::{ResolvedDownload, downloaded_codec};
+pub use library::AudioQuality;
 mod peer;
 pub use peer::{PeerAudio, PeerLink};
 mod config;
@@ -341,6 +342,8 @@ pub enum SourceError {
     Server { status: u16, message: String },
     #[error("source item was not found")]
     NotFound,
+    #[error("source denied access: {0}")]
+    Denied(String),
     #[error("source request is invalid: {0}")]
     InvalidRequest(&'static str),
     #[error("source operation was cancelled")]

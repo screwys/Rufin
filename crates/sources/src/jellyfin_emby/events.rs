@@ -10,10 +10,7 @@ use reqwest::StatusCode;
 use serde_json::Value;
 use std::time::Instant;
 use tokio::time::{Duration, interval, sleep};
-use tokio_tungstenite::{
-    WebSocketStream,
-    tungstenite::{Message, protocol::Role},
-};
+use tokio_websockets::{ClientBuilder, Message, WebSocketStream};
 use tracing::{debug, warn};
 
 use super::*;
@@ -80,7 +77,7 @@ impl JellyfinEmbySource {
             .upgrade()
             .await
             .map_err(|error| SourceError::Network(error.to_string()))?;
-        Ok(WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await)
+        Ok(ClientBuilder::new().take_over(upgraded))
     }
 
     pub(crate) async fn listen_library_changes(
@@ -128,24 +125,23 @@ impl JellyfinEmbySource {
                         return Ok(true);
                     };
                     heard = Instant::now();
-                    match message.map_err(websocket_error)? {
-                        Message::Text(text) => match library_socket_message(&text, &self.user_id)? {
-                            JellyfinSocketMessage::Change(change) => {
-                                if !on_change(change) {
-                                    return Ok(false);
-                                }
+                    let message = message.map_err(websocket_error)?;
+                    if message.is_close() {
+                        return Ok(true);
+                    }
+                    let Some(text) = message.as_text() else {
+                        continue;
+                    };
+                    match library_socket_message(text, &self.user_id)? {
+                        JellyfinSocketMessage::Change(change) => {
+                            if !on_change(change) {
+                                return Ok(false);
                             }
-                            JellyfinSocketMessage::ForceKeepAlive => {
-                                send_keep_alive(&mut socket).await?;
-                            }
-                            JellyfinSocketMessage::Other => {}
-                        },
-                        Message::Close(_) => return Ok(true),
-                        Message::Ping(payload) => socket
-                            .send(Message::Pong(payload))
-                            .await
-                            .map_err(websocket_error)?,
-                        Message::Pong(_) | Message::Binary(_) | Message::Frame(_) => {}
+                        }
+                        JellyfinSocketMessage::ForceKeepAlive => {
+                            send_keep_alive(&mut socket).await?;
+                        }
+                        JellyfinSocketMessage::Other => {}
                     }
                 }
             }
@@ -238,13 +234,11 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
 /// Jellyfin's keep-alive, and a ping whose pong shows the connection still stands.
 async fn send_keep_alive(socket: &mut WebSocketStream<reqwest::Upgraded>) -> SourceResult<()> {
     socket
-        .send(Message::Text(
-            r#"{"MessageType":"KeepAlive"}"#.to_string().into(),
-        ))
+        .send(Message::text(r#"{"MessageType":"KeepAlive"}"#))
         .await
         .map_err(websocket_error)?;
     socket
-        .send(Message::Ping(Vec::new().into()))
+        .send(Message::ping(""))
         .await
         .map_err(websocket_error)
 }
@@ -255,7 +249,7 @@ fn websocket_key() -> SourceResult<String> {
     Ok(general_purpose::STANDARD.encode(bytes))
 }
 
-fn websocket_error(error: tokio_tungstenite::tungstenite::Error) -> SourceError {
+fn websocket_error(error: tokio_websockets::Error) -> SourceError {
     SourceError::Network(error.to_string())
 }
 
@@ -332,7 +326,6 @@ mod tests {
                     user_id: "user".into(),
                     username: "listener".into(),
                     trust_invalid_cert: false,
-                    use_instant_mix: false,
                 },
                 "token".into(),
                 "device".into(),

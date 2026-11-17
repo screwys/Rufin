@@ -16,15 +16,15 @@ use tracing::warn;
 
 use crate::library::CatalogUi;
 use crate::library::collections::library_route_inset;
-use crate::library::detail_showcase::{MetaLine, band_stops, open_web_link, paint_band};
-use crate::library::route_layout::{
-    PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, route_scroller_widget,
+use crate::library::detail_showcase::{
+    DetailStrip, MetaLine, band_stops, open_web_link, paint_band,
 };
+use crate::library::route_layout::{PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN};
 use crate::shell::shell::Shell;
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::controls::{DELETE_ICON, EDIT_ICON};
 use crate::widgets::interactions::ContextMenuSurface;
-use crate::widgets::layout::{configure_fill_width_clip, width_allocation_owner};
+use crate::widgets::layout::width_allocation_owner;
 use crate::widgets::library_fields::opaque_artwork;
 use crate::widgets::mounted_route::{MountedRoute, MountedRouteSearchTarget};
 
@@ -266,6 +266,8 @@ struct OnAirHeader {
     genre_names: RefCell<Vec<String>>,
     toggle_icon: gtk::Image,
     toggle_text: gtk::Label,
+    /// The station's name with the toggle, at the page's top once the header has scrolled away.
+    strip: DetailStrip,
     pin: gtk::Button,
     edit: gtk::Button,
     homepage: gtk::Button,
@@ -331,6 +333,7 @@ impl OnAirHeader {
             if station.artwork_binding.is_none() {
                 self.stops.set(Self::no_colours());
                 self.band.queue_draw();
+                self.strip.band.queue_draw();
             }
             shell.artwork.bind_artwork_tile(
                 &self.cover,
@@ -339,6 +342,7 @@ impl OnAirHeader {
             );
         }
         self.name.set_text(&station.name);
+        self.strip.title.set_text(&station.name);
         self.channel
             .set_text(on_air.channel.as_deref().unwrap_or_default());
         self.channel.set_visible(on_air.channel.is_some());
@@ -356,8 +360,13 @@ impl OnAirHeader {
         } else {
             (crate::widgets::controls::PLAY_ICON, tr(msgid("Play")))
         };
-        self.toggle_icon.set_icon_name(Some(icon));
-        self.toggle_text.set_text(&label);
+        for (image, text) in [
+            (&self.toggle_icon, &self.toggle_text),
+            (&self.strip.play_icon, &self.strip.play_text),
+        ] {
+            image.set_icon_name(Some(icon));
+            text.set_text(&label);
+        }
         self.homepage.set_visible(!station.homepage.is_empty());
         self.homepage_url.replace(station.homepage.clone());
         // An added station has its card's pin and Edit; a suggested one has neither.
@@ -491,19 +500,30 @@ impl RadioRoute {
         let cover = ArtworkTile::new(HEADER_COVER_SIZE);
         cover.area.add_css_class("station-cover");
         cover.area.add_css_class("detail-showcase-cover");
+        cover.set_animated(true);
         on_air_cover.append(&cover.area);
         let stops = Rc::new(Cell::new(OnAirHeader::no_colours()));
         let painted = Rc::clone(&stops);
         band.set_draw_func(move |_, cairo, width, height| {
             paint_band(cairo, f64::from(width), f64::from(height), painted.get());
         });
-        let (taken, weak_band) = (Rc::clone(&stops), band.downgrade());
+        let strip = DetailStrip::new(
+            {
+                let stops = Rc::clone(&stops);
+                move || Some(stops.get())
+            },
+            &on_air_toggle,
+        );
+        let (taken, bands) = (
+            Rc::clone(&stops),
+            [band.downgrade(), strip.band.downgrade()],
+        );
         cover.connect_texture(Rc::new(move |texture| {
             let stops = band_stops(texture);
-            if taken.replace(stops) != stops
-                && let Some(band) = weak_band.upgrade()
-            {
-                band.queue_draw();
+            if taken.replace(stops) != stops {
+                for band in bands.iter().filter_map(glib::WeakRef::upgrade) {
+                    band.queue_draw();
+                }
             }
         }));
         let homepage_url = Rc::new(RefCell::new(String::new()));
@@ -539,9 +559,6 @@ impl RadioRoute {
             })
             .collect::<Vec<_>>();
 
-        let scroller = gtk::ScrolledWindow::new();
-        configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
-        scroller.set_vexpand(true);
         let route = Rc::new_cyclic(|route: &Weak<Self>| {
             let weak = route.clone();
             let page = width_allocation_owner(
@@ -552,14 +569,10 @@ impl RadioRoute {
                     }
                 },
             );
-            scroller.set_child(Some(&page));
-            // A click on a card plays it; it does not bring the card into view.
-            if let Some(viewport) = scroller.child().and_downcast::<gtk::Viewport>() {
-                viewport.set_scroll_to_focus(false);
-            }
             Self {
                 shell: Rc::downgrade(shell),
-                root: route_scroller_widget(scroller),
+                // The page scrolls the station on air away; its strip then stays at the top.
+                root: super::detail_scroll::detail_scroll(&page, &on_air, &strip.root, None),
                 on_air: OnAirHeader {
                     root: on_air,
                     band,
@@ -585,6 +598,7 @@ impl RadioRoute {
                     top: on_air_top,
                     toggle_icon: on_air_toggle_icon,
                     toggle_text: on_air_toggle_text,
+                    strip,
                     pin: on_air_pin,
                     edit: on_air_edit,
                     homepage: on_air_homepage,

@@ -103,7 +103,7 @@ pub fn search_metadata(
     )
     .map_err(|e| e.to_string())?;
     let key = crate::cache::cache_key("musicbrainz-search", &url.as_str());
-    let Some(data) = cache.fetch(&key, || {
+    let Some(data) = cache.fetch(&key, 7, || {
         fetch_musicbrainz_json(client()?, url, "MusicBrainz search")
     })?
     else {
@@ -169,7 +169,7 @@ pub fn lookup_metadata(
         MetadataMatchKind::Artist => (MUSICBRAINZ_ARTIST_URL, "genres"),
     };
     let key = crate::cache::cache_key("musicbrainz-entity", &(root, &candidate.id, inc));
-    cache.fetch(&key, || {
+    cache.fetch(&key, 7, || {
         let value = fetch_musicbrainz_entity(root, &candidate.id, inc, "MusicBrainz lookup")?
             .ok_or_else(|| "MusicBrainz did not return this result".to_string())?;
         Ok(MetadataLookup {
@@ -251,14 +251,6 @@ impl MetadataLookup {
     }
 }
 
-fn normalized(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(char::to_lowercase)
-        .filter(|c| c.is_alphanumeric())
-        .collect()
-}
-
 fn match_release_track(
     release: &Value,
     values: &MetadataChanges,
@@ -335,7 +327,7 @@ fn match_release_track(
             return Some(id);
         }
     }
-    let title = normalized(value("title"));
+    let title = names::name_key(value("title"));
     if title.is_empty() {
         return None;
     }
@@ -345,7 +337,7 @@ fn match_release_track(
             .filter(|(_, track)| {
                 text(track, "title")
                     .or_else(|| track.get("recording").and_then(|r| text(r, "title")))
-                    .is_some_and(|name| normalized(&name) == title)
+                    .is_some_and(|name| names::name_key(&name) == title)
             })
             .collect(),
     )

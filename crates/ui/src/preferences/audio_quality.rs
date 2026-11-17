@@ -2,18 +2,19 @@ use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_val
 use adw::prelude::*;
 use library::{AudioChannels, AudioCodec};
 use rufin_core::downloads::{
-    DEFAULT_DOWNLOAD_BITRATE, DOWNLOAD_BITRATES, download_quality_shows_bitrate,
-    download_quality_shows_channels, download_quality_with_bitrate, download_quality_with_channels,
-    download_quality_with_codec,
+    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_quality_shows_bitrate,
+    audio_quality_shows_channels, audio_quality_with_bitrate, audio_quality_with_channels,
+    audio_quality_with_codec,
 };
-use sources::DownloadQuality;
+use sources::AudioQuality;
 use std::{cell::Cell, rc::Rc};
 
+/// The format, bitrate and channels rows of a download or stream quality.
 pub(crate) fn rows(
-    initial: DownloadQuality,
-    changed: impl Fn(DownloadQuality, Rc<dyn Fn(DownloadQuality)>) + 'static,
+    initial: AudioQuality,
+    changed: impl Fn(AudioQuality) + 'static,
 ) -> [adw::PreferencesRow; 3] {
-    let resource = "preferences/download_quality.ui";
+    let resource = "preferences/audio_quality.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         format: adw::ComboRow,
@@ -33,13 +34,13 @@ pub(crate) fn rows(
         AudioChannels::StereoLossy,
         AudioChannels::Stereo,
     ];
-    let lower = f64::from(DOWNLOAD_BITRATES[0]);
-    let upper = f64::from(*DOWNLOAD_BITRATES.last().unwrap());
-    let step = f64::from(DOWNLOAD_BITRATES[1] - DOWNLOAD_BITRATES[0]);
+    let lower = f64::from(AUDIO_BITRATES[0]);
+    let upper = f64::from(*AUDIO_BITRATES.last().unwrap());
+    let step = f64::from(AUDIO_BITRATES[1] - AUDIO_BITRATES[0]);
     bitrate_scale.adjustment().set_step_increment(step);
     install_scale_scroll_forwarding(&bitrate_scale);
     install_sliding_value_bubble(&bitrate_scale, |rate| format!("{rate:.0} kbps"));
-    for rate in DOWNLOAD_BITRATES.iter().step_by(4) {
+    for rate in AUDIO_BITRATES.iter().step_by(4) {
         bitrate_scale.add_mark(
             f64::from(*rate),
             gtk::PositionType::Bottom,
@@ -54,8 +55,8 @@ pub(crate) fn rows(
     );
     let updating = Rc::new(Cell::new(false));
     let current = Rc::new(Cell::new(initial));
-    let rate = Rc::new(Cell::new(DEFAULT_DOWNLOAD_BITRATE));
-    let set: Rc<dyn Fn(DownloadQuality)> = {
+    let rate = Rc::new(Cell::new(DEFAULT_AUDIO_BITRATE));
+    let set: Rc<dyn Fn(AudioQuality)> = {
         let (weak, updating, current, rate) = (
             weak.clone(),
             updating.clone(),
@@ -77,7 +78,7 @@ pub(crate) fn rows(
             rate.set(
                 encoding
                     .and_then(|encoding| encoding.bitrate_kbps)
-                    .unwrap_or(DEFAULT_DOWNLOAD_BITRATE),
+                    .unwrap_or(DEFAULT_AUDIO_BITRATE),
             );
             format.set_selected(encoding.map_or(0, |encoding| {
                 1 + codecs
@@ -94,19 +95,18 @@ pub(crate) fn rows(
                     .position(|channel| *channel == encoding.channels)
                     .unwrap() as u32
             }));
-            bitrate.set_visible(download_quality_shows_bitrate(quality));
-            channels.set_visible(download_quality_shows_channels(quality));
+            bitrate.set_visible(audio_quality_shows_bitrate(quality));
+            channels.set_visible(audio_quality_shows_channels(quality));
             updating.set(false);
         })
     };
     set(initial);
     let commit: Rc<dyn Fn()> = {
-        let (weak, updating, current, rate, set) = (
+        let (weak, updating, current, rate) = (
             weak.clone(),
             updating.clone(),
             current.clone(),
             rate.clone(),
-            set.clone(),
         );
         Rc::new(move || {
             if updating.get() {
@@ -122,18 +122,17 @@ pub(crate) fn rows(
                 .checked_sub(1)
                 .and_then(|index| codecs.get(index as usize))
                 .copied();
-            let quality = download_quality_with_bitrate(
-                download_quality_with_codec(current.get(), codec),
-                rate.get(),
-            );
-            let quality = download_quality_with_channels(
-                quality,
+            let quality = audio_quality_with_channels(
+                audio_quality_with_bitrate(
+                    audio_quality_with_codec(current.get(), codec),
+                    rate.get(),
+                ),
                 channel_choices[channels.selected() as usize],
             );
-            bitrate.set_visible(download_quality_shows_bitrate(quality));
-            channels.set_visible(download_quality_shows_channels(quality));
+            bitrate.set_visible(audio_quality_shows_bitrate(quality));
+            channels.set_visible(audio_quality_shows_channels(quality));
             if current.replace(quality) != quality {
-                changed(quality, set.clone());
+                changed(quality);
             }
         })
     };
@@ -197,12 +196,12 @@ pub(crate) fn rows(
     [format.upcast(), bitrate.upcast(), channels.upcast()]
 }
 
-pub(crate) fn label(quality: DownloadQuality) -> String {
+pub(crate) fn label(quality: AudioQuality) -> String {
     match quality {
-        DownloadQuality::Original => localization::tr("Original"),
-        DownloadQuality::Transcoded(encoding) => encoding.bitrate_kbps.map_or_else(
-            || encoding.codec.name().to_ascii_uppercase(),
-            |rate| format!("{} {rate} kbps", encoding.codec.name().to_ascii_uppercase()),
+        AudioQuality::Original => localization::tr("Original"),
+        AudioQuality::Transcoded(encoding) => encoding.bitrate_kbps.map_or_else(
+            || encoding.codec.label().into(),
+            |rate| format!("{} {rate} kbps", encoding.codec.label()),
         ),
     }
 }

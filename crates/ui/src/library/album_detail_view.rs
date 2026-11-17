@@ -110,7 +110,6 @@ impl CatalogUi {
                 shape: ShowcaseShape::Detail,
                 initial_width: inner_content_width,
                 cover: ShowcaseCover::Single(cover.clone()),
-                play_label: msgid("Play album"),
                 play,
                 menu,
                 download: true,
@@ -122,7 +121,10 @@ impl CatalogUi {
         let route_stack = gtk::Stack::new();
         route_stack.set_hexpand(true);
         route_stack.set_vexpand(true);
-        route_stack.add_named(&wrapper, Some("content"));
+        route_stack.add_named(
+            &showcase_view.scrolling_page(&wrapper, track_projection.scroll_parts()),
+            Some("content"),
+        );
         route_stack.add_named(
             &crate::library::route_layout::placeholder_view("Album", msgid("This isn't available")),
             Some("missing"),

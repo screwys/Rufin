@@ -55,12 +55,10 @@ pub enum SourceSetup {
     EmbyConnect {
         server: crate::EmbyConnectServer,
         source_name: Option<String>,
-        use_instant_mix: bool,
     },
     JellyfinQuickConnect {
         login: crate::JellyfinQuickConnectLogin,
         source_name: Option<String>,
-        use_instant_mix: bool,
         #[serde(default)]
         local_server_url: Option<String>,
     },
@@ -78,7 +76,6 @@ pub enum SourceSetup {
     JellyfinEmby {
         kind: crate::ServerKind,
         credentials: CredentialInput,
-        use_instant_mix: bool,
     },
     OpenSubsonic {
         kind: SubsonicFlavor,
@@ -119,13 +116,11 @@ pub enum SourceSettingsChange {
         source_id: SourceId,
         server: crate::EmbyConnectServer,
         source_name: Option<String>,
-        use_instant_mix: bool,
     },
     JellyfinQuickConnect {
         source_id: SourceId,
         login: crate::JellyfinQuickConnectLogin,
         source_name: Option<String>,
-        use_instant_mix: bool,
         #[serde(default)]
         local_server_url: Option<String>,
     },
@@ -143,7 +138,6 @@ pub enum SourceSettingsChange {
         connect_manually: bool,
         source_id: SourceId,
         credentials: CredentialInput,
-        use_instant_mix: bool,
     },
     OpenSubsonic {
         source_id: SourceId,
@@ -188,7 +182,6 @@ pub enum EditableSource {
         source_id: SourceId,
         kind: String,
         credentials: CredentialPreset,
-        use_instant_mix: Option<bool>,
         emby_connect: bool,
     },
     Local {
@@ -378,7 +371,6 @@ impl SourceConfiguration {
                         trust_invalid_cert: config.trust_invalid_cert,
                         open_subsonic_authentication: None,
                     },
-                    use_instant_mix: Some(config.use_instant_mix),
                     emby_connect: config.emby_connect,
                 })
             }
@@ -395,7 +387,6 @@ impl SourceConfiguration {
                         trust_invalid_cert: config.trust_invalid_cert,
                         open_subsonic_authentication: Some(config.authentication),
                     },
-                    use_instant_mix: None,
                     emby_connect: false,
                 })
             }
@@ -476,7 +467,6 @@ mod tests {
                 "user_id": "account-id",
                 "username": "listener",
                 "trust_invalid_cert": true,
-                "use_jellyfin_instant_mix": true,
             }),
         );
         let jellyfin = JellyfinEmbySourceConfig::from_configuration(&jellyfin_stored)
@@ -485,7 +475,6 @@ mod tests {
         assert_eq!(jellyfin.user_id, "account-id");
         assert_eq!(jellyfin.username, "listener");
         assert!(jellyfin.trust_invalid_cert);
-        assert!(jellyfin.use_instant_mix);
         assert_eq!(
             decode_provider_payload::<serde_json::Value>(&encode_provider_payload(
                 jellyfin_stored.source_id,
@@ -579,7 +568,6 @@ mod tests {
                 "user_id": "account-id",
                 "username": "listener",
                 "trust_invalid_cert": false,
-                "use_jellyfin_instant_mix": false,
             }),
         );
 

@@ -103,6 +103,7 @@ fn present(parent: &gtk::Window, shell: &Rc<Shell>, item: MediaDetailsItem) {
                     crate::editors::metadata::present_metadata_dialog(
                         &editor,
                         item.metadata_item(),
+                        false,
                     );
                 });
                 state.set_visible_child_name("details");

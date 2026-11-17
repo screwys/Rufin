@@ -88,7 +88,8 @@ p.pref-note {
   min-height: 50px;
   padding: 8px 14px;
 }
-.pref-row + .pref-row {
+.pref-row + .pref-row,
+.pref-row + .pref-rows > .pref-row:first-child {
   box-shadow: inset 0 1px var(--border-color, var(--line));
 }
 label.pref-row {
@@ -198,7 +199,7 @@ label.pref-row {
 .theme-errors {
   margin: 0;
   padding: 0 12px 12px;
-  color: var(--favorite);
+  color: var(--destructive, #e01b24);
   font-size: 12px;
   white-space: pre-wrap;
   user-select: text;
@@ -307,7 +308,7 @@ button.pref-row:hover {
 .pref-quality {
   display: block;
 }
-.pref-quality .download-quality-controls {
+.pref-quality .audio-quality-controls {
   display: grid;
   gap: 4px;
 }
@@ -353,6 +354,38 @@ button.pref-row:hover {
 .pref-drag {
   cursor: grab;
   opacity: 0.6;
+  touch-action: none;
+}
+/* The row that is being dragged to another place. */
+.pref-list-row.reorder-dragging {
+  position: relative;
+  z-index: 1;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-bg-color, var(--surface)));
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* A Home block's own choices, under its row and in line with its title. */
+.pref-list-row:has(.pref-block-options) {
+  flex-wrap: wrap;
+}
+.pref-block-options {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 0 0 4px 28px;
+}
+.pref-block-options > * {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.pref-block-options > * > span {
+  color: var(--muted);
+}
+.pref-block-options input[type="number"] {
+  width: 64px;
 }
 a.pref-row {
   color: var(--text);
@@ -368,6 +401,11 @@ a.pref-row:hover {
 /* Customization: its tabs, as GTK's inline view switcher. */
 .segmented.pref-tabs {
   margin: 12px 0 0;
+}
+/* A tab that is one group has no title to set it off from the tabs. */
+.pref-tabs ~ .pref-group,
+.pref-tabs ~ [data-tabs] > p.pref-note:first-child {
+  margin-top: 12px;
 }
 /* Customization › Menus: the item menu, each entry showing or hiding itself. */
 .menu-preview {

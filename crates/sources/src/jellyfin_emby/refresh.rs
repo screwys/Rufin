@@ -215,10 +215,11 @@ impl JellyfinEmbySource {
         progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<Option<i64>> {
-        let after = since.map(|since| {
-            chrono::DateTime::from_timestamp(since - crate::source::SYNC_MARGIN, 0)
-                .unwrap_or_default()
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        let after = since.and_then(|since| {
+            time::OffsetDateTime::from_unix_timestamp(since - crate::source::SYNC_MARGIN)
+                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
         });
         let known = observation
             .catalog
@@ -823,7 +824,6 @@ mod tests {
                     user_id: "user".into(),
                     username: "listener".into(),
                     trust_invalid_cert: false,
-                    use_instant_mix: false,
                 },
                 "token".into(),
                 "device".into(),
@@ -997,7 +997,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1290,7 +1289,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),
@@ -1341,7 +1339,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),

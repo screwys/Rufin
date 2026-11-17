@@ -25,29 +25,40 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
     let executable = fs::canonicalize(executable)?;
     let directories = directories::ProjectDirs::from("io.github", "screwys", "Rufin")
         .ok_or("Could not locate Rufin's configuration directory")?;
-    let config = directories.config_dir().join("settings.json");
-    let previous = match fs::read(&config) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    let mut settings: Value = previous
-        .as_deref()
-        .map(serde_json::from_slice)
-        .transpose()?
-        .unwrap_or_else(|| json!({}));
-    // Unlike fakesink, fakeaudiosink follows the clock so progress can be observed.
-    settings["playback"]["audio_output"] = json!("fakeaudiosink");
-    settings["secret_storage_mode"] = json!("config-file");
+    // What the check needs of the settings, in the two files Rufin keeps them in: an output
+    // that follows the clock, unlike fakesink, so progress can be observed, and logins kept
+    // in a file.
+    let files = [
+        (
+            directories.config_dir().join("state.json"),
+            r#"{"playback":{"audio_output":"fakeaudiosink"}}"#,
+        ),
+        (
+            directories.config_dir().join("rufin.toml"),
+            "[privacy]\nsecret_storage = \"config-file\"\n",
+        ),
+    ];
+    let mut previous = Vec::new();
+    for (path, _) in &files {
+        previous.push(match fs::read(path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        });
+    }
     fs::create_dir_all(directories.config_dir())?;
     let result = (|| {
-        fs::write(&config, serde_json::to_vec(&settings)?)?;
+        for (path, content) in &files {
+            fs::write(path, content)?;
+        }
         check(&executable)
     })();
-    if let Some(previous) = previous {
-        fs::write(config, previous)?;
-    } else if config.exists() {
-        fs::remove_file(config)?;
+    for ((path, _), previous) in files.iter().zip(previous) {
+        match previous {
+            Some(previous) => fs::write(path, previous)?,
+            None if path.exists() => fs::remove_file(path)?,
+            None => {}
+        }
     }
     result
 }

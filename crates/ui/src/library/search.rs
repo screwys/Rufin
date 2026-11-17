@@ -220,8 +220,17 @@ impl SearchItem {
     fn is_downloaded(&self) -> bool {
         matches!(self, Self::Track(row, _) if crate::widgets::library_fields::TrackPresentation::download_badge(row))
     }
-    fn favorite(&self) -> Option<(library::FavoriteTarget, bool)> {
-        Some(match self {
+    /// The state its cover shows, its media URI and its source.
+    fn marks(&self) -> (&library::TrackState, &str, Option<&str>) {
+        match self {
+            Self::Track(row, _) => (&row.state, &row.media_uri, row.source_id.as_deref()),
+            Self::Album(row) => (&row.state, &row.media_uri, None),
+            Self::Artist(row) => (&row.state, &row.media_uri, None),
+        }
+    }
+
+    fn favorite(&self) -> (library::FavoriteTarget, bool) {
+        match self {
             Self::Track(row, _) => (
                 library::FavoriteTarget::Track(row.media_uri.clone()),
                 row.state.favorite,
@@ -234,7 +243,7 @@ impl SearchItem {
                 library::FavoriteTarget::Artist(row.media_uri.clone()),
                 row.state.favorite,
             ),
-        })
+        }
     }
     fn play(&self, shell: &Rc<CatalogUi>, placement: QueuePlacement) {
         shell
@@ -275,7 +284,7 @@ struct SearchGridCell {
     shell: Rc<CatalogUi>,
     cover: ArtworkTile,
     current: Rc<RefCell<Option<SearchItem>>>,
-    favorite: gtk::Button,
+    marks: cards::CollectionGridCoverView,
 }
 
 impl SearchGridCell {
@@ -283,34 +292,27 @@ impl SearchGridCell {
         let current = Rc::new(RefCell::new(None::<SearchItem>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play"));
         let cover_host = controls.imp().cover_host.get();
-        let favorite = controls.favorite();
         let cover = ArtworkTile::new_elastic_square();
         cover_host.append(&cover.widget());
-        let favorite_shell = Rc::clone(&shell);
-        let favorite_item = Rc::clone(&current);
-        favorite.connect_clicked(move |button| {
-            let Some((target, _)) = favorite_item
-                .borrow()
-                .as_ref()
-                .and_then(SearchItem::favorite)
-            else {
-                return;
-            };
-            favorite_shell.set_favorite(target, !favorite_button_is_active(button));
-        });
-        let menu = controls.imp().menu.get();
+        cards::install_cover_marks(
+            &shell,
+            &current,
+            controls.controls(),
+            |item: &SearchItem| item.favorite().0,
+        );
+        let menu = controls.menu();
         let overlay = controls.imp().overlay.get();
         install_grid_play(
             &shell,
             &current,
             [
-                controls.imp().play.get(),
-                controls.imp().play_next.get(),
-                controls.imp().play_last.get(),
+                controls.controls().play.clone(),
+                controls.controls().play_next.clone(),
+                controls.controls().play_last.clone(),
             ],
             |shell, item, placement| item.play(shell, placement),
         );
-        let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
+        let body = CollectionGridCardCell::new(&shell, fields, &controls);
         let snippet = LyricsSnippetView::new();
         body.card.append(&snippet);
         let drag_current = Rc::clone(&current);
@@ -336,7 +338,7 @@ impl SearchGridCell {
             shell,
             cover,
             current,
-            favorite,
+            marks: controls,
         }
     }
 
@@ -374,14 +376,15 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
             .bind_playing_target(&self.shell, Some(item.play_target()));
         self.body
             .bind(item.title(), |field| item.field_links(field));
-        let favorite = item.favorite();
-        set_favorite_button_active(
-            &self.favorite,
-            favorite.as_ref().is_some_and(|(_, value)| *value),
+        let (state, media_uri, source_id) = item.marks();
+        cards::bind_cover_marks(
+            &self.shell,
+            self.marks.controls(),
+            Some(state.favorite),
+            Some(state.rating),
+            media_uri,
+            source_id,
         );
-        self.favorite.set_sensitive(favorite.is_some());
-        self.favorite
-            .set_opacity(if favorite.is_some() { 1.0 } else { 0.0 });
         *self.current.borrow_mut() = Some(item);
         self.bind_current_artwork();
     }
@@ -390,8 +393,7 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
         self.release_artwork();
         self.snippet.bind(None);
         self.body.clear();
-        self.favorite.set_visible(false);
-        self.favorite.set_sensitive(false);
+        cards::clear_cover_marks(self.marks.controls());
         self.current.take();
     }
 
@@ -1094,7 +1096,6 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
             Rc::new(move |target, position| {
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
-                    && value.favorite().is_some()
                 {
                     value.present_context(target, &shell, position);
                 }
@@ -1111,7 +1112,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
                 .upgrade()
                 .and_then(|item| item_at_from_item::<SearchItem>(&item))
                 .as_ref()
-                .and_then(SearchItem::favorite)
+                .map(SearchItem::favorite)
             else {
                 return;
             };
@@ -1128,12 +1129,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
         let Some(button) = crate::widgets::recycled_cells::row_favorite_button(item) else {
             return;
         };
-        let favorite = value.favorite();
-        set_favorite_button_active(
-            &button,
-            favorite.as_ref().is_some_and(|(_, active)| *active),
-        );
-        button.set_sensitive(favorite.is_some());
+        set_favorite_button_active(&button, value.favorite().1);
     });
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {

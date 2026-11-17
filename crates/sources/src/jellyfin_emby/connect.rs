@@ -195,7 +195,6 @@ pub(crate) async fn connect_server(
     source_id: SourceId,
     server: EmbyConnectServer,
     name: Option<String>,
-    use_instant_mix: bool,
     device_id: String,
 ) -> SourceResult<ConnectedSource> {
     let client = build_client(false)?;
@@ -253,7 +252,6 @@ pub(crate) async fn connect_server(
                 user_id,
                 username: required(&user, "Name")?,
                 trust_invalid_cert: false,
-                use_instant_mix,
                 emby_connect: true,
             }
             .into_payload(),
@@ -448,7 +446,7 @@ mod tests {
             access_key: "exchange-key".into(),
         };
         let login = serde_json::from_value(serde_json::to_value(&login).unwrap()).unwrap();
-        let connected = connect_server(SourceId::new("source"), login, None, true, "device".into())
+        let connected = connect_server(SourceId::new("source"), login, None, "device".into())
             .await
             .unwrap();
         let (configuration, _, credential) = connected.into_parts();
@@ -477,9 +475,9 @@ mod tests {
                 local_server_url: None,
                 username: "Listener".into(),
                 secret: String::new(),
-                trust_invalid_cert: false,
+                // A changed setting of the connection reopens it.
+                trust_invalid_cert: true,
             },
-            false,
             Some("device".into()),
         )
         .await
@@ -505,7 +503,7 @@ mod tests {
             "reopened-token"
         );
         let stream = source
-            .emby_stream("emby:track:track", StreamQuality::Original, None)
+            .emby_stream("emby:track:track", None, None)
             .await
             .unwrap();
         assert!(stream.uri().contains("reopened-token"));
@@ -534,7 +532,6 @@ mod tests {
                 user_id: "local-user".into(),
                 username: "Listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: true,
                 emby_connect: true,
             }
             .into_payload(),
@@ -551,7 +548,6 @@ mod tests {
                 secret: String::new(),
                 trust_invalid_cert: false,
             },
-            false,
             Some("device".into()),
         )
         .await

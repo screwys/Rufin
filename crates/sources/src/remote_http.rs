@@ -124,8 +124,10 @@ pub async fn json_dated<T: DeserializeOwned>(
 ) -> SourceResult<(T, Option<i64>)> {
     let (value, date) = json_with_header(request, policy, limit, &header::DATE).await?;
     let date = date
-        .and_then(|date| chrono::DateTime::parse_from_rfc2822(&date).ok())
-        .map(|date| date.timestamp());
+        .and_then(|date| {
+            time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc2822).ok()
+        })
+        .map(|date| date.unix_timestamp());
     Ok((value, date))
 }
 

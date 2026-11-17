@@ -1498,12 +1498,6 @@ impl Context<'_> {
             .collect()
     }
 
-    /// Whether a playlist is listed: it has a name and its source still lists it.
-    pub(crate) fn listed_playlist(&self, record: &PlaylistRec) -> bool {
-        !self.snapshot.text(record.name).is_empty()
-            && (record.flags & SOURCE_OWNED == 0 || record.indexed())
-    }
-
     /// The smart playlists `keep` keeps, counted in music folder `folder`.
     fn smart_items(
         &self,
@@ -1538,7 +1532,7 @@ impl Context<'_> {
             .playlists
             .iter()
             .filter(|(_, record)| {
-                self.listed_playlist(record)
+                snapshot.listed_playlist(record)
                     && keep(&record.folders)
                     && (record.source == NO_SOURCE
                         || source.is_some_and(|source| record.source == source))
@@ -1883,8 +1877,10 @@ enum Fact<'a> {
 }
 
 pub(crate) fn date_text(seconds: u32) -> Option<String> {
-    chrono::DateTime::from_timestamp(i64::from(seconds), 0)
-        .map(|time| time.format("%Y-%m-%d").to_string())
+    time::OffsetDateTime::from_unix_timestamp(i64::from(seconds))
+        .ok()?
+        .format(time::macros::format_description!("[year]-[month]-[day]"))
+        .ok()
 }
 
 impl Context<'_> {

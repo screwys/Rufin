@@ -247,33 +247,15 @@ impl JellyfinEmbySource {
             | crate::SourceRadioSeed::Playlist(id)
             | crate::SourceRadioSeed::Genre(id) => raw_item_id(id),
         };
-        let path = match seed {
-            crate::SourceRadioSeed::Track(_) if !self.use_instant_mix => {
-                format!("Items/{raw}/Similar")
-            }
-            _ => format!("Items/{raw}/InstantMix"),
-        };
-        let mut url = endpoint(&self.base_url(), &path)?;
+        // The instant mix is the server's recommendation, and the one its plugins replace.
+        let mut url = endpoint(&self.base_url(), &format!("Items/{raw}/InstantMix"))?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("Limit", &limit.clamp(1, 500).to_string());
-        let mut items = self.get_json::<Value>(url).await?["Items"]
+        let items = self.get_json::<Value>(url).await?["Items"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        if items.is_empty()
-            && matches!(seed, crate::SourceRadioSeed::Track(_))
-            && !self.use_instant_mix
-        {
-            let mut url = endpoint(&self.base_url(), &format!("Items/{raw}/InstantMix"))?;
-            url.query_pairs_mut()
-                .append_pair("UserId", &self.user_id)
-                .append_pair("Limit", &limit.clamp(1, 500).to_string());
-            items = self.get_json::<Value>(url).await?["Items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-        }
         Ok(items
             .into_iter()
             .filter_map(|item| id(&item["Id"]).map(|raw| self.kind.object_id("track", &raw)))
@@ -468,92 +450,35 @@ impl JellyfinEmbySource {
     pub(crate) async fn resolve_stream(
         &self,
         track_object_id: &str,
-        quality: StreamQuality,
+        encoding: Option<library::AudioEncoding>,
         session_identifier: Option<&str>,
     ) -> SourceResult<ResolvedStream> {
         if self.kind == ServerKind::Emby {
             return self
-                .emby_stream(track_object_id, quality, session_identifier)
+                .emby_stream(track_object_id, encoding, session_identifier)
                 .await;
         }
-        let stream = stream_descriptor(
-            &self.base_url(),
-            &self.user_id,
-            &self.device_id,
-            &self.access_token,
-            self.trust_invalid_cert,
-            track_object_id,
-            quality,
-        )?;
-        let mut url =
-            Url::parse(stream.uri()).map_err(|error| SourceError::Other(error.to_string()))?;
-        if let Some(session) = session_identifier {
-            url.query_pairs_mut().append_pair("PlaySessionId", session);
+        match encoding {
+            Some(encoding) => {
+                self.jellyfin_transcode(track_object_id, encoding, session_identifier)
+            }
+            None => self.jellyfin_original(track_object_id, session_identifier),
         }
-        Ok(ResolvedStream::new(url.to_string())
-            .with_content_type(stream.content_type)
-            .with_trust_invalid_certificate(self.trust_invalid_cert)
-            .with_transcoding(quality != StreamQuality::Original))
     }
 
     pub(crate) async fn resolve_download(
         &self,
         track: &str,
-        quality: crate::DownloadQuality,
+        quality: crate::AudioQuality,
         channels: Option<u32>,
     ) -> SourceResult<crate::ResolvedDownload> {
         if self.kind == ServerKind::Jellyfin {
             return self.jellyfin_download(track, quality, channels);
         }
         let encoding = quality.encoding();
-        let stream = self
-            .emby_stream(track, StreamQuality::Original, None)
-            .await?;
-        let Some(encoding) = encoding else {
-            return Ok(crate::ResolvedDownload::ready(stream, None));
-        };
-        let container = match encoding.codec {
-            library::AudioCodec::Opus | library::AudioCodec::Vorbis => "ogg",
-            _ => encoding.codec.name(),
-        };
-        let mut url =
-            Url::parse(stream.uri()).map_err(|error| SourceError::Other(error.to_string()))?;
-        url.set_path(&format!(
-            "{}/Audio/{}/stream.{container}",
-            self.base_url().path().trim_end_matches('/'),
-            raw_item_id(track)
-        ));
-        let session = url
-            .query_pairs()
-            .find(|(key, _)| key == "PlaySessionId")
-            .map(|(_, value)| value.into_owned())
-            .expect("Emby streams have a session");
-        let pairs = url
-            .query_pairs()
-            .filter(|(key, _)| key != "Static")
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect::<Vec<_>>();
-        url.set_query(None);
-        url.query_pairs_mut()
-            .extend_pairs(pairs)
-            .append_pair("Static", "false")
-            .append_pair("AudioCodec", encoding.codec.name());
-        if encoding.codec != library::AudioCodec::Flac
-            && let Some(rate) = encoding.bitrate_kbps
-        {
-            url.query_pairs_mut()
-                .append_pair("AudioBitRate", &rate.saturating_mul(1000).to_string());
-        }
-        if encoding.stereo() {
-            url.query_pairs_mut().append_pair("MaxAudioChannels", "2");
-        }
-        let stream = ResolvedStream::new(url.to_string())
-            .with_trust_invalid_certificate(self.trust_invalid_cert)
-            .with_content_type(Some(encoding.codec.content_type().into()))
-            .with_transcoding(true);
         Ok(crate::ResolvedDownload::ready(
-            self.hold_emby_transcode(stream, &session).await?,
-            Some(encoding.codec),
+            self.emby_stream(track, encoding, None).await?,
+            encoding.map(|encoding| encoding.codec),
         ))
     }
 
@@ -1190,7 +1115,7 @@ impl PlaybackReportDto {
 
 #[cfg(test)]
 mod tests {
-    use super::{playlist_entry, stream_descriptor};
+    use super::playlist_entry;
     use crate::jellyfin_emby::item::{album_from_item, track_from_item};
     use crate::jellyfin_emby::{JellyfinEmbySource, JellyfinEmbySourceConfig};
     use serde_json::Value;
@@ -1230,7 +1155,6 @@ mod tests {
                     secret: "password".into(),
                     trust_invalid_cert: false,
                 },
-                false,
                 "device".into(),
             )
             .await;
@@ -1282,7 +1206,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1430,7 +1353,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1497,24 +1419,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn playback_stream_keeps_authentication_out_of_diagnostics() {
-        let stream = stream_descriptor(
-            &reqwest::Url::parse("https://music.example/jellyfin/").expect("base URL"),
-            "user-one",
-            "device-one",
-            "secret-token",
-            false,
-            "track-one",
-            playback::StreamQuality::Original,
-        )
-        .expect("stream descriptor");
-
-        assert!(stream.uri().contains("secret-token"));
-        assert!(!stream.redacted_uri().contains("secret-token"));
-        assert!(stream.redacted_uri().contains("ApiKey=%3Credacted%3E"));
-    }
-
     #[tokio::test]
     async fn jellyfin_lyrics_write_uses_the_managed_upload_endpoint() {
         let server = MockServer::start().await;
@@ -1538,7 +1442,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),
@@ -1552,74 +1455,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recommendation_policy_is_shared_and_preserves_similar_candidates() {
+    async fn recommendations_are_the_instant_mix() {
         for kind in [crate::ServerKind::Jellyfin, crate::ServerKind::Emby] {
-            for use_instant_mix in [false, true] {
-                for similar_is_empty in [false, true] {
-                    let server = MockServer::start().await;
-                    let prefix = if kind == crate::ServerKind::Emby {
-                        "/emby"
-                    } else {
-                        ""
-                    };
-                    let similar_items = if similar_is_empty {
-                        serde_json::json!([])
-                    } else {
-                        serde_json::json!([{"Id":"similar-track"}])
-                    };
-                    Mock::given(method("GET"))
-                        .and(path(format!("{prefix}/Items/track-one/Similar")))
-                        .respond_with(
-                            ResponseTemplate::new(200)
-                                .set_body_json(serde_json::json!({"Items":similar_items})),
-                        )
-                        .expect(u64::from(!use_instant_mix))
-                        .mount(&server)
-                        .await;
-                    Mock::given(method("GET"))
-                        .and(path(format!("{prefix}/Items/track-one/InstantMix")))
-                        .respond_with(
-                            ResponseTemplate::new(200)
-                                .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
-                        )
-                        .expect(u64::from(use_instant_mix || similar_is_empty))
-                        .mount(&server)
-                        .await;
-                    let source = JellyfinEmbySource::open(
-                        JellyfinEmbySourceConfig {
-                            kind,
-                            emby_connect: false,
-                            base_url: server.uri(),
-                            local_url: None,
-                            server_id: Some("server-one".into()),
-                            user_id: "user-one".into(),
-                            username: "listener".into(),
-                            trust_invalid_cert: false,
-                            use_instant_mix,
-                        },
-                        "secret-token".into(),
-                        "device-one".into(),
+            let server = MockServer::start().await;
+            let prefix = if kind == crate::ServerKind::Emby {
+                "/emby"
+            } else {
+                ""
+            };
+            Mock::given(method("GET"))
+                .and(path(format!("{prefix}/Items/track-one/InstantMix")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let source = JellyfinEmbySource::open(
+                JellyfinEmbySourceConfig {
+                    kind,
+                    emby_connect: false,
+                    base_url: server.uri(),
+                    local_url: None,
+                    server_id: Some("server-one".into()),
+                    user_id: "user-one".into(),
+                    username: "listener".into(),
+                    trust_invalid_cert: false,
+                },
+                "secret-token".into(),
+                "device-one".into(),
+            )
+            .unwrap();
+            assert_eq!(
+                source
+                    .generated_track_object_ids(
+                        &crate::SourceRadioSeed::Track(kind.object_id("track", "track-one")),
+                        20,
                     )
-                    .unwrap();
-                    let expected = if use_instant_mix || similar_is_empty {
-                        "mix-track"
-                    } else {
-                        "similar-track"
-                    };
-                    assert_eq!(
-                        source
-                            .generated_track_object_ids(
-                                &crate::SourceRadioSeed::Track(
-                                    kind.object_id("track", "track-one")
-                                ),
-                                20,
-                            )
-                            .await
-                            .unwrap(),
-                        [kind.object_id("track", expected)]
-                    );
-                }
-            }
+                    .await
+                    .unwrap(),
+                [kind.object_id("track", "mix-track")]
+            );
         }
     }
 
@@ -1653,7 +1530,6 @@ mod tests {
                 user_id: "user".into(),
                 username: "listener".into(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "token".into(),
             "device".into(),
@@ -1745,7 +1621,6 @@ mod tests {
                     user_id: "user".into(),
                     username: "listener".into(),
                     trust_invalid_cert: false,
-                    use_instant_mix: false,
                 },
                 "token".into(),
                 "device".into(),
@@ -1977,7 +1852,6 @@ mod tests {
                 user_id: "user-one".to_string(),
                 username: "listener".to_string(),
                 trust_invalid_cert: false,
-                use_instant_mix: false,
             },
             "secret-token".to_string(),
             "device-one".to_string(),

@@ -195,7 +195,7 @@ async function stream(path, receive, signal) {
       if (!response.ok) throw new Error(tr("Could not receive live updates"));
       leavingPage = false;
       if (interrupted) {
-        state.randomSource = null;
+        state.mixSource = null;
         run(async () => {
           updateSources(await api("/sources"));
           await loadView();
@@ -313,7 +313,7 @@ const state = {
   currentMediaUri: null,
   currentRun: null,
   selectedLibrary: null,
-  randomSource: null,
+  mixSource: null,
   stream: null,
 };
 

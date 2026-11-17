@@ -38,9 +38,10 @@ import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.player.PlayerIconButton
+import androidx.compose.ui.text.style.TextAlign
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
-import io.github.screwys.rufin.player.PlaybackPreferences
 import kotlin.math.round
 import kotlin.math.roundToInt
 
@@ -63,8 +64,19 @@ internal fun SettingsSwitch(title: String, checked: Boolean, summary: String? = 
 internal fun SettingsNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, integer: Boolean = true, enabled: Boolean = true, save: (Any) -> Unit) {
     var edit by remember { mutableStateOf(false) }
     var text by remember(value) { mutableStateOf(if (integer) value.toLong().toString() else value.toString()) }
-    SettingsRow(title, summary = if (integer) value.toLong().toString() else value.toString(),
-        modifier = Modifier.clickable(enabled = enabled) { edit = true })
+    // A whole number steps by one from its row; its value opens the dialog for any other.
+    if (integer) SettingsRow(title, modifier = Modifier.alpha(if (enabled) 1f else .38f), trailing = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PlayerIconButton("rufin-list-remove-symbolic", "Decrease", { save(value.toLong() - 1) },
+                enabled = enabled && value - 1 >= range.start, iconSize = 18.dp)
+            Text(value.toLong().toString(), Modifier.widthIn(min = 36.dp).clip(MaterialTheme.shapes.small)
+                .clickable(enabled = enabled) { edit = true }.padding(horizontal = 6.dp, vertical = 8.dp),
+                textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"))
+            PlayerIconButton("rufin-list-add-symbolic", "Increase", { save(value.toLong() + 1) },
+                enabled = enabled && value + 1 <= range.endInclusive, iconSize = 18.dp)
+        }
+    })
+    else SettingsRow(title, summary = value.toString(), modifier = Modifier.clickable(enabled = enabled) { edit = true })
     if (edit) AlertDialog(onDismissRequest = { edit = false }, title = { Text(title) }, text = {
         OutlinedTextField(text, { text = it }, singleLine = true, colors = settingsTextFieldColors(),
             keyboardOptions = KeyboardOptions(keyboardType = if (integer) KeyboardType.Number else KeyboardType.Decimal))
@@ -112,7 +124,7 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
 
 @Composable
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,
-    player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, navigate: (MoreDestination) -> Unit) {
+    player: PlayerConnection, browse: BrowseConnection, navigate: (MoreDestination) -> Unit) {
     var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
     LaunchedEffect(destination, model.ready, player.bridge) {
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
@@ -146,7 +158,6 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     SettingsSwitch(translate("Use sort tags"), state.useSortTags) { preferences.changePreference { setUseSortTags(it) } }
                 }
             }
-            MoreDestination.Playback -> PlaybackPreferences(player, preferences, output)
             MoreDestination.Privacy -> {
                 SettingsGroup {
                     SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference { setPrivateMode(it) } }

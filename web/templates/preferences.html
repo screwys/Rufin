@@ -34,9 +34,9 @@
       </section>
       <section id="pref-customization" role="tabpanel" hidden>
         <div class="segmented pref-tabs" role="radiogroup" aria-label="{{ localization::tr("Customization") }}">
-          {% for (tab, label) in [("layout", "Layout"), ("player", "Player"), ("menus", "Menus")] %}<label><input type="radio" name="customization-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
+          {% for (tab, label) in [("layout", "Layout"), ("home", "Home"), ("player", "Player"), ("menus", "Menus")] %}<label><input type="radio" name="customization-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
         </div>
-        <div data-customization-tab="layout">
+        <div data-tabs="customization-tab" data-tab="layout">
           <h4>{{ localization::tr("Accessibility") }}</h4>
           <div class="pref-group">{% call m::switch("/reduce_motion", localization::tr("Reduce motion"), "") %}{% endcall %}</div>
           <h4>{{ localization::tr("Window") }}</h4>
@@ -51,13 +51,27 @@
             {% call m::sidebar_mode("/layout/narrow_profile/left_sidebar", localization::tr("Left sidebar"), true) %}{% endcall %}
             {% call m::sidebar_mode("/layout/narrow_profile/right_sidebar", localization::tr("Right sidebar"), false) %}{% endcall %}
           </div>
-          <h4>{{ localization::tr("Navigation") }}</h4>
+          <h4>{{ localization::tr("Grids") }}</h4>
           <div class="pref-group">
-            <button type="button" class="pref-row pref-link" id="pref-sidebar-items"><span class="pref-label"><span>{{ localization::tr("Sidebar items") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
-            <button type="button" class="pref-row pref-link" id="pref-home-blocks"><span class="pref-label"><span>{{ localization::tr("Home blocks") }}</span><small></small></span>{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}</button>
+            {% call m::switch("/grid_favorite_badges", localization::tr("Show a badge for favorited items"), "") %}{% endcall %}
+            {% call m::switch("/grid_star_ratings", localization::tr("Show star ratings"), "") %}{% endcall %}
+          </div>
+          <h4>{{ localization::tr("Sidebar items") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}
+            <div class="pref-rows" id="pref-routes"></div>
           </div>
         </div>
-        <div data-customization-tab="player" hidden>
+        <div data-tabs="customization-tab" data-tab="home" hidden>
+          <h4>{{ localization::tr("Display") }}</h4>
+          <div class="pref-group">
+            <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Size") }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Size") }}">{% for (value, title) in [("Compact", "Compact"), ("Default", "Default"), ("Large", "Large")] %}<label><input type="radio" name="/home/size" value='"{{ value }}"' data-setting="/home/size" />{{ localization::tr(title) }}</label>{% endfor %}</div></div>
+            <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Spacing") }}</span></span><div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Spacing") }}">{% for (value, title) in [("Compact", "Small"), ("Default", "Default"), ("Large", "Wide")] %}<label><input type="radio" name="/home/spacing" value='"{{ value }}"' data-setting="/home/spacing" />{{ localization::tr(title) }}</label>{% endfor %}</div></div>
+          </div>
+          <h4>{{ localization::tr("Blocks") }}</h4>
+          <div class="pref-group" id="pref-home-blocks-list"></div>
+        </div>
+        <div data-tabs="customization-tab" data-tab="player" hidden>
           <h4>{{ localization::tr("Bottom bar") }}</h4>
           <div class="pref-group">
             {% call m::switch("/show_bottom_bar_rating", localization::tr("Show ratings in the bottom bar"), "") %}{% endcall %}
@@ -77,14 +91,14 @@
             {% call m::switch("/fullscreen_background_image", localization::tr("Enable background image"), "") %}{% endcall %}
           </div>
         </div>
-        <div data-customization-tab="menus" hidden>
+        <div data-tabs="customization-tab" data-tab="menus" hidden>
           <h4>{{ localization::tr("Item menus") }}</h4>
           <p class="pref-note">{{ localization::tr("Select an entry to show or hide it.") }}</p>
           <div class="pref-group menu-preview">
             {% for (item, label, submenu, separator) in [("Play", "Play", false, false), ("PlayRadio", "Play radio", true, false), ("AddToPlaylist", "Add to Playlist", true, true), ("Favorites", "Favorites", false, false), ("EditMetadata", "Edit metadata", false, true), ("GoTo", "Go to", true, false), ("Share", "Share", false, false), ("Download", "Download", false, true), ("Pins", "Saved", false, true)] %}
             {% if separator %}<hr />{% endif %}<button type="button" class="menu-preview-entry" data-menu-item="{{ item }}" aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span>{{ localization::tr(label) }}</span>{% if submenu %}{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}{% endif %}</button>
             {% endfor %}
-            <hr /><button type="button" class="menu-preview-entry" data-menu-rating aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span class="menu-preview-stars">{% for star in ["rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-non-starred-symbolic", "rufin-non-starred-symbolic"] %}{% call m::icon(star) %}{% endcall %}{% endfor %}</span><small>{{ localization::tr("Rating") }}</small></button>
+            <hr /><button type="button" class="menu-preview-entry" data-menu-rating aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span class="menu-preview-stars">{% for star in ["rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-star-outline-symbolic", "rufin-star-outline-symbolic"] %}{% call m::icon(star) %}{% endcall %}{% endfor %}</span><small>{{ localization::tr("Rating") }}</small></button>
           </div>
         </div>
       </section>
@@ -242,8 +256,10 @@
         </div>
       </section>
       <section id="pref-playback" role="tabpanel" hidden>
-        <h4>{{ localization::tr("Queue and transitions") }}</h4>
-        <div class="pref-group">
+        <div class="segmented pref-tabs" role="radiogroup" aria-label="{{ localization::tr("Playback") }}">
+          {% for (tab, label) in [("queue", "Queue"), ("auto-dj", "Auto DJ"), ("audio", "Audio")] %}<label><input type="radio" name="playback-tab" value="{{ tab }}"{% if loop.first %} checked{% endif %} />{{ localization::tr(label) }}</label>{% endfor %}
+        </div>
+        <div class="pref-group" data-tabs="playback-tab" data-tab="queue">
           <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Transition mode") }}</span></span>
             <div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Transition mode") }}">
               <label><input type="radio" name="pref-transition" value='"Gapless"' data-setting="/playback/transition_mode" />{{ localization::tr("Gapless") }}</label>
@@ -256,17 +272,35 @@
           {% call m::switch("/playback/preserve_pitch", localization::tr("Preserve pitch"), "") %}{% endcall %}
           {% call m::switch("/playback/audio_fade_on_status_change", localization::tr("Audio fade on play/pause"), localization::tr("Fade audio when playback is paused or resumed")) %}{% endcall %}
           {% call m::switch("/playback/skip_unplayable_tracks", localization::tr("Skip unplayable tracks"), "") %}{% endcall %}
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Auto DJ refill threshold") }}</span><small>{{ localization::tr("Add tracks when fewer than this many remain") }}</small></span><input type="number" min="1" max="10" step="1" data-setting="/auto_dj_refill_threshold" /></label>
           {% call m::switch("/clear_queue_includes_current", localization::tr("Clearing queue also clears the current song"), "") %}{% endcall %}
         </div>
-        <h4>{{ localization::tr("Audio") }}</h4>
+        <div data-tabs="playback-tab" data-tab="auto-dj" hidden>
+        <p class="pref-note">{{ localization::tr("What Auto DJ and radio pick") }}</p>
         <div class="pref-group">
+          <label class="pref-row" id="pref-server-recommendations"><span class="pref-label"><span>{{ localization::tr("Override server recommendations") }}</span><small>{{ localization::tr("Play Rufin's picks instead of the server's own") }}</small></span><input type="checkbox" role="switch" data-setting="/override_server_recommendations" /></label>
+          {% call m::switch("/auto_dj_similar_artists", localization::tr("Similar artists from ListenBrainz"), localization::tr("Look up the artists that listeners play alongside the current one")) %}{% endcall %}
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Auto DJ refill threshold") }}</span><small>{{ localization::tr("Add tracks when fewer than this many remain") }}</small></span><input type="number" min="1" max="10" step="1" data-setting="/auto_dj_refill_threshold" /></label>
+          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Tracks per refill") }}</span></span><input type="number" min="1" max="20" step="1" data-setting="/auto_dj_refill_count" /></label>
+          <div class="pref-row"><span class="pref-label"><span>{{ localization::tr("Same artist") }}</span></span>
+            <div class="segmented" role="radiogroup" aria-label="{{ localization::tr("Same artist") }}">
+              {% for (value, title) in [("Few", "Few"), ("Some", "Some"), ("Many", "Many")] %}<label><input type="radio" name="pref-same-artist" value='"{{ value }}"' data-setting="/auto_dj_same_artist" />{{ localization::tr(title) }}</label>{% endfor %}
+            </div>
+          </div>
+          {% call m::switch("/auto_dj_skip_low_rated", localization::tr("Skip low-rated tracks"), localization::tr("Leave out tracks rated two stars or lower")) %}{% endcall %}
+        </div>
+        </div>
+        <div class="pref-group" data-tabs="playback-tab" data-tab="audio" hidden>
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Loudness normalization") }}</span></span><select data-setting="/playback/loudness_normalization"><option value='"Off"'>{{ localization::tr("Off") }}</option><option value='"ReplayGain"'>ReplayGain</option><option value='"EbuR128"'>EBU R128</option></select></label>
           <label class="pref-row" data-when="/playback/loudness_normalization!=Off"><span class="pref-label"><span>{{ localization::tr("Normalization scope") }}</span><small>{{ localization::tr("Track evens out every song, while Album preserves the intended differences within each album") }}</small></span><select data-setting="/playback/loudness_normalization_scope"><option value='"Track"'>{{ localization::tr("Track") }}</option><option value='"Album"'>{{ localization::tr("Album") }}</option></select></label>
           <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Target loudness") }}</span><small>{{ localization::tr("EBU R128 reference level") }}</small></span><span class="pref-range"><input type="range" min="-48" max="0" step="1" data-setting="/playback/ebu_r128_target_lufs" /><output></output></span></label>
           <label class="pref-row" data-when="/playback/loudness_normalization=EbuR128"><span class="pref-label"><span>{{ localization::tr("Write EBU R128 tags to files") }}</span><small>{{ localization::tr("Store calculated loudness in supported Local music files") }}</small></span><input type="checkbox" role="switch" data-setting="/playback/write_ebu_r128_tags" /></label>
           <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Volume scale") }}</span><small>{{ localization::tr("Perceptual for a finer control at low volume; Linear for a direct scale") }}</small></span><select data-setting="/playback/volume_scale"><option value='"Perceptual"'>{{ localization::tr("Perceptual") }}</option><option value='"Linear"'>{{ localization::tr("Linear") }}</option></select></label>
-          <label class="pref-row"><span class="pref-label"><span>{{ localization::tr("Stream quality") }}</span></span><select data-setting="/playback/stream_quality"><option value='"Original"'>{{ localization::tr("Original") }}</option>{% for kbps in [320, 256, 192, 128] %}<option value='{"MaxBitrateKbps":{{ kbps }}}'>{{ kbps }} kbps</option>{% endfor %}</select></label>
+        </div>
+        <div data-tabs="playback-tab" data-tab="audio" hidden>
+          <h4>{{ localization::tr("Stream quality") }}</h4>
+          <div class="pref-group">
+            <div class="pref-row pref-quality" id="pref-stream-quality">{% include "audio_quality.html" %}</div>
+          </div>
         </div>
       </section>
       <section id="pref-library" role="tabpanel" hidden>
@@ -293,7 +327,7 @@
         </div>
         <h4>{{ localization::tr("Downloads") }}</h4>
         <div class="pref-group">
-          <div class="pref-row pref-quality" id="pref-download-quality">{% include "download_quality.html" %}</div>
+          <div class="pref-row pref-quality" id="pref-download-quality">{% include "audio_quality.html" %}</div>
           {% call m::switch("/show_downloaded_badges", localization::tr("Show downloaded badge"), "") %}{% endcall %}
         </div>
       </section>
@@ -318,16 +352,4 @@
       </section>
     </div>
   </div>
-</dialog>
-<dialog id="sidebar-items-dialog" class="pref-dialog" aria-labelledby="sidebar-items-title">
-  <header class="pref-header"><span></span><h3 id="sidebar-items-title">{{ localization::tr("Sidebar items") }}</h3><button type="button" class="icon-button" data-close="sidebar-items-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
-  <div class="pref-group">{% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}</div>
-  <h4>{{ localization::tr("Pages") }}</h4>
-  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
-  <div class="pref-group" id="pref-routes"></div>
-</dialog>
-<dialog id="home-blocks-dialog" class="pref-dialog" aria-labelledby="home-blocks-title">
-  <header class="pref-header"><span></span><h3 id="home-blocks-title">{{ localization::tr("Home blocks") }}</h3><button type="button" class="icon-button" data-close="home-blocks-dialog" aria-label="{{ localization::tr("Close") }}">{% call m::icon("rufin-window-close-symbolic") %}{% endcall %}</button></header>
-  <p class="pref-note">{{ localization::tr("Drag to reorder.") }}</p>
-  <div class="pref-group" id="pref-home-blocks-list"></div>
 </dialog>

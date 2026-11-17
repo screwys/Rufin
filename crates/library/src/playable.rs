@@ -33,6 +33,9 @@ pub struct Playable {
     pub audio_revision: Option<[u8; 32]>,
     pub audio_hash: Option<[u8; 32]>,
     pub channels: Option<u32>,
+    pub bitrate_kbps: Option<u32>,
+    /// The sample size of lossless audio; lossy audio has none.
+    pub bit_depth: Option<u32>,
     pub gains: Gains,
     /// What names a downloaded copy.
     pub names: PlayableNames,
@@ -70,6 +73,26 @@ pub struct PlayableFile {
 }
 
 impl Playable {
+    /// The encoding a stream of this track is asked for; none when its own audio already fits
+    /// `quality`. A lossy format is for audio above its rate, FLAC for lossless audio in
+    /// another format, and either for more channels than the quality keeps.
+    pub fn stream_encoding(&self, quality: crate::AudioQuality) -> Option<crate::AudioEncoding> {
+        let encoding = quality.encoding()?;
+        let fits = if encoding.codec == crate::AudioCodec::Flac {
+            self.bit_depth.is_none()
+                || self
+                    .format
+                    .as_deref()
+                    .is_some_and(|format| format.eq_ignore_ascii_case("flac"))
+        } else {
+            self.bitrate_kbps
+                .zip(encoding.bitrate_kbps)
+                .is_some_and(|(rate, limit)| rate <= limit)
+        };
+        let downmix = encoding.stereo() && self.channels.is_some_and(|channels| channels > 2);
+        (downmix || !fits).then_some(encoding)
+    }
+
     /// The file a local locator or a Local source's file row names, as a URI GStreamer opens.
     pub fn local_uri(&self) -> Option<String> {
         if let Some(locator) = &self.locator {
@@ -197,7 +220,8 @@ impl Catalog {
                     ORDER BY coalesce(member_details.cue_path,member_details.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,
                 measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision,track.track_key,
                 json_extract(details.metadata,'$.audio_properties.size_bytes'),
-                CASE WHEN track.title='' THEN track.media_uri ELSE track.title END,track.display_artist,track.display_album,track.disc_number,track.track_number
+                CASE WHEN track.title='' THEN track.media_uri ELSE track.title END,track.display_artist,track.display_album,track.disc_number,track.track_number,
+                json_extract(details.metadata,'$.audio_properties.bitrate_kbps'),json_extract(details.metadata,'$.audio_properties.bit_depth')
              FROM tracks track LEFT JOIN track_details details USING(track_key)
              LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
              LEFT JOIN loudness measured ON measured.audio_hash=details.audio_hash
@@ -246,6 +270,8 @@ impl Catalog {
             disc: row.try_get(28)?,
             number: row.try_get(29)?,
         };
+        let bitrate_kbps: Option<i64> = row.try_get(30)?;
+        let bit_depth: Option<i64> = row.try_get(31)?;
         let source = source.map(SourceKey::from_raw);
         let (source_id, source_kind) = source
             .and_then(|source| {
@@ -342,6 +368,8 @@ impl Catalog {
             audio_revision: audio_revision.and_then(|revision| revision.try_into().ok()),
             audio_hash,
             channels: channels.and_then(|channels| u32::try_from(channels).ok()),
+            bitrate_kbps: bitrate_kbps.and_then(|rate| u32::try_from(rate).ok()),
+            bit_depth: bit_depth.and_then(|depth| u32::try_from(depth).ok()),
             gains: Gains {
                 track: parse(track_gain)?,
                 album: parse(album_gain)?,

@@ -22,11 +22,12 @@ const FEED_RETRY_MAX: Duration = Duration::from_secs(60);
 
 pub struct LocalChangeFeed {
     roots: Vec<PathBuf>,
+    links: Arc<super::Links>,
 }
 
 impl LocalChangeFeed {
-    pub fn new(roots: Vec<PathBuf>) -> Self {
-        Self { roots }
+    pub fn new(roots: Vec<PathBuf>, links: Arc<super::Links>) -> Self {
+        Self { roots, links }
     }
 
     pub fn listen_forever(
@@ -69,6 +70,7 @@ impl LocalChangeFeed {
         let overflow = Arc::new(AtomicBool::new(false));
         let callback_overflow = Arc::clone(&overflow);
         let roots = self.roots.iter().cloned().collect::<HashSet<_>>();
+        let links = Arc::clone(&self.links);
         let listener = std::thread::current();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = match event {
@@ -87,6 +89,7 @@ impl LocalChangeFeed {
                     if !event.paths.is_empty() {
                         event.paths.retain(|path| {
                             path.ancestors().any(|ancestor| roots.contains(ancestor))
+                                || links.listed(path).is_some()
                         });
                         if event.paths.is_empty() {
                             return;
@@ -127,7 +130,23 @@ impl LocalChangeFeed {
         }
 
         let mut retry_failed_roots_at = Instant::now() + FAILED_ROOT_RETRY;
+        // The folders that followed links lead to, each watched as a root is.
+        let mut followed = std::collections::BTreeSet::new();
+        let mut generation = None;
         while !should_stop() {
+            if generation != Some(self.links.generation()) {
+                generation = Some(self.links.generation());
+                let folders = self.links.folders();
+                for folder in followed.difference(&folders) {
+                    let _ = watcher.unwatch(folder);
+                }
+                for folder in folders.difference(&followed) {
+                    if let Err(error) = watcher.watch(folder, RecursiveMode::Recursive) {
+                        warn!(%error, folder = %folder.display(), "failed to watch a linked Local music folder");
+                    }
+                }
+                followed = folders;
+            }
             match wait_for_message(&receiver, &overflow, POLL_INTERVAL, should_stop) {
                 FeedWait::Message(FeedMessage::Change(mut evidence)) => {
                     loop {

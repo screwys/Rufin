@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.animation.AnimatedVisibility
@@ -8,11 +9,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateBounds
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -22,7 +20,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,8 +48,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.RufinIcon
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
 
 @Composable
 internal fun SettingsPage(modifier: Modifier = Modifier, embedded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
@@ -80,30 +75,6 @@ internal fun SettingsGroup(title: String? = null, description: String? = null, c
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)),
             verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
-    }
-}
-
-@Composable
-internal fun SettingsExpander(title: String, content: @Composable () -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val visibility = remember { MutableTransitionState(expanded) }
-    val bringIntoView = remember { BringIntoViewRequester() }
-    visibility.targetState = expanded
-    LaunchedEffect(visibility) {
-        snapshotFlow { visibility.isIdle && visibility.currentState }
-            // Restoring an open section keeps the saved scroll position.
-            .drop(1)
-            .collectLatest { revealed -> if (revealed) bringIntoView.bringIntoView() }
-    }
-    val duration = if (LocalReduceMotion.current) 0 else 180
-    val rotation by animateFloatAsState(if (expanded) 90f else 0f, tween(duration), label = "settingsExpansion")
-    SettingsGroup {
-        SettingsRow(title, modifier = Modifier.clickable(role = Role.Button) { expanded = !expanded },
-            trailing = { RufinIcon("rufin-go-next-symbolic", translate(if (expanded) "Hide" else "Show"),
-                Modifier.size(20.dp).graphicsLayer { rotationZ = rotation }) })
-        AnimatedVisibility(visibleState = visibility, modifier = Modifier.bringIntoViewRequester(bringIntoView),
-            enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
-            exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration))) { content() }
     }
 }
 
@@ -168,13 +139,17 @@ internal fun settingsButtonColors() = ButtonDefaults.outlinedButtonColors(
 /** A row of a reorderable list; `toggleable` is false where its switch cannot change, such as
  * the last visible Home block. */
 internal data class SettingsReorderItem(val id: String, val title: String, val enabled: Boolean, val reorderable: Boolean = true,
-    val toggleable: Boolean = true, val summary: String? = null)
+    val toggleable: Boolean = true, val summary: String? = null,
+    /** Whether the list's `details` show under the row. */
+    val details: Boolean = false)
 
 @Composable
 internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
     onReorder: (List<String>, String, String, Boolean) -> Unit,
     onToggle: (String, Boolean) -> Unit,
     onStep: ((String, Boolean) -> Unit)? = null,
+    /** What a row with `details` shows under it, in the row's own card. */
+    details: (@Composable (String) -> Unit)? = null,
 ) {
     var order by remember(items) { mutableStateOf(items.map { it.id }) }
     var dragged by remember { mutableStateOf<String?>(null) }
@@ -203,6 +178,7 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
         Box(Modifier.animateBounds(lookahead, boundsTransform = { _, _ -> tween(if (reduceMotion || dragged == id) 0 else 160) })
             .onSizeChanged { heights[id] = it.height }.zIndex(if (dragged == id) 1f else 0f)
             .graphicsLayer { translationY = dragOffset }) {
+        Column(Modifier.clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) {
         SettingsRow(item.title, summary = item.summary,
             leading = {
                 Box(Modifier.size(40.dp).pointerInput(id, item.reorderable, items, gap) {
@@ -243,6 +219,10 @@ internal fun SettingsReorderRows(items: List<SettingsReorderItem>,
                     CustomAccessibilityAction(translate("Move up")) { move(id, true); true }.takeIf { up },
                     CustomAccessibilityAction(translate("Move down")) { move(id, false); true }.takeIf { down })
             })
+        if (details != null) AnimatedVisibility(item.details,
+            enter = expandVertically(tween(if (reduceMotion) 0 else 160)) + fadeIn(tween(if (reduceMotion) 0 else 160)),
+            exit = shrinkVertically(tween(if (reduceMotion) 0 else 160)) + fadeOut(tween(if (reduceMotion) 0 else 160))) { details(id) }
+        }
         }
     } }
     }

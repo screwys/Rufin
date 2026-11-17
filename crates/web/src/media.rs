@@ -8,9 +8,10 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/artwork", get(artwork))
         .route("/api/queue/reorder", post(reorder))
         .route("/api/queue/next", post(play_next))
-        .route("/api/random", get(random_settings))
-        .route("/api/queue/random", post(random))
+        .route("/api/mix", get(mix_settings))
+        .route("/api/queue/mix", post(mix))
         .route("/api/favorite", get(selection_favorite).post(favorite))
+        .route("/api/rating", post(rating))
         .route("/api/queue/radio", post(radio))
         .route("/api/share", post(share))
         .route("/api/delete", post(delete))
@@ -121,6 +122,32 @@ pub(super) async fn favorite(
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
 }
 
+/// Rates a track, album or artist: 1 to 10 in half stars, or none.
+pub(super) async fn rating(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        kind: String,
+        uri: String,
+        rating: Option<u8>,
+    }
+    let input: Input = body(request).await?;
+    let target = match input.kind.as_str() {
+        "track" => library::FavoriteTarget::Track(input.uri),
+        "album" => library::FavoriteTarget::Album(input.uri),
+        "artist" => library::FavoriteTarget::Artist(input.uri),
+        _ => return Err(bad_request("Unknown rating type")),
+    };
+    let rating = input
+        .rating
+        .filter(|rating| *rating > 0)
+        .map(|rating| rating.min(10));
+    products.source.set_rating(target, rating);
+    Ok(json_response(StatusCode::OK, json!({"rating":rating})))
+}
+
 /// The link that shares the target a row's menu offers, made with the share dialog's choices.
 async fn share(
     State(products): State<ProductHandles>,
@@ -196,8 +223,8 @@ async fn radio(
     Ok(accepted())
 }
 
-/// The source and music folder a Random Play request names, as a selection of its own.
-async fn random_library(
+/// The source and music folder a Mix request names, as a selection of its own.
+async fn mix_library(
     products: &ProductHandles,
     source: &str,
     folder: Option<&str>,
@@ -207,18 +234,18 @@ async fn random_library(
         .ok_or_else(|| bad_request("source is required"))
 }
 
-async fn random_settings(
+async fn mix_settings(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let selected = random_library(
+    let selected = mix_library(
         &products,
         required(&parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
     let offset = number(&parameters, "offset", 0)?;
-    let (total, rows) = rufin_core::radio::random_genres(
+    let (total, rows) = rufin_core::mix::mix_genres(
         &products.library,
         &selected,
         parameters.get("q").map(String::as_str).unwrap_or(""),
@@ -227,12 +254,11 @@ async fn random_settings(
     )
     .await
     .map_err(internal)?;
-    let settings = products.settings.load().random_play.clone();
-    let selected_genre =
-        rufin_core::radio::saved_random_genre(&products.library, &settings, &selected)
-            .await
-            .map_err(internal)?
-            .map(|row| json!({"id":row.key,"name":row.name}));
+    let settings = products.settings.load().mix.clone();
+    let selected_genre = rufin_core::mix::saved_mix_genre(&products.library, &settings, &selected)
+        .await
+        .map_err(internal)?
+        .map(|row| json!({"id":row.key,"name":row.name}));
     let total = boolean(&parameters, "total")?.then_some(total as i64);
     Ok(json_response(
         StatusCode::OK,
@@ -240,7 +266,7 @@ async fn random_settings(
     ))
 }
 
-async fn random(
+async fn mix(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -259,7 +285,7 @@ async fn random(
         mode: String,
     }
     let input: Input = body(request).await?;
-    let selected = random_library(&products, &input.source, input.folder.as_deref()).await?;
+    let selected = mix_library(&products, &input.source, input.folder.as_deref()).await?;
     let placement = match input.mode.as_str() {
         "replace" => rufin_core::playback::QueuePlacement::Now,
         "next" => rufin_core::playback::QueuePlacement::Next,
@@ -269,7 +295,7 @@ async fn random(
     // The selection is saved as the dialogs of the other clients save theirs; the count of the
     // unit it does not play stays as saved.
     let genre = match input.genre {
-        Some(key) => Some(rufin_core::settings::RandomPlayGenreSelection {
+        Some(key) => Some(rufin_core::settings::MixGenreSelection {
             source_id: selected.source_id.clone(),
             music_folder_id: selected.music_folder_object_id.clone(),
             genre_id: products
@@ -283,8 +309,8 @@ async fn random(
     };
     let settings = products.settings.clone();
     tokio::task::spawn_blocking(move || {
-        let saved = settings.random_preferences();
-        settings.set_random_preferences(rufin_core::settings::RandomPlaySettings {
+        let saved = settings.mix_preferences();
+        settings.set_mix_preferences(rufin_core::settings::MixSettings {
             albums: input.albums,
             limit: if input.albums {
                 saved.limit
@@ -305,10 +331,10 @@ async fn random(
     .await
     .map_err(internal)?
     .map_err(internal)?;
-    let request = rufin_core::playback::RandomPlayRequest {
+    let request = rufin_core::playback::MixRequest {
         placement,
         requested: input.count.min(500),
-        criteria: library::RandomCriteria {
+        criteria: library::MixCriteria {
             min_year: input.min_year.map(i64::from),
             max_year: input.max_year.map(i64::from),
             genre: input.genre,
@@ -317,7 +343,7 @@ async fn random(
         },
     };
     let empty =
-        rufin_core::radio::queue_random(&products.library, &selected, request, &products.playback)
+        rufin_core::mix::queue_mix(&products.library, &selected, request, &products.playback)
             .await
             .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"empty":empty})))
@@ -517,10 +543,11 @@ async fn artwork(
         .map_err(bad_request)?
         .unwrap_or(256)
         .max(1);
-    let original = parameters
-        .get("original")
-        .is_some_and(|value| value == "true");
-    let request = if original {
+    let flag = |name| parameters.get(name).is_some_and(|value| value == "true");
+    let original = flag("original");
+    // A cover that may play is read whole, and sent whole only when it is animated.
+    let animated = flag("animated");
+    let request = if original || animated {
         rufin_core::artwork::ArtworkRequest::original(binding, size)
     } else {
         rufin_core::artwork::ArtworkRequest::new(binding, size)
@@ -545,13 +572,22 @@ async fn artwork(
             }
             rufin_core::artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
         };
-        let png = tokio::task::spawn_blocking(move || {
-            image.pixels().resized_to_cover(size)?.encode_png()
-        })
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
-        (png, "image/png")
+        let playing = image
+            .animation_bytes()
+            .filter(|_| animated)
+            .and_then(|bytes| Some((bytes.to_vec(), rufin_core::artwork::image_mime(bytes)?)));
+        match playing {
+            Some(playing) => playing,
+            None => {
+                let png = tokio::task::spawn_blocking(move || {
+                    image.pixels().resized_to_cover(size)?.encode_png()
+                })
+                .await
+                .map_err(internal)?
+                .map_err(internal)?;
+                (png, "image/png")
+            }
+        }
     };
     Ok(Response::builder()
         .header("content-type", mime)

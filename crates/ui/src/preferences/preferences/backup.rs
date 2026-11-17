@@ -326,6 +326,39 @@ pub(super) fn group(
     backup_group
 }
 
+/// Offers once, before the release that changes the app ID, to export a backup.
+pub fn show_notice(shell: &Rc<Shell>) {
+    if shell.shows_first_run()
+        || !rufin_core::runtime::source::shows_backup_notice(
+            shell.settings.current.borrow().application.clone(),
+            shell.source.configured.borrow().sources.clone(),
+        )
+    {
+        return;
+    }
+    shell
+        .settings
+        .set_app_setting("dismiss backup notice", true, |settings| {
+            &mut settings.application.backup_notice_dismissed
+        });
+    let resource = "preferences/dialogs/backup.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "backup_notice");
+    let export: gtk::Button =
+        crate::ui_resource::object(&builder, resource, "backup_notice_export");
+    let weak_shell = Rc::downgrade(shell);
+    let weak_dialog = dialog.downgrade();
+    export.connect_clicked(move |_| {
+        if let Some(dialog) = weak_dialog.upgrade() {
+            dialog.close();
+        }
+        if let Some(shell) = weak_shell.upgrade() {
+            export_dialog(&shell);
+        }
+    });
+    dialog.present(Some(&shell.chrome.window));
+}
+
 fn export_dialog(shell: &Rc<Shell>) {
     let shell = Rc::clone(shell);
     glib::spawn_future_local(async move {

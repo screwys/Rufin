@@ -56,21 +56,21 @@
   margin-left: auto;
 }
 
-.download-quality-controls {
+.audio-quality-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   width: 100%;
 }
-.download-quality-controls label {
+.audio-quality-controls label {
   flex: 1 1 10rem;
   min-width: 0;
 }
-.download-quality-controls input[type="range"] {
+.audio-quality-controls input[type="range"] {
   width: 100%;
 }
-.download-quality-controls output {
+.audio-quality-controls output {
   font-variant-numeric: tabular-nums;
 }
 

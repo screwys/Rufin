@@ -1,11 +1,11 @@
 //! Streaming semantic backups. Archive framing is staged before any live owner is changed.
-use chrono::{Datelike, TimeZone};
 use library::{BackupRestoreReport, Catalog, LibraryError, StateGroups};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
 fn invalid(message: impl Into<String>) -> BackupError {
@@ -316,7 +316,8 @@ pub fn stage_backup(
     }
     for name in manifest.contents.members() {
         let name = match name {
-            "playlist-folders.jsonl" => continue,
+            // Backups of 0.17 and earlier have no stations or playlist folders.
+            "playlist-folders.jsonl" | "stations.jsonl" => continue,
             "play-counts.jsonl" if !directory.path().join(name).is_file() => {
                 "legacy-activity.jsonl"
             }
@@ -393,31 +394,34 @@ impl BackupSchedule {
         Ok(())
     }
     pub fn due_at(&self, now: i64) -> Option<i64> {
-        self.due_at_in(now, &chrono::Local)
+        self.due_at_in(now, |time| {
+            UtcOffset::local_offset_at(time).unwrap_or(UtcOffset::UTC)
+        })
     }
-    fn due_at_in<Tz: TimeZone>(&self, now: i64, zone: &Tz) -> Option<i64> {
+    /// `offset_at` is the zone: the UTC offset its clocks show at an instant.
+    fn due_at_in(&self, now: i64, offset_at: impl Fn(OffsetDateTime) -> UtcOffset) -> Option<i64> {
         self.validate().ok()?;
         if self.frequency == BackupFrequency::Off {
             return None;
         }
-        let now = zone.timestamp_opt(now, 0).single()?;
+        let now = OffsetDateTime::from_unix_timestamp(now).ok()?;
+        let today = now.to_offset(offset_at(now)).date();
         for days in 0..=7 {
-            let date = now.date_naive().checked_sub_days(chrono::Days::new(days))?;
+            let date = today.checked_sub(time::Duration::days(days))?;
             if self.frequency == BackupFrequency::Weekly
-                && date.weekday().num_days_from_monday() != u32::from(self.weekday)
+                && date.weekday().number_days_from_monday() != self.weekday
             {
                 continue;
             }
-            let clock = date.and_hms_opt(u32::from(self.hour), 0, 0)?;
+            let clock = date.with_hms(self.hour, 0, 0).ok()?;
             // At a spring-forward gap, run at the first valid local minute after the chosen hour.
             let due = (0..=180).find_map(|minutes| {
-                zone.from_local_datetime(&(clock + chrono::Duration::minutes(minutes)))
-                    .earliest()
+                earliest_instant(clock + time::Duration::minutes(minutes), &offset_at)
             })?;
             if due > now {
                 continue;
             }
-            let due = due.timestamp();
+            let due = due.unix_timestamp();
             return self
                 .last_successful_at
                 .is_none_or(|last| last < due)
@@ -425,6 +429,20 @@ impl BackupSchedule {
         }
         None
     }
+}
+/// The earliest instant whose local clock reads `clock`; none inside a spring-forward gap. The
+/// offsets a day either side are those before and after any transition near it.
+fn earliest_instant(
+    clock: PrimitiveDateTime,
+    offset_at: impl Fn(OffsetDateTime) -> UtcOffset,
+) -> Option<OffsetDateTime> {
+    let around = clock.assume_utc();
+    [around - time::Duration::DAY, around + time::Duration::DAY]
+        .into_iter()
+        .map(&offset_at)
+        .map(|offset| clock.assume_offset(offset))
+        .filter(|instant| offset_at(*instant) == instant.offset())
+        .min()
 }
 fn schedule_prefix(schedule_id: &str) -> String {
     format!(
@@ -532,24 +550,22 @@ mod tests {
     }
     #[test]
     fn daily_and_weekly_schedules_track_normal_last_success() {
-        let now = chrono::Utc
-            .with_ymd_and_hms(2026, 9, 5, 12, 0, 0)
-            .unwrap()
-            .timestamp();
+        let now = time::macros::datetime!(2026-09-05 12:00 UTC).unix_timestamp();
+        let utc = |_: OffsetDateTime| UtcOffset::UTC;
         let mut schedule = BackupSchedule {
             frequency: BackupFrequency::Daily,
             schedule_id: "mine".into(),
             ..Default::default()
         };
-        let due = schedule.due_at_in(now, &chrono::Utc).unwrap();
+        let due = schedule.due_at_in(now, utc).unwrap();
         assert_eq!(now - due, 10 * 3600);
         schedule.last_successful_at = Some(due);
-        assert_eq!(schedule.due_at_in(now, &chrono::Utc), None);
+        assert_eq!(schedule.due_at_in(now, utc), None);
         schedule.frequency = BackupFrequency::Weekly;
         schedule.weekday = 0;
         schedule.last_successful_at = None;
         assert_eq!(
-            now - schedule.due_at_in(now, &chrono::Utc).unwrap(),
+            now - schedule.due_at_in(now, utc).unwrap(),
             5 * 86400 + 10 * 3600
         );
     }

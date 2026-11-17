@@ -52,6 +52,11 @@ impl SourceKind {
         matches!(self, Self::Navidrome | Self::Subsonic)
     }
 
+    /// Whether the server picks a radio's tracks itself.
+    pub fn recommends(self) -> bool {
+        matches!(self, Self::Jellyfin | Self::Emby | Self::Plex) || self.subsonic()
+    }
+
     /// Whether a playlist can belong to the source: its server stores it.
     pub fn owns_playlists(self) -> bool {
         matches!(self, Self::Jellyfin | Self::Emby | Self::Plex) || self.subsonic()

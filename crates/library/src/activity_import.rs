@@ -7,7 +7,9 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use serde::Deserialize;
-use unicode_normalization::UnicodeNormalization;
+use time::format_description::BorrowedFormatItem;
+use time::macros::format_description;
+use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 use crate::catalog::views::Context;
 use crate::{ActivityRecord, Catalog, LibraryError, LibraryResult, PlayCount, TrackKey};
@@ -205,8 +207,8 @@ fn import_id(track: &Named, started_at: i64) -> String {
     let hash = blake3::hash(
         format!(
             "{}\0{}\0{started_at}",
-            name_key(&track.artist),
-            name_key(&track.title)
+            names::name_key(&track.artist),
+            names::name_key(&track.title)
         )
         .as_bytes(),
     );
@@ -214,26 +216,10 @@ fn import_id(track: &Named, started_at: i64) -> String {
 }
 
 fn local_period(started_at: i64) -> String {
-    chrono::DateTime::from_timestamp(started_at, 0)
-        .unwrap_or_default()
-        .with_timezone(&chrono::Local)
-        .format("%Y-%m")
-        .to_string()
-}
-
-/// Names compare by their letters and digits, whatever their case, width or punctuation; a
-/// name of punctuation only, such as "&", by its characters.
-fn name_key(name: &str) -> String {
-    let lower = name.nfkc().flat_map(char::to_lowercase).collect::<String>();
-    let key = lower
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect::<String>();
-    if key.is_empty() {
-        lower.split_whitespace().collect()
-    } else {
-        key
-    }
+    let time =
+        OffsetDateTime::from_unix_timestamp(started_at).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let time = time.to_offset(UtcOffset::local_offset_at(time).unwrap_or(UtcOffset::UTC));
+    format!("{:04}-{:02}", time.year(), u8::from(time.month()))
 }
 
 #[derive(Clone)]
@@ -262,7 +248,7 @@ impl Matcher {
             if context.visible(slot).is_none() {
                 continue;
             }
-            let title = name_key(snapshot.text(record.title));
+            let title = names::name_key(snapshot.text(record.title));
             if title.is_empty() {
                 continue;
             }
@@ -270,14 +256,14 @@ impl Matcher {
             durations.insert(key, record.duration_ms);
             let candidate = Candidate {
                 key,
-                album: name_key(snapshot.text(record.album_title)),
+                album: names::name_key(snapshot.text(record.album_title)),
                 duration_ms: record.duration_ms,
                 listens: context.counts_listens(record),
             };
-            let mut artists = vec![name_key(snapshot.text(record.artist))];
+            let mut artists = vec![names::name_key(snapshot.text(record.artist))];
             for artist in snapshot.track_runs(record)[0] {
                 if let Some(artist) = snapshot.artists.live(*artist) {
-                    artists.push(name_key(snapshot.text(artist.name)));
+                    artists.push(names::name_key(snapshot.text(artist.name)));
                 }
             }
             artists.sort_unstable();
@@ -307,10 +293,11 @@ impl Matcher {
                 listens: true,
             });
         }
-        let candidates = self
-            .names
-            .get(&(name_key(&named.artist), name_key(&named.title)))?;
-        let album = name_key(&named.album);
+        let candidates = self.names.get(&(
+            names::name_key(&named.artist),
+            names::name_key(&named.title),
+        ))?;
+        let album = names::name_key(&named.album);
         candidates
             .iter()
             .min_by_key(|candidate| {
@@ -569,17 +556,22 @@ fn moment(text: &str) -> Option<i64> {
         };
         return Some(seconds as i64);
     }
-    if let Ok(time) = chrono::DateTime::parse_from_rfc3339(text) {
-        return Some(time.timestamp());
+    if let Some(time) = crate::catalog::records::rfc3339(text) {
+        return Some(time.unix_timestamp());
     }
-    [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%d %b %Y %H:%M",
-        "%d %b %Y, %H:%M",
-    ]
-    .iter()
-    .find_map(|format| chrono::NaiveDateTime::parse_from_str(text, format).ok())
-    .map(|time| time.and_utc().timestamp())
+    let formats: [&[BorrowedFormatItem<'_>]; 3] = [
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none][first [T][ ]][hour padding:none]:[minute padding:none]:[second padding:none]"
+        ),
+        format_description!(
+            "[year]-[month padding:none]-[day padding:none] [hour padding:none]:[minute padding:none]"
+        ),
+        format_description!(
+            "[day padding:none] [month repr:short case_sensitive:false] [year][optional [,]] [hour padding:none]:[minute padding:none]"
+        ),
+    ];
+    formats
+        .iter()
+        .find_map(|format| PrimitiveDateTime::parse(text, format).ok())
+        .map(|time| time.assume_utc().unix_timestamp())
 }

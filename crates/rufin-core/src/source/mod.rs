@@ -2108,7 +2108,7 @@ impl SourceOwner {
                 });
                 stored.ui.set_download_quality(
                     configuration.source_id.clone(),
-                    sources::DownloadQuality::Transcoded(library::AudioEncoding {
+                    sources::AudioQuality::Transcoded(library::AudioEncoding {
                         codec: library::AudioCodec::Opus,
                         bitrate_kbps: Some(128),
                         channels: library::AudioChannels::Preserve,
@@ -2955,6 +2955,18 @@ impl SourceOwner {
                 if let Some(login) = logins.remove(previous.as_str()) {
                     logins.insert(next.as_str().to_owned(), login);
                 }
+                drop(logins);
+                // The open clients hold this login already: they keep running under its new
+                // reference.
+                for cached in shared
+                    .clients
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .values_mut()
+                    .filter(|cached| cached.credential.as_ref() == Some(&previous))
+                {
+                    cached.credential = Some(next.clone());
+                }
                 *previous = next;
                 Ok(())
             }));
@@ -3175,7 +3187,6 @@ fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, Stri
         },
         plex_settings: None,
         file_settings: None,
-        use_instant_mix: None,
         emby_connect: false,
     };
     match configuration.editable().map_err(string_error)? {
@@ -3186,12 +3197,10 @@ fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, Stri
         }
         sources::EditableSource::Credentials {
             credentials,
-            use_instant_mix,
             emby_connect,
             ..
         } => {
             editable.credentials = credentials;
-            editable.use_instant_mix = use_instant_mix;
             editable.emby_connect = emby_connect;
         }
         sources::EditableSource::Files { settings, .. } => {
@@ -3252,7 +3261,7 @@ mod source_tests {
         let secret = serde_json::json!({"client_id":"test-device","token":"test-token","account_id":"profile","profiles":{},"resources":{"profile":{"one":"one-token","two":"two-token"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
         let reference = seal_credential(secrets.as_ref(), &secret).unwrap();
         let configured:Vec<_> = ["one","two"].into_iter().map(|server|ConfiguredSource {
-            configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
+            configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":"http://127.0.0.1:9","local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
             credential:Some(reference.clone()),music_folder_id:None,local_access:None,enable_half_stars:false,
         }).collect();
         settings
@@ -3856,7 +3865,7 @@ mod source_tests {
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(
                     &playable,
-                    playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
+                    playback::StreamRequest::new(&local_uri, playback::AudioQuality::Original),
                     None,
                     None,
                     |source_id| owner.open_client(source_id),
@@ -4045,7 +4054,7 @@ mod source_tests {
                     .await
                     .unwrap(),
             );
-            let settings_path = directory.path().join("settings.json");
+            let settings_path = directory.path().join("rufin.toml");
             let settings = SettingsFile::open(settings_path.clone()).unwrap();
             let first = SourceId::new("first");
             let second = SourceId::new("second");
@@ -4216,14 +4225,12 @@ impl SourceOwner {
         source_id: Option<SourceId>,
         kind: sources::ServerKind,
         credentials: sources::CredentialInput,
-        use_instant_mix: bool,
         connect_manually: bool,
     ) -> sources::SourceResult<()> {
         if let Some(source_id) = source_id {
             self.update_source(SourceSettingsChange::JellyfinEmby {
                 source_id,
                 credentials,
-                use_instant_mix,
                 connect_manually,
             })
             .recv()
@@ -4231,16 +4238,12 @@ impl SourceOwner {
             .map_err(|error| SourceError::Other(error.to_string()))?
             .map_err(SourceError::Other)
         } else {
-            self.configure_source(SourceSetup::JellyfinEmby {
-                kind,
-                credentials,
-                use_instant_mix,
-            })
-            .recv()
-            .await
-            .map_err(|error| SourceError::Other(error.to_string()))?
-            .map(|_| ())
-            .map_err(SourceError::Other)
+            self.configure_source(SourceSetup::JellyfinEmby { kind, credentials })
+                .recv()
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))?
+                .map(|_| ())
+                .map_err(SourceError::Other)
         }
     }
     pub async fn save_subsonic(

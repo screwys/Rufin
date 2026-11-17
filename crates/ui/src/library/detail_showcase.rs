@@ -3,7 +3,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use ::library::{AlbumRow, AlbumView, ArtistView, Row};
+use ::library::{AlbumRow, AlbumView, ArtistView, PlaylistListRow, Row};
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
@@ -15,12 +15,12 @@ use tracing::warn;
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::route_layout::{
-    DETAIL_SHOWCASE_NARROW_WIDTH as NARROW_WIDTH, detail_showcase_cover_size,
+    DETAIL_SHOWCASE_NARROW_WIDTH as NARROW_WIDTH, PRIMARY_ROUTE_MARGIN_END,
+    PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_showcase_cover_size,
 };
 use crate::menus::media_menus::{CollectionPlay, row_favorite};
 use crate::widgets::artwork::{ArtworkTile, CoverGroupProjection};
-use crate::widgets::cover_controls::{cover_hover_controls_with_favorite, showcase_cover_overlay};
-use crate::widgets::interactions::ContextMenuOpen;
+use crate::widgets::interactions::{ContextMenuOpen, install_context_menu_openers};
 use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::localization::bind_label_text_with;
 use crate::widgets::media_drag::MediaDragSource;
@@ -109,6 +109,8 @@ mod showcase_imp {
         #[template_child]
         pub favorite: TemplateChild<gtk::Button>,
         #[template_child]
+        pub edit: TemplateChild<gtk::Button>,
+        #[template_child]
         pub download: TemplateChild<gtk::Button>,
         #[template_child]
         pub more: TemplateChild<gtk::Button>,
@@ -120,8 +122,9 @@ mod showcase_imp {
         pub row: RefCell<Option<Row>>,
         pub(crate) shell: RefCell<Weak<CatalogUi>>,
         pub offers_download: Cell<bool>,
-        /// The favorite in the cover's corner on hover; it toggles the same favorite as ♡.
-        pub cover_favorite: RefCell<Option<gtk::Button>>,
+        /// The cover's Artwork button, under the pointer while the row's picture can change.
+        pub artwork_button: RefCell<Option<gtk::Button>>,
+        pub artwork_writable: Cell<bool>,
         /// Play's and Radio's widths with their labels, to tell whether the labels fit again.
         pub labelled_play: Cell<i32>,
         pub labelled_radio: Cell<i32>,
@@ -133,6 +136,8 @@ mod showcase_imp {
         pub has_facts: Cell<bool>,
         /// The facts and the genres as one line.
         pub(crate) meta_fit: std::cell::OnceCell<Rc<MetaLine>>,
+        /// The header as a strip, on a page that scrolls the header away.
+        pub(crate) strip: RefCell<Option<DetailStrip>>,
     }
 
     #[glib::object_subclass]
@@ -407,6 +412,13 @@ impl ShowcaseCover {
             Self::Group(cover, _) => cover.resize(size),
         }
     }
+
+    fn set_animated(&self) {
+        match self {
+            Self::Single(cover) => cover.tile.set_animated(true),
+            Self::Group(cover, _) => cover.set_animated(true),
+        }
+    }
 }
 
 /// What a mounted header shows and does.
@@ -414,8 +426,6 @@ pub struct ShowcaseMount {
     pub shape: ShowcaseShape,
     pub initial_width: i32,
     pub cover: ShowcaseCover,
-    /// The cover's hover Play: "Play album".
-    pub play_label: &'static str,
     pub play: CollectionPlay,
     /// The row's menu, from ⋯, the cover's corner and a secondary click.
     pub menu: ContextMenuOpen,
@@ -428,6 +438,7 @@ impl DetailShowcaseView {
     pub fn new(title: &str) -> Self {
         let view: Self = glib::Object::new();
         let imp = view.imp();
+        crate::favorites::install_favorite_heart(&imp.favorite);
         crate::widgets::text_slide::install(&imp.title_slide, &imp.title_viewport, &*imp.title);
         crate::widgets::text_slide::install(&imp.detail_slide, &imp.detail_viewport, &*imp.detail);
         // The facts slide as the title does when they are wider than the room.
@@ -481,12 +492,46 @@ impl DetailShowcaseView {
         let imp = self.imp();
         if imp.band_stops.replace(stops) != stops {
             imp.band.queue_draw();
+            if let Some(strip) = &*imp.strip.borrow() {
+                strip.band.queue_draw();
+            }
         }
     }
 
     pub fn set_title(&self, text: &str) {
-        self.imp().title.set_text(text);
+        let imp = self.imp();
+        imp.title.set_text(text);
+        if let Some(strip) = &*imp.strip.borrow() {
+            strip.title.set_text(text);
+        }
         self.refit();
+    }
+
+    /// Makes `page`, which holds the mounted header above the list in `list`, scroll as one
+    /// with that list. As the header leaves, a strip with the title and Play fades in; the
+    /// page goes on leaving until `frame` (the list with its column header) is under it.
+    pub fn scrolling_page(
+        &self,
+        page: &impl IsA<gtk::Widget>,
+        (list, frame): (gtk::ScrolledWindow, gtk::Widget),
+    ) -> gtk::Widget {
+        let imp = self.imp();
+        let weak = self.downgrade();
+        let strip = DetailStrip::new(
+            move || weak.upgrade().map(|view| view.imp().band_stops.get()),
+            &imp.play,
+        );
+        strip.title.set_text(&imp.title.text());
+        // A header without buttons has a strip without Play.
+        strip.play.set_visible(imp.actions.is_visible());
+        let scrolling = super::detail_scroll::detail_scroll(
+            page,
+            &*imp.body,
+            &strip.root,
+            Some((&list, &frame)),
+        );
+        imp.strip.replace(Some(strip));
+        scrolling
     }
 
     /// Shows `text` under the title: an album's artist, or the sub-page an artist's band heads.
@@ -603,8 +648,8 @@ impl DetailShowcaseView {
         self.refit();
     }
 
-    /// Mounts the header for `row`: its cover with the hover controls, its buttons, and its
-    /// shape at each width.
+    /// Mounts the header for `row`: its cover, with a playlist's picture buttons on hover, its
+    /// buttons, and its shape at each width.
     pub(crate) fn mount(
         &self,
         shell: &Rc<CatalogUi>,
@@ -615,27 +660,11 @@ impl DetailShowcaseView {
             shape,
             initial_width,
             cover,
-            play_label,
             play,
             menu,
             download,
         } = mount;
-        let (controls, cover_favorite) = cover_hover_controls_with_favorite(0, play_label, false);
-        let favorite = self.imp().favorite.downgrade();
-        cover_favorite.connect_clicked(move |_| {
-            if let Some(favorite) = favorite.upgrade() {
-                favorite.emit_clicked();
-            }
-        });
-        self.imp().cover_favorite.replace(Some(cover_favorite));
-        for (button, placement) in [
-            (&controls.play, QueuePlacement::Now),
-            (&controls.play_next, QueuePlacement::Next),
-            (&controls.play_last, QueuePlacement::Last),
-        ] {
-            let play = Rc::clone(&play);
-            button.connect_clicked(move |_| play(placement, false));
-        }
+        cover.set_animated();
         let weak = self.downgrade();
         cover.connect_texture(Rc::new(move |texture| {
             if let Some(view) = weak.upgrade() {
@@ -651,11 +680,17 @@ impl DetailShowcaseView {
                 button
             }
         };
-        self.imp().cover_host.append(&showcase_cover_overlay(
-            button.upcast_ref(),
-            controls,
-            Some(Rc::clone(&menu)),
-        ));
+        let overlay = gtk::Overlay::new();
+        overlay.add_css_class("cover-frame");
+        overlay.set_halign(gtk::Align::Start);
+        overlay.set_valign(gtk::Align::Start);
+        overlay.set_child(Some(&button));
+        install_context_menu_openers(&overlay, Rc::clone(&menu));
+        // Home's showcase steps through albums; a page's own cover changes its picture.
+        if shape != ShowcaseShape::Home {
+            self.install_artwork_button(&overlay);
+        }
+        self.imp().cover_host.append(&overlay);
         self.bind_actions(shell, play, menu, download);
         self.show_row(row);
         self.present(shape, initial_width, Some(cover))
@@ -682,15 +717,13 @@ impl DetailShowcaseView {
         );
         imp.radio.set_visible(offered.radio.is_some());
         imp.favorite.set_visible(offered.favorite);
-        let cover_favorite = imp.cover_favorite.borrow().clone();
-        if let Some(cover_favorite) = &cover_favorite {
-            // Hover shows and hides it, so a row without a favorite keeps it unmapped.
-            cover_favorite.set_child_visible(offered.favorite);
-        }
         if let Some((_, favorite)) = row_favorite(&row) {
-            for button in std::iter::once(&*imp.favorite).chain(cover_favorite.as_ref()) {
-                set_favorite_button_active(button, favorite);
-            }
+            set_favorite_button_active(&imp.favorite, favorite);
+        }
+        imp.edit
+            .set_visible(offered.edit && playlist_row(&row).is_some());
+        if imp.artwork_button.borrow().is_some() {
+            self.show_artwork_writable(&shell, row.clone(), offered.edit_metadata);
         }
         let downloaded = offered.remove_download;
         imp.download
@@ -826,6 +859,21 @@ impl DetailShowcaseView {
             }
         });
         let view = self.downgrade();
+        imp.edit.connect_clicked(move |_| {
+            let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
+                return;
+            };
+            match playlist_row(&row) {
+                Some(PlaylistListRow::Playlist(playlist)) => shell
+                    .shell()
+                    .edit_playlist_dialog(playlist.playlist_key, playlist.name.clone()),
+                Some(PlaylistListRow::SmartPlaylist(playlist)) => {
+                    shell.shell().edit_smart_playlist_dialog(playlist.clone())
+                }
+                _ => {}
+            }
+        });
+        let view = self.downgrade();
         imp.download.connect_clicked(move |button| {
             let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) else {
                 return;
@@ -838,6 +886,58 @@ impl DetailShowcaseView {
                 );
             }
         });
+    }
+
+    /// Puts the Artwork button on the cover; it shows under the pointer while the row's picture
+    /// can change, and opens the editor that changes it.
+    fn install_artwork_button(&self, overlay: &gtk::Overlay) {
+        let resource = "routes/cover_artwork.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, { edit_artwork: gtk::Button });
+        overlay.add_overlay(&edit_artwork);
+        let view = self.downgrade();
+        edit_artwork.connect_clicked(move |_| {
+            if let Some((shell, row)) = view.upgrade().and_then(|view| view.shown()) {
+                shell.shell().edit_row_artwork(row);
+            }
+        });
+        let (view, button) = (self.downgrade(), edit_artwork.downgrade());
+        let show = Rc::new(move |shown: bool| {
+            if let (Some(view), Some(button)) = (view.upgrade(), button.upgrade()) {
+                button.set_visible(shown && view.imp().artwork_writable.get());
+            }
+        });
+        let motion = gtk::EventControllerMotion::new();
+        let entered = Rc::clone(&show);
+        motion.connect_enter(move |_, _, _| entered(true));
+        motion.connect_leave(move |_| show(false));
+        overlay.add_controller(motion);
+        self.imp().artwork_button.replace(Some(edit_artwork));
+    }
+
+    /// Reads whether `row`'s cover can change its picture.
+    fn show_artwork_writable(&self, shell: &CatalogUi, row: Row, edit_metadata: bool) {
+        self.set_artwork_writable(false);
+        let view = self.downgrade();
+        let shell = Rc::clone(shell.shell());
+        glib::spawn_future_local(async move {
+            let writable =
+                crate::playlists::artwork::artwork_writable(&shell, &row, edit_metadata).await;
+            // A later row's own read decides for it.
+            if let Some(view) = view.upgrade()
+                && view.row().is_some_and(|shown| shown == row)
+            {
+                view.set_artwork_writable(writable);
+            }
+        });
+    }
+
+    fn set_artwork_writable(&self, writable: bool) {
+        let imp = self.imp();
+        imp.artwork_writable.set(writable);
+        if !writable && let Some(button) = imp.artwork_button.borrow().as_ref() {
+            button.set_visible(false);
+        }
     }
 
     /// The row the header shows.
@@ -950,6 +1050,63 @@ impl DetailShowcaseView {
             .set_tooltip_text((!play_labelled).then_some(tooltip.as_str()));
         imp.fitted.set(Some((shape, width)));
         self.fit_text(layout, width);
+    }
+}
+
+/// A header as a strip, for a page that scrolls its header away: the header's title on its
+/// band, with its Play.
+pub(crate) struct DetailStrip {
+    pub(crate) root: gtk::Widget,
+    pub(crate) band: gtk::DrawingArea,
+    pub(crate) title: gtk::Label,
+    pub(crate) play: gtk::Button,
+    pub(crate) play_icon: gtk::Image,
+    pub(crate) play_text: gtk::Label,
+}
+
+impl DetailStrip {
+    /// A strip whose band paints the header's colours `stops`, and whose Play clicks the
+    /// header's own, `header_play`.
+    pub(crate) fn new(
+        stops: impl Fn() -> Option<[[u8; 3]; 3]> + 'static,
+        header_play: &gtk::Button,
+    ) -> Self {
+        let resource = "routes/detail_strip.ui";
+        let builder = crate::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            root: gtk::Overlay,
+            band: gtk::DrawingArea,
+            title_host: gtk::Box,
+            play: gtk::Button,
+            play_icon: gtk::Image,
+            play_text: gtk::Label,
+        });
+        root.set_margin_top(ROUTE_TOP_MARGIN);
+        root.set_margin_bottom(ROUTE_TOP_MARGIN);
+        root.set_margin_start(PRIMARY_ROUTE_MARGIN_START);
+        root.set_margin_end(PRIMARY_ROUTE_MARGIN_END);
+        band.set_draw_func(move |_, cairo, width, height| {
+            if let Some(stops) = stops() {
+                paint_band(cairo, f64::from(width), f64::from(height), stops);
+            }
+        });
+        let (slide, title) = crate::widgets::text_slide::new_label();
+        title.add_css_class("detail-title");
+        title_host.append(&slide);
+        let header_play = header_play.downgrade();
+        play.connect_clicked(move |_| {
+            if let Some(header_play) = header_play.upgrade() {
+                header_play.emit_clicked();
+            }
+        });
+        Self {
+            root: root.upcast(),
+            band,
+            title,
+            play,
+            play_icon,
+            play_text,
+        }
     }
 }
 
@@ -1114,6 +1271,16 @@ fn media_cover_projection_with_open(
         tile,
         size: Rc::new(Cell::new(size)),
         candidates,
+    }
+}
+
+/// The playlist or smart playlist `row` is, whose picture and settings its page edits.
+fn playlist_row(row: &Row) -> Option<&PlaylistListRow> {
+    match row {
+        Row::Playlist(
+            playlist @ (PlaylistListRow::Playlist(_) | PlaylistListRow::SmartPlaylist(_)),
+        ) => Some(playlist),
+        _ => None,
     }
 }
 

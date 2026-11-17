@@ -73,6 +73,13 @@ mod allocation_owner_imp {
                     self.apply_width(for_size);
                 }
             }
+            // A parent that takes this owner's width as the narrowest asks for the height at
+            // it; the child is never measured narrower than it can be.
+            let for_size = if orientation == gtk::Orientation::Vertical && for_size >= 0 {
+                for_size.max(child.measure(gtk::Orientation::Horizontal, -1).0)
+            } else {
+                for_size
+            };
             let (minimum, natural, minimum_baseline, natural_baseline) =
                 child.measure(orientation, for_size);
             let natural = if orientation == gtk::Orientation::Horizontal {

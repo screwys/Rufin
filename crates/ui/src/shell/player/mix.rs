@@ -11,7 +11,7 @@ use tracing::warn;
 use localization::tr;
 
 use crate::shell::shell::Shell;
-use rufin_core::settings::{RandomPlayGenreSelection, RandomPlaySettings};
+use rufin_core::settings::{MixGenreSelection, MixSettings};
 
 /// The kinds the popover offers, each with its button's id.
 const KINDS: [(PlayedFilter, &str); 5] = [
@@ -45,7 +45,7 @@ pub(crate) fn present_mix_popover(anchor: &gtk::Button, shell: &Rc<Shell>) {
     let reading = selected.clone();
     let runtime = shell.products.runtime.clone();
     let task = runtime.spawn(async move {
-        rufin_core::radio::random_genres(
+        rufin_core::mix::mix_genres(
             &catalog,
             &reading,
             "",
@@ -74,8 +74,8 @@ fn present_mix_popover_loaded(
     selected: rufin_core::runtime::SelectedLibrary,
     genres: Vec<GenreChoice>,
 ) {
-    let saved = shell.settings.current.borrow().random_play.clone();
-    let resource = "player/random_play.ui";
+    let saved = shell.settings.current.borrow().mix.clone();
+    let resource = "player/mix.ui";
     let builder = crate::ui_resource::builder(resource);
     let content: gtk::Box = crate::ui_resource::object(&builder, resource, "mix");
     let controls = MixControls {
@@ -148,13 +148,13 @@ fn present_mix_popover_loaded(
             shell
                 .settings
                 .update_app_settings("mix settings", |current| {
-                    if current.random_play == settings {
+                    if current.mix == settings {
                         return false;
                     }
-                    current.random_play = settings.clone();
+                    current.mix = settings.clone();
                     true
                 });
-            play_random(&shell, settings, placement);
+            play_mix(&shell, settings, placement);
             if let Some(popover) = popover.upgrade() {
                 popover.popdown();
             }
@@ -206,7 +206,7 @@ fn settings_from_controls(
     genres: &[GenreChoice],
     source_id: sources::SourceId,
     music_folder_id: Option<String>,
-) -> RandomPlaySettings {
+) -> MixSettings {
     let albums = controls.unit.active_name().as_deref() == Some("albums");
     let mut limits = controls.limits.get();
     limits[usize::from(albums)] = controls.limit.value() as usize;
@@ -219,14 +219,14 @@ fn settings_from_controls(
             .ok()
             .filter(|year| (1850..=2050).contains(year))
     };
-    RandomPlaySettings {
+    MixSettings {
         albums,
         limit: limits[0],
         album_limit: limits[1],
         min_year: year(&controls.min_year),
         max_year: year(&controls.max_year),
         genre: selected_genre(genres, controls.genre.selected()).map(|genre_id| {
-            RandomPlayGenreSelection {
+            MixGenreSelection {
                 source_id,
                 music_folder_id,
                 genre_id,
@@ -240,9 +240,9 @@ fn settings_from_controls(
     }
 }
 
-pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
-    let settings = shell.settings.current.borrow().random_play.clone();
-    play_random(shell, settings, placement);
+pub(crate) fn play_saved_mix(shell: &Rc<Shell>, placement: QueuePlacement) {
+    let settings = shell.settings.current.borrow().mix.clone();
+    play_mix(shell, settings, placement);
 }
 
 fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
@@ -254,13 +254,13 @@ fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
         .map(|genre| genre.object_id.clone())
 }
 
-fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlacement) {
+fn play_mix(shell: &Shell, settings: MixSettings, placement: QueuePlacement) {
     let queue = shell.products.playback.clone();
     let feedback = Rc::clone(&shell.control_feedback);
     glib::spawn_future_local(async move {
-        match rufin_core::radio::play_saved_random(&queue, settings, placement).await {
+        match rufin_core::mix::play_saved_mix(&queue, settings, placement).await {
             Ok(true) => {
-                let resource = "player/random_play.ui";
+                let resource = "player/mix.ui";
                 let builder = crate::ui_resource::builder(resource);
                 let message: gtk::Label =
                     crate::ui_resource::object(&builder, resource, "no_matches");

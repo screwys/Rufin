@@ -186,6 +186,7 @@ impl CatalogUi {
         });
         let (tracks_widget, tracks, toolbar) =
             self.scrolling_track_projection(rows.clone(), list_key, "smart-playlist-detail");
+        let scroll_parts = tracks.scroll_parts();
         let item_navigation = tracks.item_navigation();
         let apply_tracks = tracks.clone();
         let apply = Rc::new(move |settings: &LibraryListSettings| {
@@ -197,6 +198,7 @@ impl CatalogUi {
             owner,
             rows,
             tracks_widget,
+            scroll_parts,
             item_navigation,
             apply,
             move |apply_owner| tracks.page_reads(|_| {}, move |header| apply_owner(header)),
@@ -232,6 +234,7 @@ impl CatalogUi {
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
+        let scroll_parts = entries.scroll_parts();
         let apply_entries = Rc::clone(&entries);
         let apply = Rc::new(move |settings: &LibraryListSettings| {
             apply_entries.apply_library_list_settings(LibraryListKey::PlaylistTracks, settings);
@@ -249,6 +252,7 @@ impl CatalogUi {
             owner,
             rows,
             tracks_widget,
+            scroll_parts,
             item_navigation,
             apply,
             move |apply_owner| {
@@ -288,6 +292,7 @@ impl CatalogUi {
         owner: PlaylistDetailOwner,
         rows: Rows<library::Row>,
         tracks_widget: gtk::Widget,
+        scroll_parts: (gtk::ScrolledWindow, gtk::Widget),
         item_navigation: crate::widgets::mounted_route::MountedRouteItemNavigation,
         apply_list_settings: Rc<dyn Fn(&LibraryListSettings)>,
         reads: impl FnOnce(Rc<dyn Fn(Option<library::Header>)>) -> PageReads,
@@ -389,7 +394,6 @@ impl CatalogUi {
                 shape: ShowcaseShape::Detail,
                 initial_width: width,
                 cover: ShowcaseCover::Group(cover.clone(), open_cover),
-                play_label: msgid("Play playlist"),
                 play: Rc::clone(&play),
                 menu,
                 download: true,
@@ -433,7 +437,7 @@ impl CatalogUi {
                 reads.resume(&shell.settings.current.borrow());
             })
         };
-        MountedRoute::new(wrapper.upcast(), resume)
+        MountedRoute::new(showcase_view.scrolling_page(&wrapper, scroll_parts), resume)
             .with_search(search)
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(item_navigation)

@@ -12,7 +12,7 @@ use audio_processing::{
 use library::{
     Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, SourcePhase, TrackKey,
 };
-use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
+use playback::{LoudnessNormalizationScope, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{debug, info, warn};
 
@@ -478,7 +478,10 @@ impl Analysis<'_> {
         let owner = Arc::clone(self.source_owner);
         let stream = prepare_stream(
             playable,
-            StreamRequest::new(&playable.media_uri, StreamQuality::Original),
+            StreamRequest::new(
+                &playable.media_uri,
+                self.source_owner.shared.settings.stream_quality(),
+            ),
             Some(self.configuration),
             Some(self.source_owner.downloads()),
             move |source_id| async move {

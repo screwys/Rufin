@@ -504,8 +504,8 @@ private fun MenuRating(value: UByte?, halfStars: Boolean, commit: (UByte?) -> Un
             }, verticalAlignment = Alignment.CenterVertically) {
             repeat(5) { index ->
                 val icon = when ((displayed - index * 2).coerceIn(0, 2)) {
-                    0 -> "rufin-non-starred-symbolic"
-                    1 -> "rufin-semi-starred-symbolic"
+                    0 -> "rufin-star-outline-symbolic"
+                    1 -> "rufin-star-half-symbolic"
                     else -> "rufin-starred-symbolic"
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {

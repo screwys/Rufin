@@ -50,13 +50,13 @@ private fun rememberSleepTimer(player: PlayerConnection): Pair<SleepTimerView?, 
 
 /** The row atop the player's More sheet: Mix, Sleep timer and Auto DJ. */
 @Composable
-internal fun PlayerMenuActions(player: PlayerConnection, onRandom: () -> Unit, onSleepTimer: () -> Unit, onAutoDjSettings: () -> Unit) {
+internal fun PlayerMenuActions(player: PlayerConnection, onMix: () -> Unit, onSleepTimer: () -> Unit, onAutoDjSettings: () -> Unit) {
     val autoDj by remember(player) { derivedStateOf { player.playback?.controls?.autoDjEnabled == true } }
     val (timer, text) = rememberSleepTimer(player)
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             // A station plays alone: Mix and Auto DJ have no queue to fill.
-            PlayerMenuTile("rufin-mix-symbolic", translate("Mix"), Modifier.weight(1f), enabled = !player.live, onClick = onRandom)
+            PlayerMenuTile("rufin-mix-symbolic", translate("Mix"), Modifier.weight(1f), enabled = !player.live, onClick = onMix)
             PlayerMenuTile("rufin-sleep-timer-symbolic", text?.short?.ifEmpty { null } ?: translate("Sleep timer"),
                 Modifier.weight(1f), active = timer != null, onClick = onSleepTimer)
             PlayerMenuTile("rufin-auto-dj-symbolic", translate("Auto DJ"), Modifier.weight(1f), active = autoDj, enabled = !player.live,

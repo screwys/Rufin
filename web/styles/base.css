@@ -16,6 +16,7 @@
   --muted: #aaa;
   --accent: #8dbbff;
   --blue: #3584e4;
+  --favorite: var(--accent);
   --player: #292929;
   color: var(--text);
   background: var(--bg);
@@ -533,6 +534,7 @@ dialog > #toast { position: fixed; }
   --muted: #707076;
   --accent: #1766b1;
   --blue: #3584e4;
+  --favorite: var(--accent);
   --player: #f8f8fa;
 }
 
@@ -592,7 +594,8 @@ dialog > #toast { position: fixed; }
 .enhanced .without-js { display: none !important; }
 .page-navigation { display: flex; gap: 16px; padding: 16px; }
 html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls { opacity: 1; }
-html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls button { pointer-events: auto; }
+html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-controls :is(button, .cover-rating) { pointer-events: auto; }
+html:not(.enhanced) .album-card:is(:hover, :focus-within) .cover-corner { opacity: 1; pointer-events: auto; }
 html:not(.enhanced) #navigation:target { display: flex; }
 html:not(.enhanced) #login-dialog[open] { position: fixed; inset: 15vh 0 auto; }
 #transport-form { display: none; }

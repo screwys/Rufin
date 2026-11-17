@@ -13,7 +13,10 @@ pub mod detail_links;
 pub mod diagnostics;
 pub mod downloads;
 mod features;
+#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+mod flatpak_documents;
 mod loudness;
+pub mod mix;
 pub mod paths;
 pub mod playback;
 pub mod presence;

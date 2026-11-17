@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="GtkFileFilter" id="image_filter">
+    <property name="name" translatable="yes">Image files</property>
+    <mime-types><mime-type>image/*</mime-type></mime-types>
+    <patterns><pattern>*.jxl</pattern><pattern>*.JXL</pattern></patterns>
+  </object>
+  <object class="GtkFileDialog" id="image_chooser"><property name="title" translatable="yes">Upload artwork</property><property name="default-filter">image_filter</property></object>
+</interface>

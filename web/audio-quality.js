@@ -1,7 +1,7 @@
 import { run, tr } from "./ui.js";
 
-// Shows a download quality as the app offers it ({value, bitrate, channels}) and posts each
-// edit; `change(edit)` returns what the app made of it.
+// Shows a download or stream quality as the app offers it ({value, bitrate, channels}) and
+// posts each edit; `change(edit)` returns what the app made of it.
 export function qualityControls(root, initial, change) {
   const format = root.querySelector('[data-quality="format"]');
   const bitrate = root.querySelector('[data-quality="bitrate"]');

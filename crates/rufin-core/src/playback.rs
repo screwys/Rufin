@@ -503,7 +503,7 @@ impl PlaybackOwner {
         if self.request_plex_auto_dj(&request) {
             return;
         }
-        let seed = library::RadioSeed::Track(request.seed_media_uri.clone());
+        let seed = library::RadioSeed::Track(request.anchor_media_uri.clone());
         let candidates = self.candidates(seed, request.requested_count, Default::default());
         self.runtime.spawn(async move {
             let candidates = candidates.await;
@@ -546,11 +546,12 @@ impl PlaybackOwner {
         playback: WeakPlayback,
         run: RunId,
         occurrence: Arc<playback::QueueRow>,
-        request: StreamRequest,
+        mut request: StreamRequest,
     ) -> tokio::task::JoinHandle<()> {
         let catalog = Arc::clone(&self.catalog);
         let source_owner = Arc::clone(&self.source);
         let local = self.settings.local_configuration();
+        request.quality = self.settings.stream_quality();
         // A cast receiver shows the cover the cache holds.
         let cast_artwork = (!self.playback_output().is_local()).then(|| {
             (
@@ -577,7 +578,10 @@ impl PlaybackOwner {
                         )
                     });
                 playback.post(move |player, sample| match result {
-                    Ok(stream) => player.stream_resolved(run, stream),
+                    Ok(stream) => {
+                        player.stream_loading(run, sample);
+                        player.stream_resolved(run, stream)
+                    }
                     Err(error) => player.stream_failed(run, error, sample),
                 });
                 return;
@@ -659,6 +663,14 @@ impl PlaybackOwner {
         if edited != current.playback {
             self.playback_settings_changed(current.playback.clone());
         }
+        let metered = self.settings.metered();
+        let (before, after) = (
+            previous.stream_quality(metered),
+            current.stream_quality(metered),
+        );
+        if before != after {
+            self.stream_quality_changed(before, after);
+        }
         if previous.application.cast_proxy_enabled != current.application.cast_proxy_enabled {
             self.cast
                 .set_proxy_media(current.application.cast_proxy_enabled);
@@ -681,6 +693,27 @@ impl PlaybackOwner {
         self.equalizer_output_changed(settings.audio_output.as_deref());
         self.send(Command::UpdateSettings(settings));
     }
+    /// The quality streams are asked for changed: the next track resolves again, and so does
+    /// the playing one when its own stream would be another.
+    fn stream_quality_changed(&self, before: library::AudioQuality, after: library::AudioQuality) {
+        let Some(active) = self.active() else {
+            return;
+        };
+        let _ = active.command(Command::StreamInputsChanged);
+        let Some(media) = self.current_media() else {
+            return;
+        };
+        let catalog = Arc::clone(&self.catalog);
+        self.runtime.spawn(async move {
+            let track = &media.row.track;
+            if let Ok(Some(playable)) = catalog.playable(track.track_key).await
+                && playable.stream_encoding(before) != playable.stream_encoding(after)
+            {
+                let _ = active.command(Command::ResolveCurrentAgain(track.media_uri.clone()));
+            }
+        });
+    }
+
     pub(crate) fn stream_inputs_changed(&self) -> Result<(), String> {
         let active = self
             .active()
@@ -825,7 +858,7 @@ impl PlaybackOwner {
         WaveformMedia {
             request: StreamRequest::new(
                 (&media.row.track).media_uri.clone(),
-                self.settings.playback_stream_quality(),
+                waveform_quality(self.settings.stream_quality()),
             ),
             media,
             source: Arc::clone(&self.source),
@@ -984,6 +1017,19 @@ impl PlaybackOwner {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl PlaybackOwner {
+    /// Whether the device's network is metered, as mobile data is: streams are then asked
+    /// for the quality chosen for it.
+    pub fn set_metered(&self, metered: bool) {
+        let settings = self.settings.load();
+        let was = self.settings.metered();
+        self.settings.set_metered(metered);
+        if was != metered && settings.ui.application.mobile_data_stream_quality.is_some() {
+            self.stream_quality_changed(
+                settings.ui.stream_quality(was),
+                settings.ui.stream_quality(metered),
+            );
+        }
+    }
     pub fn remove(&self, position: usize) {
         self.send(Command::Remove(position));
     }
@@ -1201,6 +1247,12 @@ impl PlaybackOwner {
         }
         self.take_active();
     }
+}
+
+/// The quality the seekbar's waveform reads a track in. Its peaks need no more than the lowest
+/// rate, so a track its server encodes is not sent a second time at the listening rate.
+fn waveform_quality(quality: library::AudioQuality) -> library::AudioQuality {
+    crate::downloads::audio_quality_with_bitrate(quality, crate::downloads::AUDIO_BITRATES[0])
 }
 
 /// Opens a playable from the first usable of its download, its mapped file and its own local
@@ -1662,7 +1714,7 @@ mod tests {
             &playable,
             playback::StreamRequest::new(
                 occurrence.track.media_uri.clone(),
-                playback::StreamQuality::Original,
+                playback::AudioQuality::Original,
             ),
             None,
             None,

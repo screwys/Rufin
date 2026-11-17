@@ -22,6 +22,8 @@ const SETTINGS: &[&str] = &[
     "/prefer_server_lyrics",
     "/external_lyrics_providers",
     "/reduce_motion",
+    "/home/size",
+    "/home/spacing",
     "/layout/default_profile/left_sidebar",
     "/layout/default_profile/right_sidebar",
     "/layout/narrow_enabled",
@@ -33,6 +35,8 @@ const SETTINGS: &[&str] = &[
     "/right_panel/combined",
     "/right_panel/queue_visible",
     "/show_bottom_bar_rating",
+    "/grid_favorite_badges",
+    "/grid_star_ratings",
     "/seekbar_waveform_enabled",
     "/sidebar/pins_visible",
     "/context_menu/items",
@@ -62,6 +66,11 @@ const SETTINGS: &[&str] = &[
     "/playback/volume_scale",
     "/playback/stream_quality",
     "/auto_dj_refill_threshold",
+    "/auto_dj_refill_count",
+    "/override_server_recommendations",
+    "/auto_dj_similar_artists",
+    "/auto_dj_same_artist",
+    "/auto_dj_skip_low_rated",
     "/clear_queue_includes_current",
     "/fullscreen_lyrics_visible",
     "/fullscreen_visualizer_visible",
@@ -98,12 +107,13 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         })
         .collect::<Vec<_>>();
     let (themes, theme_errors) = themes(&settings);
+    let stream_quality = super::source::quality_view(settings.playback.stream_quality);
     drop(settings);
     let blocks = products
         .settings
         .home_block_rows()
         .into_iter()
-        .map(|row| json!({"block": row.block, "title": localization::tr(&row.title), "visible": row.visible, "can_toggle": row.can_toggle}))
+        .map(|row| json!({"block": row.block, "title": localization::tr(&row.title), "visible": row.visible, "can_toggle": row.can_toggle, "has_options": row.has_options, "items": row.items, "rows": row.rows}))
         .collect::<Vec<_>>();
     let lyrics = rufin_core::settings::ExternalLyricsProvider::all()
         .into_iter()
@@ -114,8 +124,11 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         "/artist_image_providers": rufin_core::settings::ArtistImageProvider::all().into_iter().map(|provider| provider_json(json!(provider), String::new())).collect::<Vec<_>>(),
         "/external_lyrics_providers": lyrics,
     });
+    let server_recommendations_shown = rufin_core::runtime::source::shows_server_recommendations(
+        products.source.list_sources().sources,
+    );
     Ok(
-        json!({"values": values, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors}),
+        json!({"values": values, "stream_quality": stream_quality, "routes": routes, "home_blocks": blocks, "providers": providers, "themes": themes, "theme_errors": theme_errors, "server_recommendations_shown": server_recommendations_shown}),
     )
 }
 
@@ -240,6 +253,10 @@ enum Edit {
         target: Option<library::HomeBlockKind>,
         #[serde(default)]
         after: bool,
+        /// How many items it lists.
+        items: Option<u8>,
+        /// The rows its columns stack; 0 leaves that to what it holds.
+        rows: Option<u8>,
     },
 }
 
@@ -321,7 +338,19 @@ async fn write(
             delta,
             target,
             after,
+            items,
+            rows,
         } => {
+            if let Some(items) = items {
+                settings
+                    .set_home_block_items(block, items)
+                    .map_err(bad_request)?;
+            }
+            if let Some(rows) = rows {
+                settings
+                    .set_home_block_rows(block, Some(rows).filter(|rows| *rows > 0))
+                    .map_err(bad_request)?;
+            }
             if let Some(visible) = visible {
                 settings
                     .set_home_block_visible(block, visible)
