@@ -8,8 +8,6 @@ let values = {};
 let shown = null;
 // The quality every source streams in, and the one the shown source streams in.
 let streamQuality = null;
-let sourceStreamQuality = null;
-let shownSource = null;
 
 // Rows that only apply while another setting is on, as GTK makes them insensitive.
 const dependencies = {
@@ -44,7 +42,7 @@ function show(preferences) {
   }
   if (streamQuality) streamQuality.set(preferences.stream_quality);
   else streamQuality = qualityControls($("pref-stream-quality"), preferences.stream_quality,
-    async (edit) => (await api("/stream/quality", "POST", { source: null, edit })).stream_quality);
+    async (edit) => (await api("/stream/quality", "POST", { edit })).stream_quality);
   $("pref-server-recommendations").hidden = !preferences.server_recommendations_shown;
   for (const node of document.querySelectorAll("[data-when]")) {
     const [, path, not, expected] = node.dataset.when.match(/^(.*?)(!?)=(.*)$/);
@@ -409,17 +407,6 @@ async function importActivity(file) {
 
 function showSource(item) {
   showPage("source", item.name);
-  shownSource = item;
-  // A source whose server encodes its tracks has a stream quality of its own.
-  $("pref-source-stream").hidden = !item.stream_quality;
-  if (item.stream_quality) {
-    if (sourceStreamQuality) sourceStreamQuality.set(item.stream_quality);
-    else sourceStreamQuality = qualityControls($("pref-source-stream-quality"), item.stream_quality, async (edit) => {
-      const result = await api("/stream/quality", "POST", { source: shownSource.id, edit });
-      shownSource.stream_quality = result.stream_quality;
-      return result.stream_quality;
-    }, true);
-  }
   const action = (title, run, className = "") => {
     const row = el("button", `pref-row pref-action ${className}`, title);
     row.type = "button";

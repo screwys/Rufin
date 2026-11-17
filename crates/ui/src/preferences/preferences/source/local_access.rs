@@ -103,29 +103,6 @@ fn manage_server_content(
     if let Some(row) = super::playlist_auto_save_row(shell, &server) {
         content.append(&row);
     }
-    if !server.file_library {
-        let streaming = adw::PreferencesGroup::builder()
-            .title(tr(super::super::general::STREAM_QUALITY_TITLE))
-            .build();
-        let saved = shell
-            .settings
-            .current
-            .borrow()
-            .download_settings(&server.id)
-            .stream_quality;
-        let quality_shell = Rc::clone(shell);
-        let quality_source = server.id.clone();
-        for row in crate::preferences::audio_quality::source_rows(saved, move |quality| {
-            quality_shell
-                .settings
-                .update_app_settings("stream quality", |settings| {
-                    settings.set_source_stream_quality(quality_source.clone(), quality)
-                });
-        }) {
-            streaming.add(&row);
-        }
-        content.append(&streaming);
-    }
     if let Some(half_stars) = super::half_stars_row(shell, &server) {
         let library = adw::PreferencesGroup::builder()
             .title(tr("Library"))

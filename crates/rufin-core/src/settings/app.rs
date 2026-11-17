@@ -247,6 +247,12 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     allow_permanent_delete: bool = false => set_allow_permanent_delete;
     #[serde(default = "default_true")]
     show_downloaded_badges: bool = true => set_show_downloaded_badges;
+    /// Grids: a red corner on the covers of favorites.
+    #[serde(default = "default_true")]
+    grid_favorite_badges: bool = true => set_grid_favorite_badges;
+    /// Grids: the rating on a cover under the pointer.
+    #[serde(default)]
+    grid_star_ratings: bool = false => set_grid_star_ratings;
     /// Android: whether rule downloads run on mobile data too.
     #[serde(default)]
     download_on_mobile_data: bool = false => set_download_on_mobile_data;
@@ -568,27 +574,13 @@ impl Settings {
         self.update_download_settings(source_id, |settings| settings.quality = quality)
     }
 
-    /// The quality a stream from `source_id` is asked for: the one for mobile data while the
-    /// network is metered, else the source's own, else the one for every source.
-    pub fn stream_quality(&self, source_id: Option<&str>, metered: bool) -> library::AudioQuality {
+    /// The quality streams are asked for: the one for mobile data while the network is
+    /// metered, else the one set in playback settings.
+    pub fn stream_quality(&self, metered: bool) -> library::AudioQuality {
         self.application
             .mobile_data_stream_quality
             .filter(|_| metered)
-            .or_else(|| {
-                self.downloads
-                    .iter()
-                    .find(|entry| Some(entry.source_id.as_str()) == source_id)?
-                    .stream_quality
-            })
             .unwrap_or(self.playback.stream_quality)
-    }
-
-    pub fn set_source_stream_quality(
-        &mut self,
-        source_id: SourceId,
-        quality: Option<library::AudioQuality>,
-    ) -> bool {
-        self.update_download_settings(source_id, |settings| settings.stream_quality = quality)
     }
 
     pub fn set_download_directory(

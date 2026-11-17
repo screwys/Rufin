@@ -480,10 +480,7 @@ impl Analysis<'_> {
             playable,
             StreamRequest::new(
                 &playable.media_uri,
-                self.source_owner
-                    .shared
-                    .settings
-                    .stream_quality(playable.source_id.as_ref().map(library::SourceId::as_str)),
+                self.source_owner.shared.settings.stream_quality(),
             ),
             Some(self.configuration),
             Some(self.source_owner.downloads()),

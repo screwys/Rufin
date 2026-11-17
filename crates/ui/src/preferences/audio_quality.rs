@@ -14,39 +14,14 @@ pub(crate) fn rows(
     initial: AudioQuality,
     changed: impl Fn(AudioQuality) + 'static,
 ) -> [adw::PreferencesRow; 3] {
-    quality_rows(Some(initial), false, move |quality| {
-        changed(quality.unwrap_or_default())
-    })
-}
-
-/// The same rows for one source's streams, with a first choice that follows the quality set
-/// for every source.
-pub(crate) fn source_rows(
-    initial: Option<AudioQuality>,
-    changed: impl Fn(Option<AudioQuality>) + 'static,
-) -> [adw::PreferencesRow; 3] {
-    quality_rows(initial, true, changed)
-}
-
-fn quality_rows(
-    initial: Option<AudioQuality>,
-    follows: bool,
-    changed: impl Fn(Option<AudioQuality>) + 'static,
-) -> [adw::PreferencesRow; 3] {
     let resource = "preferences/audio_quality.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         format: adw::ComboRow,
-        format_choices: gtk::StringList,
         bitrate: adw::ActionRow,
         bitrate_scale: gtk::Scale,
         channels: adw::ComboRow,
     });
-    // The formats follow the original, which follows the choice to leave it to every source.
-    let first_quality = u32::from(follows);
-    if follows {
-        format_choices.splice(0, 0, &[&localization::tr("Default")]);
-    }
     let codecs = [
         AudioCodec::Opus,
         AudioCodec::Aac,
@@ -81,7 +56,7 @@ fn quality_rows(
     let updating = Rc::new(Cell::new(false));
     let current = Rc::new(Cell::new(initial));
     let rate = Rc::new(Cell::new(DEFAULT_AUDIO_BITRATE));
-    let set: Rc<dyn Fn(Option<AudioQuality>)> = {
+    let set: Rc<dyn Fn(AudioQuality)> = {
         let (weak, updating, current, rate) = (
             weak.clone(),
             updating.clone(),
@@ -99,20 +74,17 @@ fn quality_rows(
             };
             updating.set(true);
             current.set(quality);
-            let encoding = quality.and_then(AudioQuality::encoding);
+            let encoding = quality.encoding();
             rate.set(
                 encoding
                     .and_then(|encoding| encoding.bitrate_kbps)
                     .unwrap_or(DEFAULT_AUDIO_BITRATE),
             );
-            format.set_selected(quality.map_or(0, |quality| {
-                first_quality
-                    + quality.encoding().map_or(0, |encoding| {
-                        1 + codecs
-                            .iter()
-                            .position(|codec| *codec == encoding.codec)
-                            .unwrap() as u32
-                    })
+            format.set_selected(encoding.map_or(0, |encoding| {
+                1 + codecs
+                    .iter()
+                    .position(|codec| *codec == encoding.codec)
+                    .unwrap() as u32
             }));
             let value = f64::from(rate.get());
             scale.set_range(lower.min(value), upper.max(value));
@@ -123,8 +95,8 @@ fn quality_rows(
                     .position(|channel| *channel == encoding.channels)
                     .unwrap() as u32
             }));
-            bitrate.set_visible(quality.is_some_and(audio_quality_shows_bitrate));
-            channels.set_visible(quality.is_some_and(audio_quality_shows_channels));
+            bitrate.set_visible(audio_quality_shows_bitrate(quality));
+            channels.set_visible(audio_quality_shows_channels(quality));
             updating.set(false);
         })
     };
@@ -145,25 +117,20 @@ fn quality_rows(
             else {
                 return;
             };
-            let quality = format
+            let codec = format
                 .selected()
-                .checked_sub(first_quality)
-                .map(|selected| {
-                    let codec = selected
-                        .checked_sub(1)
-                        .and_then(|index| codecs.get(index as usize))
-                        .copied();
-                    let quality = audio_quality_with_bitrate(
-                        audio_quality_with_codec(current.get().unwrap_or_default(), codec),
-                        rate.get(),
-                    );
-                    audio_quality_with_channels(
-                        quality,
-                        channel_choices[channels.selected() as usize],
-                    )
-                });
-            bitrate.set_visible(quality.is_some_and(audio_quality_shows_bitrate));
-            channels.set_visible(quality.is_some_and(audio_quality_shows_channels));
+                .checked_sub(1)
+                .and_then(|index| codecs.get(index as usize))
+                .copied();
+            let quality = audio_quality_with_channels(
+                audio_quality_with_bitrate(
+                    audio_quality_with_codec(current.get(), codec),
+                    rate.get(),
+                ),
+                channel_choices[channels.selected() as usize],
+            );
+            bitrate.set_visible(audio_quality_shows_bitrate(quality));
+            channels.set_visible(audio_quality_shows_channels(quality));
             if current.replace(quality) != quality {
                 changed(quality);
             }

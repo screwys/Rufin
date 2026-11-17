@@ -63,10 +63,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
                 val setup = runtime.source()
                 bridge = setup
                 providers = listOf("local" to "Local", "jellyfin" to "Jellyfin", "emby" to "Emby", "plex" to "Plex", "navidrome" to "Navidrome", "subsonic" to "OpenSubsonic", "webdav" to "WebDAV", "smb" to "SMB / Samba").map { (kind, title) -> kind to translate(title) }
-                sourceId?.let { id ->
-                    form.load(withContext(Dispatchers.IO) { setup.editable(id) } ?: error(translate("Source is no longer available")))
-                    form.streamQuality = withContext(Dispatchers.IO) { runtime.settings().use { it.downloadSettings(id).streamQuality } }
-                }
+                sourceId?.let { form.load(withContext(Dispatchers.IO) { setup.editable(it) } ?: error(translate("Source is no longer available"))) }
                 ready = true
                 // Where the network needs no prompt, the list opens with what is on it.
                 if (sourceId == null && service.hasLocalNetworkAccess()) find(model.sources?.sources?.isEmpty() == true)
@@ -103,13 +100,6 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         val source = model.connectedService().runtime.value!!.getOrThrow().source()
         try { source.setHalfStars(id, enabled); form.halfStars = enabled }
         finally { source.destroy() }
-    }
-    fun setStreamQuality(quality: io.github.screwys.rufin.shared.library.AudioQuality?) = model.runAction {
-        val id = sourceId ?: return@runAction
-        withContext(Dispatchers.IO) {
-            model.connectedService().runtime.value!!.getOrThrow().settings().use { it.setSourceStreamQuality(id, quality) }
-        }
-        form.streamQuality = quality
     }
     fun selectProvider(kind: String, server: FoundServer? = null) {
         cancelAuthorization()

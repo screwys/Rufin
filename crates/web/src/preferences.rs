@@ -105,7 +105,7 @@ fn values(products: &ProductHandles) -> Result<Value, Error> {
         })
         .collect::<Vec<_>>();
     let (themes, theme_errors) = themes(&settings);
-    let stream_quality = super::source::quality_view(Some(settings.playback.stream_quality));
+    let stream_quality = super::source::quality_view(settings.playback.stream_quality);
     drop(settings);
     let blocks = products
         .settings
