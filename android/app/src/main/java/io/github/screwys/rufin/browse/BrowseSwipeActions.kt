@@ -175,13 +175,13 @@ internal fun BrowseSwipeActions(
                         alpha = if (distance > 0f) (distance / threshold).coerceIn(0f, 1f) else 0f
                         val scale = .8f + .2f * (abs(distance) / threshold).coerceIn(0f, 1f)
                         scaleX = scale; scaleY = scale
-                    }, tint = if (action == BrowseSwipeAction.Favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimaryContainer) }
+                    }, tint = if (action == BrowseSwipeAction.Favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer) }
                 left?.let { action -> RufinIcon(if (action == BrowseSwipeAction.Favorite && item.row.favorite) "rufin-heart-outline-symbolic" else action.icon,
                     action.label, Modifier.align(Alignment.CenterEnd).padding(horizontal = 20.dp).size(24.dp).graphicsLayer {
                         alpha = if (distance < 0f) (-distance / threshold).coerceIn(0f, 1f) else 0f
                         val scale = .8f + .2f * (abs(distance) / threshold).coerceIn(0f, 1f)
                         scaleX = scale; scaleY = scale
-                    }, tint = if (action == BrowseSwipeAction.Favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimaryContainer) }
+                    }, tint = if (action == BrowseSwipeAction.Favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer) }
             }
             Box(Modifier.fillMaxWidth().graphicsLayer { translationX = distance }
                 .background(MaterialTheme.colorScheme.surface)) { content() }

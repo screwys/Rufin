@@ -44,11 +44,9 @@ askama = "0.16.1"
 age = "0.12.1"
 flate2 = "1.1.10"
 tar = "0.4.46"
-chrono = "0.4.45"
 adw = { package = "libadwaita", version = "0.9.1" }
 apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
 async-channel = "2.5.0"
-async-trait = "0.1.89"
 ashpd = { version = "0.13.13", default-features = false, features = [
     "background",
     "tokio",
@@ -58,7 +56,6 @@ blake3 = "1.8.2"
 block2 = "0.6.2"
 blurhash = { version = "0.2.3", default-features = false }
 bytes = "1"
-constant_time_eq = "0.6.0"
 digest_auth = "0.3.1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
@@ -149,10 +146,12 @@ toml_edit = "0.25.13"
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 csv = "1.4.0"
 thiserror = "2.0.18"
+time = { version = "0.3.55", features = ["formatting", "macros", "parsing"] }
 tray-icon = { version = "0.25.0", default-features = false }
 tokio = "1.53.3"
 tokio-rustls = { version = "0.26.4", default-features = false }
-tokio-tungstenite = { version = "0.30.0", default-features = false }
+# The WebSocket client iroh-relay builds; the feeds take over the HTTP upgrade reqwest made.
+tokio-websockets = { version = "0.13.3", default-features = false, features = ["client", "getrandom", "sha1_smol"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.23"
 url = "2.5.7"

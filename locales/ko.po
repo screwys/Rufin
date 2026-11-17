@@ -1919,6 +1919,9 @@ msgstr ""
 msgid "Grid"
 msgstr ""
 
+msgid "Grids"
+msgstr ""
+
 msgid "Grouping"
 msgstr ""
 
@@ -3032,15 +3035,6 @@ msgstr ""
 msgid "Play count"
 msgstr ""
 
-msgid "Play genre"
-msgstr ""
-
-msgid "Play mood"
-msgstr ""
-
-msgid "Play playlist"
-msgstr ""
-
 msgid "Play radio later"
 msgstr ""
 
@@ -3090,6 +3084,9 @@ msgid "Playing on {device}"
 msgstr ""
 
 msgid "Playing stream"
+msgstr ""
+
+msgid "Playing"
 msgstr ""
 
 msgid "Playlist File"
@@ -3914,6 +3911,9 @@ msgstr ""
 msgid "Show Rufin"
 msgstr ""
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr ""
 
@@ -3951,6 +3951,9 @@ msgid "Show ratings in the bottom bar"
 msgstr ""
 
 msgid "Show sidebar"
+msgstr ""
+
+msgid "Show star ratings"
 msgstr ""
 
 msgid "Show tray icon"

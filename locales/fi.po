@@ -2292,6 +2292,11 @@ msgstr ""
 msgid "Grid"
 msgstr "Ruudukko"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Ruudukko"
+
 msgid "Grouping"
 msgstr ""
 
@@ -3589,15 +3594,6 @@ msgstr "Toista esittäjä"
 msgid "Play count"
 msgstr "Toistokerrat"
 
-msgid "Play genre"
-msgstr ""
-
-msgid "Play mood"
-msgstr ""
-
-msgid "Play playlist"
-msgstr "Toista soittolista"
-
 #, fuzzy
 #| msgid "Play random (play later)"
 msgid "Play radio later"
@@ -3666,6 +3662,11 @@ msgstr "Toistetaan laitteella {device}"
 #| msgid "Play random"
 msgid "Playing stream"
 msgstr "Toista satunnainen"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "Uusi soittolista"
 
 msgid "Playlist File"
 msgstr "Soittolistatiedosto"
@@ -4651,6 +4652,9 @@ msgstr "Näytä Rufin"
 msgid "Show Rufin"
 msgstr "Näytä Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Näytä kuvitus"
 
@@ -4697,6 +4701,11 @@ msgstr "Näytä arviot alapalkissa"
 
 msgid "Show sidebar"
 msgstr "Näytä sivupalkki"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Näytä ilmoitusalueen kuvake"
 
 msgid "Show tray icon"
 msgstr "Näytä ilmoitusalueen kuvake"
@@ -5893,6 +5902,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Play playlist"
+#~ msgstr "Toista soittolista"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

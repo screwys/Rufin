@@ -1,4 +1,5 @@
 //! Playlists: adding media to them, creating, editing and deleting them.
+pub(crate) mod artwork;
 mod edit;
 mod new;
 pub(crate) mod picker;

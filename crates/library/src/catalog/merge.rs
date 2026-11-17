@@ -1376,7 +1376,7 @@ async fn complete_kind(
 /// entry, queue entry or download holds. Albums, artists, tags and folders the expired tracks
 /// named go with them when nothing else names them.
 async fn expire(write: &mut Write<'_>, source: SourceKey) -> LibraryResult<bool> {
-    let cutoff = chrono::Utc::now().timestamp() - EXPIRY_SECONDS;
+    let cutoff = time::OffsetDateTime::now_utc().unix_timestamp() - EXPIRY_SECONDS;
     let expired: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks track WHERE source_key=?1 AND indexed=0 AND hidden_since<?2
             AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)
             AND NOT EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=track.track_key)
@@ -1916,10 +1916,10 @@ impl Observation<'_> {
             }
         }
         if kinds.is_empty() {
-            if self
-                .catalog
-                .expiry_due(self.source, chrono::Utc::now().timestamp())
-            {
+            if self.catalog.expiry_due(
+                self.source,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ) {
                 loop {
                     let mut write = self.write().await?;
                     if !expire(&mut write, self.source).await? {

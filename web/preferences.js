@@ -2,7 +2,7 @@ import { api, browserHeaders, state } from "./connection.js";
 import { qualityControls } from "./audio-quality.js";
 import { closeIntegration, init as initIntegrations, integrationOpen, showIntegrations } from "./integrations.js";
 import { openSource, sourceIcon, updateSources } from "./sources.js";
-import { $, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
+import { $, applyGrids, el, icon, notice, openPopup, run, tr, setLayoutSettings } from "./ui.js";
 
 let values = {};
 let shown = null;
@@ -50,6 +50,7 @@ function show(preferences) {
   }
   for (const [path, owner] of Object.entries(dependencies))
     for (const node of document.querySelectorAll(`[data-setting="${path}"]`)) setSensitive(node.closest(".pref-row"), values[owner] !== false);
+  applyGrids(values["/grid_favorite_badges"] !== false, values["/grid_star_ratings"] === true);
   showCustomization(preferences);
   showIntegrations(preferences);
   // The sidebar follows its entries' order and visibility, as GTK's does.

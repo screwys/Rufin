@@ -2332,6 +2332,11 @@ msgstr "Joslu atstarpe (pikseļos)"
 msgid "Grid"
 msgstr "Režģis"
 
+#, fuzzy
+#| msgid "Grid"
+msgid "Grids"
+msgstr "Režģis"
+
 msgid "Grouping"
 msgstr ""
 
@@ -3628,15 +3633,6 @@ msgstr "Atskaņot mākslinieku"
 msgid "Play count"
 msgstr "Atskaņošanas skaits"
 
-msgid "Play genre"
-msgstr "Atskaņot pēc žanra"
-
-msgid "Play mood"
-msgstr "Atskaņot pēc noskaņas"
-
-msgid "Play playlist"
-msgstr "Atskaņot atskaņošanas sarakstu"
-
 #, fuzzy
 #| msgid "Play radio"
 msgid "Play radio later"
@@ -3701,6 +3697,11 @@ msgstr "Atskaņo ierīcē {device}"
 #| msgid "Play random"
 msgid "Playing stream"
 msgstr "Atskaņot nejaušā secībā"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "Playing"
+msgstr "Jauns atskaņošanas saraksts"
 
 msgid "Playlist File"
 msgstr "Atskaņošanas saraksta fails"
@@ -4666,6 +4667,9 @@ msgstr "Rādīt Rufin"
 msgid "Show Rufin"
 msgstr "Rādīt Rufin"
 
+msgid "Show a badge for favorited items"
+msgstr ""
+
 msgid "Show artwork"
 msgstr "Rādīt albuma vāciņu"
 
@@ -4712,6 +4716,11 @@ msgstr "Rādīt vērtējumus apakšējā joslā"
 
 msgid "Show sidebar"
 msgstr "Rādīt sānu paneli"
+
+#, fuzzy
+#| msgid "Show tray icon"
+msgid "Show star ratings"
+msgstr "Rādīt sistēmas joslas ikonu"
 
 msgid "Show tray icon"
 msgstr "Rādīt sistēmas joslas ikonu"
@@ -5932,6 +5941,15 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Play genre"
+#~ msgstr "Atskaņot pēc žanra"
+
+#~ msgid "Play mood"
+#~ msgstr "Atskaņot pēc noskaņas"
+
+#~ msgid "Play playlist"
+#~ msgstr "Atskaņot atskaņošanas sarakstu"
 
 #, fuzzy
 #~| msgid "Drag to reorder"

@@ -199,7 +199,7 @@ label.pref-row {
 .theme-errors {
   margin: 0;
   padding: 0 12px 12px;
-  color: var(--favorite);
+  color: var(--destructive, #e01b24);
   font-size: 12px;
   white-space: pre-wrap;
   user-select: text;

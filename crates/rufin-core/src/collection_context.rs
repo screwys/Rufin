@@ -113,13 +113,21 @@ impl CollectionTarget {
     }
 }
 
-/// Whether what plays, in context `playing`, is the collection `context_id` names: the same id,
-/// or that id decorated after `|` (a page's filter and order), or also after `:` for a playlist.
+/// Whether what plays, in context `playing`, is the collection `context_id` names.
 #[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn plays_context(context_id: &str, playing: &str) -> bool {
-    let playlist = context_id.starts_with("playlist:");
-    playing == context_id
-        || playing
-            .strip_prefix(context_id)
-            .is_some_and(|suffix| suffix.starts_with('|') || (playlist && suffix.starts_with(':')))
+    playing_contexts(playing).any(|playing| playing == context_id)
+}
+
+/// The collections that play in context `playing`: the same id, that id before any `|` (a
+/// page's filter and order), and also before a `:` for a playlist.
+pub fn playing_contexts(playing: &str) -> impl Iterator<Item = &str> {
+    playing
+        .char_indices()
+        .filter_map(move |(index, separator)| {
+            let before = playing.get(..index)?;
+            (separator == '|' || (separator == ':' && before.starts_with("playlist:")))
+                .then_some(before)
+        })
+        .chain(std::iter::once(playing))
 }

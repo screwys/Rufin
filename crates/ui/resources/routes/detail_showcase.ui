@@ -247,6 +247,14 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkButton" id="edit">
+                        <property name="visible">false</property>
+                        <property name="icon-name">rufin-document-edit-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Edit</property>
+                        <style><class name="detail-round"/></style>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkButton" id="download">
                         <property name="visible">false</property>
                         <property name="icon-name">rufin-download-symbolic</property>
