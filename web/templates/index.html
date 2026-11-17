@@ -141,6 +141,10 @@
         </nav>
         <section id="pins" aria-labelledby="pins-title" hidden>
           <h2 id="pins-title">{{ localization::tr("Saved") }}</h2>
+          <div id="pin-new" class="pin-row" aria-hidden="true">
+            <span class="pin-cover">{% call m::icon("rufin-bookmark-symbolic") %}{% endcall %}</span>
+            <span class="pin-title">{{ localization::tr("Add to Saved") }}</span>
+          </div>
           <div id="pin-list"></div>
         </section>
       </aside>

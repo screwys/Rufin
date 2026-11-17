@@ -551,9 +551,7 @@ impl PlaybackOwner {
         let catalog = Arc::clone(&self.catalog);
         let source_owner = Arc::clone(&self.source);
         let local = self.settings.local_configuration();
-        request.quality = self
-            .settings
-            .stream_quality(occurrence.track.source_id.as_deref());
+        request.quality = self.settings.stream_quality();
         // A cast receiver shows the cover the cache holds.
         let cast_artwork = (!self.playback_output().is_local()).then(|| {
             (
@@ -665,25 +663,13 @@ impl PlaybackOwner {
         if edited != current.playback {
             self.playback_settings_changed(current.playback.clone());
         }
-        let qualities = |settings: &crate::settings::Settings| {
-            (
-                settings.playback.stream_quality,
-                settings.application.mobile_data_stream_quality,
-                settings
-                    .downloads
-                    .iter()
-                    .map(|entry| (entry.source_id.clone(), entry.stream_quality))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        if qualities(previous) != qualities(current) {
-            let metered = self.settings.metered();
-            self.stream_quality_changed(|source| {
-                (
-                    previous.stream_quality(source, metered),
-                    current.stream_quality(source, metered),
-                )
-            });
+        let metered = self.settings.metered();
+        let (before, after) = (
+            previous.stream_quality(metered),
+            current.stream_quality(metered),
+        );
+        if before != after {
+            self.stream_quality_changed(before, after);
         }
         if previous.application.cast_proxy_enabled != current.application.cast_proxy_enabled {
             self.cast
@@ -708,12 +694,8 @@ impl PlaybackOwner {
         self.send(Command::UpdateSettings(settings));
     }
     /// The quality streams are asked for changed: the next track resolves again, and so does
-    /// the playing one when its own stream would be another. `qualities` gives a source's
-    /// quality before and after.
-    fn stream_quality_changed(
-        &self,
-        qualities: impl FnOnce(Option<&str>) -> (library::AudioQuality, library::AudioQuality),
-    ) {
+    /// the playing one when its own stream would be another.
+    fn stream_quality_changed(&self, before: library::AudioQuality, after: library::AudioQuality) {
         let Some(active) = self.active() else {
             return;
         };
@@ -721,10 +703,6 @@ impl PlaybackOwner {
         let Some(media) = self.current_media() else {
             return;
         };
-        let (before, after) = qualities(media.row.track.source_id.as_deref());
-        if before == after {
-            return;
-        }
         let catalog = Arc::clone(&self.catalog);
         self.runtime.spawn(async move {
             let track = &media.row.track;
@@ -880,10 +858,7 @@ impl PlaybackOwner {
         WaveformMedia {
             request: StreamRequest::new(
                 (&media.row.track).media_uri.clone(),
-                waveform_quality(
-                    self.settings
-                        .stream_quality(media.row.track.source_id.as_deref()),
-                ),
+                waveform_quality(self.settings.stream_quality()),
             ),
             media,
             source: Arc::clone(&self.source),
@@ -1049,12 +1024,10 @@ impl PlaybackOwner {
         let was = self.settings.metered();
         self.settings.set_metered(metered);
         if was != metered && settings.ui.application.mobile_data_stream_quality.is_some() {
-            self.stream_quality_changed(|source| {
-                (
-                    settings.ui.stream_quality(source, was),
-                    settings.ui.stream_quality(source, metered),
-                )
-            });
+            self.stream_quality_changed(
+                settings.ui.stream_quality(was),
+                settings.ui.stream_quality(metered),
+            );
         }
     }
     pub fn remove(&self, position: usize) {

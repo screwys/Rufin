@@ -609,10 +609,6 @@ pub struct SourceDownloadSettings {
     pub quality: AudioQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<DownloadDirectory>,
-    /// The quality this source's streams are asked for, in place of the one for every source.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "bindings", uniffi(default = None))]
-    pub stream_quality: Option<AudioQuality>,
 }
 
 impl SourceDownloadSettings {
@@ -622,15 +618,11 @@ impl SourceDownloadSettings {
             rules: DownloadRules::default(),
             quality: AudioQuality::Original,
             directory: None,
-            stream_quality: None,
         }
     }
 
     pub fn is_default(&self) -> bool {
-        self.rules.is_empty()
-            && self.quality == AudioQuality::Original
-            && self.directory.is_none()
-            && self.stream_quality.is_none()
+        self.rules.is_empty() && self.quality == AudioQuality::Original && self.directory.is_none()
     }
 }
 

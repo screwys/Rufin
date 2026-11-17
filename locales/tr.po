@@ -1,0 +1,5146 @@
+# Rufin translation template.
+# Copyright (C) 2026 Rufin contributors
+# This file is distributed under the same license as the Rufin package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Rufin\n"
+"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: 2026-11-15 14:29+0000\n"
+"Last-Translator: US <uma@users.noreply.hosted.weblate.org>\n"
+"Language-Team: Turkish <https://hosted.weblate.org/projects/rufin/app/tr/>\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 2026.12.dev0\n"
+
+msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+"Furigana ve romaji okunuşları için bir Japonca sözlük indirilir. Bu ayar "
+"kaynak kullanımını da artırır."
+
+msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+"Onaylamak, bu cihaza profilinize ve kayıtlı kaynak oturumlarınıza erişim "
+"verir."
+
+msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+"Yedek dosyası hassas bilgiler içerebilir. Parola belirlemek ister misiniz?"
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+"{entries} atlanan çalma listesi girişi ve {listens} atlanan dinlemeyle yedek "
+"geri yüklendi."
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+"Mevcut bir profile bağlanmak bu cihazdaki tüm verileri kaldırır; devam etmek "
+"istediğinizden emin misiniz?"
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
+msgstr ""
+"Rufin Connect kullanan cihazlar artık uyumlu değil. Lütfen Rufin'i "
+"güncelleyin."
+
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+"Tüm şarkı sözlerini otomatik olarak önbelleğe almak ister misiniz? Bunu "
+"Tercihler -> Depolama bölümünden de etkinleştirebilirsiniz"
+
+msgid ""
+"Downloads from this source will be removed, and automatic rules will be "
+"turned off"
+msgstr ""
+"Bu kaynaktan yapılan indirmeler kaldırılacak ve otomatik kurallar kapatılacak"
+
+msgid ""
+"GNU FM, Maloja and other Last.fm-style servers. On Maloja, the password is "
+"an API key."
+msgstr ""
+"GNU FM, Maloja ve diğer Last.fm tarzı sunucular. Maloja'da parola bir API "
+"anahtarıdır."
+
+msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+"Discord flatpak olarak kurulu değilse Rufin'e soket erişimi vermeniz "
+"gerekir. Flatpak olarak kuruluysa buna gerek yoktur."
+
+msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+"Girilen kimlik bilgilerini veya misafir erişimini kullanarak bu sunucudaki "
+"paylaşılan klasörleri listele"
+
+msgid ""
+"Listens from Rufin, ListenBrainz or Last.fm, or play counts from other "
+"players"
+msgstr ""
+"Rufin, ListenBrainz veya Last.fm dinlemeleri ya da diğer oynatıcılardan "
+"çalma sayıları"
+
+msgid ""
+"Logs have secrets and absolute folder paths redacted, but you may still want "
+"to review the logs before sharing them"
+msgstr ""
+"Günlüklerde gizli bilgiler ve mutlak klasör yolları gizlenir, ancak "
+"paylaşmadan önce yine de günlükleri gözden geçirmek isteyebilirsiniz"
+
+msgid "No results ¯\\_(°╭╮°)_/¯"
+msgstr "Sonuç yok ¯\\_(°╭╮°)_/¯"
+
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+"Gizli servis bulunamadı. Rufin kimlik bilgilerini depolamak için bir dosya "
+"kullanacak. İptal etmek kimlik bilgilerini hiç kaydetmez."
+
+#, python-brace-format
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
+msgstr ""
+"Gizli servis bulunamadı. Bir gizli servisiniz olabilir ancak portal bozuk "
+"olabilir; düzeltmek için {link_start}bu sorunu{link_end} inceleyebilirsiniz, "
+"aksi halde Rufin kimlik bilgilerini depolamak için bir dosya kullanacak. "
+"İptal etmek kimlik bilgilerini hiç kaydetmez."
+
+msgid ""
+"Only downloads from this rule will be deleted. Shared and manual downloads "
+"stay"
+msgstr ""
+"Yalnızca bu kuraldan yapılan indirmeler silinecek. Paylaşılan ve elle "
+"yapılan indirmeler kalır"
+
+msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+"Parçaları yalnızca çalma listesi olarak içe aktarır; klasörü değişiklikler "
+"için izlemez."
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
+msgstr ""
+"Rufin Connect'i başka bir cihazda açın, Katıl düğmesiyle veya davet kodunu "
+"kopyalayarak bağlanın"
+
+msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+"Göreli yollar müzik klasöründe veya kaynak URL'sinde başlar. Yerel yollar "
+"mutlak da olabilir."
+
+msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+"Kayıtlı bağlantılar ve kimlik bilgileri hariç tüm Rufin verileri ve ayarları "
+"kaldırılsın mı? Veriler temizlendikten sonra Rufin yeniden başlayacak."
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+"Tüm Rufin verileri, ayarları ve kayıtlı oturumları kaldırılsın mı? Veriler "
+"temizlendikten sonra Rufin yeniden başlayacak."
+
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+"Rufin'in Yerel hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
+"sözleri dahil kaldırılsın mı? Müzik dosyalarınız silinmeyecek."
+
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
+msgstr ""
+"Rufin'in {name} hakkında tuttuğu her şey, favorileri, puanlamaları ve şarkı "
+"sözleri dahil kaldırılsın mı?"
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+"Seçili içerikler değiştirilsin ve bu yapılandırılmış kaynaklar kaldırılsın "
+"mı?\n"
+"{sources}\n"
+"Seçilmediği sürece korunan kullanıcı durumları ve kayıtlı oturumları "
+"kalacaktır."
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+"Seçili içerikler bu yedekle değiştirilsin mi? Yerel klasör izinlerinin "
+"yeniden seçilmesi gerekebilir."
+
+msgid ""
+"Route server media through this device instead of sharing provider URLs with "
+"the renderer"
+msgstr ""
+"Sağlayıcı URL'lerini oynatıcıyla paylaşmak yerine sunucu medyasını bu cihaz "
+"üzerinden yönlendir"
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Preferences."
+msgstr ""
+"Rufin, çaldığınız müzikle ilgili olarak bu hizmetlere danışır. Bunların tümü "
+"daha sonra Tercihler'den değiştirilebilir."
+
+msgid ""
+"Rufin asks these services about the music you play. All of this can be "
+"changed later in Settings."
+msgstr ""
+"Rufin, çaldığınız müzikle ilgili olarak bu hizmetlere danışır. Bunların tümü "
+"daha sonra Ayarlar'dan değiştirilebilir."
+
+msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+"Rufin tüm kitaplık için eksik EBU R128 meta verilerini hesaplayacak. Bu, "
+"uzun süre önemli miktarda CPU, pil ve ağ bant genişliği kullanabilir."
+
+msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+"Bazı değişiklikler kaydedildi. Sonucu incelemek için bu düzenleyiciyi "
+"kapatıp yeniden açın."
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
+msgstr ""
+"Geçici kitaplık depolaması kullanımda. Rufin kapanınca değişiklikler "
+"kaybolabilir."
+
+msgid ""
+"Thank you for trying out Rufin! If you have problems or suggestions, please "
+"open an issue in Github."
+msgstr ""
+"Rufin'i denediğiniz için teşekkürler! Sorun yaşarsanız veya öneriniz olursa "
+"lütfen Github'da bir sorun açın."
+
+msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
+"Bu, Rufin'in kullandığı yedek kapak görseli; bunu öğe kapak görseli olarak "
+"ayarlamak ister misiniz?"
+
+msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+"Bu, kaynak tarafından yerel olarak desteklenmiyor, ancak Rufin kısmi "
+"yıldızları gösterebilir ve ardından kaynak için yukarı yuvarlayabilir"
+
+msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+"Bu Rufin'e aittir. Yapılandırılmış tüm kaynaklardan girişler içerebilir "
+"ancak uzaklarla eşitlenmez."
+
+msgid ""
+"This will log you out and clear your secrets including API ones. Your app "
+"cache is not touched."
+msgstr ""
+"Bu, oturumunuzu kapatır ve API anahtarları dahil gizli bilgilerinizi "
+"temizler. Uygulama önbelleğinize dokunulmaz."
+
+msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
+"Bu, şarkı sözleri dosyanızın üzerine Rufin'in getirdiklerini yazacak; bunun "
+"yerine şarkı sözleri getirmek için özel bir program veya eklenti kullanmak "
+"daha iyi bir deneyim olabilir."
+
+msgid ""
+"Track evens out every song, while Album preserves the intended differences "
+"within each album"
+msgstr ""
+"Parça her şarkıyı eşitler; Albüm ise her albüm içindeki amaçlanan "
+"farklılıkları korur"
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For Flatpak and MacOS users this means the logins will not "
+"migrate automatically, and Android users will need to re download the app.\n"
+"\n"
+"        There should likely be no problems for other packages, but in either "
+"case, it is recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"With the next release, the repo will move to an organization and the app ID "
+"will change. For flatpak users this means the logins will not migrate "
+"automatically, and Android users will need to re download the app. There "
+"should likely be no problems for other packages, but in either case, it is "
+"recommended to export a backup to restore from it."
+msgstr ""
+
+msgid ""
+"You have set Rufin to automatically download your entire library. This can "
+"use a lot of data. Do you confirm?"
+msgstr ""
+"Rufin'i tüm kitaplığınızı otomatik olarak indirecek şekilde ayarladınız. Bu "
+"çok fazla veri kullanabilir. Onaylıyor musunuz?"
+
+msgid ""
+"You will need to reconnect through the clients you use with the new API key."
+msgstr ""
+"Yeni API anahtarıyla kullandığınız istemciler üzerinden yeniden bağlanmanız "
+"gerekecek."
+
+msgid "(hold to shuffle)"
+msgstr "(karıştırmak için basılı tutun)"
+
+msgid "+1 track"
+msgstr "+1 parça"
+
+msgid "+5 min"
+msgstr "+5 dk"
+
+msgid "1 day"
+msgstr "1 gün"
+
+msgid "1 hour"
+msgstr "1 saat"
+
+msgid "1 month"
+msgstr "1 ay"
+
+msgid "1 week"
+msgstr "1 hafta"
+
+msgid "1 year"
+msgstr "1 yıl"
+
+msgid "10 bands"
+msgstr "10 bant"
+
+msgid "12 hours"
+msgstr "12 saat"
+
+msgid "18 bands"
+msgstr "18 bant"
+
+msgid "24 hours"
+msgstr "24 saat"
+
+msgid "31 bands"
+msgstr "31 bant"
+
+msgid "5 Latest Albums"
+msgstr "En Son 5 Albüm"
+
+msgid "6 hours"
+msgstr "6 saat"
+
+msgid "A new update is available, restart to apply"
+msgstr "Yeni bir güncelleme mevcut, uygulamak için yeniden başlatın"
+
+msgid "A"
+msgstr "A"
+
+msgid "API key (Subsonic)"
+msgstr "API anahtarı (Subsonic)"
+
+msgid "API key"
+msgstr "API anahtarı"
+
+msgid "About Rufin"
+msgstr "Rufin Hakkında"
+
+msgid "Absolute"
+msgstr "Mutlak"
+
+msgid "Accent color"
+msgstr "Vurgu rengi"
+
+msgid "Access denied"
+msgstr "Erişim reddedildi"
+
+msgid "Access token"
+msgstr "Erişim token'ı"
+
+msgid "Accessibility"
+msgstr "Erişilebilirlik"
+
+msgid "Account"
+msgstr "Hesap"
+
+msgid "Actions"
+msgstr "Eylemler"
+
+msgid "Active"
+msgstr "Etkin"
+
+msgid "Activity"
+msgstr "Etkinlik"
+
+msgid "Add Manually"
+msgstr "Elle Ekle"
+
+msgid "Add SMB folder"
+msgstr "SMB klasörü ekle"
+
+msgid "Add Source"
+msgstr "Kaynak Ekle"
+
+msgid "Add Station"
+msgstr "İstasyon Ekle"
+
+msgid "Add WebDAV folder"
+msgstr "WebDAV klasörü ekle"
+
+msgid "Add a matching server prefix"
+msgstr "Eşleşen bir sunucu öneki ekle"
+
+msgid "Add a music folder"
+msgstr "Müzik klasörü ekle"
+
+msgid "Add a music source to start listening."
+msgstr "Dinlemeye başlamak için bir müzik kaynağı ekleyin."
+
+msgid "Add a new source"
+msgstr "Yeni kaynak ekle"
+
+msgid "Add a source to configure downloads."
+msgstr "İndirmeleri yapılandırmak için bir kaynak ekleyin."
+
+msgid "Add a title"
+msgstr "Başlık ekle"
+
+msgid "Add band"
+msgstr "Bant ekle"
+
+msgid "Add current"
+msgstr "Mevcut olanı ekle"
+
+msgid "Add folder"
+msgstr "Klasör ekle"
+
+msgid "Add group"
+msgstr "Grup ekle"
+
+msgid "Add image"
+msgstr "Görsel ekle"
+
+msgid "Add music"
+msgstr "Müzik ekle"
+
+msgid "Add rule"
+msgstr "Kural ekle"
+
+msgid "Add server"
+msgstr "Sunucu ekle"
+
+msgid "Add to Favorites"
+msgstr "Favorilere Ekle"
+
+msgid "Add to Playlist"
+msgstr "Çalma Listesine Ekle"
+
+msgid "Add to Saved"
+msgstr "Kaydedilenlere Ekle"
+
+msgid "Add to folder"
+msgstr "Klasöre ekle"
+
+msgid "Add to library"
+msgstr "Kitaplığa ekle"
+
+msgid "Add to {saved_on}"
+msgstr "{saved_on} öğesine ekle"
+
+msgid "Add tracks when fewer than this many remain"
+msgstr "Kalan parça bu sayıdan azaldığında parça ekle"
+
+msgid "Add"
+msgstr "Ekle"
+
+msgid "Added to"
+msgstr "Şuraya eklendi"
+
+msgid "Added"
+msgstr "Eklendi"
+
+msgid "Album Artists"
+msgstr "Albüm Sanatçıları"
+
+msgid "Album artist sort"
+msgstr "Albüm sanatçısı sıralaması"
+
+msgid "Album artist"
+msgstr "Albüm sanatçısı"
+
+msgid "Album artists"
+msgstr "Albüm sanatçıları"
+
+msgid "Album covers"
+msgstr "Albüm kapakları"
+
+msgid "Album details"
+msgstr "Albüm ayrıntıları"
+
+msgid "Album gain"
+msgstr "Albüm kazancı"
+
+msgid "Album peak"
+msgstr "Albüm tepe değeri"
+
+msgid "Album radio"
+msgstr "Albüm radyosu"
+
+msgid "Album sort"
+msgstr "Albüm sıralaması"
+
+msgid "Album title"
+msgstr "Albüm başlığı"
+
+msgid "Album tracks"
+msgstr "Albüm parçaları"
+
+msgid "Album unavailable"
+msgstr "Albüm kullanılamıyor"
+
+msgid "Album"
+msgstr "Albüm"
+
+msgid "Albums"
+msgstr "Albümler"
+
+msgid "All Music"
+msgstr "Tüm Müzik"
+
+msgid "All Playlists"
+msgstr "Tüm Çalma Listeleri"
+
+msgid "All time"
+msgstr "Tüm zamanlar"
+
+msgid "All"
+msgstr "Tümü"
+
+msgid "Allow downloading"
+msgstr "İndirmeye izin ver"
+
+msgid "Allow permanently deleting tracks"
+msgstr "Parçaların kalıcı olarak silinmesine izin ver"
+
+msgid "Allow remote connections"
+msgstr "Uzak bağlantılara izin ver"
+
+msgid "Also album types and tag suggestions"
+msgstr "Ayrıca albüm türleri ve etiket önerileri"
+
+msgid "Alternate addresses"
+msgstr "Alternatif adresler"
+
+msgid "Alternate row colors"
+msgstr "Alternatif satır renkleri"
+
+msgid "Anonymous (WebDAV / SMB)"
+msgstr "Anonim (WebDAV / SMB)"
+
+msgid "Anonymous"
+msgstr "Anonim"
+
+msgid "Any"
+msgstr "Herhangi"
+
+msgid "App icon"
+msgstr "Uygulama simgesi"
+
+msgid "App settings"
+msgstr "Uygulama ayarları"
+
+msgid "Appearance"
+msgstr "Görünüm"
+
+msgid "Application name"
+msgstr "Uygulama adı"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr "Kenar çubuğu ve tam ekrana ayrı ayrı uygulanır"
+
+msgid "Apply"
+msgstr "Uygula"
+
+msgid "Approve sign-in in your browser"
+msgstr "Tarayıcınızda oturum açmayı onaylayın"
+
+msgid "Approve"
+msgstr "Onayla"
+
+msgid "April {year}"
+msgstr "Nisan {year}"
+
+msgid "Artist albums"
+msgstr "Sanatçı albümleri"
+
+msgid "Artist details"
+msgstr "Sanatçı ayrıntıları"
+
+msgid "Artist images"
+msgstr "Sanatçı görselleri"
+
+msgid "Artist name"
+msgstr "Sanatçı adı"
+
+msgid "Artist pictures, covers and tags from MusicBrainz, Last.fm and Wikidata"
+msgstr ""
+"MusicBrainz, Last.fm ve Wikidata'dan sanatçı resimleri, kapaklar ve etiketler"
+
+msgid "Artist radio"
+msgstr "Sanatçı radyosu"
+
+msgid "Artist sort"
+msgstr "Sanatçı sıralaması"
+
+msgid "Artist tracks"
+msgstr "Sanatçı parçaları"
+
+msgid "Artist unavailable"
+msgstr "Sanatçı kullanılamıyor"
+
+msgid "Artist"
+msgstr "Sanatçı"
+
+msgid "Artists"
+msgstr "Sanatçılar"
+
+msgid "Artwork editing is no longer available"
+msgstr "Kapak görseli düzenleme artık kullanılamıyor"
+
+msgid "Artwork selected"
+msgstr "Kapak görseli seçildi"
+
+msgid "Artwork storage"
+msgstr "Kapak görseli depolaması"
+
+msgid "Artwork"
+msgstr "Kapak görseli"
+
+msgid "Ascending"
+msgstr "Artan"
+
+msgid "Asked in this order."
+msgstr "Bu sırayla sorulur."
+
+msgid "Audio effects"
+msgstr "Ses efektleri"
+
+msgid "Audio fade on play/pause"
+msgstr "Oynat/duraklat sırasında ses geçişi"
+
+msgid "Audio fingerprints"
+msgstr "Ses parmak izleri"
+
+msgid "Audio output failed"
+msgstr "Ses çıkışı başarısız"
+
+msgid "Audio output"
+msgstr "Ses çıkışı"
+
+msgid "Audio processing is unavailable while casting"
+msgstr "Yayınlama sırasında ses işleme kullanılamaz"
+
+msgid "Audio"
+msgstr "Ses"
+
+msgid "Audioscrobbler API"
+msgstr "Audioscrobbler API"
+
+msgid "August {year}"
+msgstr "Ağustos {year}"
+
+msgid "Authentication"
+msgstr "Kimlik doğrulama"
+
+msgid "Auto DJ refill threshold"
+msgstr "Otomatik DJ yeniden doldurma eşiği"
+
+msgid "Auto DJ"
+msgstr "Otomatik DJ"
+
+msgid "Auto"
+msgstr "Otomatik"
+
+msgid "AutoEQ / APO"
+msgstr "AutoEQ / APO"
+
+msgid "Automatic Backups"
+msgstr "Otomatik Yedekler"
+
+msgid "Automatic headroom"
+msgstr "Otomatik boşluk payı"
+
+msgid "Automatic preamp"
+msgstr "Otomatik ön yükseltici"
+
+msgid "Automatic updates"
+msgstr "Otomatik güncellemeler"
+
+msgid "Automatic"
+msgstr "Otomatik"
+
+msgid "BPM"
+msgstr "BPM"
+
+msgid "Back"
+msgstr "Geri"
+
+msgid "Backup Folder"
+msgstr "Yedek Klasörü"
+
+msgid "Backup Password"
+msgstr "Yedek Parolası"
+
+msgid "Backup Settings"
+msgstr "Yedek Ayarları"
+
+msgid "Backup exported"
+msgstr "Yedek dışa aktarıldı"
+
+msgid "Backup failed: {error}"
+msgstr "Yedekleme başarısız: {error}"
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr "Yedek uyarılarla geri yüklendi: {warnings}"
+
+msgid "Backup restored"
+msgstr "Yedek geri yüklendi"
+
+msgid "Backups"
+msgstr "Yedekler"
+
+msgid "Balance"
+msgstr "Denge"
+
+msgid "Band layout"
+msgstr "Bant düzeni"
+
+msgid "Band"
+msgstr "Bant"
+
+msgid "Bands"
+msgstr "Bantlar"
+
+msgid "Bandwidth"
+msgstr "Bant genişliği"
+
+msgid "Bar count"
+msgstr "Çubuk sayısı"
+
+msgid "Bar spacing (px)"
+msgstr "Çubuk aralığı (px)"
+
+msgid "Bass"
+msgstr "Bas"
+
+msgid "Bearer token (WebDAV)"
+msgstr "Bearer token (WebDAV)"
+
+msgid "Bearer token"
+msgstr "Bearer token"
+
+msgid "Bit depth"
+msgstr "Bit derinliği"
+
+msgid "Bitrate"
+msgstr "Bit hızı"
+
+msgid "Bitstream"
+msgstr "Bit akışı"
+
+msgid "Blocks"
+msgstr ""
+
+msgid "Blue"
+msgstr "Mavi"
+
+msgid "Bottom bar"
+msgstr "Alt çubuk"
+
+msgid "Brightness (%)"
+msgstr "Parlaklık (%)"
+
+msgid "By Lyrics"
+msgstr "Şarkı Sözlerine Göre"
+
+msgid "By Title"
+msgstr "Başlığa Göre"
+
+msgid "C"
+msgstr "C"
+
+msgid "CUE file"
+msgstr "CUE dosyası"
+
+msgid "Cache"
+msgstr "Önbellek"
+
+msgid "Cached data"
+msgstr "Önbelleğe alınmış veriler"
+
+msgid "Cached"
+msgstr "Önbelleğe alındı"
+
+msgid "Caching Library"
+msgstr "Kitaplık Önbelleğe Alınıyor"
+
+msgid "Caching local library..."
+msgstr "Yerel kitaplık önbelleğe alınıyor..."
+
+msgid "Calculating fingerprint..."
+msgstr "Parmak izi hesaplanıyor..."
+
+msgid "Cancel download and clear downloaded items"
+msgstr "İndirmeyi iptal et ve indirilen öğeleri temizle"
+
+msgid "Cancel download"
+msgstr "İndirmeyi iptal et"
+
+msgid "Cancel"
+msgstr "İptal"
+
+msgid "Cast format"
+msgstr "Yayın formatı"
+
+msgid "Casting changes apply to the next stream"
+msgstr "Yayınlama değişiklikleri sonraki akışa uygulanır"
+
+msgid "Casting network"
+msgstr "Yayınlama ağı"
+
+msgid "Casting"
+msgstr "Yayınlama"
+
+msgid "Centered bars"
+msgstr "Ortalanmış çubuklar"
+
+msgid "Certificate authority (PEM)"
+msgstr "Sertifika yetkilisi (PEM)"
+
+msgid "Change Profile"
+msgstr "Profili Değiştir"
+
+msgid "Change Secret Storage"
+msgstr "Gizli Depolamayı Değiştir"
+
+msgid "Change Source"
+msgstr "Kaynağı Değiştir"
+
+msgid "Change sort order"
+msgstr "Sıralama düzenini değiştir"
+
+msgid "Change"
+msgstr "Değiştir"
+
+msgid "Changes apply to {count} track"
+msgid_plural "Changes apply to {count} tracks"
+msgstr[0] "Değişiklikler {count} parçaya uygulanır"
+msgstr[1] "Değişiklikler {count} parçalara uygulanır"
+
+msgid "Changes apply to {count} tracks"
+msgstr "Değişiklikler {count} parçaya uygulanır"
+
+msgid "Changes take effect after restarting Rufin"
+msgstr "Değişiklikler Rufin yeniden başlatıldıktan sonra etkili olur"
+
+msgid "Channels"
+msgstr "Kanallar"
+
+msgid "Check for updates"
+msgstr "Güncellemeleri kontrol et"
+
+msgid "Checking the user token..."
+msgstr "Kullanıcı token'ı kontrol ediliyor..."
+
+msgid "Choose Folder"
+msgstr "Klasör Seç"
+
+msgid "Choose Server"
+msgstr "Sunucu Seç"
+
+msgid "Choose a local music folder"
+msgstr "Yerel bir müzik klasörü seçin"
+
+msgid "Choose an address"
+msgstr "Bir adres seçin"
+
+msgid "Choose at least one local music folder"
+msgstr "En az bir yerel müzik klasörü seçin"
+
+msgid "Choose connection"
+msgstr "Bağlantı seç"
+
+msgid "Choose folder"
+msgstr "Klasör seç"
+
+msgid "Choose one or more folders to scan and play directly from this computer"
+msgstr ""
+"Bu bilgisayardan doğrudan taramak ve oynatmak için bir veya daha fazla "
+"klasör seçin"
+
+msgid "Choose playback output"
+msgstr "Oynatma çıkışını seç"
+
+msgid "Choose where your music is. Add more places later in Preferences."
+msgstr ""
+"Müziğinizin nerede olduğunu seçin. Daha sonra Tercihler'den daha fazla yer "
+"ekleyin."
+
+msgid "Choose where your music is. Add more places later in Settings."
+msgstr ""
+"Müziğinizin nerede olduğunu seçin. Daha sonra Ayarlar'dan daha fazla yer "
+"ekleyin."
+
+msgid "Choose whether to keep the completed downloads."
+msgstr "Tamamlanan indirmelerin tutulup tutulmayacağını seçin."
+
+msgid "Choose"
+msgstr "Seç"
+
+msgid "Choose..."
+msgstr "Seç..."
+
+msgid "Circular spectrum"
+msgstr "Dairesel spektrum"
+
+msgid "Classical"
+msgstr "Klasik"
+
+msgid "Clear EBU R128 cache"
+msgstr "EBU R128 önbelleğini temizle"
+
+msgid "Clear Japanese dictionary"
+msgstr "Japonca sözlüğü temizle"
+
+msgid "Clear Mapping"
+msgstr "Eşlemeyi Temizle"
+
+msgid "Clear album"
+msgstr "Albümü temizle"
+
+msgid "Clear all cache"
+msgstr "Tüm önbelleği temizle"
+
+msgid "Clear all cache?"
+msgstr "Tüm önbellek temizlensin mi?"
+
+msgid "Clear all data"
+msgstr "Tüm verileri temizle"
+
+msgid "Clear all data?"
+msgstr "Tüm veriler temizlensin mi?"
+
+msgid "Clear artist"
+msgstr "Sanatçıyı temizle"
+
+msgid "Clear artwork cache"
+msgstr "Kapak görseli önbelleğini temizle"
+
+msgid "Clear fetched lyrics for this track"
+msgstr "Bu parça için getirilen şarkı sözlerini temizle"
+
+msgid "Clear fingerprint cache"
+msgstr "Parmak izi önbelleğini temizle"
+
+msgid "Clear lookup cache"
+msgstr "Arama önbelleğini temizle"
+
+msgid "Clear lyrics cache"
+msgstr "Şarkı sözü önbelleğini temizle"
+
+msgid "Clear queue"
+msgstr "Kuyruğu temizle"
+
+msgid "Clear this cache?"
+msgstr "Bu önbellek temizlensin mi?"
+
+msgid "Clear title"
+msgstr "Başlığı temizle"
+
+msgid "Clear waveform cache"
+msgstr "Dalga biçimi önbelleğini temizle"
+
+msgid "Clear"
+msgstr "Temizle"
+
+msgid "Clearing queue also clears the current song"
+msgstr "Kuyruğu temizlemek mevcut şarkıyı da temizler"
+
+msgid "Clipping"
+msgstr "Kırpılma"
+
+msgid "Close Window"
+msgstr "Pencereyi Kapat"
+
+msgid "Close app window"
+msgstr "Uygulama penceresini kapat"
+
+msgid "Close fullscreen player"
+msgstr "Tam ekran oynatıcıyı kapat"
+
+msgid "Close"
+msgstr "Kapat"
+
+msgid "Club"
+msgstr "Kulüp"
+
+msgid "Collapse sidebar"
+msgstr "Kenar çubuğunu daralt"
+
+msgid "Collapse/expand sidebar"
+msgstr "Kenar çubuğunu daralt/genişlet"
+
+msgid "Collection"
+msgstr "Koleksiyon"
+
+msgid "Collections"
+msgstr "Koleksiyonlar"
+
+msgid "Color for the active word during playback"
+msgstr "Oynatma sırasında etkin kelimenin rengi"
+
+msgid "Colored"
+msgstr "Renkli"
+
+msgid "Column borders"
+msgstr "Sütun kenarlıkları"
+
+msgid "Columns"
+msgstr "Sütunlar"
+
+msgid "Combine lyrics and visualizer"
+msgstr "Şarkı sözleri ve görselleştiriciyi birleştir"
+
+msgid "Comment text"
+msgstr "Yorum metni"
+
+msgid "Comment"
+msgstr "Yorum"
+
+msgid "Compact"
+msgstr "Kompakt"
+
+msgid "Compare these emoji on both devices"
+msgstr "Bu emojileri iki cihazda karşılaştırın"
+
+msgid "Compilation"
+msgstr "Derleme"
+
+msgid "Complete sign-in in your browser"
+msgstr "Oturum açmayı tarayıcınızda tamamlayın"
+
+msgid "Completed downloads will stay on this device."
+msgstr "Tamamlanan indirmeler bu cihazda kalacak."
+
+msgid "Composer sort"
+msgstr "Besteci sıralaması"
+
+msgid "Composer"
+msgstr "Besteci"
+
+msgid "Condition"
+msgstr "Koşul"
+
+msgid "Configure another"
+msgstr "Başka bir tane yapılandır"
+
+msgid "Configured items: {count}"
+msgstr "Yapılandırılmış öğeler: {count}"
+
+msgid "Confirm"
+msgstr "Onayla"
+
+msgid "Connect a device"
+msgstr "Bir cihaz bağla"
+
+msgid "Connect is not enabled"
+msgstr "Connect etkin değil"
+
+msgid "Connect manually"
+msgstr "Elle bağlan"
+
+msgid "Connect to Rufin"
+msgstr "Rufin'e bağlan"
+
+msgid "Connect"
+msgstr "Bağlan"
+
+msgid "Connected as {username}"
+msgstr "{username} olarak bağlandı"
+
+msgid "Connected devices"
+msgstr "Bağlı cihazlar"
+
+msgid "Connected"
+msgstr "Bağlandı"
+
+msgid "Connecting devices"
+msgstr "Cihazlar bağlanıyor"
+
+msgid "Connecting to music server..."
+msgstr "Müzik sunucusuna bağlanılıyor..."
+
+msgid "Connecting to {device}..."
+msgstr "{device} cihazına bağlanılıyor..."
+
+msgid "Connecting..."
+msgstr "Bağlanılıyor..."
+
+msgid "Connection failed"
+msgstr "Bağlantı başarısız"
+
+msgid "Connection lost. Reconnecting..."
+msgstr "Bağlantı kesildi. Yeniden bağlanılıyor..."
+
+msgid "Connection name"
+msgstr "Bağlantı adı"
+
+msgid "Connection options"
+msgstr "Bağlantı seçenekleri"
+
+msgid "Connection settings"
+msgstr "Bağlantı ayarları"
+
+msgid "Connection test has failed"
+msgstr "Bağlantı testi başarısız oldu"
+
+msgid "Connection"
+msgstr "Bağlantı"
+
+msgid "Contents"
+msgstr "İçerik"
+
+msgid "Continue from {device}"
+msgstr "{device} cihazından devam et"
+
+msgid "Continue"
+msgstr "Devam"
+
+msgid "Control notifications"
+msgstr "Bildirimleri kontrol et"
+
+msgid "Controller status"
+msgstr "Denetleyici durumu"
+
+msgid "Controller"
+msgstr "Denetleyici"
+
+msgid "Copy access token"
+msgstr "Erişim token'ını kopyala"
+
+msgid "Copy invitation"
+msgstr "Daveti kopyala"
+
+msgid "Copy link"
+msgstr "Bağlantıyı kopyala"
+
+msgid "Copy of {name}"
+msgstr "{name} kopyası"
+
+msgid "Copy"
+msgstr "Kopyala"
+
+msgid "Copyright"
+msgstr "Telif hakkı"
+
+msgid "Could not load listening overview"
+msgstr "Dinleme özeti yüklenemedi"
+
+msgid "Could not load page"
+msgstr "Sayfa yüklenemedi"
+
+msgid "Could not load related tracks"
+msgstr "İlgili parçalar yüklenemedi"
+
+msgid "Could not load this page"
+msgstr "Bu sayfa yüklenemedi"
+
+msgid "Could not open browser"
+msgstr "Tarayıcı açılamadı"
+
+msgid "Could not open file: {error}"
+msgstr "Dosya açılamadı: {error}"
+
+msgid "Could not open folder: {error}"
+msgstr "Klasör açılamadı: {error}"
+
+msgid "Could not play this track"
+msgstr "Bu parça oynatılamadı"
+
+msgid "Could not read artwork"
+msgstr "Kapak görseli okunamadı"
+
+msgid "Could not receive live updates"
+msgstr "Canlı güncellemeler alınamadı"
+
+msgid "Could not save diagnostic log"
+msgstr "Tanılama günlüğü kaydedilemedi"
+
+msgid "Could not share: {error}"
+msgstr "Paylaşılamadı: {error}"
+
+msgid "Could not update Rufin to {version}"
+msgstr "Rufin {version} sürümüne güncellenemedi"
+
+msgid "Could not update favorites"
+msgstr "Favoriler güncellenemedi"
+
+msgid "Couldn't connect to the server"
+msgstr "Sunucuya bağlanılamadı"
+
+msgid "Couldn't connect"
+msgstr "Bağlanılamadı"
+
+msgid "Couldn't decode this track"
+msgstr "Bu parça çözülemedi"
+
+msgid "Couldn't load this folder"
+msgstr "Bu klasör yüklenemedi"
+
+msgid "Couldn't open the sign-in page: {error}"
+msgstr "Oturum açma sayfası açılamadı: {error}"
+
+msgid "Couldn't search for lyrics"
+msgstr "Şarkı sözleri aranamadı"
+
+msgid "Couldn’t download Japanese dictionary"
+msgstr "Japonca sözlük indirilemedi"
+
+msgid "Country"
+msgstr "Ülke"
+
+msgid "Covers and artist images your library doesn't have"
+msgstr "Kitaplığınızda olmayan kapaklar ve sanatçı görselleri"
+
+msgid "Covers, artist images, tags"
+msgstr "Kapaklar, sanatçı görselleri, etiketler"
+
+msgid "Create API keys"
+msgstr "API anahtarları oluştur"
+
+msgid "Create a playlist from queue"
+msgstr "Kuyruktan çalma listesi oluştur"
+
+msgid "Create playlist"
+msgstr "Çalma listesi oluştur"
+
+msgid "Create"
+msgstr "Oluştur"
+
+msgid "Crossfade duration"
+msgstr "Çapraz geçiş süresi"
+
+msgid "Crossfade mode"
+msgstr "Çapraz geçiş modu"
+
+msgid "Crossfade"
+msgstr "Çapraz geçiş"
+
+msgid "Crossfeed"
+msgstr "Çapraz besleme"
+
+msgid "Current artwork"
+msgstr "Mevcut kapak görseli"
+
+msgid "Custom HTTP headers"
+msgstr "Özel HTTP başlıkları"
+
+msgid "Custom bands"
+msgstr "Özel bantlar"
+
+msgid "Custom"
+msgstr "Özel"
+
+msgid "Customization"
+msgstr "Özelleştirme"
+
+msgid "Customize display"
+msgstr "Görünümü özelleştir"
+
+msgid "Customize"
+msgstr "Özelleştir"
+
+msgid "Cut"
+msgstr "Kes"
+
+msgid "Daily"
+msgstr "Günlük"
+
+msgid "Dance"
+msgstr "Dans"
+
+msgid "Dark"
+msgstr "Koyu"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
+"Veritabanı boyutları, veritabanı ek yükü hariç depolanan verileri gösterir."
+
+msgid "Date added"
+msgstr "Eklenme tarihi"
+
+msgid "Date"
+msgstr "Tarih"
+
+msgid "Days after month ends"
+msgstr "Ay bittikten sonraki günler"
+
+msgid "Days after year ends"
+msgstr "Yıl bittikten sonraki günler"
+
+msgid "Days before month ends"
+msgstr "Ay bitmeden önceki günler"
+
+msgid "Days before year ends"
+msgstr "Yıl bitmeden önceki günler"
+
+msgid "Debug logging"
+msgstr "Hata ayıklama günlüğü"
+
+msgid "December {year}"
+msgstr "Aralık {year}"
+
+msgid "Decrease"
+msgstr "Azalt"
+
+msgid "Default channel"
+msgstr "Varsayılan kanal"
+
+msgid "Default"
+msgstr "Varsayılan"
+
+msgid "Delete Permanently?"
+msgstr "Kalıcı Olarak Silinsin mi?"
+
+msgid "Delete Playlist"
+msgstr "Çalma Listesini Sil"
+
+msgid "Delete Station"
+msgstr "İstasyonu Sil"
+
+#, python-brace-format
+msgid "Delete \"{name}\"?"
+msgstr "\"{name}\" silinsin mi?"
+
+msgid "Delete folder"
+msgstr "Klasörü sil"
+
+msgid "Delete permanently"
+msgstr "Kalıcı olarak sil"
+
+msgid "Delete playlist file"
+msgstr "Çalma listesi dosyasını sil"
+
+msgid "Delete preset"
+msgstr "Ön ayarı sil"
+
+msgid "Delete this station?"
+msgstr "Bu istasyon silinsin mi?"
+
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "{count} çalma listesi silinsin mi?"
+msgstr[1] "{count} çalma listeleri silinsin mi?"
+
+msgid "Delete"
+msgstr "Sil"
+
+msgid "Delivery"
+msgstr "Teslimat"
+
+msgid "Demo"
+msgstr "Demo"
+
+msgid "Demos"
+msgstr "Demolar"
+
+msgid "Descending"
+msgstr "Azalan"
+
+msgid "Description"
+msgstr "Açıklama"
+
+msgid "Detail track columns"
+msgstr "Ayrıntı parça sütunları"
+
+msgid "Detail"
+msgstr "Ayrıntı"
+
+msgid "Details"
+msgstr "Ayrıntılar"
+
+msgid "Device invitation"
+msgstr "Cihaz daveti"
+
+msgid "Device name"
+msgstr "Cihaz adı"
+
+msgid "Device"
+msgstr "Cihaz"
+
+msgid "Diagnostic log saved"
+msgstr "Tanılama günlüğü kaydedildi"
+
+msgid "Diagnostic log"
+msgstr "Tanılama günlüğü"
+
+msgid "Direct"
+msgstr "Doğrudan"
+
+msgid "Disable private mode"
+msgstr "Gizli modu devre dışı bırak"
+
+msgid "Disabled"
+msgstr "Devre dışı"
+
+msgid "Disc number"
+msgstr "Disk numarası"
+
+msgid "Disc subtitle"
+msgstr "Disk alt başlığı"
+
+msgid "Disc {number}"
+msgstr "Disk {number}"
+
+msgid "Disc"
+msgstr "Disk"
+
+msgid "Discard changes?"
+msgstr "Değişiklikler atılsın mı?"
+
+msgid "Discography"
+msgstr "Diskografi"
+
+msgid "Disconnect from Rufin?"
+msgstr "Rufin bağlantısı kesilsin mi?"
+
+msgid "Disconnect this device"
+msgstr "Bu cihazın bağlantısını kes"
+
+msgid "Disconnect this device?"
+msgstr "Bu cihazın bağlantısı kesilsin mi?"
+
+msgid "Disconnect"
+msgstr "Bağlantıyı kes"
+
+msgid "Discord Rich Presence"
+msgstr "Discord Rich Presence"
+
+msgid "Discord access in Flatpak"
+msgstr "Flatpak'te Discord erişimi"
+
+msgid "Display"
+msgstr "Görüntü"
+
+msgid "Do not encrypt"
+msgstr "Şifreleme"
+
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] "Meta veri değişiklikleri {count} parçaya uygulansın mı?"
+msgstr[1] "Meta veri değişiklikleri {count} parçalara uygulansın mı?"
+
+msgid "Do you want to use the existing configuration?"
+msgstr "Mevcut yapılandırmayı kullanmak ister misiniz?"
+
+msgid "Don't duplicate"
+msgstr "Çoğaltma"
+
+msgid "Donate"
+msgstr "Bağış yap"
+
+msgid "Done"
+msgstr "Tamam"
+
+msgid "Download Automatically"
+msgstr "Otomatik İndir"
+
+msgid "Download Folder"
+msgstr "İndirme Klasörü"
+
+msgid "Download Lazily"
+msgstr "Tembel İndir"
+
+msgid "Download Queue"
+msgstr "İndirme Kuyruğu"
+
+msgid "Download on Mobile Data"
+msgstr "Mobil Veride İndir"
+
+msgid "Download queued"
+msgstr "İndirme kuyruğa alındı"
+
+msgid "Download started"
+msgstr "İndirme başladı"
+
+msgid "Download"
+msgstr "İndir"
+
+msgid "Downloaded"
+msgstr "İndirildi"
+
+msgid "Downloading Japanese dictionary..."
+msgstr "Japonca sözlük indiriliyor..."
+
+msgid "Downloading artwork"
+msgstr "Kapak görseli indiriliyor"
+
+msgid "Downloading artwork... {count} checked"
+msgstr "Kapak görseli indiriliyor... {count} kontrol edildi"
+
+msgid "Downloading lyrics"
+msgstr "Şarkı sözleri indiriliyor"
+
+msgid "Downloading lyrics... {count} checked"
+msgstr "Şarkı sözleri indiriliyor... {count} kontrol edildi"
+
+msgid "Downloading"
+msgstr "İndiriliyor"
+
+msgid "Downloads"
+msgstr "İndirmeler"
+
+msgid "Drag to a folder"
+msgstr "Bir klasöre sürükleyin"
+
+msgid "Drag to reorder"
+msgstr "Yeniden sıralamak için sürükleyin"
+
+msgid "Duplicate preset"
+msgstr "Ön ayarı çoğalt"
+
+msgid "Duplicate"
+msgstr "Çoğalt"
+
+msgid "Duration"
+msgstr "Süre"
+
+msgid "Dynamic background"
+msgstr "Dinamik arka plan"
+
+msgid "Dynamic"
+msgstr "Dinamik"
+
+msgid "EBU R128 analysis"
+msgstr "EBU R128 analizi"
+
+msgid "EBU R128 reference level"
+msgstr "EBU R128 referans düzeyi"
+
+msgid "EBU R128"
+msgstr "EBU R128"
+
+msgid "EP"
+msgstr "EP"
+
+msgid "EPs"
+msgstr "EP'ler"
+
+msgid "ERB"
+msgstr "ERB"
+
+msgid "Each plays whole"
+msgstr "Her biri tamamını oynatır"
+
+msgid "Edit Lyrics"
+msgstr "Şarkı Sözlerini Düzenle"
+
+msgid "Edit Playlist"
+msgstr "Çalma Listesini Düzenle"
+
+msgid "Edit Smart Playlist"
+msgstr "Akıllı Çalma Listesini Düzenle"
+
+msgid "Edit Source"
+msgstr "Kaynağı Düzenle"
+
+msgid "Edit Station"
+msgstr "İstasyonu Düzenle"
+
+msgid "Edit lyrics"
+msgstr "Şarkı sözlerini düzenle"
+
+msgid "Edit metadata"
+msgstr "Meta verileri düzenle"
+
+msgid "Edit theme"
+msgstr "Temayı düzenle"
+
+msgid "Edit"
+msgstr "Düzenle"
+
+msgid "Embed in track"
+msgstr "Parçaya göm"
+
+msgid "Emby Connect"
+msgstr "Emby Connect"
+
+msgid "Emby"
+msgstr "Emby"
+
+msgid "Enable Controller"
+msgstr "Denetleyiciyi Etkinleştir"
+
+msgid "Enable EBU R128 Analysis?"
+msgstr "EBU R128 Analizi etkinleştirilsin mi?"
+
+msgid "Enable Rufin Connect"
+msgstr "Rufin Connect'i Etkinleştir"
+
+msgid "Enable automatic backups"
+msgstr "Otomatik yedeklemeleri etkinleştir"
+
+msgid "Enable background image"
+msgstr "Arka plan görselini etkinleştir"
+
+msgid "Enable caching lyrics"
+msgstr "Şarkı sözlerini önbelleğe almayı etkinleştir"
+
+msgid "Enable partial star ratings"
+msgstr "Kısmi yıldız puanlamalarını etkinleştir"
+
+msgid "Enable private mode"
+msgstr "Gizli modu etkinleştir"
+
+msgid "Enable"
+msgstr "Etkinleştir"
+
+msgid "Enabled"
+msgstr "Etkin"
+
+msgid "Encoding peak"
+msgstr "Kodlama tepe değeri"
+
+msgid "Encoding"
+msgstr "Kodlama"
+
+msgid "Encrypt backups"
+msgstr "Yedekleri şifrele"
+
+msgid "End of this track"
+msgstr "Bu parçanın sonu"
+
+msgid "Ends around {time}"
+msgstr "Yaklaşık {time} civarında biter"
+
+msgid "Enter a name and URL."
+msgstr "Bir ad ve URL girin."
+
+msgid "Enter a name and the server's URL."
+msgstr "Bir ad ve sunucunun URL'sini girin."
+
+msgid "Enter a server address and API key"
+msgstr "Bir sunucu adresi ve API anahtarı girin"
+
+msgid "Enter a server address, username, and password"
+msgstr "Bir sunucu adresi, kullanıcı adı ve parola girin"
+
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+"Tarayıcınız üzerinden oturum açmak için Nextcloud sunucu adresinizi girin"
+
+msgid "Enter your user token first"
+msgstr "Önce kullanıcı token'ınızı girin"
+
+msgid "Enter your username and password."
+msgstr "Kullanıcı adınızı ve parolanızı girin."
+
+msgid "Entire Library"
+msgstr "Tüm Kitaplık"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr "Ekolayzer alıcı tarafından kontrol edilir"
+
+msgid "Equalizer"
+msgstr "Ekolayzer"
+
+msgid "Ever played"
+msgstr "Hiç çalındı"
+
+msgid "Everything, including new tracks"
+msgstr "Yeni parçalar dahil her şey"
+
+msgid "Excluded folders"
+msgstr "Hariç tutulan klasörler"
+
+msgid "Expand lyrics and visualizer"
+msgstr "Şarkı sözlerini ve görselleştiriciyi genişlet"
+
+msgid "Expand sidebar"
+msgstr "Kenar çubuğunu genişlet"
+
+msgid "Expires"
+msgstr "Sona erer"
+
+msgid "Explore"
+msgstr "Keşfet"
+
+msgid "Export Activity"
+msgstr "Etkinliği Dışa Aktar"
+
+msgid "Export Backup"
+msgstr "Yedeği Dışa Aktar"
+
+msgid "Export PNG"
+msgstr "PNG Dışa Aktar"
+
+msgid "Export Playlist"
+msgstr "Çalma Listesini Dışa Aktar"
+
+#, fuzzy
+#| msgid "Export Backup"
+msgid "Export a Backup"
+msgstr "Yedeği Dışa Aktar"
+
+msgid "Export format"
+msgstr "Dışa aktarma formatı"
+
+msgid "Export playlist"
+msgstr "Çalma listesini dışa aktar"
+
+msgid "Export preset"
+msgstr "Ön ayarı dışa aktar"
+
+msgid "Export your listening history in Rufin"
+msgstr "Dinleme geçmişinizi Rufin'de dışa aktarın"
+
+msgid "Export"
+msgstr "Dışa Aktar"
+
+msgid "External lyric lookup is off"
+msgstr "Harici şarkı sözü araması kapalı"
+
+msgid "External lyrics lookup"
+msgstr "Harici şarkı sözü araması"
+
+msgid "External metadata lookup"
+msgstr "Harici meta veri araması"
+
+msgid "FFT size"
+msgstr "FFT boyutu"
+
+msgid "FLAC"
+msgstr "FLAC"
+
+msgid "Fade audio when playback is paused or resumed"
+msgstr "Oynatma duraklatıldığında veya devam ettiğinde sesi geçişle"
+
+msgid "Fall speed (%)"
+msgstr "Düşme hızı (%)"
+
+msgid "Favorite current track"
+msgstr "Mevcut parçayı favorile"
+
+msgid "Favorite tracks"
+msgstr "Favori parçalar"
+
+msgid "Favorite tracks, plus tracks from favorite albums and artists"
+msgstr "Favori parçalar ile favori albüm ve sanatçılardan parçalar"
+
+msgid "Favorite"
+msgstr "Favori"
+
+msgid "Favorites and ratings"
+msgstr "Favoriler ve puanlamalar"
+
+msgid "Favorites"
+msgstr "Favoriler"
+
+msgid "Featured genres"
+msgstr "Öne çıkan türler"
+
+msgid "February {year}"
+msgstr "Şubat {year}"
+
+msgid "Fetching Home"
+msgstr "Ana Sayfa getiriliyor"
+
+msgid "Fetching albums"
+msgstr "Albümler getiriliyor"
+
+msgid "Fetching artists"
+msgstr "Sanatçılar getiriliyor"
+
+msgid "Fetching artwork"
+msgstr "Kapak görseli getiriliyor"
+
+msgid "Fetching genres"
+msgstr "Türler getiriliyor"
+
+msgid "Fetching lyrics"
+msgstr "Şarkı sözleri getiriliyor"
+
+msgid "Fetching metadata..."
+msgstr "Meta veriler getiriliyor..."
+
+msgid "Fetching playlists"
+msgstr "Çalma listeleri getiriliyor"
+
+msgid "Few"
+msgstr "Çok az"
+
+msgid "Field"
+msgstr "Alan"
+
+msgid "File connection"
+msgstr "Dosya bağlantısı"
+
+msgid "File format"
+msgstr "Dosya formatı"
+
+msgid "File path"
+msgstr "Dosya yolu"
+
+msgid "File size"
+msgstr "Dosya boyutu"
+
+msgid "Filename"
+msgstr "Dosya adı"
+
+msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
+msgstr ""
+"Dosyalarda Mood/BPM etiketlerinin yazılı olması gerekir. Jellyfin için "
+"desteklenmez"
+
+msgid "Filled spectrum"
+msgstr "Dolgulu spektrum"
+
+msgid "Filter type"
+msgstr "Filtre türü"
+
+msgid "Find in {name}"
+msgstr "{name} içinde bul"
+
+msgid "Find shares"
+msgstr "Paylaşımları bul"
+
+msgid "Find your token"
+msgstr "Token'ınızı bulun"
+
+msgid "Finding lyrics..."
+msgstr "Şarkı sözleri aranıyor..."
+
+msgid "Finish the last track"
+msgstr "Son parçayı bitir"
+
+msgid "Finishes the track playing at {time}"
+msgstr "{time} zamanında çalan parçayı bitirir"
+
+msgid "Fit to height"
+msgstr "Yüksekliğe sığdır"
+
+msgid "Fixed position"
+msgstr "Sabit konum"
+
+msgid "Flat"
+msgstr "Düz"
+
+msgid "Folder name"
+msgstr "Klasör adı"
+
+msgid "Folder path"
+msgstr "Klasör yolu"
+
+msgid "Folder"
+msgstr "Klasör"
+
+msgid "Folders"
+msgstr "Klasörler"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr "Uygulama vurgusunu daha açık ve koyu tonlarla takip et"
+
+msgid "Font family"
+msgstr "Yazı tipi ailesi"
+
+msgid "Font size (px)"
+msgstr "Yazı tipi boyutu (px)"
+
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+"Yalnızca bu içe veya dışa aktarma için. Şifrelenmemiş arşiv için boş bırakın."
+
+msgid "Forget Source"
+msgstr "Kaynağı Unut"
+
+msgid "Format not supported"
+msgstr "Format desteklenmiyor"
+
+msgid "Format"
+msgstr "Format"
+
+msgid "Forward"
+msgstr "İleri"
+
+msgid "Found Servers"
+msgstr "Bulunan Sunucular"
+
+msgid "Found"
+msgstr "Bulundu"
+
+msgid "Frame rate limit"
+msgstr "Kare hızı sınırı"
+
+msgid "Frames per second"
+msgstr "Saniyedeki kare sayısı"
+
+msgid "Frequency · Hz"
+msgstr "Frekans · Hz"
+
+msgid "Frequency scale"
+msgstr "Frekans ölçeği"
+
+msgid "Frequency"
+msgstr "Frekans"
+
+msgid "Friday"
+msgstr "Cuma"
+
+msgid "Full Bass & Treble"
+msgstr "Tam Bas ve Tiz"
+
+msgid "Full Bass"
+msgstr "Tam Bas"
+
+msgid "Full Treble"
+msgstr "Tam Tiz"
+
+msgid "Full"
+msgstr "Tam"
+
+msgid "Fullscreen player"
+msgstr "Tam ekran oynatıcı"
+
+msgid "Fullscreen"
+msgstr "Tam ekran"
+
+msgid "Furigana"
+msgstr "Furigana"
+
+msgid "Gain · dB"
+msgstr "Kazanç · dB"
+
+msgid "Gain"
+msgstr "Kazanç"
+
+msgid "Gapless mode"
+msgstr "Boşluksuz mod"
+
+msgid "Gapless"
+msgstr "Boşluksuz"
+
+msgid "General"
+msgstr "Genel"
+
+msgid "Genius"
+msgstr "Genius"
+
+msgid "Genre radio"
+msgstr "Tür radyosu"
+
+msgid "Genre tracks"
+msgstr "Tür parçaları"
+
+msgid "Genre"
+msgstr "Tür"
+
+msgid "Genres"
+msgstr "Türler"
+
+msgid "Get a personal key"
+msgstr "Kişisel anahtar al"
+
+msgid "Go to Album"
+msgstr "Albüme Git"
+
+msgid "Go to {artist}"
+msgstr "{artist} sanatçısına git"
+
+msgid "Go to"
+msgstr "Git"
+
+msgid "Google Cast"
+msgstr "Google Oyuncular"
+
+msgid "Gradient end"
+msgstr "Gradyan bitişi"
+
+msgid "Gradient start"
+msgstr "Gradyan başlangıcı"
+
+msgid "Graphic"
+msgstr "Grafik"
+
+msgid "Green"
+msgstr "Yeşil"
+
+msgid "Grid labels"
+msgstr "Izgara etiketleri"
+
+msgid "Grid spacing"
+msgstr "Izgara aralığı"
+
+msgid "Grid"
+msgstr "Izgara"
+
+msgid "Grouping"
+msgstr "Gruplama"
+
+msgid "Guest / public access"
+msgstr "Misafir / herkese açık erişim"
+
+msgid "Halo"
+msgstr "Hale"
+
+msgid "Heard"
+msgstr "Dinlendi"
+
+msgid "Height (%)"
+msgstr "Yükseklik (%)"
+
+msgid "Help"
+msgstr "Yardım"
+
+msgid "Hidden"
+msgstr "Gizli"
+
+msgid "Hide sidebar"
+msgstr "Kenar çubuğunu gizle"
+
+msgid "High shelf"
+msgstr "Yüksek raf"
+
+msgid "Highlight hovered row"
+msgstr "Üzerine gelinen satırı vurgula"
+
+msgid "History"
+msgstr "Geçmiş"
+
+msgid "Hold and drag to resize"
+msgstr "Yeniden boyutlandırmak için basılı tutup sürükleyin"
+
+msgid "Hold to reorder"
+msgstr "Yeniden sıralamak için basılı tutun"
+
+msgid "Home Profile"
+msgstr "Ana Profil"
+
+msgid "Home"
+msgstr "Ana Sayfa"
+
+msgid "Homepage"
+msgstr "Ana sayfa"
+
+msgid "Hour"
+msgstr "Saat"
+
+msgid "Hours"
+msgstr "Saat"
+
+msgid "Hz"
+msgstr "Hz"
+
+msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
+msgstr "Sayfa yüklenmiyorsa Libre.fm IP aralığınızı/VPN'nizi engelliyordur"
+
+msgid "Ignore playback volume"
+msgstr "Oynatma ses düzeyini yoksay"
+
+msgid "Image files"
+msgstr "Görsel dosyaları"
+
+msgid "Image"
+msgstr "Görsel"
+
+msgid "Import Activity"
+msgstr "Etkinliği İçe Aktar"
+
+msgid "Import Backup"
+msgstr "Yedeği İçe Aktar"
+
+msgid "Import Playlist"
+msgstr "Çalma Listesini İçe Aktar"
+
+msgid "Import preset"
+msgstr "Ön ayarı içe aktar"
+
+msgid "Import theme"
+msgstr "Temayı içe aktar"
+
+msgid "Import"
+msgstr "İçe Aktar"
+
+msgid "Imported {count} listen."
+msgid_plural "Imported {count} listens."
+msgstr[0] "{count} dinleme içe aktarıldı."
+msgstr[1] "{count} dinlemeler içe aktarıldı."
+
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+"Dosyaları kitaplığa içe aktarır ve eklenen klasörleri değişiklikler için "
+"izler."
+
+msgid "In playlist"
+msgstr "Çalma listesinde"
+
+msgid "Inactive at this sample rate"
+msgstr "Bu örnekleme hızında etkin değil"
+
+msgid "Include detailed Rufin diagnostics in this session"
+msgstr "Bu oturuma ayrıntılı Rufin tanılaması ekle"
+
+msgid "Increase"
+msgstr "Artır"
+
+msgid "Install available updates when Rufin starts"
+msgstr "Rufin başladığında mevcut güncellemeleri yükle"
+
+msgid "Installed"
+msgstr "Kurulu"
+
+msgid "Instrumental"
+msgstr "Enstrümantal"
+
+msgid "Integrations"
+msgstr "Entegrasyonlar"
+
+msgid "Invite"
+msgstr "Davet et"
+
+msgid "Item ID"
+msgstr "Öğe kimliği"
+
+msgid "Item is no longer available"
+msgstr "Öğe artık kullanılamıyor"
+
+msgid "Item menus"
+msgstr "Öğe menüleri"
+
+#, fuzzy
+#| msgid "Item ID"
+msgid "Items"
+msgstr "Öğe kimliği"
+
+msgid "January {year}"
+msgstr "Ocak {year}"
+
+msgid "Japanese dictionary"
+msgstr "Japonca sözlük"
+
+msgid "Jellyfin"
+msgstr "Jellyfin"
+
+msgid "Join profile"
+msgstr "Profile katıl"
+
+msgid "Join to copy its sources and sign-ins"
+msgstr "Kaynaklarını ve oturum açmalarını kopyalamak için katıl"
+
+msgid "Join"
+msgstr "Katıl"
+
+msgid "July {year}"
+msgstr "Temmuz {year}"
+
+msgid "June {year}"
+msgstr "Haziran {year}"
+
+msgid "Karaoke Playback"
+msgstr "Karaoke Oynatma"
+
+msgid "Karaoke highlight color"
+msgstr "Karaoke vurgu rengi"
+
+msgid "Karaoke mode"
+msgstr "Karaoke modu"
+
+msgid "Keep Rufin running after closing the window"
+msgstr "Pencereyi kapattıktan sonra Rufin'i çalışır durumda tut"
+
+msgid "Keep music available offline. Folder changes only affect new downloads"
+msgstr ""
+"Müziği çevrimdışı kullanılabilir tut. Klasör değişiklikleri yalnızca yeni "
+"indirmeleri etkiler"
+
+msgid "Keyboard Shortcuts"
+msgstr "Klavye Kısayolları"
+
+msgid "Koito, Maloja and other ListenBrainz servers."
+msgstr "Koito, Maloja ve diğer ListenBrainz sunucuları."
+
+msgid "LED spectrum"
+msgstr "LED spektrum"
+
+msgid "LIVE"
+msgstr "CANLI"
+
+msgid "LRCLIB"
+msgstr "LRCLIB"
+
+msgid "Labels"
+msgstr "Etiketler"
+
+msgid "Language and readings"
+msgstr "Dil ve okunuşlar"
+
+msgid "Language"
+msgstr "Dil"
+
+msgid "Laptop/Headphones"
+msgstr "Dizüstü/Kulaklık"
+
+msgid "Large"
+msgstr "Büyük"
+
+msgid "Last 30 days"
+msgstr "Son 30 gün"
+
+msgid "Last 365 days"
+msgstr "Son 365 gün"
+
+msgid "Last 7 days"
+msgstr "Son 7 gün"
+
+msgid "Last played"
+msgstr "Son çalınan"
+
+msgid "Last.fm"
+msgstr "Last.fm"
+
+msgid "Layout"
+msgstr "Düzen"
+
+msgid "Leave empty for an unencrypted archive."
+msgstr "Şifrelenmemiş arşiv için boş bırakın."
+
+msgid "Leave out tracks rated two stars or lower"
+msgstr "İki yıldız veya daha düşük puan alan parçaları hariç tutun"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr "Kaydedilmiş kimlik bilgisini korumak için parolayı boş bırakın"
+
+msgid "Left sidebar"
+msgstr "Sol kenar çubuğu"
+
+msgid "Legacy authorization"
+msgstr "Eski yetkilendirme"
+
+msgid "Legacy password (Subsonic)"
+msgstr "Eski parola (Subsonic)"
+
+msgid "Legacy password"
+msgstr "Eski parola"
+
+msgid "Legacy"
+msgstr "Eski"
+
+msgid "Less"
+msgstr "Daha az"
+
+msgid "Library items"
+msgstr "Kitaplık öğeleri"
+
+msgid "Library"
+msgstr "Kitaplık"
+
+msgid "Light"
+msgstr "Açık"
+
+msgid "Limit"
+msgstr "Sınır"
+
+msgid "Linear"
+msgstr "Doğrusal"
+
+msgid "Link copied"
+msgstr "Bağlantı kopyalandı"
+
+msgid "Link exported file"
+msgstr "Dışa aktarılan dosyayı bağla"
+
+msgid "Link to file..."
+msgstr "Dosyaya bağlantı ver..."
+
+msgid "Link"
+msgstr "Bağlantı"
+
+msgid "Linked file"
+msgstr "Bağlı dosya"
+
+msgid "Links"
+msgstr "Bağlantılar"
+
+msgid "ListenBrainz API"
+msgstr "ListenBrainz API"
+
+msgid "ListenBrainz or Audioscrobbler API"
+msgstr "ListenBrainz veya Audioscrobbler API"
+
+msgid "Listening overview"
+msgstr "Dinleme özeti"
+
+msgid "Listening"
+msgstr "Dinleme"
+
+msgid "Live"
+msgstr "Canlı"
+
+msgid "Load file contents"
+msgstr "Dosya içeriğini yükle"
+
+msgid "Loading cached lookups..."
+msgstr "Önbelleğe alınmış aramalar yükleniyor..."
+
+msgid "Loading related tracks..."
+msgstr "İlgili parçalar yükleniyor..."
+
+msgid "Loading..."
+msgstr "Yükleniyor..."
+
+msgid "Local Address"
+msgstr "Yerel Adres"
+
+msgid "Local File Access"
+msgstr "Yerel Dosya Erişimi"
+
+msgid "Local File Mapping"
+msgstr "Yerel Dosya Eşlemesi"
+
+msgid "Local Folders"
+msgstr "Yerel Klasörler"
+
+msgid "Local Prefix"
+msgstr "Yerel Önek"
+
+msgid "Local file access configured"
+msgstr "Yerel dosya erişimi yapılandırıldı"
+
+msgid "Local file access is required before these tags can be saved."
+msgstr "Bu etiketler kaydedilmeden önce yerel dosya erişimi gerekir."
+
+msgid "Local file mapping: {matched} of {total} server path matches"
+msgid_plural "Local file mapping: {matched} of {total} server paths match"
+msgstr[0] ""
+"Yerel dosya eşlemesi: {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[1] ""
+"Yerel dosya eşlemesi: {total} sunucular yolundan {matched} tanesi eşleşiyor"
+
+msgid "Local files and folders"
+msgstr "Yerel dosyalar ve klasörler"
+
+msgid "Local imports and access"
+msgstr "Yerel içe aktarmalar ve erişim"
+
+msgid "Local library"
+msgstr "Yerel kitaplık"
+
+msgid "Local music folder is unavailable"
+msgstr "Yerel müzik klasörü kullanılamıyor"
+
+msgid "Local music folder"
+msgstr "Yerel müzik klasörü"
+
+msgid "Local network permission is required for remote connections"
+msgstr "Uzak bağlantılar için yerel ağ izni gerekir"
+
+msgid "Local network permission was denied"
+msgstr "Yerel ağ izni reddedildi"
+
+msgid "Local network"
+msgstr "Yerel ağ"
+
+msgid "Local playback saved"
+msgstr "Yerel oynatma kaydedildi"
+
+msgid "Local storage"
+msgstr "Yerel depolama"
+
+msgid "Local"
+msgstr "Yerel"
+
+msgid "Locate Folder"
+msgstr "Klasörü Bul"
+
+msgid "Lock metadata"
+msgstr "Meta verileri kilitle"
+
+msgid "Logarithmic"
+msgstr "Logaritmik"
+
+msgid "Logs are copied"
+msgstr "Günlükler kopyalandı"
+
+msgid "Look up the artists that listeners play alongside the current one"
+msgstr ""
+"Dinleyicilerin şu anki şarkıyla birlikte dinledikleri sanatçıları araştırın"
+
+msgid "Lookup"
+msgstr "Arama"
+
+msgid "Lookups"
+msgstr "Aramalar"
+
+msgid "Loudness normalization"
+msgstr "Ses yüksekliği normalleştirme"
+
+msgid "Low shelf"
+msgstr "Düşük raf"
+
+msgid "Lyrics background opacity"
+msgstr "Şarkı sözü arka planı opaklığı"
+
+msgid "Lyrics from LRCLIB, NetEase, Genius and SimpMusic when a track has none"
+msgstr ""
+"Bir parçada yoksa LRCLIB, NetEase, Genius ve SimpMusic'ten şarkı sözleri"
+
+msgid "Lyrics loaded"
+msgstr "Şarkı sözleri yüklendi"
+
+msgid "Lyrics offset (ms)"
+msgstr "Şarkı sözü kayması (ms)"
+
+msgid "Lyrics storage"
+msgstr "Şarkı sözü depolaması"
+
+msgid "Lyrics will appear here."
+msgstr "Şarkı sözleri burada görünecek."
+
+msgid "Lyrics your library doesn't have"
+msgstr "Kitaplığınızda olmayan şarkı sözleri"
+
+msgid "Lyrics"
+msgstr "Şarkı sözleri"
+
+msgid "MP3"
+msgstr "MP3"
+
+msgid "Manage"
+msgstr "Yönet"
+
+msgid "Many"
+msgstr "Birçok"
+
+msgid "Mapped Local Path"
+msgstr "Eşlenen Yerel Yol"
+
+msgid "March {year}"
+msgstr "Mart {year}"
+
+msgid "Match"
+msgstr "Eşleşme"
+
+msgid "Matched"
+msgstr "Eşleşti"
+
+msgid "Matching tracks..."
+msgstr "Parçalar eşleştiriliyor..."
+
+msgid "Maximum frequency (Hz)"
+msgstr "Maksimum frekans (Hz)"
+
+msgid "Maximum level (dB)"
+msgstr "Maksimum düzey (dB)"
+
+msgid "Maximum year"
+msgstr "Maksimum yıl"
+
+msgid "Maximum"
+msgstr "Maksimum"
+
+msgid "May {year}"
+msgstr "Mayıs {year}"
+
+msgid "Menu"
+msgstr "Menü"
+
+msgid "Menus"
+msgstr "Menüler"
+
+msgid "Metadata changed before it was saved. Reload it before trying again."
+msgstr ""
+"Meta veriler kaydedilmeden önce değişti. Tekrar denemeden önce yeniden "
+"yükleyin."
+
+msgid "Metadata editing is no longer available"
+msgstr "Meta veri düzenleme artık kullanılamıyor"
+
+msgid "Metadata editing requires Local access"
+msgstr "Meta veri düzenleme Yerel erişim gerektirir"
+
+msgid "Metadata lookups"
+msgstr "Meta veri aramaları"
+
+msgid "Metadata saved"
+msgstr "Meta veriler kaydedildi"
+
+msgid "Metadata was saved, but refreshing the source failed."
+msgstr "Meta veriler kaydedildi ancak kaynak yenilenemedi."
+
+msgid "Metadata"
+msgstr "Meta veriler"
+
+msgid "Minimize overview"
+msgstr "Özeti küçült"
+
+msgid "Minimum frequency (Hz)"
+msgstr "Minimum frekans (Hz)"
+
+msgid "Minimum level (dB)"
+msgstr "Minimum düzey (dB)"
+
+msgid "Minimum year"
+msgstr "Minimum yıl"
+
+msgid "Minimum"
+msgstr "Minimum"
+
+msgid "Minutes"
+msgstr "Dakika"
+
+msgid "Mirrored bars"
+msgstr "Yansıtılmış çubuklar"
+
+msgid "Mirrored"
+msgstr "Yansıtılmış"
+
+msgid "Mix (play later)"
+msgstr "Karışım (sonra çal)"
+
+msgid "Mix (play next)"
+msgstr "Karışım (sıradaki çal)"
+
+msgid "Mix"
+msgstr "Karışım"
+
+msgid "Mode"
+msgstr "Mod"
+
+msgid "Monday"
+msgstr "Pazartesi"
+
+msgid "Mono"
+msgstr "Mono"
+
+msgid "Month"
+msgstr "Ay"
+
+msgid "Monthly"
+msgstr "Aylık"
+
+msgid "Mood tracks"
+msgstr "Ruh hali parçaları"
+
+msgid "Mood"
+msgstr "Ruh hali"
+
+msgid "Moods"
+msgstr "Ruh halleri"
+
+msgid "More actions"
+msgstr "Daha fazla eylem"
+
+msgid "More"
+msgstr "Daha fazla"
+
+msgid "Most Played"
+msgstr "En Çok Çalınan"
+
+msgid "Most Skipped"
+msgstr "En Çok Atlanan"
+
+msgid "Most played"
+msgstr "En çok çalınan"
+
+msgid "Motion"
+msgstr "Hareket"
+
+msgid "Move down"
+msgstr "Aşağı taşı"
+
+msgid "Move up"
+msgstr "Yukarı taşı"
+
+msgid "Multi-selection"
+msgstr "Çoklu seçim"
+
+msgid "Music Folder"
+msgstr "Müzik Klasörü"
+
+msgid "Music access permission was denied"
+msgstr "Müzik erişim izni reddedildi"
+
+msgid "Music folder"
+msgstr "Müzik klasörü"
+
+msgid "Music folders on the Rufin machine"
+msgstr "Rufin makinesindeki müzik klasörleri"
+
+msgid "Music on this phone"
+msgstr "Bu telefondaki müzik"
+
+msgid "Music"
+msgstr "Müzik"
+
+msgid "MusicBrainz album artist ID"
+msgstr "MusicBrainz albüm sanatçısı kimliği"
+
+msgid "MusicBrainz artist ID"
+msgstr "MusicBrainz sanatçı kimliği"
+
+msgid "MusicBrainz or Last.fm"
+msgstr "MusicBrainz veya Last.fm"
+
+msgid "MusicBrainz recording ID"
+msgstr "MusicBrainz kayıt kimliği"
+
+msgid "MusicBrainz release ID"
+msgstr "MusicBrainz sürüm kimliği"
+
+msgid "MusicBrainz release group ID"
+msgstr "MusicBrainz sürüm grubu kimliği"
+
+msgid "MusicBrainz release track ID"
+msgstr "MusicBrainz sürüm parça kimliği"
+
+msgid "MusicBrainz"
+msgstr "MusicBrainz"
+
+msgid "Musical key"
+msgstr "Müzikal anahtar"
+
+msgid "Mute"
+msgstr "Sessize al"
+
+msgid "Muted"
+msgstr "Sessiz"
+
+msgid "My music"
+msgstr "Müziğim"
+
+msgid "Name or stream address"
+msgstr "Ad veya akış adresi"
+
+msgid "Name"
+msgstr "Ad"
+
+msgid "Narrow layout threshold"
+msgstr "Dar düzen eşiği"
+
+msgid "Narrow window"
+msgstr "Dar pencere"
+
+msgid "Navidrome"
+msgstr "Navidrome"
+
+msgid "Navigate page items"
+msgstr "Sayfa öğelerinde gezin"
+
+msgid "Navigate to Search"
+msgstr "Aramaya git"
+
+msgid "Navigation"
+msgstr "Gezinme"
+
+msgid "Nearby devices"
+msgstr "Yakındaki cihazlar"
+
+msgid "Nearby discovery"
+msgstr "Yakındaki keşif"
+
+msgid "Needs attention"
+msgstr "Dikkat gerekiyor"
+
+msgid "Needs review"
+msgstr "İnceleme gerekiyor"
+
+msgid "NetEase"
+msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
+"Yerel ve vekil sunucu üzerinden gelen medyayı yayınlama cihazlarına "
+"göndermek için kullanılan ağ"
+
+msgid "Never Played"
+msgstr "Hiç Çalınmadı"
+
+msgid "Never played"
+msgstr "Hiç çalınmadı"
+
+msgid "New Playlist"
+msgstr "Yeni Çalma Listesi"
+
+msgid "New Smart Playlist"
+msgstr "Yeni Akıllı Çalma Listesi"
+
+msgid "New download rule"
+msgstr "Yeni indirme kuralı"
+
+msgid "New file"
+msgstr "Yeni dosya"
+
+msgid "New folder"
+msgstr "Yeni klasör"
+
+msgid "New playlist"
+msgstr "Yeni çalma listesi"
+
+msgid "New release is available"
+msgstr "Yeni sürüm mevcut"
+
+msgid "Newly added"
+msgstr "Yeni eklenen"
+
+msgid "Next Track"
+msgstr "Sonraki Parça"
+
+msgid "Next album"
+msgstr "Sonraki albüm"
+
+msgid "Next audio device"
+msgstr "Sonraki ses cihazı"
+
+msgid "Next page"
+msgstr "Sonraki sayfa"
+
+msgid "Next period"
+msgstr "Sonraki dönem"
+
+msgid "Next source"
+msgstr "Sonraki kaynak"
+
+msgid "Next"
+msgstr "Sonraki"
+
+msgid "No Servers Found"
+msgstr "Sunucu Bulunamadı"
+
+msgid "No albums from this artist yet"
+msgstr "Bu sanatçıdan henüz albüm yok"
+
+msgid "No artwork found"
+msgstr "Kapak görseli bulunamadı"
+
+msgid "No cached server path yet"
+msgstr "Henüz önbelleğe alınmış sunucu yolu yok"
+
+msgid "No downloads queued"
+msgstr "Kuyrukta indirme yok"
+
+msgid "No favorite albums yet"
+msgstr "Henüz favori albüm yok"
+
+msgid "No favorite artists yet"
+msgstr "Henüz favori sanatçı yok"
+
+msgid "No favorites yet"
+msgstr "Henüz favori yok"
+
+msgid "No file linked"
+msgstr "Bağlı dosya yok"
+
+msgid "No folders selected"
+msgstr "Klasör seçilmedi"
+
+msgid "No limit"
+msgstr "Sınır yok"
+
+msgid "No linked servers found"
+msgstr "Bağlı sunucu bulunamadı"
+
+msgid "No listening activity in this period"
+msgstr "Bu dönemde dinleme etkinliği yok"
+
+msgid "No local file mapping"
+msgstr "Yerel dosya eşlemesi yok"
+
+msgid "No local files or folders configured"
+msgstr "Yapılandırılmış yerel dosya veya klasör yok"
+
+msgid "No lyrics available."
+msgstr "Şarkı sözü yok."
+
+msgid "No lyrics"
+msgstr "Şarkı sözü yok"
+
+msgid "No matching track in this release"
+msgstr "Bu sürümde eşleşen parça yok"
+
+msgid "No matching tracks found"
+msgstr "Eşleşen parça bulunamadı"
+
+msgid "No matching tracks"
+msgstr "Eşleşen parça yok"
+
+msgid "No music from this artist yet"
+msgstr "Bu sanatçıdan henüz müzik yok"
+
+msgid "No network address available"
+msgstr "Kullanılabilir ağ adresi yok"
+
+msgid "No network devices found"
+msgstr "Ağ cihazı bulunamadı"
+
+msgid "No playable entries were found"
+msgstr "Oynatılabilir giriş bulunamadı"
+
+msgid "No playlists yet"
+msgstr "Henüz çalma listesi yok"
+
+msgid "No related tracks found"
+msgstr "İlgili parça bulunamadı"
+
+msgid "No results for \"{query}\""
+msgstr "\"{query}\" için sonuç yok"
+
+msgid "No results"
+msgstr "Sonuç yok"
+
+msgid "No servers found, add one manually or try again"
+msgstr "Sunucu bulunamadı; elle ekleyin veya tekrar deneyin"
+
+msgid "No smart playlists yet"
+msgstr "Henüz akıllı çalma listesi yok"
+
+msgid "No source"
+msgstr "Kaynak yok"
+
+msgid "No sources configured"
+msgstr "Yapılandırılmış kaynak yok"
+
+msgid "No tracks here yet"
+msgstr "Burada henüz parça yok"
+
+msgid "No"
+msgstr "Hayır"
+
+msgid "None"
+msgstr "Yok"
+
+msgid "Normalization scope"
+msgstr "Normalleştirme kapsamı"
+
+msgid "Not connected"
+msgstr "Bağlı değil"
+
+msgid "Not needed for most servers"
+msgstr "Çoğu sunucu için gerekli değil"
+
+msgid "Not played recently"
+msgstr "Son zamanlarda çalınmadı"
+
+msgid "Not set"
+msgstr "Ayarlanmadı"
+
+msgid "Not valid"
+msgstr "Geçerli değil"
+
+msgid "Nothing here yet"
+msgstr "Burada henüz bir şey yok"
+
+msgid "Nothing in this folder"
+msgstr "Bu klasörde hiçbir şey yok"
+
+msgid "Nothing played yet"
+msgstr "Henüz bir şey çalınmadı"
+
+msgid "Nothing playing"
+msgstr "Çalan bir şey yok"
+
+msgid "Nothing queued"
+msgstr "Kuyrukta bir şey yok"
+
+msgid "Nothing to play here"
+msgstr "Burada oynatılacak bir şey yok"
+
+msgid "Notifications"
+msgstr "Bildirimler"
+
+msgid "November {year}"
+msgstr "Kasım {year}"
+
+msgid "Now Playing"
+msgstr "Şimdi Çalıyor"
+
+msgid "Now playing notifications"
+msgstr "Şimdi çalıyor bildirimleri"
+
+msgid "Now playing updates"
+msgstr "Şimdi çalıyor güncellemeleri"
+
+msgid "Number of backups"
+msgstr "Yedek sayısı"
+
+msgid "Number of songs"
+msgstr "Şarkı sayısı"
+
+msgid "October {year}"
+msgstr "Ekim {year}"
+
+msgid "Off only for a server you control"
+msgstr "Yalnızca kontrol ettiğiniz bir sunucu için kapalı"
+
+msgid "Off"
+msgstr "Kapalı"
+
+msgid "Offline"
+msgstr "Çevrimdışı"
+
+msgid "On"
+msgstr "Açık"
+
+msgid "One Name: Value header per line"
+msgstr "Her satırda bir Ad: Değer başlığı"
+
+msgid "One address per line, pointing to the same collection"
+msgstr "Her satırda aynı koleksiyonu gösteren bir adres"
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+"Her satırda bir klasör yolu; tüm koleksiyonu dahil etmek için boş bırakın"
+
+msgid "One path per line"
+msgstr "Her satırda bir yol"
+
+#, fuzzy
+#| msgid "Service icons on album and artist pages"
+msgid "One row shows albums and artists as cards"
+msgstr "Albüm ve sanatçı sayfalarındaki hizmet simgeleri"
+
+msgid "Online Lookups"
+msgstr "Çevrimiçi Aramalar"
+
+msgid "Only fill missing information"
+msgstr "Yalnızca eksik bilgileri doldur"
+
+msgid "Opacity (%)"
+msgstr "Opaklık (%)"
+
+msgid "Open Controller"
+msgstr "Denetleyiciyi Aç"
+
+msgid "Open Folder"
+msgstr "Klasörü Aç"
+
+msgid "Open Rufin Connect"
+msgstr "Rufin Connect'i Aç"
+
+msgid "Open approval page"
+msgstr "Onay sayfasını aç"
+
+msgid "Open automatically"
+msgstr "Otomatik aç"
+
+msgid "Open custom themes folder"
+msgstr "Özel temalar klasörünü aç"
+
+msgid "Open fullscreen player"
+msgstr "Tam ekran oynatıcıyı aç"
+
+msgid "Open homepage"
+msgstr "Ana sayfayı aç"
+
+msgid "Open on Emby"
+msgstr "Emby'de aç"
+
+msgid "Open on Jellyfin"
+msgstr "Jellyfin'de aç"
+
+msgid "Open on Last.fm"
+msgstr "Last.fm'de aç"
+
+msgid "Open on MusicBrainz"
+msgstr "MusicBrainz'de aç"
+
+msgid "Open on Navidrome"
+msgstr "Navidrome'da aç"
+
+msgid "Open on Plex"
+msgstr "Plex'te aç"
+
+msgid "Open on server"
+msgstr "Sunucuda aç"
+
+msgid "Open release notes"
+msgstr "Sürüm notlarını aç"
+
+msgid "Open settings"
+msgstr "Ayarları aç"
+
+msgid "Open"
+msgstr "Aç"
+
+msgid "OpenSubsonic"
+msgstr "OpenSubsonic"
+
+msgid "Opening Last.fm authorization..."
+msgstr "Last.fm yetkilendirmesi açılıyor..."
+
+msgid "Opening Libre.fm authorization..."
+msgstr "Libre.fm yetkilendirmesi açılıyor..."
+
+msgid "Optional. New images show up sooner with your own key."
+msgstr "İsteğe bağlı. Kendi anahtarınızla yeni görseller daha erken görünür."
+
+msgid "Optional. Rufin has its own."
+msgstr "İsteğe bağlı. Rufin'in kendi anahtarı var."
+
+msgid "Options"
+msgstr "Seçenekler"
+
+msgid "Orange"
+msgstr "Turuncu"
+
+msgid "Order"
+msgstr "Sıra"
+
+msgid "Original audio"
+msgstr "Özgün ses"
+
+msgid "Original release date"
+msgstr "Özgün sürüm tarihi"
+
+msgid "Original"
+msgstr "Özgün"
+
+msgid "Original: {value}"
+msgstr "Özgün: {value}"
+
+msgid "Other releases"
+msgstr "Diğer sürümler"
+
+msgid "Otherwise automatic downloads wait for Wi-Fi"
+msgstr "Aksi halde otomatik indirmeler Wi-Fi bekler"
+
+msgid "Outline bars"
+msgstr "Ana hat çubukları"
+
+msgid "Output gain"
+msgstr "Çıkış kazancı"
+
+#, fuzzy
+#| msgid "Use server recommendations"
+msgid "Override server recommendations"
+msgstr "Sunucu önerilerini kullanın"
+
+msgid "Overview"
+msgstr "Özet"
+
+msgid "Page links"
+msgstr "Sayfa bağlantıları"
+
+msgid "Parametric"
+msgstr "Parametrik"
+
+msgid "Password or token"
+msgstr "Parola veya token"
+
+msgid "Password"
+msgstr "Parola"
+
+msgid "Paste"
+msgstr "Yapıştır"
+
+msgid "Path format"
+msgstr "Yol formatı"
+
+msgid "Path in Source"
+msgstr "Kaynaktaki yol"
+
+msgid "Path"
+msgstr "Yol"
+
+msgid "Pause"
+msgstr "Duraklat"
+
+msgid "Pauses at {time}"
+msgstr "{time} zamanında duraklatır"
+
+msgid "Pauses when that track ends"
+msgstr "O parça bitince duraklatır"
+
+msgid "Pauses when this track ends"
+msgstr "Bu parça bitince duraklatır"
+
+msgid "Peak fall speed (% per second)"
+msgstr "Tepe düşme hızı (saniyede %)"
+
+msgid "Peak hold (seconds)"
+msgstr "Tepe tutma (saniye)"
+
+msgid "Peak"
+msgstr "Tepe"
+
+msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
+msgstr ""
+"Düşük seste daha ince kontrol için Algısal; doğrudan ölçek için Doğrusal"
+
+msgid "Perceptual"
+msgstr "Algısal"
+
+msgid "Performer"
+msgstr "İcracı"
+
+msgid "Personal API key"
+msgstr "Kişisel API anahtarı"
+
+msgid "Pink"
+msgstr "Pembe"
+
+msgid "Plain lyrics"
+msgstr "Düz şarkı sözleri"
+
+msgid "Play (shuffled)"
+msgstr "Çal (karışık)"
+
+msgid "Play Later (shuffled)"
+msgstr "Sonra Çal (karışık)"
+
+msgid "Play Later"
+msgstr "Sonra Çal"
+
+msgid "Play Next (shuffled)"
+msgstr "Sıradaki Çal (karışık)"
+
+msgid "Play Next"
+msgstr "Sıradaki Çal"
+
+msgid "Play Rufin's picks instead of the server's own"
+msgstr ""
+
+msgid "Play album"
+msgstr "Albümü çal"
+
+msgid "Play artist"
+msgstr "Sanatçıyı çal"
+
+msgid "Play count"
+msgstr "Çalma sayısı"
+
+msgid "Play genre"
+msgstr "Türü çal"
+
+msgid "Play mood"
+msgstr "Ruh halini çal"
+
+msgid "Play playlist"
+msgstr "Çalma listesini çal"
+
+msgid "Play radio later"
+msgstr "Radyoyu sonra çal"
+
+msgid "Play radio next"
+msgstr "Radyoyu sıradaki çal"
+
+msgid "Play radio"
+msgstr "Radyoyu çal"
+
+msgid "Play track"
+msgstr "Parçayı çal"
+
+msgid "Play"
+msgstr "Çal"
+
+msgid "Play/Pause"
+msgstr "Çal/Duraklat"
+
+msgid "Playback controls"
+msgstr "Oynatma kontrolleri"
+
+msgid "Playback position"
+msgstr "Oynatma konumu"
+
+msgid "Playback speed"
+msgstr "Oynatma hızı"
+
+msgid "Playback"
+msgstr "Oynatma"
+
+msgid "Played"
+msgstr "Çalındı"
+
+msgid "Player"
+msgstr "Oynatıcı"
+
+msgid "Playing from {}"
+msgstr "Şuradan çalınıyor: {}"
+
+msgid "Playing from"
+msgstr "Şuradan çalınıyor"
+
+msgid "Playing on this device"
+msgstr "Bu cihazda çalınıyor"
+
+msgid "Playing on {device}"
+msgstr "{device} cihazında çalınıyor"
+
+msgid "Playing stream"
+msgstr "Akış çalınıyor"
+
+msgid "Playlist File"
+msgstr "Çalma Listesi Dosyası"
+
+msgid "Playlist file changed"
+msgstr "Çalma listesi dosyası değişti"
+
+msgid "Playlist files"
+msgstr "Çalma listesi dosyaları"
+
+msgid "Playlist name"
+msgstr "Çalma listesi adı"
+
+msgid "Playlist order"
+msgstr "Çalma listesi sırası"
+
+msgid "Playlist radio"
+msgstr "Çalma listesi radyosu"
+
+msgid "Playlist tracks"
+msgstr "Çalma listesi parçaları"
+
+msgid "Playlist"
+msgstr "Çalma listesi"
+
+msgid "Playlists"
+msgstr "Çalma listeleri"
+
+msgid "Plays from"
+msgstr "Şuradan çalmalar"
+
+msgid "Plays"
+msgstr "Çalmalar"
+
+msgid "Plex Account"
+msgstr "Plex Hesabı"
+
+msgid "Plex"
+msgstr "Plex"
+
+msgid "Pop"
+msgstr "Pop"
+
+msgid "Port"
+msgstr "Bağlantı noktası"
+
+msgid "Preamp"
+msgstr "Ön yükseltici"
+
+msgid "Prefer distinct track covers"
+msgstr "Farklı parça kapaklarını tercih et"
+
+msgid "Prefer server lyrics"
+msgstr "Sunucu şarkı sözlerini tercih et"
+
+msgid "Prefer translations"
+msgstr "Çevirileri tercih et"
+
+msgid "Preferences"
+msgstr "Tercihler"
+
+msgid "Preparing library..."
+msgstr "Kitaplık hazırlanıyor..."
+
+msgid "Presence and links"
+msgstr "Durum ve bağlantılar"
+
+msgid "Preserve channels"
+msgstr "Kanalları koru"
+
+msgid "Preserve pitch"
+msgstr "Perdeyi koru"
+
+msgid "Preset name"
+msgstr "Ön ayar adı"
+
+msgid "Preset text"
+msgstr "Ön ayar metni"
+
+msgid "Preset"
+msgstr "Ön ayar"
+
+msgid "Presets"
+msgstr "Ön ayarlar"
+
+msgid "Prevent automatic metadata refreshes from replacing these values"
+msgstr "Otomatik meta veri yenilemelerinin bu değerleri değiştirmesini önle"
+
+msgid "Previous Track"
+msgstr "Önceki Parça"
+
+msgid "Previous album"
+msgstr "Önceki albüm"
+
+msgid "Previous audio device"
+msgstr "Önceki ses cihazı"
+
+msgid "Previous page"
+msgstr "Önceki sayfa"
+
+msgid "Previous period"
+msgstr "Önceki dönem"
+
+msgid "Previous"
+msgstr "Önceki"
+
+msgid "Privacy & Security"
+msgstr "Gizlilik ve Güvenlik"
+
+msgid "Private mode is off"
+msgstr "Gizli mod kapalı"
+
+msgid "Private mode is on"
+msgstr "Gizli mod açık"
+
+msgid "Private mode"
+msgstr "Gizli mod"
+
+msgid "Profile PIN"
+msgstr "Profil PIN'i"
+
+msgid "Profile up to date"
+msgstr "Profil güncel"
+
+msgid "Pronunciation"
+msgstr "Telaffuz"
+
+msgid "Protocol"
+msgstr "Protokol"
+
+msgid "Providers"
+msgstr "Sağlayıcılar"
+
+msgid "Proxy casting through Rufin"
+msgstr "Rufin üzerinden vekil yayınlama"
+
+msgid "Public"
+msgstr "Herkese açık"
+
+msgid "Purple"
+msgstr "Mor"
+
+msgid "Q"
+msgstr "Q"
+
+msgid "Queue a track to begin"
+msgstr "Başlamak için bir parçayı kuyruğa alın"
+
+msgid "Queue tracks to show"
+msgstr "Gösterilecek parçaları kuyruğa al"
+
+msgid "Queue"
+msgstr "Kuyruk"
+
+msgid "Queued"
+msgstr "Kuyruğa alındı"
+
+msgid "Quick Connect"
+msgstr "Hızlı Bağlantı"
+
+msgid "Quit Rufin"
+msgstr "Rufin'den Çık"
+
+msgid "Quit"
+msgstr "Çık"
+
+msgid "Radio"
+msgstr "Radyo"
+
+msgid "Random"
+msgstr "Rastgele"
+
+msgid "Range selection"
+msgstr "Aralık seçimi"
+
+msgid "Rating"
+msgstr "Puanlama"
+
+msgid "Reading tags..."
+msgstr "Etiketler okunuyor..."
+
+msgid "Ready"
+msgstr "Hazır"
+
+msgid "Receiving profile"
+msgstr "Profil alınıyor"
+
+msgid "Recent searches"
+msgstr "Son aramalar"
+
+msgid "Recently added"
+msgstr "Son eklenenler"
+
+msgid "Recently played"
+msgstr "Son çalınanlar"
+
+msgid "Recently released"
+msgstr "Son çıkanlar"
+
+msgid "Recommended when your server provides one"
+msgstr "Sunucunuz sağlıyorsa önerilir"
+
+msgid "Reconnect"
+msgstr "Yeniden bağlan"
+
+msgid "Record label"
+msgstr "Plak şirketi"
+
+msgid "Recording"
+msgstr "Kayıt"
+
+msgid "Red"
+msgstr "Kırmızı"
+
+msgid "Redo"
+msgstr "Yinele"
+
+msgid "Reduce motion"
+msgstr "Hareketi azalt"
+
+msgid "Refresh automatically"
+msgstr "Otomatik yenile"
+
+msgid "Refresh"
+msgstr "Yenile"
+
+msgid "Regenerate access token"
+msgstr "Erişim token'ını yeniden oluştur"
+
+msgid "Regenerate access token?"
+msgstr "Erişim token'ı yeniden oluşturulsun mu?"
+
+msgid "Regenerate"
+msgstr "Yeniden oluştur"
+
+msgid "Related"
+msgstr "İlgili"
+
+msgid "Relative"
+msgstr "Göreli"
+
+msgid "Relay address"
+msgstr "Aktarma adresi"
+
+msgid "Relay"
+msgstr "Aktarma"
+
+msgid "Release date"
+msgstr "Sürüm tarihi"
+
+msgid "Release group"
+msgstr "Sürüm grubu"
+
+msgid "Release notifications"
+msgstr "Sürüm bildirimleri"
+
+msgid "Release type"
+msgstr "Sürüm türü"
+
+msgid "Release"
+msgstr "Sürüm"
+
+msgid "Reload from file"
+msgstr "Dosyadan yeniden yükle"
+
+msgid "Reload metadata to review the current values."
+msgstr "Mevcut değerleri incelemek için meta verileri yeniden yükleyin."
+
+msgid "Reload themes"
+msgstr "Temaları yeniden yükle"
+
+msgid "Reload to apply changes"
+msgstr "Değişiklikleri uygulamak için yeniden yükle"
+
+msgid "Reload"
+msgstr "Yeniden yükle"
+
+msgid "Remix"
+msgstr "Remiks"
+
+msgid "Remixes"
+msgstr "Remiksler"
+
+msgid "Remote folders on a Windows share or NAS"
+msgstr "Windows paylaşımı veya NAS üzerindeki uzak klasörler"
+
+msgid "Remote folders over WebDAV"
+msgstr "WebDAV üzerinden uzak klasörler"
+
+msgid "Remote folders"
+msgstr "Uzak klasörler"
+
+msgid "Remote lyrics"
+msgstr "Uzak şarkı sözleri"
+
+msgid "Remove All Downloads"
+msgstr "Tüm İndirmeleri Kaldır"
+
+msgid "Remove Download"
+msgstr "İndirmeyi Kaldır"
+
+msgid "Remove Downloads"
+msgstr "İndirmeleri Kaldır"
+
+msgid "Remove Rule and Delete Downloads"
+msgstr "Kuralı Kaldır ve İndirmeleri Sil"
+
+msgid "Remove Rule and Downloads"
+msgstr "Kuralı ve İndirmeleri Kaldır"
+
+msgid "Remove Rule, Keep Downloads"
+msgstr "Kuralı Kaldır, İndirmeleri Koru"
+
+msgid "Remove all downloads"
+msgstr "Tüm indirmeleri kaldır"
+
+msgid "Remove and Delete"
+msgstr "Kaldır ve Sil"
+
+msgid "Remove band"
+msgstr "Bandı kaldır"
+
+msgid "Remove device"
+msgstr "Cihazı kaldır"
+
+msgid "Remove folder"
+msgstr "Klasörü kaldır"
+
+msgid "Remove from Favorites"
+msgstr "Favorilerden Kaldır"
+
+msgid "Remove from Playlist"
+msgstr "Çalma Listesinden Kaldır"
+
+msgid "Remove from Queue"
+msgstr "Kuyruktan Kaldır"
+
+msgid "Remove from Saved"
+msgstr "Kaydedilenlerden Kaldır"
+
+msgid "Remove from folder"
+msgstr "Klasörden kaldır"
+
+msgid "Remove group"
+msgstr "Grubu kaldır"
+
+msgid "Remove image"
+msgstr "Görseli kaldır"
+
+msgid "Remove rule"
+msgstr "Kuralı kaldır"
+
+msgid "Remove search"
+msgstr "Aramayı kaldır"
+
+msgid "Remove server"
+msgstr "Sunucuyu kaldır"
+
+msgid "Remove unavailable tracks"
+msgstr "Kullanılamayan parçaları kaldır"
+
+msgid "Remove"
+msgstr "Kaldır"
+
+msgid "Removed from"
+msgstr "Şuradan kaldırıldı"
+
+msgid "Rename file"
+msgstr "Dosyayı yeniden adlandır"
+
+msgid "Rename folder"
+msgstr "Klasörü yeniden adlandır"
+
+msgid "Rename preset"
+msgstr "Ön ayarı yeniden adlandır"
+
+msgid "Rename"
+msgstr "Yeniden adlandır"
+
+msgid "Repeat all"
+msgstr "Tümünü tekrarla"
+
+msgid "Repeat off"
+msgstr "Tekrar kapalı"
+
+msgid "Repeat one"
+msgstr "Birini tekrarla"
+
+msgid "Repeat"
+msgstr "Tekrarla"
+
+msgid "Replace file contents"
+msgstr "Dosya içeriğini değiştir"
+
+msgid "Replace saved custom headers"
+msgstr "Kaydedilmiş özel başlıkları değiştir"
+
+msgid "ReplayGain tags"
+msgstr "ReplayGain etiketleri"
+
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
+msgid "Request failed ({status})"
+msgstr "İstek başarısız ({status})"
+
+msgid "Require SMB encryption"
+msgstr "SMB şifrelemesi gerektir"
+
+msgid "Reset appearance"
+msgstr "Görünümü sıfırla"
+
+msgid "Reset to defaults"
+msgstr "Varsayılanlara sıfırla"
+
+msgid "Reset"
+msgstr "Sıfırla"
+
+msgid "Response"
+msgstr "Yanıt"
+
+msgid "Restart now"
+msgstr "Şimdi yeniden başlat"
+
+msgid "Restore User State"
+msgstr "Kullanıcı Durumunu Geri Yükle"
+
+msgid "Restore defaults without deleting saved presets"
+msgstr "Kaydedilmiş ön ayarları silmeden varsayılanları geri yükle"
+
+msgid "Restore player layout"
+msgstr "Oynatıcı düzenini geri yükle"
+
+msgid "Restore"
+msgstr "Geri yükle"
+
+msgid "Results from radio-browser.info."
+msgstr "Radio-browser.info sonuçları."
+
+msgid "Results per section"
+msgstr "Bölüm başına sonuç"
+
+msgid "Resume"
+msgstr "Devam et"
+
+msgid "Resync Library"
+msgstr "Kitaplığı Yeniden Eşitle"
+
+msgid "Retry"
+msgstr "Yeniden dene"
+
+msgid "Reverse order"
+msgstr "Sırayı tersine çevir"
+
+msgid "Ribbon"
+msgstr "Şerit"
+
+msgid "Rich Presence on"
+msgstr "Rich Presence açık"
+
+msgid "Right sidebar"
+msgstr "Sağ kenar çubuğu"
+
+msgid "Rise speed (%)"
+msgstr "Yükselme hızı (%)"
+
+msgid "Rock"
+msgstr "Rock"
+
+msgid "Romaji"
+msgstr "Roma"
+
+msgid "Rounded bars"
+msgstr "Yuvarlatılmış çubuklar"
+
+msgid "Rounded spectrum"
+msgstr "Yuvarlatılmış spektrum"
+
+msgid "Row borders"
+msgstr "Satır kenarlıkları"
+
+msgid "Rows"
+msgstr "Satırlar"
+
+msgid "Rufin Connect"
+msgstr "Rufin Bağlan"
+
+msgid "Rufin JSON"
+msgstr "Rufin JSON"
+
+msgid "Rufin data folder"
+msgstr "Rufin veri klasörü"
+
+msgid "Rufin host"
+msgstr "Rufin ana bilgisayarı"
+
+msgid "Rufin needs local access to {path}"
+msgstr "Rufin'in {path} için yerel erişime ihtiyacı var"
+
+msgid "Rule actions"
+msgstr "Kural eylemleri"
+
+msgid "SMB / Samba"
+msgstr "SMB / Samba"
+
+msgid "SMB Domain"
+msgstr "SMB Etki Alanı"
+
+msgid "Same artist"
+msgstr "Aynı sanatçı"
+
+msgid "Sample peak"
+msgstr "Örnek tepe değeri"
+
+msgid "Sample rate"
+msgstr "Örnekleme hızı"
+
+msgid "Saturday"
+msgstr "Cumartesi"
+
+msgid "Save Diagnostic Log"
+msgstr "Tanılama Günlüğünü Kaydet"
+
+msgid "Save Lyrics"
+msgstr "Şarkı Sözlerini Kaydet"
+
+msgid "Save Server Settings"
+msgstr "Sunucu Ayarlarını Kaydet"
+
+msgid "Save action saves the lyrics directly to your source"
+msgstr "Kaydet eylemi şarkı sözlerini doğrudan kaynağınıza kaydeder"
+
+msgid "Save changes automatically"
+msgstr "Değişiklikleri otomatik kaydet"
+
+msgid "Save in folder"
+msgstr "Klasöre kaydet"
+
+msgid "Save lyrics automatically"
+msgstr "Şarkı sözlerini otomatik kaydet"
+
+msgid "Save playlist changes automatically"
+msgstr "Çalma listesi değişikliklerini otomatik kaydet"
+
+msgid "Save preset"
+msgstr "Ön ayarı kaydet"
+
+msgid "Save"
+msgstr "Kaydet"
+
+msgid "Saved Plex Login"
+msgstr "Kaydedilmiş Plex Oturumu"
+
+msgid "Saved logins"
+msgstr "Kaydedilmiş oturumlar"
+
+msgid "Saved mapping. {matched} of {total} server path matches"
+msgid_plural "Saved mapping. {matched} of {total} server paths match"
+msgstr[0] ""
+"Eşleme kaydedildi. {total} sunucu yolundan {matched} tanesi eşleşiyor"
+msgstr[1] ""
+"Eşleme kaydedildi. {total} sunucular yolundan {matched} tanesi eşleşiyor"
+
+msgid "Saved preset"
+msgstr "Ön ayar kaydedildi"
+
+msgid "Saved to"
+msgstr "Şuraya kaydedildi"
+
+msgid "Saved"
+msgstr "Kaydedildi"
+
+msgid "Saved..."
+msgstr "Kaydedildi..."
+
+msgid "Saves lyrics to your source"
+msgstr "Şarkı sözlerini kaynağınıza kaydeder"
+
+msgid "Saving..."
+msgstr "Kaydediliyor..."
+
+msgid "Scanning tracks"
+msgstr "Parçalar taranıyor"
+
+msgid "Schedule"
+msgstr "Zamanlama"
+
+msgid "Scheduled Backup Failed"
+msgstr "Zamanlanmış Yedekleme Başarısız"
+
+msgid "Scheduled Backup Password"
+msgstr "Zamanlanmış Yedek Parolası"
+
+msgid "Scheduled backup password saved"
+msgstr "Zamanlanmış yedek parolası kaydedildi"
+
+msgid "Scrobble plays"
+msgstr "Çalmaları scrobble et"
+
+msgid "Scrobbling"
+msgstr "Scrobbling"
+
+msgid "Search Again"
+msgstr "Tekrar Ara"
+
+msgid "Search Lyrics"
+msgstr "Şarkı Sözlerini Ara"
+
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz'de Ara"
+
+msgid "Search artwork"
+msgstr "Kapak görseli ara"
+
+msgid "Search by AcoustID"
+msgstr "AcoustID ile ara"
+
+msgid "Search current folder"
+msgstr "Geçerli klasörde ara"
+
+msgid "Search genres"
+msgstr "Türleri ara"
+
+msgid "Search in page"
+msgstr "Sayfada ara"
+
+msgid "Search is unavailable"
+msgstr "Arama kullanılamıyor"
+
+msgid "Search lyrics"
+msgstr "Şarkı sözleri ara"
+
+msgid "Search playlists"
+msgstr "Çalma listelerinde ara"
+
+msgid "Search preferences"
+msgstr "Tercihlerde ara"
+
+msgid "Search queue"
+msgstr "Kuyrukta ara"
+
+msgid "Search stations"
+msgstr "İstasyonlarda ara"
+
+msgid "Search this network"
+msgstr "Bu ağda ara"
+
+msgid "Search unavailable"
+msgstr "Arama kullanılamıyor"
+
+msgid "Search"
+msgstr "Ara"
+
+msgid "Search..."
+msgstr "Ara..."
+
+msgid "Searching AcoustID..."
+msgstr "AcoustID aranıyor..."
+
+msgid "Searching Local Network"
+msgstr "Yerel Ağ Aranıyor"
+
+msgid "Searching MusicBrainz..."
+msgstr "MusicBrainz aranıyor..."
+
+msgid "Searching for devices..."
+msgstr "Cihazlar aranıyor..."
+
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Yerel ağda {provider} sunucuları aranıyor..."
+
+msgid "Searching will start automatically"
+msgstr "Arama otomatik olarak başlayacak"
+
+msgid "Searching..."
+msgstr "Aranıyor..."
+
+msgid "Secondary release types"
+msgstr "İkincil sürüm türleri"
+
+msgid "Secret storage"
+msgstr "Gizli depolama"
+
+msgid "Seek Backward"
+msgstr "Geri Sar"
+
+msgid "Seek Forward"
+msgstr "İleri Sar"
+
+msgid "Seek playback"
+msgstr "Oynatma konumuna git"
+
+msgid "Seek to {time}"
+msgstr "{time} konumuna git"
+
+msgid "Seekbar"
+msgstr "Arama çubuğu"
+
+msgid "Segment end"
+msgstr "Bölüm sonu"
+
+msgid "Segment start"
+msgstr "Bölüm başlangıcı"
+
+msgid "Segmented bars"
+msgstr "Bölümlenmiş çubuklar"
+
+msgid "Select All"
+msgstr "Tümünü Seç"
+
+msgid "Select Download Folder"
+msgstr "İndirme Klasörünü Seç"
+
+msgid "Select Music Folder"
+msgstr "Müzik Klasörünü Seç"
+
+msgid "Select Source"
+msgstr "Kaynak Seç"
+
+msgid "Select all"
+msgstr "Tümünü seç"
+
+msgid "Select an entry to show or hide it."
+msgstr "Göstermek veya gizlemek için bir giriş seçin."
+
+msgid "Select {title}"
+msgstr "{title} seç"
+
+msgid "Selected folders"
+msgstr "Seçili klasörler"
+
+msgid "Selected items: {count}"
+msgstr "Seçili öğeler: {count}"
+
+msgid "Selected"
+msgstr "Seçildi"
+
+msgid "Selection"
+msgstr "Seçim"
+
+msgid "Self-host an Iroh Relay"
+msgstr "Iroh Relay'i kendi sunucunuzda barındırın"
+
+msgid "Self-hosted scrobbling"
+msgstr "Kendi sunucunuzda barındırılan scrobbling"
+
+msgid "September {year}"
+msgstr "Eylül {year}"
+
+msgid "Server Actions"
+msgstr "Sunucu Eylemleri"
+
+msgid "Server Address Override"
+msgstr "Sunucu Adresi Geçersiz Kılma"
+
+msgid "Server Address"
+msgstr "Sunucu Adresi"
+
+msgid "Server Library"
+msgstr "Sunucu Kitaplığı"
+
+msgid "Server Prefix"
+msgstr "Sunucu Öneki"
+
+msgid "Server Sample"
+msgstr "Sunucu Örneği"
+
+msgid "Server Settings"
+msgstr "Sunucu Ayarları"
+
+msgid "Server URL"
+msgstr "Sunucu URL'si"
+
+msgid "Server default"
+msgstr "Sunucu varsayılanı"
+
+msgid "Server discovery failed: {error}"
+msgstr "Sunucu keşfi başarısız: {error}"
+
+msgid "Server is unreachable"
+msgstr "Sunucuya ulaşılamıyor"
+
+msgid "Server prefix doesn't match"
+msgstr "Sunucu öneki eşleşmiyor"
+
+msgid "Server"
+msgstr "Sunucu"
+
+msgid "Service icons on album and artist pages"
+msgstr "Albüm ve sanatçı sayfalarındaki hizmet simgeleri"
+
+msgid "Services"
+msgstr "Hizmetler"
+
+msgid "Set the Discord activity type to Listening"
+msgstr "Discord etkinlik türünü Dinliyor olarak ayarla"
+
+msgid "Set {count} play count."
+msgid_plural "Set {count} play counts."
+msgstr[0] "{count} çalma sayısı ayarla."
+msgstr[1] "{count} çalma sayıları ayarla."
+
+msgid "Settings and sources"
+msgstr "Ayarlar ve kaynaklar"
+
+msgid "Settings"
+msgstr "Ayarlar"
+
+msgid "Shadow"
+msgstr "Gölge"
+
+msgid "Share"
+msgstr "Paylaş"
+
+msgid "Shared file size"
+msgstr "Paylaşılan dosya boyutu"
+
+msgid "Shared secret"
+msgstr "Paylaşılan gizli anahtar"
+
+msgid "Show Rufin in headline"
+msgstr "Başlıkta Rufin'i göster"
+
+msgid "Show Rufin"
+msgstr "Rufin'i göster"
+
+msgid "Show artwork"
+msgstr "Kapak görselini göster"
+
+msgid "Show comparison"
+msgstr "Karşılaştırmayı göster"
+
+msgid "Show current lyrics line"
+msgstr "Geçerli şarkı sözü satırını göster"
+
+msgid "Show downloaded badge"
+msgstr "İndirildi rozetini göster"
+
+msgid "Show external site links"
+msgstr "Harici site bağlantılarını göster"
+
+msgid "Show header"
+msgstr "Başlığı göster"
+
+msgid "Show lyrics in the right panel"
+msgstr "Şarkı sözlerini sağ panelde göster"
+
+msgid "Show lyrics"
+msgstr "Şarkı sözlerini göster"
+
+msgid "Show paused status"
+msgstr "Duraklatıldı durumunu göster"
+
+msgid "Show peak markers"
+msgstr "Tepe işaretlerini göster"
+
+msgid "Show playback queue"
+msgstr "Oynatma kuyruğunu göster"
+
+msgid "Show ratings in the bottom bar"
+msgstr "Puanlamaları alt çubukta göster"
+
+msgid "Show sidebar"
+msgstr "Kenar çubuğunu göster"
+
+msgid "Show tray icon"
+msgstr "Sistem tepsisi simgesini göster"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr "Görselleştiriciyi ve şarkı sözlerini sağ panelde göster"
+
+msgid "Show visualizer in the right panel"
+msgstr "Görselleştiriciyi sağ panelde göster"
+
+msgid "Show visualizer"
+msgstr "Görselleştiriciyi göster"
+
+msgid "Show"
+msgstr "Göster"
+
+msgid "Show/hide lyrics"
+msgstr "Şarkı sözlerini göster/gizle"
+
+msgid "Show/hide right sidebar"
+msgstr "Sağ kenar çubuğunu göster/gizle"
+
+msgid "Showcase"
+msgstr "Vitrin"
+
+msgid "Shows what you are playing on your Discord profile"
+msgstr "Discord profilinizde ne çaldığınızı gösterir"
+
+msgid "Shows what you play on your Discord profile"
+msgstr "Discord profilinizde ne çaldığınızı gösterir"
+
+msgid "Shuffle"
+msgstr "Karıştır"
+
+msgid "Sidebar Items"
+msgstr "Kenar Çubuğu Öğeleri"
+
+msgid "Sidebar item {position}"
+msgstr "Kenar çubuğu öğesi {position}"
+
+msgid "Sidebar items"
+msgstr "Kenar çubuğu öğeleri"
+
+msgid "Sidebar route by position"
+msgstr "Konuma göre kenar çubuğu rotası"
+
+msgid "Sidebar"
+msgstr "Kenar çubuğu"
+
+msgid "Sign In in Browser"
+msgstr "Tarayıcıda Oturum Aç"
+
+msgid "Sign In with Password"
+msgstr "Parolayla Oturum Aç"
+
+msgid "Sign in again"
+msgstr "Yeniden oturum aç"
+
+msgid "Sign in to Plex first"
+msgstr "Önce Plex'e oturum açın"
+
+msgid "Sign in with Nextcloud"
+msgstr "Nextcloud ile oturum aç"
+
+msgid "Sign in with a code"
+msgstr "Kodla oturum aç"
+
+msgid "Sign in"
+msgstr "Oturum aç"
+
+msgid "Signing in..."
+msgstr "Oturum açılıyor..."
+
+msgid "Similar artists from ListenBrainz"
+msgstr "ListenBrainz benzer sanatçılar"
+
+msgid "Similar artists"
+msgstr "Benzer sanatçılar"
+
+msgid "SimpMusic"
+msgstr "SimpMusic"
+
+msgid "Single"
+msgstr "Tekli"
+
+msgid "Singles"
+msgstr "Single'lar"
+
+msgid "Size"
+msgstr "Boyut"
+
+msgid "Skip count"
+msgstr "Atlama sayısı"
+
+msgid "Skip low-rated tracks"
+msgstr "Oynatılamayan düşük puanlı parçaları atla"
+
+msgid "Skip same-album crossfade"
+msgstr "Aynı albümdeki çapraz geçişi atla"
+
+msgid "Skip unplayable tracks"
+msgstr "Oynatılamayan parçaları atla"
+
+msgid "Skip"
+msgstr "Atla"
+
+msgid "Slate"
+msgstr "Arduvaz"
+
+msgid "Sleep timer"
+msgstr "Uyku zamanlayıcısı"
+
+msgid "Small"
+msgstr "Küçük"
+
+msgid "Smart Playlist"
+msgstr "Akıllı Çalma Listesi"
+
+msgid "Smart Playlists"
+msgstr "Akıllı Çalma Listeleri"
+
+msgid "Smart playlist tracks"
+msgstr "Akıllı çalma listesi parçaları"
+
+msgid "Smart playlists"
+msgstr "Akıllı çalma listeleri"
+
+msgid "Soft spectrum"
+msgstr "Yumuşak spektrum"
+
+msgid "Solid bars"
+msgstr "Dolu çubuklar"
+
+msgid "Some playlist entries could not be imported"
+msgstr "Bazı çalma listesi girişleri içe aktarılamadı"
+
+msgid "Some"
+msgstr "Bazıları"
+
+msgid "Song and artist links"
+msgstr "Şarkı ve sanatçı bağlantıları"
+
+msgid "Song title"
+msgstr "Şarkı başlığı"
+
+msgid "Song"
+msgstr "Şarkı"
+
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+"Sanatçıları ve albümleri adları yerine sıralama etiketlerine göre sırala"
+
+msgid "Sort by"
+msgstr "Sıralama ölçütü"
+
+msgid "Sort name"
+msgstr "Sıralama adı"
+
+msgid "Sort title"
+msgstr "Sıralama başlığı"
+
+msgid "Soundtrack"
+msgstr "Film müziği"
+
+msgid "Soundtracks"
+msgstr "Film müzikleri"
+
+msgid "Source by position"
+msgstr "Konuma göre kaynak"
+
+msgid "Source is no longer available"
+msgstr "Kaynak artık kullanılamıyor"
+
+msgid "Source setup is unavailable"
+msgstr "Kaynak kurulumu kullanılamıyor"
+
+msgid "Source type"
+msgstr "Kaynak türü"
+
+msgid "Source"
+msgstr "Kaynak"
+
+msgid "Sources"
+msgstr "Kaynaklar"
+
+#, fuzzy
+#| msgid "Grid spacing"
+msgid "Spacing"
+msgstr "Izgara aralığı"
+
+msgid "Spectrum · dBFS"
+msgstr "Spektrum · dBFS"
+
+msgid "Spectrum line"
+msgstr "Spektrum çizgisi"
+
+msgid "Spectrum"
+msgstr "Spektrum"
+
+msgid "Start Listening"
+msgstr "Dinlemeye Başla"
+
+msgid "Start from"
+msgstr "Şuradan başla"
+
+msgid "Start minimized"
+msgstr "Küçültülmüş başlat"
+
+msgid "Start playing automatically"
+msgstr "Otomatik oynatmayı başlat"
+
+msgid "Start"
+msgstr "Başlat"
+
+msgid "Starting page"
+msgstr "Başlangıç sayfası"
+
+msgid "Starting..."
+msgstr "Başlatılıyor..."
+
+msgid "Static"
+msgstr "Statik"
+
+msgid "Stations are saved on {saved_on}."
+msgstr "İstasyonlar {saved_on} üzerinde kaydedilir."
+
+msgid "Stations"
+msgstr "İstasyonlar"
+
+msgid "Status display"
+msgstr "Durum göstergesi"
+
+msgid "Status"
+msgstr "Durum"
+
+msgid "Stereo for lossy formats"
+msgstr "Kayıplı formatlar için stereo"
+
+msgid "Stereo"
+msgstr "Stereo"
+
+msgid "Stop"
+msgstr "Durdur"
+
+msgid "Storage"
+msgstr "Depolama"
+
+msgid "Store calculated loudness in supported Local music files"
+msgstr "Hesaplanan ses yüksekliğini desteklenen Yerel müzik dosyalarında sakla"
+
+msgid "Stream address"
+msgstr "Akış adresi"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Stream quality on mobile data"
+msgstr "Akış kalitesi"
+
+msgid "Stream quality"
+msgstr "Akış kalitesi"
+
+msgid "Streaming"
+msgstr "Akış"
+
+msgid "Studio"
+msgstr "Stüdyo"
+
+msgid "Studios"
+msgstr "Stüdyolar"
+
+msgid "Style"
+msgstr "Stil"
+
+msgid "Suggested"
+msgstr "Önerilen"
+
+msgid "Sunday"
+msgstr "Pazar"
+
+msgid "Swipe left"
+msgstr "Sola kaydır"
+
+msgid "Swipe on a row"
+msgstr "Bir satırda kaydır"
+
+msgid "Swipe right"
+msgstr "Sağa kaydır"
+
+msgid "Switch Search/Favorites tabs"
+msgstr "Arama/Favoriler sekmelerini değiştir"
+
+msgid "Switch between layouts"
+msgstr "Düzenler arasında geçiş yap"
+
+msgid "Switch pane"
+msgstr "Bölmeyi değiştir"
+
+msgid "Switching library..."
+msgstr "Kitaplık değiştiriliyor..."
+
+msgid "Symbolic"
+msgstr "Sembolik"
+
+msgid "Sync folder"
+msgstr "Klasörü eşitle"
+
+msgid "Synced and plain lyrics"
+msgstr "Eşzamanlı ve düz şarkı sözleri"
+
+msgid "Synced lyrics"
+msgstr "Eşzamanlı şarkı sözleri"
+
+msgid "Synced lyrics, some word by word"
+msgstr "Eşzamanlı şarkı sözleri, bazıları kelime kelime"
+
+msgid "System default"
+msgstr "Sistem varsayılanı"
+
+msgid "System flatpak:"
+msgstr "Sistem flatpak:"
+
+msgid "System keyring"
+msgstr "Sistem anahtarlığı"
+
+msgid "System"
+msgstr "Sistem"
+
+msgid "Tags"
+msgstr "Etiketler"
+
+msgid "Target loudness"
+msgstr "Hedef ses yüksekliği"
+
+msgid "Teal"
+msgstr "Deniz mavisi"
+
+msgid "Techno"
+msgstr "Tekno"
+
+msgid "Test connection"
+msgstr "Bağlantıyı test et"
+
+msgid "Text"
+msgstr "Metin"
+
+msgid "The API token was not accepted. Please connect again."
+msgstr "API token'ı kabul edilmedi. Lütfen yeniden bağlanın."
+
+msgid "The anchored track is gone"
+msgstr "Sabitlenen parça gitti"
+
+msgid "The closest match wins; on a tie, the higher one."
+msgstr "En yakın eşleşme kazanır; eşitlik durumunda daha yüksek olan."
+
+msgid "The connection no longer exists"
+msgstr "Bağlantı artık mevcut değil"
+
+msgid "The files are deleted where they are stored. This cannot be undone."
+msgstr "Dosyalar depolandıkları yerden silinir. Bu geri alınamaz."
+
+msgid "The sheet a long press opens. Tap an entry to show or hide it."
+msgstr ""
+"Uzun basmanın açtığı sayfa. Göstermek veya gizlemek için bir girişe dokunun."
+
+msgid "TheAudioDB album ID"
+msgstr "TheAudioDB albüm kimliği"
+
+msgid "TheAudioDB artist ID"
+msgstr "TheAudioDB sanatçı kimliği"
+
+msgid "Theme"
+msgstr "Tema"
+
+msgid "These emoji match"
+msgstr "Bu emojiler eşleşiyor"
+
+msgid "This can be turned off after pairing if you want"
+msgstr "İsterseniz eşleştirmeden sonra bu kapatılabilir"
+
+msgid "This device was removed from the profile"
+msgstr "Bu cihaz profilden kaldırıldı"
+
+msgid "This device"
+msgstr "Bu cihaz"
+
+msgid "This is owned by {source} and synced to it."
+msgstr "Bu {source} kaynağına aittir ve onunla eşitlenir."
+
+msgid "This isn't available"
+msgstr "Bu kullanılamıyor"
+
+msgid "This item has no link to share"
+msgstr "Bu öğenin paylaşılacak bağlantısı yok"
+
+msgid "This playlist only accepts {source} tracks"
+msgstr "Bu çalma listesi yalnızca {source} parçalarını kabul eder"
+
+msgid "This source cannot edit this field"
+msgstr "Bu kaynak bu alanı düzenleyemez"
+
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr "Bu, yapılandırılmış tüm durumu kaldırır. Devam etmek istiyor musunuz?"
+
+msgid "Thursday"
+msgstr "Perşembe"
+
+msgid "Time"
+msgstr "Zaman"
+
+msgid "Title (merged)"
+msgstr "Başlık (birleştirilmiş)"
+
+msgid "Title"
+msgstr "Başlık"
+
+msgid "Toggle Fullscreen"
+msgstr "Tam Ekranı Aç/Kapat"
+
+msgid "Tone and channels"
+msgstr "Ton ve kanallar"
+
+msgid "Tools"
+msgstr "Araçlar"
+
+msgid "Top albums"
+msgstr "En iyi albümler"
+
+msgid "Top artists"
+msgstr "En iyi sanatçılar"
+
+msgid "Top genres"
+msgstr "En iyi türler"
+
+msgid "Top tracks"
+msgstr "En iyi parçalar"
+
+msgid "Total discs"
+msgstr "Toplam disk"
+
+msgid "Total tracks"
+msgstr "Toplam parça"
+
+msgid "Track details"
+msgstr "Parça ayrıntıları"
+
+msgid "Track gain"
+msgstr "Parça kazancı"
+
+msgid "Track number"
+msgstr "Parça numarası"
+
+msgid "Track peak"
+msgstr "Parça tepe değeri"
+
+msgid "Track radio"
+msgstr "Parça radyosu"
+
+msgid "Track unavailable"
+msgstr "Parça kullanılamıyor"
+
+msgid "Track"
+msgstr "Parça"
+
+msgid "Tracks from every playlist"
+msgstr "Her çalma listesinden parçalar"
+
+msgid "Tracks from your five latest albums"
+msgstr "En son beş albümünüzden parçalar"
+
+msgid "Tracks per refill"
+msgstr "Yenileme başına parça sayısı"
+
+msgid "Tracks"
+msgstr "Parçalar"
+
+msgid "Transcoded"
+msgstr "Dönüştürülmüş"
+
+msgid "Transition mode"
+msgstr "Geçiş modu"
+
+msgid "Translation language"
+msgstr "Çeviri dili"
+
+msgid "Tray icon"
+msgstr "Sistem tepsisi simgesi"
+
+msgid "Treble"
+msgstr "Tiz"
+
+msgid "Troubleshooting"
+msgstr "Sorun giderme"
+
+msgid "Trust self-signed certificate"
+msgstr "Kendinden imzalı sertifikaya güven"
+
+msgid "Tuesday"
+msgstr "Salı"
+
+msgid "Turn off only for a server you control"
+msgstr "Yalnızca kontrol ettiğiniz bir sunucu için kapat"
+
+msgid "Turn off private mode"
+msgstr "Gizli modu kapat"
+
+msgid "Turn off"
+msgstr "Kapat"
+
+msgid "Turn on private mode"
+msgstr "Gizli modu aç"
+
+msgid "Turns off lookups, scrobbling, play reporting and update checks"
+msgstr ""
+"Aramaları, scrobbling'i, çalma raporlamayı ve güncelleme kontrollerini "
+"kapatır"
+
+msgid "Type to search or create a new playlist"
+msgstr "Aramak veya yeni çalma listesi oluşturmak için yazın"
+
+msgid "Type to search"
+msgstr "Aramak için yazın"
+
+msgid "Typography"
+msgstr "Tipografi"
+
+msgid "UPnP"
+msgstr "UPnP"
+
+msgid "Unavailable"
+msgstr "Kullanılamıyor"
+
+msgid "Undo"
+msgstr "Geri al"
+
+msgid "Unknown artist"
+msgstr "Bilinmeyen sanatçı"
+
+msgid "Unknown disc"
+msgstr "Bilinmeyen disk"
+
+msgid "Unlink"
+msgstr "Bağlantıyı kaldır"
+
+msgid "Unmute"
+msgstr "Sesi aç"
+
+msgid "Unmuted"
+msgstr "Ses açık"
+
+msgid "Unplayed"
+msgstr "Çalınmadı"
+
+msgid "Unsaved"
+msgstr "Kaydedilmedi"
+
+msgid "Untitled"
+msgstr "Başlıksız"
+
+msgid "Update check interval"
+msgstr "Güncelleme kontrol aralığı"
+
+msgid "Update"
+msgstr "Güncelle"
+
+msgid "Updated Rufin to {version}"
+msgstr "Rufin {version} sürümüne güncellendi"
+
+msgid "Updating Rufin to {version}..."
+msgstr "Rufin {version} sürümüne güncelleniyor..."
+
+msgid "Upload artwork"
+msgstr "Kapak görseli yükle"
+
+msgid "Use API key"
+msgstr "API anahtarı kullan"
+
+msgid "Use Rufin data folder"
+msgstr "Rufin veri klasörünü kullan"
+
+msgid "Use Saved Login"
+msgstr "Kaydedilmiş Oturumu Kullan"
+
+msgid "Use This Source"
+msgstr "Bu Kaynağı Kullan"
+
+msgid "Use a number above zero"
+msgstr "Sıfırdan büyük bir sayı kullanın"
+
+msgid "Use a public relay"
+msgstr "Herkese açık bir aktarma kullan"
+
+msgid "Use accent color"
+msgstr "Vurgu rengini kullan"
+
+msgid "Use an existing connection?"
+msgstr "Mevcut bir bağlantı kullanılsın mı?"
+
+msgid "Use current artwork"
+msgstr "Mevcut kapak görselini kullan"
+
+msgid "Use default folder"
+msgstr "Varsayılan klasörü kullan"
+
+msgid "Use different layout below a threshold width"
+msgstr "Eşik genişliğinin altında farklı düzen kullan"
+
+msgid "Use each track's own cover when available"
+msgstr "Mevcut olduğunda her parçanın kendi kapağını kullan"
+
+msgid "Use existing"
+msgstr "Mevcut olanı kullan"
+
+msgid "Use for this output"
+msgstr "Bu çıkış için kullan"
+
+msgid "Use listening activity"
+msgstr "Dinleme etkinliğini kullan"
+
+msgid "Use local files for playback, lyrics, and supported metadata editing"
+msgstr ""
+"Oynatma, şarkı sözleri ve desteklenen meta veri düzenleme için yerel "
+"dosyaları kullan"
+
+msgid "Use sort tags"
+msgstr "Sıralama etiketlerini kullan"
+
+msgid "Use source setting"
+msgstr "Kaynak ayarını kullan"
+
+msgid "User flatpak:"
+msgstr "Kullanıcı flatpak:"
+
+msgid "User token"
+msgstr "Kullanıcı token'ı"
+
+msgid "User"
+msgstr "Kullanıcı"
+
+msgid "Username and password"
+msgstr "Kullanıcı adı ve parola"
+
+msgid "Username or email"
+msgstr "Kullanıcı adı veya e-posta"
+
+msgid "Username"
+msgstr "Kullanıcı adı"
+
+msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr "Mevcut karaoke şarkı sözlerini kullanır veya internetten getirir"
+
+msgid "Verification Code"
+msgstr "Doğrulama Kodu"
+
+msgid "Verify server certificate"
+msgstr "Sunucu sertifikasını doğrula"
+
+msgid "Version History"
+msgstr "Sürüm Geçmişi"
+
+msgid "Via relay"
+msgstr "Aktarma yoluyla"
+
+msgid "View all"
+msgstr "Tümünü görüntüle"
+
+msgid "View"
+msgstr "Görüntüle"
+
+msgid "Visible"
+msgstr "Görünür"
+
+msgid "Visualizer"
+msgstr "Görselleştirici"
+
+msgid "Volume Down"
+msgstr "Sesi Azalt"
+
+msgid "Volume Up"
+msgstr "Sesi Artır"
+
+msgid "Volume scale"
+msgstr "Ses ölçeği"
+
+msgid "Volume"
+msgstr "Ses düzeyi"
+
+msgid "Waiting for connection"
+msgstr "Bağlantı bekleniyor"
+
+msgid "Waiting for device"
+msgstr "Cihaz bekleniyor"
+
+msgid "Waiting for the other device to approve"
+msgstr "Diğer cihazın onaylaması bekleniyor"
+
+msgid "Waveform seekbar"
+msgstr "Dalga biçimi arama çubuğu"
+
+msgid "Waveforms"
+msgstr "Dalga biçimleri"
+
+msgid "WebDAV / Nextcloud"
+msgstr "WebDAV / Nextcloud"
+
+msgid "WebDAV"
+msgstr "WebDAV"
+
+msgid "Wednesday"
+msgstr "Çarşamba"
+
+msgid "Weekday"
+msgstr "Hafta içi"
+
+msgid "Weekly"
+msgstr "Haftalık"
+
+msgid "Weighting"
+msgstr "Ağırlıklandırma"
+
+msgid "Welcome to Rufin"
+msgstr "Rufin'e Hoş Geldiniz"
+
+msgid "What Auto DJ and radio pick"
+msgstr "Auto DJ ve radyo seçimi nedir"
+
+msgid "While your library loads"
+msgstr "Kitaplığınız yüklenirken"
+
+msgid "Wide"
+msgstr "Geniş"
+
+msgid "Width unit"
+msgstr "Genişlik birimi"
+
+msgid "Width"
+msgstr "Genişlik"
+
+msgid "Window"
+msgstr "Pencere"
+
+msgid "Write EBU R128 tags to files"
+msgstr "EBU R128 etiketlerini dosyalara yaz"
+
+msgid "Year"
+msgstr "Yıl"
+
+msgid "Yearly"
+msgstr "Yıllık"
+
+msgid "Years"
+msgstr "Yıl"
+
+msgid "Yellow"
+msgstr "Sarı"
+
+msgid "Yes"
+msgstr "Evet"
+
+msgid "Your library is ready"
+msgstr "Kitaplığınız hazır"
+
+msgid "Your music belongs here"
+msgstr "Müziğiniz buraya ait"
+
+msgid "Your own API key"
+msgstr "Kendi API anahtarınız"
+
+msgid "Your queue is empty."
+msgstr "Kuyruğunuz boş."
+
+msgid "Your {period} in Rufin"
+msgstr "Rufin'deki {period} döneminiz"
+
+msgid "Your {period}"
+msgstr "{period} döneminiz"
+
+msgid "above"
+msgstr "üstünde"
+
+msgid "after"
+msgstr "sonra"
+
+msgid "all"
+msgstr "tümü"
+
+msgid "any"
+msgstr "herhangi biri"
+
+msgid "before"
+msgstr "önce"
+
+msgid "below"
+msgstr "altında"
+
+msgid "contains"
+msgstr "içerir"
+
+msgid "days"
+msgstr "gün"
+
+msgid "does not contain"
+msgstr "içermez"
+
+msgid "does not equal"
+msgstr "eşit değildir"
+
+msgid "equals"
+msgstr "eşittir"
+
+msgid "excludes"
+msgstr "hariç tutar"
+
+msgid "fanart.tv key"
+msgstr "fanart.tv anahtarı"
+
+msgid "in the last"
+msgstr "son"
+
+msgid "is empty"
+msgstr "boş"
+
+msgid "is not empty"
+msgstr "boş değil"
+
+msgid "is not"
+msgstr "eşit değildir"
+
+msgid "is"
+msgstr "şudur"
+
+msgid "not in the last"
+msgstr "son ... içinde değil"
+
+msgid "of these rules"
+msgstr "bu kurallardan"
+
+msgid "of these"
+msgstr "bunlardan"
+
+msgid "range"
+msgstr "aralık"
+
+msgid "to"
+msgstr "ile"
+
+msgid "today"
+msgstr "bugün"
+
+msgid "yesterday"
+msgstr "dün"
+
+msgid "{action} (Shuffle)"
+msgstr "{action} (Karıştır)"
+
+msgid "{completed} of {total} ({cached} cached)"
+msgstr "{total} içinden {completed} ({cached} önbellekte)"
+
+msgid "{count} album"
+msgid_plural "{count} albums"
+msgstr[0] "{count} albüm"
+msgstr[1] "{count} albümler"
+
+msgid "{count} day ago"
+msgid_plural "{count} days ago"
+msgstr[0] "{count} gün önce"
+msgstr[1] "{count} günler önce"
+
+msgid "{count} entry matches no track in the library."
+msgid_plural "{count} entries match no track in the library."
+msgstr[0] "{count} giriş kitaplıkta hiçbir parçayla eşleşmiyor."
+msgstr[1] "{count} girişlerde kitaplıkta hiçbir parçayla eşleşmiyor."
+
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} giriş"
+msgstr[1] "{count} girişler"
+
+msgid "{count} folder selected"
+msgid_plural "{count} folders selected"
+msgstr[0] "{count} klasör seçildi"
+msgstr[1] "{count} klasörler seçildi"
+
+msgid "{count} folder"
+msgid_plural "{count} folders"
+msgstr[0] "{count} klasör"
+msgstr[1] "{count} klasörler"
+
+msgid "{count} line could not be read."
+msgid_plural "{count} lines could not be read."
+msgstr[0] "{count} satır okunamadı."
+msgstr[1] "{count} satırlar okunamadı."
+
+msgid "{count} listen was already in Rufin."
+msgid_plural "{count} listens were already in Rufin."
+msgstr[0] "{count} dinleme zaten Rufin'deydi."
+msgstr[1] "{count} dinlemeler zaten Rufin'deydi."
+
+msgid "{count} month ago"
+msgid_plural "{count} months ago"
+msgstr[0] "{count} ay önce"
+msgstr[1] "{count} aylar önce"
+
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} çalma"
+msgstr[1] "{count} çalmalar"
+
+msgid "{count} result"
+msgid_plural "{count} results"
+msgstr[0] "{count} sonuç"
+msgstr[1] "{count} sonuçlar"
+
+msgid "{count} selected"
+msgstr "{count} seçildi"
+
+msgid "{count} track"
+msgid_plural "{count} tracks"
+msgstr[0] "{count} parça"
+msgstr[1] "{count} parçalar"
+
+msgid "{count} week ago"
+msgid_plural "{count} weeks ago"
+msgstr[0] "{count} hafta önce"
+msgstr[1] "{count} haftalar önce"
+
+msgid "{count} year ago"
+msgid_plural "{count} years ago"
+msgstr[0] "{count} yıl önce"
+msgstr[1] "{count} yıllar önce"
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] "{field} · parça {count} boyunca farklılık gösteriyor"
+msgstr[1] "{field} · parça {count} boyunca farklılıklar gösteriyor"
+
+msgid "{minutes} min"
+msgstr "{minutes} dk"
+
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{stage} ({total} içinden {completed}, {cached} önbellekte)"
+
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{stage} ({total} parçadan {count})"
+
+msgid "{stage}: {completed} / {total}"
+msgstr "{stage}: {completed} / {total}"
+
+msgid "{stage}: {completed}"
+msgstr "{stage}: {completed}"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+"Rufin bilgisayarınıza kuruldu.\n"
+"\n"
+"Kurulumu tamamlamak için Son'a tıklayın."
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+"Rufin; Jellyfin, Navidrome/OpenSubsonic, Plex ve Emby sunucuları için yerel "
+"bir müzik oynatıcıdır; yerel klasörler, doğrudan Nextcloud tarayıcı oturum "
+"açma yolu dahil WebDAV, Samba ve NAS paylaşımları.\n"
+"\n"
+"Bu kurulum Rufin'i bilgisayarınıza kuracak.\n"
+"\n"
+"Devam etmek için İleri'ye tıklayın."
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+"Kurulum mevcut Rufin dosyalarını kaldıramadı. Rufin'i kapatıp tekrar deneyin."
+
+#. Windows installer: DirectoryConflict.
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Ayrı bir kurulum klasörü seçin."
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr "{app_name} uygulamasını kapatıp kurulumu tekrar deneyin."
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr "{app_name} uygulamasını kapatıp kaldırmayı tekrar deneyin."
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr "Rufin Kurulumu Tamamlanıyor"
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr "Masaüstü kısayolu oluştur"
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr "{app_name} önbelleğini kaldır"
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr "Kurulum tamamlanamadı. Lütfen tekrar deneyin."
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr "{app_name} otomatik güncelleme seçeneği geçersiz."
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr "Rufin Kurulumuna Hoş Geldiniz"
+
+#~ msgid "Drag to reorder."
+#~ msgstr "Yeniden sıralamak için sürükleyin."
+
+#~ msgid "Home blocks"
+#~ msgstr "Ana sayfa blokları"
+
+#~ msgid "Pages"
+#~ msgstr "Sayfalar"
+
+#~ msgid "Play the server's own picks; Rufin's fill in where it has too few"
+#~ msgstr ""
+#~ "Sunucunun kendi seçimlerini oynayın; Rufin, sayı yetersiz olduğu yerlerde "
+#~ "boşlukları doldursun"
+
+#~ msgid "{shown} of {total} shown"
+#~ msgstr "{total} içinden {shown} gösteriliyor"
+
+#~ msgid "128 kbps"
+#~ msgstr "128 kbps"
+
+#~ msgid "192 kbps"
+#~ msgstr "192 kbps"
+
+#~ msgid "256 kbps"
+#~ msgstr "256 kbps"
+
+#~ msgid "320 kbps"
+#~ msgstr "320 kbps"
+
+#~ msgid "kbps"
+#~ msgstr "kbps"
+
+#~ msgid "Queue and transitions"
+#~ msgstr "Kuyruk ve geçişler"
+
+#~ msgid "Use the server's Instant Mix for Radio and Auto DJ."
+#~ msgstr "Radyo ve Otomatik DJ için sunucunun Instant Mix'ini kullan."

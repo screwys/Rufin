@@ -469,9 +469,13 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }, more = { openMore(it) }, addSource = { editSourceId = null; sources = true; closeDrawer() })
     }
     val barHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
+    val openPage = moreDestination.takeIf { browse.section == AppSection.More }
+    // A foldable keeps its compact sidebar, and ☰ opens the full one over the page, as a phone's does. A tablet
+    // docks the full one, and keeps the compact one once its ☰ picked it.
+    val compactSidebar = width == ShellWidth.Medium || (!sidePlayer && preferences.sidebarCompact)
     BrowseGestureSettings(preferences.swipeLeft, preferences.swipeRight, browse, { playlist = it }, { item, share -> sharing = item to share }) {
     ModalNavigationDrawer(drawerContent = {
-        ModalDrawerSheet(Modifier.width(304.dp)) { Sidebar(model, browse, player, pinsPage, sidebarActions) }
+        ModalDrawerSheet(Modifier.width(326.dp)) { Sidebar(model, browse, player, pinsPage, sidebarActions, openPage) }
     }, drawerState = drawer, gesturesEnabled = drawer.isOpen) {
     // The Surface gives the shell its background and its text colour. Under the open player it takes no
     // focus: a D-pad stays in the player.
@@ -480,16 +484,21 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     CompositionLocalProvider(LocalToolIconSize provides if (tablet) 20.dp else 24.dp) {
     Row(Modifier.fillMaxSize()) {
         when (width) {
-            ShellWidth.Medium -> SidebarRail(browse, player, pinsPage, { scope.launch { drawer.open() } }, ::selectRoute,
-                { selectTab(ShellTab.Search) }, { selectTab(ShellTab.Saved) }, sidebarActions.saved)
             ShellWidth.Tv -> TvRail(tab, ::selectTab, browse.section == AppSection.More) { openMore(MoreDestination.Root) }
-            ShellWidth.Expanded -> PermanentDrawerSheet(Modifier.width(if (sidePlayer) 240.dp else 264.dp).statusBarsPadding()) {
+            ShellWidth.Medium, ShellWidth.Expanded -> if (compactSidebar) SidebarRail(browse, player, pinsPage,
+                { if (width == ShellWidth.Medium) scope.launch { drawer.open() } else preferences.changeSidebarCompact(false) }, ::selectRoute,
+                { selectTab(ShellTab.Search) }, { selectTab(ShellTab.Saved) }, sidebarActions.saved, openPage, ::openMore)
+            else PermanentDrawerSheet(Modifier.width(if (sidePlayer) 276.dp else 300.dp).statusBarsPadding()) {
                 val withSearch = remember(sidebarActions) {
                     SidebarActions(sidebarActions.route, sidebarActions.saved, sidebarActions.more, sidebarActions.addSource) { selectTab(ShellTab.Search) }
                 }
-                Sidebar(model, browse, player, pinsPage, withSearch, Modifier.weight(1f))
-                if (sidePlayer && hasMedia) SidebarPlayer(player, { fullPlayer = true }, { outputs = true },
-                    Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+                Sidebar(model, browse, player, pinsPage, withSearch, openPage, Modifier.weight(1f),
+                    dock = if (sidePlayer && hasMedia) { {
+                        SidebarPlayer(player, { fullPlayer = true }, { outputs = true },
+                            Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+                    } } else null,
+                    // A short, wide screen keeps the sidebar that holds its player.
+                    collapse = if (sidePlayer) null else { { preferences.changeSidebarCompact(true) } })
             }
             ShellWidth.Phone -> {}
         }
@@ -761,6 +770,22 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !mix) {
         ConnectPairingPrompt(model) { openMore(MoreDestination.Connect) }
     }
+    // Offers once, before the release that changes the app ID, to export a backup.
+    var backupNotice by rememberSaveable { mutableStateOf(false) }
+    val applicationSettings = preferences.applicationSettings
+    LaunchedEffect(applicationSettings, model.sources, sources) {
+        if (!sources && applicationSettings != null &&
+            showsBackupNotice(applicationSettings, model.sources?.sources.orEmpty())) {
+            preferences.changePreference { setBackupNoticeDismissed(true) }
+            backupNotice = true
+        }
+    }
+    if (backupNotice) AlertDialog(onDismissRequest = { backupNotice = false },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text(translate("Export a Backup")) },
+        text = { Text(translate("With the next release, the repo will move to an organization and the app ID will change. For flatpak users this means the logins will not migrate automatically, and Android users will need to re download the app. There should likely be no problems for other packages, but in either case, it is recommended to export a backup to restore from it.")) },
+        confirmButton = { TextButton({ backupNotice = false; openMore(MoreDestination.Privacy) }) { Text(translate("Export Backup")) } },
+        dismissButton = { TextButton({ backupNotice = false }) { Text(translate("Close")) } })
     if (sources) Dialog(onDismissRequest = { model.closeSourceSetup(); sources = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val close = { model.closeSourceSetup(); sources = false }
@@ -777,7 +802,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
 /** Flip covers and other tiny screens: route dots, one-column lists. */
 internal val LocalTinyScreen = compositionLocalOf { false }
 
-/** The top bar of route roots, Search, Saved and the pages of the ☰ menu: route tools live here. */
+/** The top bar of route roots, Search, Saved and the pages the sidebar's rail opens: route tools live here. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTitle: String,

@@ -408,12 +408,9 @@ impl SettingsFile {
             .cloned()
     }
 
-    /// The quality a stream from `source_id` is asked for on the network as it is now.
-    pub(crate) fn stream_quality(&self, source_id: Option<&str>) -> AudioQuality {
-        self.committed
-            .borrow()
-            .ui
-            .stream_quality(source_id, self.metered())
+    /// The quality streams are asked for on the network as it is now.
+    pub(crate) fn stream_quality(&self) -> AudioQuality {
+        self.committed.borrow().ui.stream_quality(self.metered())
     }
 
     /// Whether the device's network is metered, as mobile data is.
@@ -640,6 +637,11 @@ impl SettingsOwner {
             .update(|stored| Ok(stored.ui.sidebar.set_pinned(pin, pinned)))
     }
 
+    pub fn pin_first(&self, pin: SidebarPin) -> Result<bool, String> {
+        self.file
+            .update(|stored| Ok(stored.ui.sidebar.pin_first(pin)))
+    }
+
     pub fn set_route_visible(&self, item: SidebarRouteItem, visible: bool) -> Result<bool, String> {
         self.file
             .update(|stored| Ok(stored.ui.sidebar.set_route_visible(item, visible)))
@@ -833,19 +835,6 @@ impl SettingsOwner {
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_quality(source_id, quality);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-
-    /// The source's own stream quality; `None` follows the one for every source.
-    pub fn set_source_stream_quality(
-        &self,
-        source_id: SourceId,
-        quality: Option<sources::AudioQuality>,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.set_source_stream_quality(source_id, quality);
             Ok(())
         })
         .map_err(Into::into)

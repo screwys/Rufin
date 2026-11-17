@@ -250,6 +250,10 @@ impl SubsonicSource {
                 .acquire_navidrome_library(observation, progress, cancelled)
                 .await?;
         } else {
+            // Only OpenSubsonic promises that an empty search3 query lists everything; plain
+            // Subsonic servers are read through getArtists and their albums.
+            let open_subsonic =
+                json::boolean(&self.get_json("ping", &[]).await?["openSubsonic"]).unwrap_or(false);
             // Artists come first so that the albums and tracks crediting them are resolved
             // once.
             let mut listed = Vec::new();
@@ -262,8 +266,29 @@ impl SubsonicSource {
                 let result = async {
                     if entity == "track" {
                         return self
-                            .acquire_tracks(observation, &music_folders, progress, cancelled)
+                            .acquire_tracks(
+                                observation,
+                                &music_folders,
+                                open_subsonic,
+                                progress,
+                                cancelled,
+                            )
                             .await;
+                    }
+                    if entity == "artist" && !open_subsonic {
+                        let body = self.get_json("getArtists", &[]).await?;
+                        let mut batch = library::CatalogBatch::default();
+                        for index in json::items(&body["artists"]["index"]) {
+                            for value in json::items(&index["artist"]) {
+                                batch
+                                    .artists
+                                    .extend(artist_from_json(self, source_id, value)?);
+                            }
+                        }
+                        check_cancelled(cancelled)?;
+                        observation.apply_catalog(&batch, true).await?;
+                        progress(stage(read_stage, batch.artists.len()));
+                        return Ok(());
                     }
                     let mut offset = 0_usize;
                     loop {
@@ -387,6 +412,7 @@ impl SubsonicSource {
         &self,
         observation: &mut library::Observation<'_>,
         music_folders: &[library::FolderObservation],
+        open_subsonic: bool,
         progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
@@ -400,40 +426,80 @@ impl SubsonicSource {
         };
         let mut emitted = 0;
         for folder in scopes {
+            let folder_id = folder.map(|folder| {
+                (
+                    "musicFolderId",
+                    raw_item_id(folder.object_id.as_str()).to_string(),
+                )
+            });
             let mut offset = 0_usize;
             loop {
                 check_cancelled(cancelled)?;
-                let mut extra = vec![
-                    ("query", String::new()),
-                    ("artistCount", "0".to_string()),
-                    ("artistOffset", "0".to_string()),
-                    ("albumCount", "0".to_string()),
-                    ("albumOffset", "0".to_string()),
-                    ("songCount", TRACK_REQUEST_SIZE.to_string()),
-                    ("songOffset", offset.to_string()),
-                ];
-                if let Some(folder) = folder {
-                    extra.push((
-                        "musicFolderId",
-                        raw_item_id(folder.object_id.as_str()).to_string(),
-                    ));
-                }
-                let body: Value = self.get_json("search3", &extra).await?;
-                let page = json::items(&body["searchResult3"]["song"]);
-                if page.is_empty() {
+                // OpenSubsonic pages songs through an empty search; plain Subsonic pages
+                // albums and reads each one's songs.
+                let (listed, songs) = if open_subsonic {
+                    let mut extra = vec![
+                        ("query", String::new()),
+                        ("artistCount", "0".to_string()),
+                        ("artistOffset", "0".to_string()),
+                        ("albumCount", "0".to_string()),
+                        ("albumOffset", "0".to_string()),
+                        ("songCount", TRACK_REQUEST_SIZE.to_string()),
+                        ("songOffset", offset.to_string()),
+                    ];
+                    extra.extend(folder_id.clone());
+                    let mut body: Value = self.get_json("search3", &extra).await?;
+                    let songs = match body["searchResult3"]["song"].take() {
+                        Value::Array(songs) => songs,
+                        _ => Vec::new(),
+                    };
+                    (songs.len(), songs)
+                } else {
+                    let mut extra = vec![
+                        ("type", "alphabeticalByName".to_string()),
+                        ("size", ALBUM_REQUEST_SIZE.to_string()),
+                        ("offset", offset.to_string()),
+                    ];
+                    extra.extend(folder_id.clone());
+                    let body: Value = self.get_json("getAlbumList2", &extra).await?;
+                    let albums = json::items(&body["albumList2"]["album"]);
+                    let mut songs = Vec::new();
+                    for album_id in albums.iter().filter_map(|album| json::id(&album["id"])) {
+                        check_cancelled(cancelled)?;
+                        let mut album =
+                            match self.get_json("getAlbum", &[("id", album_id.clone())]).await {
+                                Ok(body) => body,
+                                // Removed since the album page was listed.
+                                Err(SourceError::NotFound) => continue,
+                                Err(error) => return Err(error),
+                            };
+                        let Value::Array(album_songs) = album["album"]["song"].take() else {
+                            continue;
+                        };
+                        songs.extend(album_songs.into_iter().map(|mut song| {
+                            if let Some(song) = song.as_object_mut() {
+                                song.entry("albumId")
+                                    .or_insert_with(|| album_id.clone().into());
+                            }
+                            song
+                        }));
+                    }
+                    (albums.len(), songs)
+                };
+                if listed == 0 {
                     break;
                 }
-                offset = offset.checked_add(page.len()).ok_or_else(|| {
+                offset = offset.checked_add(listed).ok_or_else(|| {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
-                let mut tracks = Vec::with_capacity(page.len());
-                for song in page {
+                let mut tracks = Vec::with_capacity(songs.len());
+                for song in &songs {
                     let Some(track) = track_from_json(self, source_id, song)? else {
                         continue;
                     };
                     tracks.push(track);
                 }
-                drop(body);
+                drop(songs);
                 let mut batch = library::CatalogBatch::default();
                 emitted += tracks.len();
                 if let Some(folder) = folder {
@@ -1053,8 +1119,17 @@ mod tests {
 
     #[tokio::test]
     async fn catalog_and_home_publish_when_optional_collections_are_unavailable() {
-        for folders_available in [false, true] {
+        for (folders_available, open_subsonic) in
+            [(false, true), (true, true), (false, false), (true, false)]
+        {
             let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/rest/ping.view"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response": { "status": "ok", "openSubsonic": open_subsonic }
+                })))
+                .mount(&server)
+                .await;
             if folders_available {
                 Mock::given(method("GET"))
                     .and(path("/rest/getMusicFolders.view"))
@@ -1069,17 +1144,46 @@ mod tests {
             Mock::given(method("GET"))
                 .and(path("/rest/getAlbumList2.view"))
                 .and(query_param("type", "alphabeticalByName"))
+                .respond_with(|request: &wiremock::Request| {
+                    let first = request
+                        .url
+                        .query_pairs()
+                        .any(|(key, value)| key == "offset" && value == "0");
+                    let albums = if first {
+                        serde_json::json!([{ "id": "album", "name": "Album", "artist": "Artist" }])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subsonic-response": { "status": "ok", "albumList2": { "album": albums } }
+                    }))
+                })
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/rest/getArtists.view"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "subsonic-response": { "status": "ok", "albumList2": { "album": [
-                        { "id": "album", "name": "Album", "artist": "Artist" }
+                    "subsonic-response": { "status": "ok", "artists": { "index": [] } }
+                })))
+                .mount(&server)
+                .await;
+            // Plain Subsonic answers an empty search with nothing; its songs come from getAlbum.
+            Mock::given(method("GET"))
+                .and(path("/rest/getAlbum.view"))
+                .and(query_param("id", "album"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response": { "status": "ok", "album": { "id": "album", "song": [
+                        { "title": "No identity" },
+                        { "id": "track", "title": "Track", "album": "Album", "artist": "Artist", "duration": 42 },
+                        { "id": 2, "title": "Next page" }
                     ] } }
                 })))
                 .mount(&server)
                 .await;
             Mock::given(method("GET")).and(path("/rest/search3.view"))
-                .respond_with(|request: &wiremock::Request| {
+                .respond_with(move |request: &wiremock::Request| {
                     let query = request.url.query_pairs().collect::<std::collections::HashMap<_, _>>();
-                    let songs = if query.get("songCount").is_some_and(|count| count == "500") {
+                    let songs = if open_subsonic && query.get("songCount").is_some_and(|count| count == "500") {
                         match query.get("songOffset").map(|value| value.as_ref()) {
                             Some("0") => {
                                 let mut page = vec![serde_json::json!({"title":"No identity"}); 499];

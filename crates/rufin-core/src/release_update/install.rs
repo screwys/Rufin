@@ -84,7 +84,7 @@ mod platform {
 
     pub(super) fn install(installer: &Installer, version: &str) -> Result<InstallOutcome, String> {
         let update = brew_command(&installer.brew, ["update"]);
-        let upgrade = brew_command(&installer.brew, ["upgrade", "--cask", "screwys/tap/rufin"]);
+        let upgrade = brew_command(&installer.brew, ["upgrade", "--cask", "rufin"]);
         let installed = brew_command(&installer.brew, ["list", "--cask", "--versions", "rufin"])?;
         if installed.status.success() && super::brew_output_has_version(&installed.stdout, version)
         {

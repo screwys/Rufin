@@ -1122,6 +1122,11 @@ impl Snapshot {
         }
     }
 
+    /// Whether a playlist is listed: it has a name and its source still lists it.
+    pub(crate) fn listed_playlist(&self, record: &PlaylistRec) -> bool {
+        !self.text(record.name).is_empty() && (record.flags & SOURCE_OWNED == 0 || record.indexed())
+    }
+
     pub(crate) fn playlist(&self, key: i64) -> Option<Playlist> {
         let record = self.playlists.get(key)?;
         Some(Playlist {

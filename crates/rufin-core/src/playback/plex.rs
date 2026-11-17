@@ -1360,7 +1360,7 @@ impl PlaybackOwner {
                 .ok_or("The current Plex track is not available locally")?;
             let mut request = StreamRequest::new(
                 (&row.track).media_uri.clone(),
-                self.settings.stream_quality(row.track.source_id.as_deref()),
+                self.settings.stream_quality(),
             );
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
