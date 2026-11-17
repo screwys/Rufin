@@ -17,9 +17,9 @@ use crate::shell::shell::Shell;
 use adw::prelude::*;
 use localization::tr;
 use playback::{
-    LoudnessNormalization, LoudnessNormalizationScope, MAX_AUTO_DJ_REFILL_COUNT,
-    MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_COUNT,
-    MIN_AUTO_DJ_REFILL_THRESHOLD, MIN_EBU_R128_TARGET_LUFS,
+    EBU_R128_TARGET_MARKS, LoudnessNormalization, LoudnessNormalizationScope,
+    MAX_AUTO_DJ_REFILL_COUNT, MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS,
+    MIN_AUTO_DJ_REFILL_COUNT, MIN_AUTO_DJ_REFILL_THRESHOLD, MIN_EBU_R128_TARGET_LUFS,
 };
 fn selected_source_is_local(shell: &Shell) -> bool {
     let configured = shell.source.configured.borrow();
@@ -209,9 +209,8 @@ pub fn playback_page(shell: &Rc<Shell>) -> gtk::Box {
     ebu_target.set_increments(1.0, 10.0);
     install_scale_scroll_forwarding(&ebu_target);
     install_sliding_value_bubble(&ebu_target, |value| format!("{value:.0} LUFS"));
-    for mark in [-48.0, -36.0, -30.0, -23.0, -18.0, -12.0, 0.0] {
-        let label = format!("{mark:.0}");
-        ebu_target.add_mark(mark, gtk::PositionType::Bottom, Some(&label));
+    for mark in EBU_R128_TARGET_MARKS {
+        ebu_target.add_mark(mark, gtk::PositionType::Bottom, Some(&mark.to_string()));
     }
     ebu_target.set_value(settings.ebu_r128_target_lufs);
     let target_shell = Rc::clone(shell);

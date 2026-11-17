@@ -76,3 +76,14 @@ pub fn audio_codec_label(codec: AudioCodec) -> String {
 pub fn audio_bitrates() -> Vec<u32> {
     AUDIO_BITRATES.to_vec()
 }
+
+/// The bitrates labelled under the bitrate slider.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn audio_bitrate_marks() -> Vec<u32> {
+    AUDIO_BITRATES.iter().step_by(4).copied().collect()
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn default_audio_bitrate() -> u32 {
+    DEFAULT_AUDIO_BITRATE
+}

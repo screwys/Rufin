@@ -21,9 +21,9 @@ use crate::settings::{SettingsFile, StoredSettings};
 
 mod quality;
 pub use quality::{
-    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_bitrates, audio_codec_label,
+    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_bitrate_marks, audio_bitrates, audio_codec_label,
     audio_quality_shows_bitrate, audio_quality_shows_channels, audio_quality_with_bitrate,
-    audio_quality_with_channels, audio_quality_with_codec,
+    audio_quality_with_channels, audio_quality_with_codec, default_audio_bitrate,
 };
 mod storage;
 mod track_download;

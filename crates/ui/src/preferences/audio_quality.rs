@@ -2,7 +2,7 @@ use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_val
 use adw::prelude::*;
 use library::{AudioChannels, AudioCodec};
 use rufin_core::downloads::{
-    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_quality_shows_bitrate,
+    AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, audio_bitrate_marks, audio_quality_shows_bitrate,
     audio_quality_shows_channels, audio_quality_with_bitrate, audio_quality_with_channels,
     audio_quality_with_codec,
 };
@@ -40,9 +40,9 @@ pub(crate) fn rows(
     bitrate_scale.adjustment().set_step_increment(step);
     install_scale_scroll_forwarding(&bitrate_scale);
     install_sliding_value_bubble(&bitrate_scale, |rate| format!("{rate:.0} kbps"));
-    for rate in AUDIO_BITRATES.iter().step_by(4) {
+    for rate in audio_bitrate_marks() {
         bitrate_scale.add_mark(
-            f64::from(*rate),
+            f64::from(rate),
             gtk::PositionType::Bottom,
             Some(&rate.to_string()),
         );
