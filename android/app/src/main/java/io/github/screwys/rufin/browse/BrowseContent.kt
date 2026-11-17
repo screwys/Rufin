@@ -107,7 +107,6 @@ import kotlinx.coroutines.flow.collect
 internal fun BrowseContent(
     items: LazyPagingItems<BrowseItem>, homeSections: List<HomeSectionItems>, player: PlayerConnection,
     home: Boolean, detail: Boolean, covers: Boolean, onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    onSectionPlay: (HomeSectionItems, Boolean) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onAddToPlaylist: (BrowseItem) -> Unit,
     onScrolled: (Boolean) -> Unit, scrollSections: List<AndroidScrollSection> = emptyList(),
     displaySize: DisplaySize = DisplaySize.DEFAULT, gridSpacing: DisplaySize = DisplaySize.DEFAULT, onPlayItem: (BrowseItem, Boolean) -> Unit = { item, _ -> onActivate(item) },
@@ -125,7 +124,7 @@ internal fun BrowseContent(
     val spacing = when (gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
     val tiny = io.github.screwys.rufin.app.LocalTinyScreen.current
     if (home) {
-        HomeContent(homeSections, player, onActivate, onMenu, onSectionPlay, onFavorite, onScrolled, onRadio, onStepShowcase)
+        HomeContent(homeSections, player, onActivate, onMenu, onPlayItem, onFavorite, onScrolled, onRadio, onStepShowcase)
     } else {
         val scope = rememberCoroutineScope()
         val refresh = if (loading && items.itemCount == 0) LoadState.Loading else items.loadState.refresh
@@ -340,7 +339,7 @@ internal val LocalOverlayBarHeight = compositionLocalOf { 0.dp }
 @Composable
 private fun HomeContent(
     sections: List<HomeSectionItems>, player: PlayerConnection, onActivate: (BrowseItem) -> Unit,
-    onMenu: (BrowseItem) -> Unit, onPlay: (HomeSectionItems, Boolean) -> Unit,
+    onMenu: (BrowseItem) -> Unit, onPlay: (BrowseItem, Boolean) -> Unit,
     onFavorite: (BrowseItem) -> Unit, onScrolled: (Boolean) -> Unit,
     onRadio: (BrowseItem) -> Unit, onStep: suspend (Boolean) -> List<AndroidBrowseRow>,
 ) {
@@ -362,20 +361,12 @@ private fun HomeContent(
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items(sections, key = { it.index.toString() + it.title }) { section ->
             if (section.kind == AndroidHomeSectionKind.SHOWCASE) {
-                HomeBand(section, player, onMenu, onFavorite, { shuffled -> onPlay(section, shuffled) }, onRadio, onStep)
+                HomeBand(section, player, onMenu, onFavorite, onPlay, onRadio, onStep)
             } else if (section.kind == AndroidHomeSectionKind.QUICK_MIX) {
-                QuickMixTiles(section.quickMix, player, onMenu)
+                HomeCard(section.title) { QuickMixTiles(section.quickMix, player, onMenu) }
             } else {
-                Column {
-                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // The title, then Play and Shuffle beside it; no refresh.
-                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Text(section.title, Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(section, false) }, { onPlay(section, true) })
-                            ShowcaseAction("rufin-shuffle-symbolic", "Shuffle", { onPlay(section, true) })
-                        }
-                    }
+                // A swipe pages a section; a column of rows is a list with lines between its rows.
+                HomeCard(section.title) {
                     // Core says how a block's columns show: the rows each stacks, or one card. A genre row
                     // opens the genre, any other its menu, as Home's cards do. Home's Size and Spacing set
                     // the widths and gaps.
@@ -387,7 +378,9 @@ private fun HomeContent(
                         val cover = when (section.size) { DisplaySize.COMPACT -> 44.dp; DisplaySize.LARGE -> 64.dp; else -> 56.dp }
                         items(section.items.chunked(section.columnRows), key = { column -> browseItemKey(column.first()) }) { column ->
                             Column(Modifier.width(when (section.size) { DisplaySize.COMPACT -> 260.dp; DisplaySize.LARGE -> 340.dp; else -> 300.dp })) {
-                                column.forEach { item ->
+                                column.forEachIndexed { line, item ->
+                                    if (line > 0) androidx.compose.material3.HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f))
                                     if (genres) HomeRow(item, player, { onActivate(item) }, onMenu,
                                         item.row.fields.map { it.text }.filter(String::isNotBlank).joinToString(" · "), cover)
                                     else HomeRow(item, player, { onMenu(it) }, onMenu, item.row.subtitle, cover)
@@ -408,14 +401,29 @@ private fun HomeContent(
     }
 }
 
-/** Home's Quick mix, with no header: two columns of filled tiles, each the mosaic of the albums its next press
+/** A Home section, as GTK's: its title on the page, and under it a card holding what it names, filled from the
+ *  window as rows are, whatever the theme's card color. */
+@Composable
+private fun HomeCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
+        Column(Modifier.padding(horizontal = 12.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .05f)).padding(vertical = 12.dp), content = content)
+    }
+}
+
+/** Home's Quick mix in its card: two columns of rows with lines between their lines, each the mosaic of the albums its next press
  *  starts with, its page's cover, its glyph and name, and the tracks it plays. A tap opens the tracks it plays; Play over the
  *  cover plays them; a hold opens its menu, core's Quick mix menu. */
 @Composable
 private fun QuickMixTiles(tiles: List<AndroidQuickMixTile>, player: PlayerConnection, onMenu: (BrowseItem) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        tiles.chunked(2).forEachIndexed { line, pair ->
+            if (line > 0) androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 pair.forEach { tile -> QuickMixTile(tile, player, Modifier.weight(1f), onMenu) }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
@@ -426,7 +434,7 @@ private fun QuickMixTiles(tiles: List<AndroidQuickMixTile>, player: PlayerConnec
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickMixTile(tile: AndroidQuickMixTile, player: PlayerConnection, modifier: Modifier, onMenu: (BrowseItem) -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(8.dp)
     val scheme = MaterialTheme.colorScheme
     val browse = player.model.browse
     // Its menu plays the entry as Play does, it being shuffled already, and takes the tracks its page lists.
@@ -437,9 +445,8 @@ private fun QuickMixTile(tile: AndroidQuickMixTile, player: PlayerConnection, mo
             }))
         }
     }
-    Row(modifier.height(64.dp).focusRing(shape).clip(shape).background(scheme.surfaceContainerHigh)
-        .combinedClickable(onClick = { browse.openRoute(Route.QuickMix(tile.entry), tile.title) }, onLongClick = { menu() })
-        .padding(start = 8.dp, end = 10.dp),
+    Row(modifier.height(64.dp).focusRing(shape).clip(shape)
+        .combinedClickable(onClick = { browse.openRoute(Route.QuickMix(tile.entry), tile.title) }, onLongClick = { menu() }),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         // A phone has no hover to show GTK's Play over the cover, so it is always there; the whole cover takes the tap.
         Box(Modifier.size(48.dp).focusRing(CoverShape).clip(CoverShape).clickable { browse.playQuickMix(tile.entry) },
@@ -485,13 +492,16 @@ private fun PaneRow(item: BrowseItem, player: PlayerConnection, onActivate: (Bro
     }
 }
 
-/** A row in a Home block: cover, title and its line, and ⋯ for its menu. */
+/** A Home row: a tap does what its section's rows do (a genre opens, the others show their menu) and a hold shows
+ *  its menu, so it carries no ⋯ of its own. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     line: String, cover: Dp) {
     val shown = favoriteItem(player.model, item)
     val artwork = rememberBrowseArtwork(item, player, cover)
-    Row(Modifier.fillMaxWidth().height(cover + 16.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp)).clickable { onClick(shown) },
+    Row(Modifier.fillMaxWidth().height(cover + 16.dp).clip(RoundedCornerShape(8.dp)).focusRing(RoundedCornerShape(8.dp))
+        .combinedClickable(onClick = { onClick(shown) }, onLongClick = { onMenu(shown) }),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(cover).clip(CoverShape))
         Column(Modifier.weight(1f)) {
@@ -499,7 +509,6 @@ private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (Browse
             if (line.isNotBlank()) Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        PlayerIconButton("rufin-view-more-symbolic", "More actions", { onMenu(shown) })
     }
 }
 
@@ -509,7 +518,7 @@ private fun HomeRow(item: BrowseItem, player: PlayerConnection, onClick: (Browse
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu: (BrowseItem) -> Unit,
-    onFavorite: (BrowseItem) -> Unit, onPlay: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
+    onFavorite: (BrowseItem) -> Unit, onPlay: (BrowseItem, Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
     onStep: suspend (Boolean) -> List<AndroidBrowseRow>,
 ) {
     // The album before, the album shown and the album after; a step answers the next three.
@@ -540,7 +549,7 @@ private fun HomeBand(section: HomeSectionItems, player: PlayerConnection, onMenu
         if (target != null) { cancelFocusChange(); step(target) }
     } }.focusGroup(), beyondViewportPageCount = 2) { page ->
         Box(Modifier.focusProperties { onEnter = { if (page != 1) { cancelFocusChange(); step(page) } } }.focusGroup()) {
-            HomeBandPage(shown[page], player, onMenu, onFavorite, onPlay, onRadio, page == 1)
+            HomeBandPage(shown[page], player, onMenu, onFavorite, { shuffled -> onPlay(shown[page], shuffled) }, onRadio, page == 1)
         }
     }
 }

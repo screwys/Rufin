@@ -1,15 +1,50 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
-  <!-- Home's Quick mix, under the showcase with no header: as many columns of tiles as fit, up to three. -->
-  <object class="GtkFlowBox" id="grid">
-    <property name="homogeneous">true</property>
-    <property name="min-children-per-line">1</property>
-    <property name="max-children-per-line">3</property>
-    <property name="selection-mode">none</property>
-    <property name="activate-on-single-click">true</property>
+  <!-- Home's Quick mix, a section as the others: its heading on the page, then a card of its mixes as
+       rows in as many columns as fit, up to three, with lines between their lines. Each row draws the
+       line above it; the clip hides the first line's. -->
+  <object class="GtkBox" id="card">
+    <property name="orientation">vertical</property>
+    <property name="spacing">8</property>
     <property name="hexpand">true</property>
-    <property name="valign">start</property>
-    <style><class name="home-quick-mix"/></style>
+    <style><class name="home-section"/></style>
+    <child>
+      <object class="GtkLabel" id="heading">
+        <property name="xalign">0</property>
+        <property name="ellipsize">end</property>
+        <property name="margin-start">5</property>
+        <property name="margin-end">5</property>
+        <!-- As tall as the other sections' headings, which hold ‹ ›. -->
+        <property name="height-request">28</property>
+        <style><class name="section-heading"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <style><class name="home-section-card"/></style>
+        <child>
+          <object class="GtkBox">
+            <property name="overflow">hidden</property>
+            <property name="hexpand">true</property>
+            <property name="margin-start">8</property>
+            <property name="margin-end">8</property>
+            <child>
+          <object class="GtkFlowBox" id="grid">
+            <property name="homogeneous">true</property>
+            <property name="min-children-per-line">1</property>
+            <property name="max-children-per-line">3</property>
+            <property name="column-spacing">12</property>
+            <property name="selection-mode">none</property>
+            <property name="activate-on-single-click">true</property>
+            <property name="hexpand">true</property>
+            <property name="valign">start</property>
+            <style><class name="home-quick-mix"/></style>
+          </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
   </object>
 </interface>

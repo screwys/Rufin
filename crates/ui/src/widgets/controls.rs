@@ -69,8 +69,9 @@ pub fn install_row_transport_controls(
     morph.set_hexpand(true);
     let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     group.add_css_class("row-play-group");
+    // It fills the row's height at its end, out to the row's edges.
     group.set_halign(gtk::Align::End);
-    group.set_valign(gtk::Align::Center);
+    group.set_valign(gtk::Align::Fill);
     group.append(&morph);
     for (button, placement) in buttons.iter().zip([
         QueuePlacement::Now,

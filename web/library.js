@@ -1063,8 +1063,8 @@ function bindHome(signal, offsets) {
   const layouts = [];
   bindCards($("content"));
   for (const section of $("content").querySelectorAll(".home-section")) {
-    // A Quick mix tile opens its entry's page; its Play plays the entry as its covers show it,
-    // and Home changes to the next.
+    // A Quick mix row opens its entry's page; its Play group plays the entry as its covers show
+    // it, now, next or later, and Home changes to the next.
     for (const tile of section.querySelectorAll(".quick-mix-tile")) {
       const open = tile.querySelector(".quick-mix-open");
       open.onclick = (event) => {
@@ -1075,7 +1075,11 @@ function bindHome(signal, offsets) {
       const play = (mode) => run(async () => {
         if (!(await api("/home/quick-mix", "POST", { ...payload, mode })).played) notice(tr("Nothing to play here"));
       });
-      tile.querySelector(".quick-mix-play").onclick = () => play("replace");
+      for (const button of tile.querySelectorAll(".pin-controls button"))
+        button.onclick = (event) => {
+          event.preventDefault();
+          play(button.value);
+        };
       // Its menu is core's Quick mix menu; it plays the entry and acts on the page it opens.
       const row = mediaRow(tile);
       tile.addEventListener("contextmenu", (event) => {
@@ -1102,16 +1106,6 @@ function bindHome(signal, offsets) {
     for (const [button, sign] of [[previous, -1], [next, 1]])
       button.onclick = () => body.scrollBy({ left: sign * body.clientWidth * 0.9, behavior: "smooth" });
     loadCardCovers(section, signal);
-    for (const [action, shuffled] of [["play-home", false], ["shuffle-home", true]])
-      section.querySelector(`[data-action="${action}"]`).onclick = () =>
-        run(() =>
-          api("/queue", "POST", {
-            mode: "replace",
-            page: JSON.parse($("content").querySelector("[data-page]").dataset.page),
-            section: Number(section.dataset.index),
-            shuffled,
-          }),
-        );
     ends();
     layouts.push(ends);
   }

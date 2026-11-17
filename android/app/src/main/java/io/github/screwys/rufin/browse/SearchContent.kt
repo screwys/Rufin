@@ -177,7 +177,7 @@ private fun SearchResults(
             val rows = searchFlow.collectAsLazyPagingItems()
             Box(Modifier.weight(1f)) {
                 BrowseContent(rows, emptyList(), player, false, false, false, browse::open, onMenu,
-                    { _, _ -> }, browse::favorite, onPlaylist, onScrolled,
+                    browse::favorite, onPlaylist, onScrolled,
                     loading = browse.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
             }
         }

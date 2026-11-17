@@ -33,12 +33,15 @@ use crate::library::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
 use crate::widgets::controls::install_row_transport_controls;
 use crate::widgets::detail_links::DetailLinkBinding;
 use crate::widgets::interactions::{CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers};
-use crate::widgets::library_fields::COLLECTION_GRID_CARD_MARGIN;
 use crate::widgets::selection::PlayTarget;
 use rufin_core::artwork::ArtworkBinding;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::album_row_artist_links;
+
+/// How far a Home section's heading sits in from the route, and its columns inside its card.
+const HOME_HEADING_INSET: i32 = 5;
+const HOME_CARD_INSET: i32 = 14;
 
 type HomeRowBinding = Rc<dyn Fn(library::Row)>;
 
@@ -122,6 +125,7 @@ impl MountedHomeSection {
         let wanted = (shown + 1).min(columns).max(built);
         for items in data.chunks(rows).take(wanted).skip(built) {
             let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            column.add_css_class("home-column");
             column.set_width_request(width);
             for item in items.iter().cloned() {
                 let (cell, bind) = match item {
@@ -296,7 +300,7 @@ impl ShownHomeSection {
         match self {
             Self::Rows(view) => &view.root,
             Self::Showcase(view) => &view.0.root,
-            Self::QuickMix(view) => view.0.grid.upcast_ref(),
+            Self::QuickMix(view) => view.0.card.upcast_ref(),
         }
     }
 }
@@ -308,6 +312,8 @@ struct QuickMixView(Rc<QuickMixState>);
 
 struct QuickMixState {
     shell: std::rc::Weak<CatalogUi>,
+    /// The section card it shows in.
+    card: gtk::Box,
     grid: gtk::FlowBox,
     /// The covers' size and the gap between tiles.
     metrics: HomeMetrics,
@@ -328,16 +334,17 @@ struct QuickMixTileView {
 impl QuickMixView {
     fn new(
         shell: &Rc<CatalogUi>,
+        title: &str,
         tiles: Vec<rufin_core::view::QuickMixTile>,
         metrics: HomeMetrics,
     ) -> Self {
         let resource = "routes/home_quick_mix.ui";
         let builder = crate::ui_resource::builder(resource);
-        crate::objects!(builder, resource, { grid: gtk::FlowBox });
-        grid.set_row_spacing(metrics.card_gap as u32);
-        grid.set_column_spacing(metrics.card_gap as u32);
+        crate::objects!(builder, resource, { card: gtk::Box, heading: gtk::Label, grid: gtk::FlowBox });
+        heading.set_label(title);
         let view = Self(Rc::new(QuickMixState {
             shell: Rc::downgrade(shell),
+            card,
             grid,
             metrics,
             tiles: RefCell::new(Vec::new()),
@@ -377,8 +384,8 @@ impl QuickMixView {
                     let builder = crate::ui_resource::builder(resource);
                     crate::objects!(builder, resource, {
                         tile: gtk::FlowBoxChild,
+                        row: gtk::Overlay,
                         covers: gtk::Overlay,
-                        play: gtk::Button,
                         glyph: gtk::Image,
                         title: gtk::Label,
                         tracks: gtk::Label,
@@ -390,19 +397,20 @@ impl QuickMixView {
                     covers.set_child(Some(&projection.widget()));
                     let shown = Rc::new(RefCell::new(None::<rufin_core::view::QuickMixTile>));
                     let (play_shell, play_shown) = (Rc::downgrade(&shell), Rc::clone(&shown));
-                    play.connect_clicked(move |_| {
+                    install_row_transport_controls(&row, move |placement| {
                         let entry = play_shown.borrow().as_ref().map(|tile| tile.entry);
                         if let (Some(shell), Some(entry)) = (play_shell.upgrade(), entry) {
                             crate::shell::player::mix::play_quick_mix(
                                 shell.shell(),
                                 entry,
-                                QueuePlacement::Now,
+                                placement,
                             );
                         }
                     });
                     let (menu_shell, menu_shown) = (Rc::downgrade(&shell), Rc::clone(&shown));
+                    row.add_css_class(CONTEXT_MENU_HOVER_OWNER_CLASS);
                     install_context_menu_openers(
-                        &tile,
+                        &row,
                         Rc::new(move |target, position| {
                             if let (Some(shell), Some(tile)) =
                                 (menu_shell.upgrade(), menu_shown.borrow().clone())
@@ -838,7 +846,7 @@ impl HomeRouteProjection {
                         self.content.remove(kept.root());
                     }
                     let columns = section.columns(&home);
-                    let next = self.build(&shell, id.clone(), section, columns, metrics);
+                    let next = self.build(&shell, section, columns, metrics);
                     self.content.append(next.root());
                     next
                 }
@@ -863,42 +871,23 @@ impl HomeRouteProjection {
     fn build(
         &self,
         shell: &Rc<CatalogUi>,
-        id: HomeSectionId,
         section: HomeSection,
         columns: HomeColumns,
         metrics: HomeMetrics,
     ) -> ShownHomeSection {
+        let title = section.title();
         let section = match section {
             HomeSection::Showcase(showcase) => {
                 return ShownHomeSection::Showcase(HomeShowcaseView::new(shell, *showcase));
             }
             HomeSection::QuickMix(tiles) => {
-                return ShownHomeSection::QuickMix(QuickMixView::new(shell, tiles, metrics));
+                return ShownHomeSection::QuickMix(QuickMixView::new(
+                    shell, &title, tiles, metrics,
+                ));
             }
             section => section,
         };
-        let view = shell.home_section_view(&section.title(), home_rows(&section), columns, metrics);
-        for (button, shuffled) in [(view.header.play(), false), (view.header.shuffle(), true)] {
-            let shell = Rc::downgrade(shell);
-            let shown = Rc::downgrade(&self.shown);
-            let page = Rc::downgrade(&self.view);
-            let id = id.clone();
-            button.connect_clicked(move |_| {
-                let (Some(shell), Some(shown), Some(page)) =
-                    (shell.upgrade(), shown.upgrade(), page.upgrade())
-                else {
-                    return;
-                };
-                // The section's place among the page's sections, as core plays it.
-                let index = shown.borrow().iter().position(|(shown, _)| *shown == id);
-                if let Some(request) = index.and_then(|index| {
-                    page.borrow()
-                        .play_section(index, QueuePlacement::Now, shuffled)
-                }) {
-                    shell.products.playback.play_selection(request);
-                }
-            });
-        }
+        let view = shell.home_section_view(&title, home_rows(&section), columns, metrics);
         ShownHomeSection::Rows(view)
     }
 
@@ -990,22 +979,25 @@ impl CatalogUi {
         columns: HomeColumns,
         metrics: HomeMetrics,
     ) -> HomeSectionView {
-        let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        // The heading and pages on the page; the columns in a filled card under them.
+        let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
         section.set_hexpand(true);
+        section.add_css_class("home-section");
         let header = home_section_header(title);
-        header.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
+        header.set_margin_start(HOME_HEADING_INSET);
         section.append(&header);
 
         let (width, gap) = metrics.column(columns);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, gap);
-        row.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
-        row.set_margin_end(COLLECTION_GRID_CARD_MARGIN);
+        row.set_margin_start(HOME_CARD_INSET);
+        row.set_margin_end(HOME_CARD_INSET);
         let scroller = gtk::ScrolledWindow::new();
         // Scrolls by wheel, touchpad, touch and ‹ ›, with no scrollbar over the cards' last line.
         scroller.set_policy(gtk::PolicyType::External, gtk::PolicyType::Never);
         scroller.set_propagate_natural_height(true);
         scroller.set_hexpand(true);
         scroller.set_child(Some(&row));
+        scroller.add_css_class("home-section-card");
         section.append(&scroller);
         let adjustment = scroller.hadjustment();
         let mounted = MountedHomeSection {

@@ -1176,7 +1176,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
             // History shows cards in Grid layout, as on the desktop.
             if (covers) Box(Modifier.weight(1f)) {
                 BrowseContent(rows, emptyList(), player, false, location in browse.details, true,
-                    onOpen, onMenu, { _, _ -> }, browse::favorite, onPlaylist, { if (active) onScrolled(it) },
+                    onOpen, onMenu, browse::favorite, onPlaylist, { if (active) onScrolled(it) },
                     displaySize = display?.size ?: DisplaySize.DEFAULT, gridSpacing = display?.gridSpacing ?: DisplaySize.DEFAULT,
                     onPlayItem = { item, shuffled -> browse.play(item, shuffled = shuffled) }, loading = page.loading,
                     onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
@@ -1203,8 +1203,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         }
         Box(Modifier.weight(1f)) {
             BrowseContent(rows, page.homeSections, player, location.route is Route.Home, location in browse.details, covers,
-                onOpen, onMenu, { section, shuffled -> page.playSection(section, shuffled) },
-                browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
+                onOpen, onMenu, browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
                 display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.fields,
                 page.supportsLetterIndex, page::letterPosition, page.sortSelection?.descending ?: false,
                 page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },

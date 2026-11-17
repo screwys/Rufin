@@ -15,7 +15,7 @@ pub use records::{
 
 use library::{MemberSelection, ReadCancellation, Row};
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::playback::{PlayRequest, QueuePlacement};
+use rufin_core::playback::QueuePlacement;
 use rufin_core::view::{OpenOptions, PlayTarget, SelectionScope, View, library_list_key};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
@@ -287,12 +287,6 @@ impl AndroidView {
             })
             .collect()
     }
-
-    fn play_request(&self, request: Option<PlayRequest>) -> Result<(), AndroidError> {
-        self.playback
-            .play_selection(request.ok_or_else(|| error("Track is no longer in this route"))?);
-        Ok(())
-    }
 }
 
 #[uniffi::export]
@@ -380,23 +374,6 @@ impl AndroidView {
                 .with_context_title(caption(target, context_title)),
         );
         Ok(())
-    }
-
-    /// Plays Home's section `index`, which `context_title` names.
-    pub fn play_section(
-        &self,
-        index: u64,
-        shuffled: bool,
-        context_title: Option<String>,
-    ) -> Result<(), AndroidError> {
-        let request = self.view.play_section(
-            usize::try_from(index).map_err(error)?,
-            QueuePlacement::Now,
-            shuffled,
-        );
-        self.play_request(
-            request.map(|request| request.with_context_title(caption(None, context_title))),
-        )
     }
 
     /// Home's section titles, in their order.

@@ -1,26 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
-  <!-- A Quick mix entry on Home: the mosaic of the albums its next press starts with, its page's
-       picture, Play over it under the pointer, its glyph and name, and the tracks it plays. Play
-       plays it; the tile opens its page. The grid flows at its natural width, which the labels
-       leave at its 180 px request. -->
+  <!-- A Quick mix entry on Home, a row as Home's others: the mosaic of the albums its next press
+       starts with, its page's picture, its glyph and name, and the tracks it plays; under the
+       pointer the rows' Play group at its end. The row opens its page. The grid flows at its
+       natural width, which the labels leave at its 180 px request. -->
   <object class="GtkFlowBoxChild" id="tile">
     <property name="width-request">180</property>
     <child>
+      <object class="GtkOverlay" id="row">
+        <style><class name="home-quick-mix-row"/></style>
+        <child>
       <object class="GtkBox">
         <property name="spacing">12</property>
         <child>
           <object class="GtkOverlay" id="covers">
             <property name="valign">center</property>
-            <child type="overlay">
-              <object class="GtkButton" id="play">
-                <property name="icon-name">rufin-media-playback-start-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Play</property>
-                <property name="focus-on-click">false</property>
-                <style><class name="flat"/><class name="cover-hover-layer"/><class name="home-quick-mix-play"/></style>
-              </object>
-            </child>
           </object>
         </child>
         <child>
@@ -62,6 +57,8 @@
               </object>
             </child>
           </object>
+        </child>
+      </object>
         </child>
       </object>
     </child>
