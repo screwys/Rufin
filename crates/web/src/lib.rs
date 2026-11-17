@@ -897,7 +897,8 @@ fn error(status: StatusCode, message: impl std::fmt::Display) -> Error {
     (status, axum::Json(json!({"error":message.to_string()})))
 }
 struct Authorization {
-    token: String,
+    /// The Authorization header's hash; `blake3::Hash` compares in constant time.
+    bearer: blake3::Hash,
     failures: Mutex<VecDeque<(IpAddr, Instant, u8)>>,
     browser_key: [u8; 32],
 }
@@ -968,7 +969,7 @@ mod authentication_tests {
 impl Authorization {
     fn new(token: &str) -> Self {
         Self {
-            token: format!("Bearer {token}"),
+            bearer: blake3::hash(format!("Bearer {token}").as_bytes()),
             failures: Mutex::new(VecDeque::new()),
             browser_key: blake3::derive_key("Rufin browser authentication v1", token.as_bytes()),
         }
@@ -999,9 +1000,7 @@ impl Authorization {
                 return Err(Box::new(response));
             }
         }
-        if token.is_some_and(|token| {
-            constant_time_eq::constant_time_eq(token.as_bytes(), self.token.as_bytes())
-        }) {
+        if token.is_some_and(|token| blake3::hash(token.as_bytes()) == self.bearer) {
             if let Some(index) = previous {
                 failures.remove(index);
             }

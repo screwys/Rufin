@@ -1,13 +1,18 @@
 //! How Rufin tells that two names are the same: how a character folds, one key to compare by,
 //! the artists a credit names, and a title without what marks a version of it.
 
-use unicode_normalization::UnicodeNormalization;
+use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
+use icu_properties::CodePointMapData;
+use icu_properties::props::{GeneralCategory, GeneralCategoryGroup};
+
+const NFKC: ComposingNormalizerBorrowed<'static> = ComposingNormalizerBorrowed::new_nfkc();
+const NFD: DecomposingNormalizerBorrowed<'static> = DecomposingNormalizerBorrowed::new_nfd();
 
 /// A name's words as they compare: letters and digits, whatever their case, width or Latin
 /// accents, one space between what anything else parted.
 pub fn name_words(name: &str) -> String {
     let mut folded = String::with_capacity(name.len());
-    for character in name.nfkc() {
+    for character in NFKC.normalize_iter(name.chars()) {
         if character.is_alphanumeric() {
             fold(character, &mut folded);
         } else {
@@ -22,7 +27,7 @@ pub fn name_words(name: &str) -> String {
 pub fn name_key(name: &str) -> String {
     let key = name_words(name).replace(' ', "");
     if key.is_empty() {
-        name.nfkc()
+        NFKC.normalize_iter(name.chars())
             .flat_map(char::to_lowercase)
             .filter(|character| !character.is_whitespace())
             .collect()
@@ -41,16 +46,18 @@ pub fn diacritic(character: char) -> bool {
     }
 }
 
+/// A character of Unicode's Mark category, which combines with the one before it.
+pub fn combining_mark(character: char) -> bool {
+    GeneralCategoryGroup::Mark.contains(CodePointMapData::<GeneralCategory>::new().get(character))
+}
+
 /// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
 /// letter with diacritics becomes its base letter.
 pub fn fold(character: char, folded: &mut String) {
     for lower in character.to_lowercase() {
-        let mut base = None;
-        let mut marks = true;
-        unicode_normalization::char::decompose_canonical(lower, |part| match base {
-            None => base = Some(part),
-            Some(_) => marks &= unicode_normalization::char::is_combining_mark(part),
-        });
+        let mut parts = NFD.normalize_iter(std::iter::once(lower));
+        let base = parts.next();
+        let marks = parts.all(combining_mark);
         match base {
             _ if diacritic(lower) => {}
             Some(base) if u32::from(lower) < 0x2000 && base.is_ascii_alphabetic() && marks => {
@@ -129,7 +136,7 @@ fn flattened_credit(credit: &str) -> String {
         && let Some((group, after)) = inside.split_once([')', '）'])
     {
         flat.push_str(before);
-        let lower = group.trim().nfkc().collect::<String>().to_ascii_lowercase();
+        let lower = NFKC.normalize(group.trim()).to_ascii_lowercase();
         let voice = lower
             .strip_prefix("cv")
             .is_some_and(|voice| voice.starts_with(['.', ':', ' ']));

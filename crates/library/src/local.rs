@@ -348,7 +348,7 @@ impl Catalog {
             std::collections::HashMap::new()
         } else {
             let mut connection = self.acquire_loaded(cancellation).await?;
-            let now = now.unwrap_or_else(|| chrono::Utc::now().timestamp());
+            let now = now.unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp());
             crate::smart_playlists::smart_totals(self, &mut connection, &smart, now, folder).await?
         };
         let snapshot = self.snapshot();

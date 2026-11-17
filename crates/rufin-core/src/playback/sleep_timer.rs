@@ -255,7 +255,8 @@ fn countdown(seconds: u64) -> String {
 
 /// The time of day in the device's zone; glib's local zone is UTC on Android.
 fn clock_time(unix_millis: i64) -> Option<String> {
-    use chrono::TimeZone;
-    let time = chrono::Local.timestamp_millis_opt(unix_millis).single()?;
-    Some(time.format("%H:%M").to_string())
+    let time = time::OffsetDateTime::from_unix_timestamp(unix_millis.div_euclid(1000)).ok()?;
+    let time =
+        time.to_offset(time::UtcOffset::local_offset_at(time).unwrap_or(time::UtcOffset::UTC));
+    Some(format!("{:02}:{:02}", time.hour(), time.minute()))
 }
