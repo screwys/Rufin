@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-16 20:42+0000\n"
+"PO-Revision-Date: 2026-11-17 20:34+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -1734,10 +1734,8 @@ msgstr "Exporter en PNG"
 msgid "Export Playlist"
 msgstr "Exporter la playlist"
 
-#, fuzzy
-#| msgid "Export Backup"
 msgid "Export a Backup"
-msgstr "Exporter la sauvegarde"
+msgstr "Exporter une sauvegarde"
 
 msgid "Export format"
 msgstr "Format d’exportation"
@@ -2033,10 +2031,8 @@ msgstr "Espacement de la grille"
 msgid "Grid"
 msgstr "Grille"
 
-#, fuzzy
-#| msgid "Grid"
 msgid "Grids"
-msgstr "Grille"
+msgstr "Grilles"
 
 msgid "Grouping"
 msgstr "Regroupement"
