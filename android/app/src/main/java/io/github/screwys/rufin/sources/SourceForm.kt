@@ -19,10 +19,6 @@ internal class SourceForm {
     var trustInvalidCertificate by mutableStateOf(false)
     var halfStars by mutableStateOf(false)
     var offersHalfStarSetting by mutableStateOf(false)
-    /** Whether the source's server encodes its tracks, so its streams have a quality. */
-    var encodes by mutableStateOf(false)
-    /** The source's own stream quality; null follows the one for every source. */
-    var streamQuality by mutableStateOf<io.github.screwys.rufin.shared.library.AudioQuality?>(null)
     var manualEmby by mutableStateOf(false)
     var subsonicAuth by mutableStateOf("password")
     var fileAuth by mutableStateOf("password")
@@ -42,7 +38,6 @@ internal class SourceForm {
         replaceHeaders = false
         halfStars = saved.source.halfStarsEnabled
         offersHalfStarSetting = saved.source.offersHalfStarSetting
-        encodes = !saved.source.fileLibrary
         url = saved.credentials.serverUrl
         localUrl = saved.credentials.localServerUrl.orEmpty()
         username = saved.credentials.username

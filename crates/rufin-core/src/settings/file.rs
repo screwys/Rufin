@@ -59,6 +59,8 @@ pub(super) const CHOICES: &[(&str, &str)] = &[
         "appearance.show_bottom_bar_rating",
         "/show_bottom_bar_rating",
     ),
+    ("grids.favorite_badges", "/grid_favorite_badges"),
+    ("grids.star_ratings", "/grid_star_ratings"),
     ("appearance.seekbar_waveform", "/seekbar_waveform_enabled"),
     ("appearance.lyrics_panel", "/lyrics_panel_visible"),
     ("appearance.visualizer_panel", "/visualizer_panel_visible"),

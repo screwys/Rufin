@@ -61,8 +61,7 @@ impl PlaybackOwner {
             .ok_or("The current track is unavailable")?;
         let mut request = StreamRequest::new(
             (&occurrence.track).media_uri.clone(),
-            self.settings
-                .stream_quality(occurrence.track.source_id.as_deref()),
+            self.settings.stream_quality(),
         );
         request.session_identifier = listen.as_ref().map(|listen| listen.play_id.clone());
         let backend =
