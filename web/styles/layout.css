@@ -199,6 +199,7 @@ nav .icon {
   display: flex;
   align-items: center;
   border-radius: 7px;
+  transition: opacity 200ms ease-out;
 }
 
 .pin-row:hover,
@@ -305,6 +306,29 @@ nav .icon {
   outline: 2px solid var(--accent);
 }
 
+/* While a drag is over the sidebar: where a new pin drops, and the pins that cannot take it. */
+#pin-new {
+  gap: 8px;
+  max-height: 0;
+  padding: 0 5px;
+  border: 0 dashed color-mix(in srgb, currentColor 32%, transparent);
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 200ms ease-out, padding 200ms ease-out, opacity 200ms ease-out;
+}
+#pin-new.open {
+  max-height: 52px;
+  padding: 5px;
+  border-width: 1px;
+  opacity: 1;
+}
+#pin-new .pin-cover {
+  opacity: 0.62;
+}
+.pin-row.drop-unavailable {
+  opacity: 0.45;
+}
+
 /* The compact rail: GTK's 72px column of icons over their names, and pinned covers. */
 #app[data-left="compact"] #navigation {
   padding: 8px 4px;
@@ -340,6 +364,12 @@ nav .icon {
 }
 #app[data-left="compact"] .pin-row .pin-open {
   justify-content: center;
+}
+#app[data-left="compact"] #pin-new {
+  justify-content: center;
+}
+#app[data-left="compact"] #pin-new .pin-title {
+  display: none;
 }
 
 /* A hidden sidebar opens over the page from the top bar's sidebar button. */

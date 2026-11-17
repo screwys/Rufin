@@ -46,6 +46,34 @@ impl SourceOwner {
             .collect())
     }
 
+    /// The pin of the collection `route` shows, as Add to Saved pins its row; None for a page
+    /// no pin keeps.
+    pub async fn route_pin(
+        &self,
+        route: &crate::route::Route,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<SidebarPin>> {
+        let catalog = &self.shared.catalog;
+        let Some(item) = route.pinned_item(catalog) else {
+            return Ok(None);
+        };
+        let rows = catalog.rows_of(&[item], false, cancellation).await?;
+        Ok(rows.first().and_then(Row::pin))
+    }
+
+    /// Whether the pinned `row` takes dropped tracks: a writable playlist of the selected library,
+    /// as Add to Playlist offers it.
+    pub fn takes_tracks(&self, row: &Row) -> bool {
+        let Row::Playlist(library::PlaylistListRow::Playlist(playlist)) = row else {
+            return false;
+        };
+        playlist.writable
+            && playlist.source_key.is_none_or(|source| {
+                self.selected_library()
+                    .is_some_and(|selected| selected.source_key == source)
+            })
+    }
+
     /// Pins every playlist of a remote source once, after its first successful refresh.
     pub(super) async fn import_playlist_pins_once(&self, source_id: &SourceId) {
         let stored = self.shared.settings.load();
