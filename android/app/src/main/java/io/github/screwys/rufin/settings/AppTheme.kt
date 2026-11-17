@@ -23,6 +23,9 @@ import io.github.screwys.rufin.shared.rufin_core.ThemePreference
 
 internal val LocalTranslationRevision = staticCompositionLocalOf { 0 }
 internal val LocalReduceMotion = staticCompositionLocalOf { false }
+/** The Grids settings: a favorite's corner and a rating's chip on grid covers. */
+internal val LocalGridFavoriteBadges = staticCompositionLocalOf { true }
+internal val LocalGridStarRatings = staticCompositionLocalOf { false }
 
 @Composable
 internal fun AppTheme(preferences: PreferencesConnection, content: @Composable () -> Unit) {
@@ -44,7 +47,9 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
     SideEffect { preferences.showThemeErrors(resolver.errors.toList()) }
     CompositionLocalProvider(LocalTranslationRevision provides preferences.translationRevision,
         LocalShowDownloadedBadges provides preferences.showDownloadedBadges,
-        LocalReduceMotion provides preferences.reduceMotion) {
+        LocalReduceMotion provides preferences.reduceMotion,
+        LocalGridFavoriteBadges provides preferences.gridFavoriteBadges,
+        LocalGridStarRatings provides preferences.gridStarRatings) {
         // Menus and small surfaces take a mobile rounding, not the 4 dp default.
         MaterialTheme(colorScheme = scheme, shapes = Shapes(extraSmall = RoundedCornerShape(12.dp)), typography = RufinTypography,
             content = content)

@@ -1,6 +1,6 @@
 {% import "macros.html" as m %}
 <!doctype html>
-<html lang="en" data-theme="{{ page.theme() }}" data-appearance="{{ page.appearance }}" style="{{ page.color_style() }}">
+<html lang="en" class="{{ page.grid_classes() }}" data-theme="{{ page.theme() }}" data-appearance="{{ page.appearance }}" style="{{ page.color_style() }}">
   <head>
     <meta charset="utf-8" />
     <meta name="rufin-csrf" content="{{ page.csrf }}" />

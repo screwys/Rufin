@@ -51,6 +51,11 @@
             {% call m::sidebar_mode("/layout/narrow_profile/left_sidebar", localization::tr("Left sidebar"), true) %}{% endcall %}
             {% call m::sidebar_mode("/layout/narrow_profile/right_sidebar", localization::tr("Right sidebar"), false) %}{% endcall %}
           </div>
+          <h4>{{ localization::tr("Grids") }}</h4>
+          <div class="pref-group">
+            {% call m::switch("/grid_favorite_badges", localization::tr("Show a badge for favorited items"), "") %}{% endcall %}
+            {% call m::switch("/grid_star_ratings", localization::tr("Show star ratings"), "") %}{% endcall %}
+          </div>
           <h4>{{ localization::tr("Sidebar items") }}</h4>
           <div class="pref-group">
             {% call m::switch("/sidebar/pins_visible", localization::tr("Saved"), localization::tr("Fixed position")) %}{% endcall %}
@@ -93,7 +98,7 @@
             {% for (item, label, submenu, separator) in [("Play", "Play", false, false), ("PlayRadio", "Play radio", true, false), ("AddToPlaylist", "Add to Playlist", true, true), ("Favorites", "Favorites", false, false), ("EditMetadata", "Edit metadata", false, true), ("GoTo", "Go to", true, false), ("Share", "Share", false, false), ("Download", "Download", false, true), ("Pins", "Saved", false, true)] %}
             {% if separator %}<hr />{% endif %}<button type="button" class="menu-preview-entry" data-menu-item="{{ item }}" aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span>{{ localization::tr(label) }}</span>{% if submenu %}{% call m::icon("rufin-go-next-symbolic") %}{% endcall %}{% endif %}</button>
             {% endfor %}
-            <hr /><button type="button" class="menu-preview-entry" data-menu-rating aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span class="menu-preview-stars">{% for star in ["rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-non-starred-symbolic", "rufin-non-starred-symbolic"] %}{% call m::icon(star) %}{% endcall %}{% endfor %}</span><small>{{ localization::tr("Rating") }}</small></button>
+            <hr /><button type="button" class="menu-preview-entry" data-menu-rating aria-pressed="true">{% call m::icon("rufin-object-select-symbolic") %}{% endcall %}<span class="menu-preview-stars">{% for star in ["rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-starred-symbolic", "rufin-star-outline-symbolic", "rufin-star-outline-symbolic"] %}{% call m::icon(star) %}{% endcall %}{% endfor %}</span><small>{{ localization::tr("Rating") }}</small></button>
           </div>
         </div>
       </section>

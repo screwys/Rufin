@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="shade">
+    <property name="visible">false</property>
+    <property name="can-target">false</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <style><class name="cover-hover-layer"/></style>
+  </object>
+  <object class="GtkBox" id="morph">
+    <property name="visible">false</property>
+    <property name="halign">center</property>
+    <property name="valign">center</property>
+    <style><class name="cover-morph"/></style>
+    <child>
+      <object class="GtkRevealer" id="play_next_side">
+        <property name="transition-type">slide-left</property>
+        <property name="transition-duration">220</property>
+        <child>
+          <object class="GtkButton" id="play_next">
+            <property name="icon-name">rufin-mail-forward-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Play Next</property>
+            <property name="focus-on-click">false</property>
+            <property name="valign">center</property>
+            <style><class name="cover-side-button"/><class name="circular"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="play">
+        <property name="icon-name">rufin-media-playback-start-symbolic</property>
+        <property name="focus-on-click">false</property>
+        <property name="valign">center</property>
+        <style><class name="cover-play-button"/><class name="circular"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkRevealer" id="play_last_side">
+        <property name="transition-type">slide-right</property>
+        <property name="transition-duration">220</property>
+        <child>
+          <object class="GtkButton" id="play_last">
+            <property name="icon-name">rufin-go-last-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Play Later</property>
+            <property name="focus-on-click">false</property>
+            <property name="valign">center</property>
+            <style><class name="cover-side-button"/><class name="circular"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkBox" id="rating">
+    <property name="visible">false</property>
+    <property name="halign">end</property>
+    <property name="valign">start</property>
+    <style><class name="cover-rating"/></style>
+  </object>
+  <object class="GtkButton" id="menu">
+    <property name="visible">false</property>
+    <property name="icon-name">rufin-more-symbolic</property>
+    <property name="focus-on-click">false</property>
+    <property name="halign">end</property>
+    <property name="valign">end</property>
+    <accessibility><property name="label" translatable="yes">More actions</property></accessibility>
+    <style><class name="cover-menu-button"/><class name="circular"/></style>
+  </object>
+  <object class="GtkButton" id="favorite">
+    <property name="focus-on-click">false</property>
+    <property name="halign">start</property>
+    <property name="valign">start</property>
+    <property name="tooltip-text" translatable="yes">Favorite</property>
+    <style><class name="cover-corner"/></style>
+    <child>
+      <object class="GtkImage">
+        <property name="icon-name">rufin-heart-outline-symbolic</property>
+        <property name="halign">start</property>
+        <property name="valign">start</property>
+      </object>
+    </child>
+  </object>
+  <object class="GtkBox" id="playing">
+    <property name="visible">false</property>
+    <property name="can-target">false</property>
+    <property name="halign">start</property>
+    <property name="valign">end</property>
+    <style><class name="cover-playing"/><class name="cover-glass"/></style>
+  </object>
+</interface>

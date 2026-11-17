@@ -76,6 +76,8 @@ import io.github.screwys.rufin.core.AndroidDetailSummary
 import io.github.screwys.rufin.core.AndroidArtistReleaseGroup
 import io.github.screwys.rufin.core.AndroidSortField
 import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.ui.FavoriteHeart
+import io.github.screwys.rufin.ui.rememberFavoriteMotion
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -311,6 +313,18 @@ private fun DetailHeader(
         }
         return
     }
+    // A playlist's Edit opens the editor its row menu's Edit opens, where that menu offers it.
+    val browse = player.model.browse
+    val editable = remember(item.row, browse.library) { playlist && browse.library?.menu(item.row)?.edit == true }
+    var editing by remember { mutableStateOf(false) }
+    if (editing) {
+        val smartPlaylist = item.row.smartPlaylist
+        if (smartPlaylist != null) SmartPlaylistEditor(player.model, browse, { editing = false }, smartPlaylist)
+        else browse.library?.let { library ->
+            PlaylistEditor(player.model, library, player, (item.row.route as Route.PlaylistDetail).v1, item.row.title,
+                onDismiss = { editing = false })
+        }
+    }
     val names: @Composable (Boolean) -> Unit = { phone ->
         CompositionLocalProvider(LocalContentColor provides OnBand) {
             // A phone's title is never cut: it wraps, a long one in a smaller size.
@@ -359,8 +373,8 @@ private fun DetailHeader(
         if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null || item.row.playlist != null)
             ShowcasePill("rufin-audio-only-symbolic", "Radio", false, { onRadio(item) }, labelled = labels >= 1)
         if (item.row.albumRow != null || item.row.artistRow != null)
-            ShowcaseRound(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
-                { onFavorite(item) }, if (item.row.favorite) MaterialTheme.colorScheme.error else LocalContentColor.current)
+            ShowcaseRound("rufin-heart-outline-symbolic", "Favorite", { onFavorite(item) }, favorite = item.row.favorite)
+        if (editable) ShowcaseRound("rufin-document-edit-symbolic", "Edit", { editing = true })
         ShowcaseRound("rufin-download-symbolic", if (item.row.downloaded) "Remove Downloads" else "Download",
             { onDownload(item) }, if (item.row.downloaded) MaterialTheme.colorScheme.primary else LocalContentColor.current)
     }
@@ -633,9 +647,11 @@ internal fun FieldRow(
                 LibraryField.IMAGE -> if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
                 // Compact actions, so the title keeps the width.
                 LibraryField.TOOLS -> PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) }, detailColumn(field.id).height(36.dp), iconSize = 20.dp)
-                LibraryField.FAVORITE -> IconButton({ favorite(projected) }, detailColumn(field.id).height(36.dp)) {
-                    RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(20.dp),
-                        if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                LibraryField.FAVORITE -> {
+                    val motion = rememberFavoriteMotion()
+                    IconButton({ motion.clicked(projected.row.favorite); favorite(projected) }, detailColumn(field.id).height(36.dp)) {
+                        FavoriteHeart(projected.row.favorite, motion, translate("Favorite"), Modifier.size(20.dp))
+                    }
                 }
                 // One line whatever the count: four digits fit, longer ones run into the gap beside them.
                 LibraryField.ROW_INDEX -> Text(value, detailColumn(field.id), textAlign = TextAlign.Center, maxLines = 1, softWrap = false,

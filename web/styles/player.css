@@ -901,7 +901,7 @@ button.lyric-line:hover {
 }
 
 #current-favorite[aria-pressed="true"] {
-  color: var(--favorite, #e01b24);
+  color: var(--favorite);
   background: transparent;
 }
 

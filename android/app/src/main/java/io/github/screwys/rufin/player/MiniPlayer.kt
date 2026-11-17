@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.FavoriteHeart
+import io.github.screwys.rufin.ui.rememberFavoriteMotion
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
@@ -54,11 +56,16 @@ internal fun PlayerIconButton(
     enabled: Boolean = true, selected: Boolean = false,
     iconSize: Dp = LocalToolIconSize.current,
     glyph: Boolean = false,
+    /** A favorite toggle's state: the button then shows its [FavoriteHeart], in the accent while set. */
+    favorite: Boolean? = null,
 ) {
     val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else LocalContentColor.current,
         animationSpec = tween(if (LocalReduceMotion.current) 0 else 180), label = "playerActionTint")
-    IconButton(onClick, modifier.focusRing(androidx.compose.foundation.shape.CircleShape), enabled, colors = IconButtonDefaults.iconButtonColors(contentColor = tint)) {
-        RufinIcon(icon, translate(label), Modifier.size(iconSize), glyph = glyph)
+    val motion = rememberFavoriteMotion()
+    IconButton({ favorite?.let(motion::clicked); onClick() }, modifier.focusRing(androidx.compose.foundation.shape.CircleShape), enabled,
+        colors = IconButtonDefaults.iconButtonColors(contentColor = tint)) {
+        if (favorite != null) FavoriteHeart(favorite, motion, translate(label), Modifier.size(iconSize), glyph = glyph)
+        else RufinIcon(icon, translate(label), Modifier.size(iconSize), glyph = glyph)
     }
 }
 
@@ -138,8 +145,8 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                 if (!compact && !foldable) {
                     PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
                     val favorite = player.favorite
-                    PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                        "Favorite current track", player::favorite, enabled = !current.live, selected = favorite)
+                    PlayerIconButton("rufin-heart-outline-symbolic", "Favorite current track", player::favorite,
+                        enabled = !current.live, favorite = favorite)
                 }
                 if (foldable) {
                     PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
@@ -147,8 +154,8 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     BarPlay(player, current.playing)
                     PlayerIconButton("rufin-media-skip-forward-symbolic", "Next Track", player::next, enabled = !current.live)
                     val favorite = player.favorite
-                    PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                        "Favorite current track", player::favorite, enabled = !current.live, selected = favorite)
+                    PlayerIconButton("rufin-heart-outline-symbolic", "Favorite current track", player::favorite,
+                        enabled = !current.live, favorite = favorite)
                 } else IconButton(player::togglePlayback) {
                     if (player.refilling) RefillSpinner(34.dp)
                     RufinIcon(if (current.playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
@@ -279,8 +286,8 @@ internal fun SidebarPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutpu
                     BarSubtitle(player.currentItem?.metadata?.artist.orEmpty(), player.live, MaterialTheme.typography.bodySmall)
                 }
                 val favorite = player.favorite
-                PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
-                    "Favorite current track", player::favorite, enabled = !player.live, selected = favorite)
+                PlayerIconButton("rufin-heart-outline-symbolic", "Favorite current track", player::favorite,
+                    enabled = !player.live, favorite = favorite)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)

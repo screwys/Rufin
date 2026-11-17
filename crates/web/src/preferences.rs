@@ -35,6 +35,8 @@ const SETTINGS: &[&str] = &[
     "/right_panel/combined",
     "/right_panel/queue_visible",
     "/show_bottom_bar_rating",
+    "/grid_favorite_badges",
+    "/grid_star_ratings",
     "/seekbar_waveform_enabled",
     "/sidebar/pins_visible",
     "/context_menu/items",
