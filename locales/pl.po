@@ -1182,6 +1182,9 @@ msgstr ""
 msgid "Create a playlist from queue"
 msgstr ""
 
+msgid "Create a playlist"
+msgstr ""
+
 msgid "Create playlist"
 msgstr ""
 
@@ -1700,6 +1703,9 @@ msgstr ""
 msgid "Favorites and ratings"
 msgstr ""
 
+msgid "Favorites only"
+msgstr ""
+
 msgid "Favorites"
 msgstr ""
 
@@ -1815,6 +1821,9 @@ msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
 
 msgid "Forget Source"
+msgstr ""
+
+msgid "Forgotten favorites"
 msgstr ""
 
 msgid "Format not supported"
@@ -2458,6 +2467,9 @@ msgstr ""
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2495,6 +2507,9 @@ msgid "Most Skipped"
 msgstr ""
 
 msgid "Most played"
+msgstr ""
+
+msgid "Most skipped"
 msgstr ""
 
 msgid "Motion"
@@ -2615,6 +2630,9 @@ msgid "New Playlist"
 msgstr ""
 
 msgid "New Smart Playlist"
+msgstr ""
+
+msgid "New and unplayed"
 msgstr ""
 
 msgid "New download rule"
@@ -2828,6 +2846,9 @@ msgid "Off"
 msgstr ""
 
 msgid "Offline"
+msgstr ""
+
+msgid "On repeat"
 msgstr ""
 
 msgid "On"
@@ -3268,6 +3289,9 @@ msgstr ""
 msgid "Quick Connect"
 msgstr ""
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr ""
 
@@ -3320,6 +3344,9 @@ msgid "Recording"
 msgstr ""
 
 msgid "Red"
+msgstr ""
+
+msgid "Rediscover"
 msgstr ""
 
 msgid "Redo"
@@ -4371,6 +4398,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -4402,6 +4432,9 @@ msgid "Top artists"
 msgstr ""
 
 msgid "Top genres"
+msgstr ""
+
+msgid "Top rated"
 msgstr ""
 
 msgid "Top tracks"

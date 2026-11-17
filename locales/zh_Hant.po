@@ -1438,6 +1438,11 @@ msgstr "刪除播放清單"
 
 #, fuzzy
 #| msgid "Smart playlists"
+msgid "Create a playlist"
+msgstr "智慧播放清單"
+
+#, fuzzy
+#| msgid "Smart playlists"
 msgid "Create playlist"
 msgstr "智慧播放清單"
 
@@ -2060,6 +2065,11 @@ msgstr "最愛"
 msgid "Favorites and ratings"
 msgstr "最愛的曲目"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "最愛"
+
 msgid "Favorites"
 msgstr "最愛"
 
@@ -2208,6 +2218,11 @@ msgstr ""
 #| msgid "Forget Server"
 msgid "Forget Source"
 msgstr "遺忘伺服器"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "無法更新最愛"
 
 msgid "Format not supported"
 msgstr ""
@@ -2947,6 +2962,9 @@ msgstr "任意播放（接續播放）"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2985,6 +3003,11 @@ msgstr "最常跳過"
 
 msgid "Most played"
 msgstr "最常播放"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "最常跳過"
 
 #, fuzzy
 #| msgid "Position"
@@ -3129,6 +3152,11 @@ msgstr "新增播放清單"
 
 msgid "New Smart Playlist"
 msgstr "新增智慧播放清單"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "從未播放"
 
 msgid "New download rule"
 msgstr "新增下載規則"
@@ -3397,6 +3425,11 @@ msgstr "關閉"
 
 msgid "Offline"
 msgstr ""
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "重複播放"
 
 msgid "On"
 msgstr ""
@@ -3924,6 +3957,9 @@ msgstr "已佇列"
 msgid "Quick Connect"
 msgstr "連接"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "離開 Rufin"
 
@@ -3987,6 +4023,9 @@ msgstr "正在下載"
 
 msgid "Red"
 msgstr "紅色"
+
+msgid "Rediscover"
+msgstr ""
 
 msgid "Redo"
 msgstr "重做"
@@ -5252,6 +5291,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -5289,6 +5331,11 @@ msgstr "專輯藝人"
 #, fuzzy
 #| msgid "Any genre"
 msgid "Top genres"
+msgstr "任何曲風"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top rated"
 msgstr "任何曲風"
 
 #, fuzzy

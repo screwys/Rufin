@@ -1438,6 +1438,11 @@ msgstr "Dzēst atskaņošanas saraksta failu"
 
 #, fuzzy
 #| msgid "Export playlist"
+msgid "Create a playlist"
+msgstr "Eksportēt atskaņošanas sarakstu"
+
+#, fuzzy
+#| msgid "Export playlist"
 msgid "Create playlist"
 msgstr "Eksportēt atskaņošanas sarakstu"
 
@@ -2054,6 +2059,11 @@ msgstr "Izlase"
 msgid "Favorites and ratings"
 msgstr "Izlase un vērtējumi"
 
+#, fuzzy
+#| msgid "Favorites"
+msgid "Favorites only"
+msgstr "Izlase"
+
 msgid "Favorites"
 msgstr "Izlase"
 
@@ -2203,6 +2213,11 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Aizmirst avotu"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Forgotten favorites"
+msgstr "Nevarēja atjaunināt izlasi"
 
 msgid "Format not supported"
 msgstr ""
@@ -2956,6 +2971,9 @@ msgstr "Atskaņot nākamo"
 msgid "Mix"
 msgstr ""
 
+msgid "Mixes"
+msgstr ""
+
 msgid "Mode"
 msgstr ""
 
@@ -2994,6 +3012,11 @@ msgstr "Visbiežāk izlaistie"
 
 msgid "Most played"
 msgstr "Visbiežāk atskaņotie"
+
+#, fuzzy
+#| msgid "Most Skipped"
+msgid "Most skipped"
+msgstr "Visbiežāk izlaistie"
 
 msgid "Motion"
 msgstr "Kustība"
@@ -3136,6 +3159,11 @@ msgstr "Jauns atskaņošanas saraksts"
 
 msgid "New Smart Playlist"
 msgstr "Jauns viedais atskaņošanas saraksts"
+
+#, fuzzy
+#| msgid "Never Played"
+msgid "New and unplayed"
+msgstr "Nekad neatskaņotie"
 
 msgid "New download rule"
 msgstr "Jauns lejupielādes noteikums"
@@ -3383,6 +3411,11 @@ msgstr "Izslēgts"
 
 msgid "Offline"
 msgstr ""
+
+#, fuzzy
+#| msgid "Repeat"
+msgid "On repeat"
+msgstr "Atkārtot"
 
 msgid "On"
 msgstr "Ieslēgt"
@@ -3880,6 +3913,9 @@ msgstr "Pievienots rindai"
 msgid "Quick Connect"
 msgstr "Ātrā savienošana"
 
+msgid "Quick Mix"
+msgstr ""
+
 msgid "Quit Rufin"
 msgstr "Iziet no Rufin"
 
@@ -3943,6 +3979,9 @@ msgstr "Lejupielādē"
 
 msgid "Red"
 msgstr "Sarkans"
+
+msgid "Rediscover"
+msgstr ""
 
 msgid "Redo"
 msgstr "Atkārtot"
@@ -5201,6 +5240,9 @@ msgstr "Šajā atskaņošanas sarakstā var ievietot tikai {source} dziesmas"
 msgid "This source cannot edit this field"
 msgstr "Šo lauku nevar rediģēt no šī avota"
 
+msgid "This time last year"
+msgstr ""
+
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr ""
 
@@ -5238,6 +5280,11 @@ msgstr "Albumu izpildītāji"
 #, fuzzy
 #| msgid "Any genre"
 msgid "Top genres"
+msgstr "Jebkurš žanrs"
+
+#, fuzzy
+#| msgid "Any genre"
+msgid "Top rated"
 msgstr "Jebkurš žanrs"
 
 #, fuzzy
