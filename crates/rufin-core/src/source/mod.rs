@@ -518,19 +518,88 @@ impl SourceOwner {
                 std::future::ready(())
             },
         );
-        if let Some(source_id) = self
-            .shared
-            .settings
-            .load()
-            .sources
-            .selected_source_id
-            .clone()
-        {
-            let owner = self.clone();
-            self.shared.runtime.spawn(async move {
+        let owner = self.clone();
+        self.shared.runtime.spawn(async move {
+            owner.absorb_extra_local_sources().await;
+            let selected = owner
+                .shared
+                .settings
+                .load()
+                .sources
+                .selected_source_id
+                .clone();
+            if let Some(source_id) = selected {
                 let _ = owner.select_source(source_id).await;
-            });
+            }
+        });
+        Ok(())
+    }
+
+    /// Local setup once added a Local source each time; the later ones move into the first.
+    async fn absorb_extra_local_sources(&self) {
+        loop {
+            let stored = self.shared.settings.load();
+            let mut locals = stored
+                .sources
+                .configured
+                .iter()
+                .filter(|source| source.configuration.is_local());
+            let (Some(kept), Some(extra)) = (locals.next(), locals.next()) else {
+                return;
+            };
+            if let Err(error) = self
+                .absorb_local_source(&kept.configuration, &extra.configuration)
+                .await
+            {
+                self.shared.warn_nonfatal(&error);
+                return;
+            }
         }
+    }
+
+    async fn absorb_local_source(
+        &self,
+        kept: &SourceConfiguration,
+        extra: &SourceConfiguration,
+    ) -> Result<(), String> {
+        let (merged, ordinals) = kept.absorb_local(extra).map_err(string_error)?;
+        let (kept, extra) = (&kept.source_id, &extra.source_id);
+        // The Store goes first: a start that stops before the settings follow absorbs again.
+        self.shared
+            .catalog
+            .absorb_source(extra, kept, &ordinals)
+            .await
+            .map_err(string_error)?;
+        self.shared.settings.update(|stored| {
+            stored
+                .sources
+                .configured
+                .retain(|item| &item.configuration.source_id != extra);
+            if let Some(item) = stored
+                .sources
+                .configured
+                .iter_mut()
+                .find(|item| &item.configuration.source_id == kept)
+            {
+                item.configuration = merged.clone();
+            }
+            if stored.sources.selected_source_id.as_ref() == Some(extra) {
+                stored.sources.selected_source_id = Some(kept.clone());
+            }
+            stored.ui.sidebar.move_source(extra, kept);
+            stored
+                .ui
+                .downloads
+                .retain(|entry| &entry.source_id != extra);
+            Ok(())
+        })?;
+        self.shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(kept);
+        self.remove_source_resources(extra, None).await;
+        self.shared.configured();
         Ok(())
     }
 
@@ -1808,6 +1877,14 @@ impl SourceOwner {
                 .await;
             let mut persisted_source_id = None;
             let result = async {
+                // Local is one source: a Local setup adds its folders to it.
+                if let SourceSetup::Local { roots } = &mut input {
+                    let source_id = owner.add_local_roots(std::mem::take(roots)).await?;
+                    owner
+                        .select_now(source_id.clone(), Arc::clone(&cancelled), false)
+                        .await?;
+                    return owner.client(&source_id);
+                }
                 let reused_credential = owner.reuse_plex_login(&mut input).await?;
                 let device_id = owner.shared.settings.load().jellyfin_device_id.clone();
                 let connected = Source::connect(fresh_source_id()?, input, &device_id)
@@ -2190,28 +2267,12 @@ impl SourceOwner {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
             let result = async {
-                let source = owner.ensure_local_source().await?;
-                let configuration = owner
-                    .configuration(source.source_id())
-                    .ok_or_else(source_access_unavailable)?;
-                let mut roots = local_roots(&configuration)?;
-                roots.extend(paths);
-                owner
-                    .edit_configured_source(SourceSettingsChange::Local {
-                        source_id: source.source_id().clone(),
-                        roots,
-                        excluded_folders: None,
-                    })
-                    .await?;
+                let before = owner.shared.settings.local_configuration();
+                let source_id = owner.add_local_roots(paths).await?;
                 if owner.shared.selected().is_none() {
-                    let unchanged =
-                        owner.configuration(source.source_id()).as_ref() == Some(&configuration);
+                    let unchanged = before.is_some() && owner.configuration(&source_id) == before;
                     owner
-                        .select_now(
-                            source.source_id().clone(),
-                            owner.shared.begin_selection(),
-                            unchanged,
-                        )
+                        .select_now(source_id, owner.shared.begin_selection(), unchanged)
                         .await?;
                 }
                 Ok(())
@@ -2220,6 +2281,28 @@ impl SourceOwner {
             let _ = sender.send(result).await;
         });
         receiver
+    }
+
+    /// Adds folders to the Local source, which this creates when there is none.
+    async fn add_local_roots(&self, paths: Vec<PathBuf>) -> Result<SourceId, String> {
+        let source = self.ensure_local_source().await?;
+        let source_id = source.source_id().clone();
+        let configuration = self
+            .configuration(&source_id)
+            .ok_or_else(source_access_unavailable)?;
+        let mut roots = local_roots(&configuration)?;
+        for path in paths {
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+        self.edit_configured_source(SourceSettingsChange::Local {
+            source_id: source_id.clone(),
+            roots,
+            excluded_folders: None,
+        })
+        .await?;
+        Ok(source_id)
     }
 
     pub fn document_roots(&self) -> Result<Vec<sources::DocumentRoot>, String> {
