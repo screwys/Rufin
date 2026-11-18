@@ -1704,6 +1704,136 @@ impl Catalog {
         Ok(true)
     }
 
+    /// Moves a file source into another of its kind in one Write. Tracks keep their keys, so
+    /// queue and playlist entries, listens and downloads follow them; favorites, ratings and
+    /// play counts of its albums, artists, tags and folders move to the same objects under
+    /// `into`, which the next refresh of `into` lists again and builds from its files.
+    /// `ordinals` gives each of the source's folders the ordinal it has in `into`.
+    pub async fn absorb_source(
+        &self,
+        from: &SourceId,
+        into: &SourceId,
+        ordinals: &[usize],
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        write.reload();
+        let from_key = write
+            .source_by_object(from.as_str())
+            .await?
+            .map(|source| source.key);
+        let into_key = write
+            .source_by_object(into.as_str())
+            .await?
+            .map(|source| source.key);
+        let connection = write.connection().await?;
+        if let Some(from_key) = from_key {
+            self.close_walks(from_key);
+            let into_key = match into_key {
+                Some(key) => {
+                    self.close_walks(key);
+                    key.raw()
+                }
+                None => {
+                    sqlx::query_scalar("INSERT INTO sources(object_id,kind,display_name) SELECT ?1,kind,display_name FROM sources WHERE source_key=?2 RETURNING source_key")
+                        .bind(into.as_str())
+                        .bind(from_key)
+                        .fetch_one(&mut *connection)
+                        .await?
+                }
+            };
+            for (links, roles, table, column) in [
+                ("track_links", "0,1", "artists", "artist_key"),
+                ("track_links", "2,3", "tags", "tag_key"),
+                ("track_links", "4", "folders", "folder_key"),
+                ("album_links", "0", "artists", "artist_key"),
+                ("album_links", "2", "tags", "tag_key"),
+            ] {
+                sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {links} WHERE role IN({roles}) AND target IN(SELECT {column} FROM {table} WHERE source_key=?1)")))
+                    .bind(from_key)
+                    .execute(&mut *connection)
+                    .await?;
+            }
+            for table in ["tracks", "playlists", "stations", "local_locators"] {
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET source_key=?2 WHERE source_key=?1"
+                )))
+                .bind(from_key)
+                .bind(into_key)
+                .execute(&mut *connection)
+                .await?;
+            }
+            // Albums, artists, tags, folders, file rows and Home rows go with the source.
+            sqlx::query("DELETE FROM sources WHERE source_key=?1")
+                .bind(from_key)
+                .execute(&mut *connection)
+                .await?;
+            sqlx::query("UPDATE sources SET freshness=NULL WHERE source_key=?1")
+                .bind(into_key)
+                .execute(&mut *connection)
+                .await?;
+        }
+        let prefixes = serde_json::to_string(
+            &crate::keys::source_entity_kinds()
+                .map(|kind| {
+                    (
+                        crate::keys::source_entity_prefix(from, kind),
+                        crate::keys::source_entity_prefix(into, kind),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        // The same object under `into` keeps its own favorite and rating; play counts add up.
+        let moved = "SELECT prefix.value->>1||substr(media_uri,length(prefix.value->>0)+1) moved FROM json_each(?1) prefix WHERE substr(media_uri,1,length(prefix.value->>0))=prefix.value->>0";
+        let owned = "EXISTS(SELECT 1 FROM json_each(?1) prefix WHERE substr(media_uri,1,length(prefix.value->>0))=prefix.value->>0)";
+        for statement in [
+            format!("INSERT OR IGNORE INTO user_state(media_uri,favorite,rating,changed_at) SELECT ({moved}),favorite,rating,changed_at FROM user_state WHERE {owned}"),
+            format!("INSERT OR IGNORE INTO outbox(media_uri,kind,value,next_attempt_at) SELECT ({moved}),kind,value,next_attempt_at FROM outbox WHERE {owned}"),
+            format!("INSERT INTO play_counts(media_uri,period,plays,skips,last_played_at) SELECT ({moved}),period,plays,skips,last_played_at FROM play_counts WHERE {owned}
+                ON CONFLICT DO UPDATE SET plays=plays+excluded.plays,skips=skips+excluded.skips,last_played_at=max(coalesce(last_played_at,excluded.last_played_at),coalesce(excluded.last_played_at,last_played_at))"),
+            format!("DELETE FROM user_state WHERE {owned}"),
+            format!("DELETE FROM outbox WHERE {owned}"),
+            format!("DELETE FROM play_counts WHERE {owned}"),
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(statement))
+                .bind(&prefixes)
+                .execute(&mut *connection)
+                .await?;
+        }
+        for table in ["listens", "downloads"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET source_id=?2 WHERE source_id=?1"
+            )))
+            .bind(from.as_str())
+            .bind(into.as_str())
+            .execute(&mut *connection)
+            .await?;
+        }
+        // A link under the source's folder `@i/` is under folder `@ordinals[i]/` of `into`.
+        let ordinals = serde_json::to_string(ordinals)?;
+        let path = "CASE WHEN substr(path,1,1)='@' AND instr(path,'/')>2 THEN '@'||(?3->>CAST(substr(path,2,instr(path,'/')-2) AS INTEGER))||substr(path,instr(path,'/')) ELSE path END";
+        for table in ["playlist_file_links", "playlist_file_ignored"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE OR IGNORE {table} SET source_id=?2,path={path} WHERE source_id=?1"
+            )))
+            .bind(from.as_str())
+            .bind(into.as_str())
+            .bind(&ordinals)
+            .execute(&mut *connection)
+            .await?;
+        }
+        sqlx::query("INSERT OR IGNORE INTO playlist_file_settings(source_id,auto_save) SELECT ?2,auto_save FROM playlist_file_settings WHERE source_id=?1")
+            .bind(from.as_str())
+            .bind(into.as_str())
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("DELETE FROM playlist_file_settings WHERE source_id=?1")
+            .bind(from.as_str())
+            .execute(&mut *connection)
+            .await?;
+        write.commit().await?;
+        Ok(())
+    }
+
     /// The source's configuration changed: open walks stop and the next refresh lists
     /// everything again.
     pub async fn invalidate_source_observation(&self, source_id: &SourceId) -> LibraryResult<()> {

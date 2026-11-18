@@ -230,6 +230,38 @@ impl SidebarSettings {
         self.pins.contains(pin)
     }
 
+    /// Pins of one source's items name them under another source that took its items.
+    pub(crate) fn move_source(&mut self, from: &SourceId, into: &SourceId) {
+        let mut pins = Vec::with_capacity(self.pins.len());
+        for mut pin in std::mem::take(&mut self.pins) {
+            match &mut pin {
+                SidebarPin::Album { source_id, .. }
+                | SidebarPin::Artist { source_id, .. }
+                | SidebarPin::Genre { source_id, .. } => {
+                    if source_id == from {
+                        *source_id = into.clone();
+                    }
+                }
+                SidebarPin::Playlist { source_id, .. } | SidebarPin::Station { source_id, .. } => {
+                    if source_id.as_ref() == Some(from) {
+                        *source_id = Some(into.clone());
+                    }
+                }
+                SidebarPin::SmartPlaylist { .. } | SidebarPin::PlaylistFolder { .. } => {}
+            }
+            if !pins.contains(&pin) {
+                pins.push(pin);
+            }
+        }
+        self.pins = pins;
+        let imported = self.playlist_pin_imported_sources.contains(from);
+        self.playlist_pin_imported_sources
+            .retain(|source| source != from);
+        if imported && !self.playlist_pin_imported_sources.contains(into) {
+            self.playlist_pin_imported_sources.push(into.clone());
+        }
+    }
+
     pub fn set_pinned(&mut self, pin: SidebarPin, pinned: bool) -> bool {
         if pinned {
             if self.pins.contains(&pin) {

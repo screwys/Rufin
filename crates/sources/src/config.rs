@@ -601,6 +601,46 @@ impl SourceConfiguration {
         ))
     }
 
+    /// This Local source with another's folders, exclusions and document folders added, and
+    /// the ordinal each of the other's folders has here.
+    pub fn absorb_local(&self, other: &Self) -> SourceResult<(Self, Vec<usize>)> {
+        let mut config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
+        let absorbed = crate::file::local::LocalSourceConfig::from_configuration(other)?;
+        let mut ordinals = Vec::with_capacity(absorbed.roots.len());
+        for root in absorbed.roots {
+            ordinals.push(match config.roots.iter().position(|kept| *kept == root) {
+                Some(ordinal) => ordinal,
+                None => {
+                    config.roots.push(root);
+                    config.roots.len() - 1
+                }
+            });
+        }
+        for folder in absorbed.excluded_folders {
+            if !config.excluded_folders.contains(&folder) {
+                config.excluded_folders.push(folder);
+            }
+        }
+        for root in absorbed.document_roots {
+            if !config
+                .document_roots
+                .iter()
+                .any(|kept| kept.uri == root.uri)
+            {
+                config.document_roots.push(root);
+            }
+        }
+        Ok((
+            encode_provider_payload(
+                self.source_id.clone(),
+                self.kind.clone(),
+                self.name.clone(),
+                config.into_payload(),
+            ),
+            ordinals,
+        ))
+    }
+
     pub fn recognize_media_locator(&self, locator: &str) -> Option<String> {
         let uri = url::Url::parse(locator).ok()?;
         let payload: serde_json::Value = serde_json::from_str(&self.provider_payload).ok()?;
