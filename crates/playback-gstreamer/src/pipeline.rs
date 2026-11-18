@@ -446,12 +446,7 @@ impl PlayerPipeline {
         let bus = pipeline
             .bus()
             .ok_or_else(|| "GStreamer playbin did not expose a bus".to_string())?;
-        let fakesink = gst::ElementFactory::make("fakesink")
-            .name(format!("{name}-video-sink"))
-            .build()
-            .map_err(|error| error.to_string())?;
         configure_playbin_for_audio(&pipeline);
-        pipeline.set_property("video-sink", &fakesink);
         let (slot, inputs) = (self.slot, self.inputs.clone());
         let (session, last_error) = (Arc::clone(&self.session), Arc::clone(&self.last_error));
         bus.set_sync_handler(move |_, message| {
@@ -1495,6 +1490,28 @@ pub(super) fn make_playbin(name: &str) -> Result<gst::Element, String> {
         .map_err(|error| error.to_string())
 }
 pub(super) fn configure_playbin_for_audio(pipeline: &gst::Element) {
+    // playbin3 still selects a file's video, and playsink drops it when the video flag is
+    // off. Stopping decoding at what the video decoders read hands it over undecoded.
+    if let Some(decoder) = pipeline
+        .downcast_ref::<gst::Bin>()
+        .and_then(|playbin| playbin.by_name("uridecodebin3"))
+    {
+        let mut caps = decoder.property::<gst::Caps>("caps");
+        let stop = caps.make_mut();
+        let video = gst::ElementFactoryType::DECODER | gst::ElementFactoryType::MEDIA_VIDEO;
+        for factory in gst::ElementFactory::factories_with_type(video, gst::Rank::NONE) {
+            for template in factory.static_pad_templates() {
+                if template.direction() == gst::PadDirection::Sink {
+                    for structure in template.caps().iter() {
+                        if structure.name().starts_with("video/") {
+                            stop.append_structure(structure.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        decoder.set_property("caps", caps);
+    }
     let current = pipeline.property_value("flags");
     let Some(flags_class) = glib::FlagsClass::with_type(current.type_()) else {
         return;

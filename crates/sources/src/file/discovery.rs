@@ -203,39 +203,12 @@ fn container_is_asf(info: &DiscovererInfo) -> bool {
         .is_some_and(|name| name == "video/x-ms-asf")
 }
 
+/// A file plays as its first audio stream, beside any video it carries.
 fn admitted_audio_stream(info: &DiscovererInfo) -> Option<gstreamer_pbutils::DiscovererAudioInfo> {
-    let audio = info.audio_streams();
-    let video_is_image = info
-        .video_streams()
-        .iter()
-        .map(video_is_still)
-        .collect::<Vec<_>>();
-    if !discovery_is_admitted(info.result(), audio.len(), &video_is_image) {
+    if info.result() != DiscovererResult::Ok {
         return None;
     }
-    audio.into_iter().next()
-}
-
-fn video_is_still(video: &gstreamer_pbutils::DiscovererVideoInfo) -> bool {
-    let caps_name = video.caps().and_then(|caps| {
-        caps.structure(0)
-            .map(|structure| structure.name().to_string())
-    });
-    video_shape_is_still(video.is_image(), caps_name.as_deref())
-}
-
-fn video_shape_is_still(is_image: bool, caps_name: Option<&str>) -> bool {
-    is_image || caps_name.is_some_and(|name| name.starts_with("image/"))
-}
-
-fn discovery_is_admitted(
-    result: DiscovererResult,
-    audio_streams: usize,
-    video_is_image: &[bool],
-) -> bool {
-    result == DiscovererResult::Ok
-        && audio_streams > 0
-        && video_is_image.iter().all(|is_image| *is_image)
+    info.audio_streams().into_iter().next()
 }
 
 struct ScopedTags {
@@ -689,29 +662,5 @@ mod tests {
         assert_eq!(metadata.artist.as_deref(), Some("Track artist"));
         assert_eq!(metadata.album_artist.as_deref(), Some("Album artist"));
         assert_eq!(metadata.comment.as_deref(), Some("Track comment"));
-    }
-
-    #[test]
-    fn admission_requires_success_audio_and_only_still_images() {
-        assert!(discovery_is_admitted(DiscovererResult::Ok, 1, &[]));
-        assert!(discovery_is_admitted(DiscovererResult::Ok, 1, &[true]));
-        for result in [
-            DiscovererResult::Error,
-            DiscovererResult::Timeout,
-            DiscovererResult::MissingPlugins,
-        ] {
-            assert!(!discovery_is_admitted(result, 1, &[]));
-        }
-        assert!(!discovery_is_admitted(DiscovererResult::Ok, 0, &[]));
-        assert!(discovery_is_admitted(DiscovererResult::Ok, 2, &[]));
-        assert!(!discovery_is_admitted(DiscovererResult::Ok, 1, &[false]));
-        assert!(!discovery_is_admitted(
-            DiscovererResult::Ok,
-            1,
-            &[true, false]
-        ));
-        assert!(video_shape_is_still(true, None));
-        assert!(video_shape_is_still(false, Some("image/png")));
-        assert!(!video_shape_is_still(false, Some("video/x-h264")));
     }
 }
