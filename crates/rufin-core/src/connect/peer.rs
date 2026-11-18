@@ -208,10 +208,12 @@ impl ConnectOwner {
                             .map_err(string_error)?;
                         // The image changes with the local picture it is read from.
                         for track in &mut tracks {
+                            let Some(binding) = &track.artwork_binding else {
+                                continue;
+                            };
                             let image = sources::NativeImageRef::new(
                                 format!("track:{}", track.object_id),
-                                (track.artwork_binding.as_deref())
-                                    .map(|binding| blake3::hash(binding).to_hex().to_string()),
+                                Some(blake3::hash(binding).to_hex().to_string()),
                             );
                             track.artwork_binding = Some(
                                 sources::native_artwork_binding(source.as_str(), &image)
