@@ -25,9 +25,10 @@ function Build-Fixture([string]$Version) {
     $inventory = Join-Path $work "files-$Version.txt"
     cargo run --locked -p xtask -- generate windows-installer-files $stage $inventory
     if ($LASTEXITCODE -ne 0) { throw 'Could not generate installer inventory' }
+    # makensis splits paths only at backslashes, so every path is native.
     & $Compiler /V2 "/DRUFIN_STAGE_DIR=$stage" "/DRUFIN_STAGE_FILES=$stage\*" `
-        "/DRUFIN_OUTPUT_DIR=$work" "/DRUFIN_ASSET_DIR=$PSScriptRoot/assets" `
-        "/DRUFIN_LANGUAGES_FILE=$work/languages.nsh" "/DRUFIN_FILES_FILE=$inventory" `
+        "/DRUFIN_OUTPUT_DIR=$work" "/DRUFIN_ASSET_DIR=$(Join-Path $PSScriptRoot 'assets')" `
+        "/DRUFIN_LANGUAGES_FILE=$(Join-Path $work 'languages.nsh')" "/DRUFIN_FILES_FILE=$inventory" `
         "/DRUFIN_PROJECT_NAME=$name" "/DRUFIN_DISPLAY_NAME=$name" `
         "/DRUFIN_APP_ID=io.github.screwys.$name" "/DRUFIN_VERSION=$Version" `
         "/DRUFIN_VERSION_QUAD=$Version.0" (Join-Path $PSScriptRoot 'rufin.nsi')
