@@ -323,23 +323,23 @@ mod tests {
         fs::write(&audio, bytes).unwrap();
         let mut worker = Worker { discovery: reader };
         assert!(matches!(
-            read_media(&mut worker, audio.clone(), None),
+            read_media(&mut worker, audio.clone(), None, None),
             MediaRead::Unreadable
         ));
         assert!(matches!(
-            read_media(&mut worker, audio.clone(), None),
+            read_media(&mut worker, audio.clone(), None, None),
             MediaRead::Accepted(_)
         ));
 
         let text = directory.path().join("license.txt");
         fs::write(&text, b"Creative Commons\nThis is a license, not audio.\n").unwrap();
         // Old GStreamer crashes; fixed versions return a normal rejection.
-        let text_result = read_media(&mut worker, text, None);
+        let text_result = read_media(&mut worker, text, None, None);
         assert!(matches!(
             text_result,
             MediaRead::Rejected | MediaRead::Unreadable
         ));
-        let audio_result = read_media(&mut worker, audio, None);
+        let audio_result = read_media(&mut worker, audio, None, None);
         assert!(
             matches!(audio_result, MediaRead::Accepted(_)),
             "Audio after text probe: {audio_result:?}; text probe: {text_result:?}"

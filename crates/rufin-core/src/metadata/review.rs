@@ -560,21 +560,15 @@ impl MetadataLookupReview {
                 .find(|candidate| release == Some(&candidate.id))
                 .cloned()
                 .or_else(|| {
-                    let recordings = &state.recordings;
-                    if candidates
+                    // Fingerprint rows for one recording list its releases best first.
+                    let fingerprinted = candidates
                         .iter()
                         .any(|candidate| candidate.from_fingerprint)
-                        && recordings.len() == 1
-                    {
-                        candidates
-                            .iter()
-                            .find(|candidate| candidate.kind == MetadataMatchKind::Recording)
-                            .cloned()
-                    } else if candidates.len() == 1 {
-                        candidates.first().cloned()
-                    } else {
-                        None
-                    }
+                        && state.recordings.len() == 1;
+                    candidates
+                        .first()
+                        .filter(|_| fingerprinted || candidates.len() == 1)
+                        .cloned()
                 })
         };
         let resolved = if let Some(chosen) = chosen {
@@ -699,21 +693,25 @@ impl MetadataLookupReview {
                 super::MetadataItemId::Track(row.media_uri),
             )
             .await?;
-            let Some(matches) = track.scan(progress, cache.clone()).await? else {
+            let Some(matches) = track.clone().scan(progress, cache.clone()).await? else {
                 continue;
             };
             if editor.draft.kind == SourceEntityKind::Album {
                 found.extend(
                     matches
                         .into_iter()
-                        .filter(|candidate| candidate.kind == super::MetadataMatchKind::Release),
+                        .filter(|candidate| candidate.kind == MetadataMatchKind::Release),
                 );
             } else {
-                for recording in matches
-                    .into_iter()
-                    .filter(|candidate| candidate.kind == super::MetadataMatchKind::Recording)
-                {
-                    let request = recording.clone();
+                let recordings = track.state().recordings.clone();
+                for id in recordings {
+                    let request = MetadataCandidate {
+                        title: id.clone(),
+                        id,
+                        kind: MetadataMatchKind::Recording,
+                        detail: String::new(),
+                        from_fingerprint: true,
+                    };
                     let cache = cache.clone();
                     let lookup = editor
                         .source

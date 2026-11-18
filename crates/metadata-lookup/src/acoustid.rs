@@ -17,7 +17,7 @@ pub fn lookup_fingerprint(
     fingerprint: &str,
     duration: u64,
 ) -> Result<Option<FingerprintMatches>, String> {
-    let key = crate::cache::cache_key("acoustid", &(fingerprint, duration));
+    let key = crate::cache::cache_key("acoustid-releases", &(fingerprint, duration));
     let matches = cache.fetch(&key, 7, || fetch_matches(fingerprint, duration))?;
     if matches.is_some() && cache.mode != crate::CacheMode::Only {
         cache.link_fingerprint(uri, &key)?;
@@ -34,7 +34,7 @@ fn fetch_matches(fingerprint: &str, duration: u64) -> Result<FingerprintMatches,
             ("client", CLIENT_KEY),
             ("fingerprint", fingerprint),
             ("duration", &duration.to_string()),
-            ("meta", "recordings releases"),
+            ("meta", "recordings releasegroups releases tracks"),
             ("format", "json"),
         ])
         .send()
@@ -50,11 +50,9 @@ fn parse_matches(value: Value) -> Result<FingerprintMatches, String> {
             .unwrap_or("AcoustID lookup failed")
             .into());
     }
-    let mut matches = FingerprintMatches {
-        candidates: Vec::new(),
-        recordings: Vec::new(),
-    };
+    let mut recordings = Vec::new();
     let mut releases = Vec::new();
+    let mut lone = Vec::new();
     for recording in value["results"]
         .as_array()
         .into_iter()
@@ -64,53 +62,127 @@ fn parse_matches(value: Value) -> Result<FingerprintMatches, String> {
         let Some(id) = recording["id"].as_str() else {
             continue;
         };
-        if !matches.recordings.iter().any(|known| known == id) {
-            matches.recordings.push(id.into());
+        if !recordings.iter().any(|known| known == id) {
+            recordings.push(id.to_string());
         }
-        let artist = recording["artists"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|artist| artist["name"].as_str())
-            .collect::<Vec<_>>()
-            .join("; ");
-        add_candidate(
-            &mut matches.candidates,
-            recording,
-            MetadataMatchKind::Recording,
-            &artist,
-        );
-        releases.push((recording, artist));
-    }
-    for (recording, artist) in releases {
-        for release in recording["releases"].as_array().into_iter().flatten() {
-            add_candidate(
-                &mut matches.candidates,
-                release,
-                MetadataMatchKind::Release,
-                &artist,
-            );
+        let mut found = false;
+        for group in recording["releasegroups"].as_array().into_iter().flatten() {
+            for release in group["releases"].as_array().into_iter().flatten() {
+                found = true;
+                releases.push(release_row(recording, group, release));
+            }
+        }
+        // A recording on no release can only be matched as itself.
+        if !found {
+            lone.push(Some(MetadataCandidate {
+                from_fingerprint: true,
+                id: id.into(),
+                kind: MetadataMatchKind::Recording,
+                title: recording["title"].as_str().unwrap_or(id).into(),
+                detail: artists(recording),
+            }));
         }
     }
-    Ok(matches)
+    // The original album comes first, so a lookup that picks the first row fills its tags.
+    releases.sort_by_key(|(rank, _)| *rank);
+    let mut candidates = Vec::new();
+    for found in releases
+        .into_iter()
+        .map(|(_, candidate)| candidate)
+        .chain(lone)
+        .flatten()
+    {
+        if candidates.len() < 20
+            && !candidates
+                .iter()
+                .any(|c: &MetadataCandidate| c.id == found.id)
+        {
+            candidates.push(found);
+        }
+    }
+    Ok(FingerprintMatches {
+        candidates,
+        recordings,
+    })
 }
 
-fn add_candidate(
-    candidates: &mut Vec<MetadataCandidate>,
-    entity: &Value,
-    kind: MetadataMatchKind,
-    artist: &str,
-) {
-    let Some(id) = entity["id"].as_str() else {
-        return;
-    };
-    if candidates.len() < 20 && !candidates.iter().any(|candidate| candidate.id == id) {
-        candidates.push(MetadataCandidate {
-            from_fingerprint: true,
-            id: id.into(),
-            kind,
-            title: entity["title"].as_str().unwrap_or(id).into(),
-            detail: artist.into(),
-        });
+/// A release the recording is on, ranked: studio albums, then EPs, singles and other types,
+/// compilations and live releases last, each oldest first.
+fn release_row(
+    recording: &Value,
+    group: &Value,
+    release: &Value,
+) -> ((bool, u8, u16), Option<MetadataCandidate>) {
+    let kind = group["type"].as_str().unwrap_or_default();
+    let secondary = group["secondarytypes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let year = release["date"]["year"]
+        .as_u64()
+        .and_then(|year| u16::try_from(year).ok());
+    let rank = (
+        !secondary.is_empty(),
+        match kind {
+            "Album" => 0,
+            "EP" => 1,
+            "Single" => 2,
+            _ => 3,
+        },
+        year.unwrap_or(u16::MAX),
+    );
+    let mut detail = [release, group, recording]
+        .into_iter()
+        .map(artists)
+        .filter(|artist| !artist.is_empty())
+        .take(1)
+        .collect::<Vec<_>>();
+    detail.extend(year.map(|year| year.to_string()));
+    if !kind.is_empty() {
+        detail.push(
+            std::iter::once(kind)
+                .chain(secondary)
+                .collect::<Vec<_>>()
+                .join(" + "),
+        );
     }
+    detail.extend(release["country"].as_str().map(str::to_string));
+    let mut formats = Vec::new();
+    for format in release["mediums"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|medium| medium["format"].as_str())
+    {
+        if !formats.contains(&format) {
+            formats.push(format);
+        }
+    }
+    if !formats.is_empty() {
+        detail.push(formats.join(" + "));
+    }
+    let row = release["id"].as_str().map(|id| MetadataCandidate {
+        from_fingerprint: true,
+        id: id.into(),
+        kind: MetadataMatchKind::Release,
+        title: release["title"]
+            .as_str()
+            .or(group["title"].as_str())
+            .unwrap_or(id)
+            .into(),
+        detail: detail.join(" · "),
+    });
+    (rank, row)
+}
+
+fn artists(entity: &Value) -> String {
+    entity["artists"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|artist| artist["name"].as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
 }

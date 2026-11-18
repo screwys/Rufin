@@ -41,7 +41,11 @@ pub async fn import_local_playlist_file(
             if !metadata.is_file() {
                 return true;
             }
-            match local::media::read_media(&mut worker, access.clone(), None) {
+            let root = roots
+                .iter()
+                .map(PathBuf::as_path)
+                .find(|root| access.starts_with(root));
+            match local::media::read_media(&mut worker, access.clone(), root, None) {
                 media::MediaRead::Accepted(track) => {
                     let canonical = track.track.media_uri.expect("local media identity");
                     let access = std::fs::canonicalize(&access).unwrap_or(access);
@@ -113,7 +117,7 @@ pub fn playlist_file_is_non_audio(path: &Path) -> bool {
         return false;
     }
     matches!(
-        local::media::read_media(&mut media::Worker::default(), path.to_owned(), None),
+        local::media::read_media(&mut media::Worker::default(), path.to_owned(), None, None),
         media::MediaRead::Rejected
     )
 }

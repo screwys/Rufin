@@ -364,6 +364,7 @@ pub(crate) async fn read_document_media(
         let mut read = crate::file::media::read_media_input(
             &mut worker,
             entry.name.clone().into(),
+            None,
             &mut input,
             &playback_uri,
             None,
