@@ -141,7 +141,7 @@ jobs:
             if ($process.ExitCode -ne 0) {
               throw "Rufin $operation exited with code $($process.ExitCode)"
             }
-            foreach ($name in @('LICENSE', 'bin/rufin.exe', 'Uninstall.exe')) {
+            foreach ($name in @('LICENSE', 'rufin.ico', 'bin/rufin.exe', 'Uninstall.exe')) {
               if (-not (Test-Path (Join-Path $stage $name))) {
                 throw "Installed file is missing: $name"
               }
@@ -151,6 +151,41 @@ jobs:
             if (Test-Path (Join-Path $stage "bin/$name")) {
               throw "Windows system DLL was bundled: $name"
             }
+          }
+          # The registration and Start Menu shortcuts point at the installed files.
+          $root = [IO.Path]::GetFullPath($stage)
+          $uninstaller = Join-Path $root 'Uninstall.exe'
+          $registration = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Rufin'
+          $registered = @{
+            InstallLocation = $root
+            DisplayIcon = Join-Path $root 'rufin.ico'
+            UninstallString = "`"$uninstaller`""
+            QuietUninstallString = "`"$uninstaller`" /S"
+          }
+          foreach ($value in $registered.Keys) {
+            if ($registration.$value -ne $registered[$value]) {
+              throw "Registered $value is $($registration.$value)"
+            }
+          }
+          $shell = New-Object -ComObject WScript.Shell
+          $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Rufin'
+          $shortcuts = @{
+            'Rufin.lnk' = Join-Path $root 'bin\rufin.exe'
+            'Uninstall Rufin.lnk' = $uninstaller
+          }
+          foreach ($shortcut in $shortcuts.Keys) {
+            $path = Join-Path $menu $shortcut
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Start Menu shortcut is missing: $shortcut"
+            }
+            $target = $shell.CreateShortcut($path).TargetPath
+            if ($target -ne $shortcuts[$shortcut]) {
+              throw "$shortcut points at $target"
+            }
+          }
+          $icon = $shell.CreateShortcut((Join-Path $menu 'Rufin.lnk')).IconLocation
+          if ($icon -ne "$($registered.DisplayIcon),0") {
+            throw "Rufin.lnk uses icon $icon"
           }
           # Use the shipped DLLs, without MSYS2 filling gaps in the bundle.
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
@@ -174,13 +209,46 @@ jobs:
         run: |
           cargo run --locked -p xtask -- verify packaged-playback "$LOCALAPPDATA/Programs/Rufin/bin/rufin.exe"
 
+      - name: Verify uninstallation
+        shell: pwsh
+        run: |
+          $root = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/Rufin'))
+          $data = Join-Path $env:LOCALAPPDATA 'screwys/Rufin'
+          # /PURGE removes the cache and keeps the rest of the user's data.
+          New-Item -ItemType Directory -Force (Join-Path $data 'cache') | Out-Null
+          [IO.File]::WriteAllText((Join-Path $data 'cache/check.txt'), 'cache')
+          [IO.File]::WriteAllText((Join-Path $data 'check.txt'), 'data')
+          # The uninstaller reruns itself from a temporary copy, so the first process exits at once.
+          Start-Process -FilePath (Join-Path $root 'Uninstall.exe') -ArgumentList '/S /PURGE'
+          $deadline = [DateTime]::Now.AddMinutes(1)
+          while (Test-Path -LiteralPath $root) {
+            if ([DateTime]::Now -gt $deadline) {
+              Get-ChildItem -LiteralPath $root -Recurse -Force | ForEach-Object FullName
+              throw 'Uninstallation left the installation folder'
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Rufin') {
+            throw 'Uninstallation left the registration'
+          }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Rufin')) {
+            throw 'Uninstallation left the Start Menu folder'
+          }
+          if (Test-Path (Join-Path $data 'cache')) {
+            throw 'Uninstallation with /PURGE left the cache'
+          }
+          if (-not (Test-Path (Join-Path $data 'check.txt'))) {
+            throw 'Uninstallation with /PURGE removed data outside the cache'
+          }
+
       - name: Verify installer failure recovery
         shell: msys2 {0}
         run: |
           # The minimal MSYS2 PATH leaves out Program Files; PowerShell inherits the
           # UCRT64 PATH that the script's cargo and makensis need. Folder 38 is Program Files.
           "$(cygpath -u -F 38)/PowerShell/7/pwsh.exe" -NoProfile -File packaging/windows/check-installer.ps1 \
-            -Compiler "$(cygpath -m "$(command -v makensis)")"
+            -Compiler "$(cygpath -m "$(command -v makensis)")" \
+            -LocaleDir "$(cygpath -m "$PWD/.local/build/cmake/release-package/locale")"
 
       - name: Retain executable symbols
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

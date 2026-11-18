@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::Result;
-use crate::process::{command_stdout, read_to_string, repo_root, write_string};
+use crate::process::{command_stdout, read_to_string, repo_root};
 
 pub(crate) const CONTEXT: &str = "Windows installer";
 
@@ -16,10 +16,8 @@ pub(crate) fn source_strings(root: &Path) -> Result<BTreeMap<String, String>> {
     )?)?)
 }
 
-pub(crate) fn command(args: Vec<String>) -> Result<()> {
-    let [locale_dir, compiler, output] = args.as_slice() else {
-        return Err("Usage: cargo run --locked -p xtask -- generate windows-installer-languages LOCALE_DIR MAKENSIS OUTPUT".into());
-    };
+/// The installer's language tables, translated from the compiled gettext catalogs.
+pub(crate) fn languages(locale_dir: &Path, compiler: &str) -> Result<String> {
     let root = repo_root()?;
     let strings = source_strings(&root)?;
     let available = nsis_languages(compiler)?;
@@ -38,9 +36,7 @@ pub(crate) fn command(args: Vec<String>) -> Result<()> {
             eprintln!("No matching NSIS language for {locale}; omitting it from the installer.");
             continue;
         };
-        let path = Path::new(locale_dir)
-            .join(&locale)
-            .join("LC_MESSAGES/rufin.mo");
+        let path = locale_dir.join(&locale).join("LC_MESSAGES/rufin.mo");
         let translations = read_mo(&fs::read(&path).map_err(|error| {
             format!(
                 "could not read installer translations {}: {error}",
@@ -58,16 +54,14 @@ pub(crate) fn command(args: Vec<String>) -> Result<()> {
         writeln!(generated, "!insertmacro MUI_LANGUAGE \"{language}\"")?;
         generated.push_str(&language_strings(language, &strings, &translations)?);
     }
-    write_string(Path::new(output), &generated)
+    Ok(generated)
 }
 
 fn nsis_languages(compiler: &str) -> Result<BTreeMap<u32, String>> {
-    let flag = if cfg!(windows) {
-        "/HDRINFO"
-    } else {
-        "-HDRINFO"
-    };
-    let info = command_stdout(compiler, [flag])?;
+    let info = command_stdout(
+        compiler,
+        [crate::windows_installer::makensis_option("HDRINFO")],
+    )?;
     let directory = info
         .split_once("NSISDIR=")
         .and_then(|(_, value)| value.split([',', '\r', '\n']).next())

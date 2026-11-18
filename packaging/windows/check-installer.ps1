@@ -1,6 +1,5 @@
-param([Parameter(Mandatory)][string]$Compiler)
+param([Parameter(Mandatory)][string]$Compiler, [Parameter(Mandatory)][string]$LocaleDir)
 $ErrorActionPreference = 'Stop'
-$repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 # makensis compiles from the ASCII build tree; the installer meets non-ASCII paths at runtime.
 $work = Join-Path ([IO.Path]::GetTempPath()) ('Rufin installer ' + [guid]::NewGuid())
 $destination = Join-Path $work 'installed ü'
@@ -22,17 +21,9 @@ function Build-Fixture([string]$Version) {
         New-Item -ItemType Directory (Join-Path $stage 'z-conflict') | Out-Null
         [IO.File]::WriteAllText((Join-Path $stage 'z-conflict/child.txt'), 'new payload')
     }
-    $inventory = Join-Path $work "files-$Version.txt"
-    cargo run --locked -p xtask -- generate windows-installer-files $stage $inventory
-    if ($LASTEXITCODE -ne 0) { throw 'Could not generate installer inventory' }
-    # makensis splits paths only at backslashes, so every path is native.
-    & $Compiler /V2 "/DRUFIN_STAGE_DIR=$stage" "/DRUFIN_STAGE_FILES=$stage\*" `
-        "/DRUFIN_OUTPUT_DIR=$work" "/DRUFIN_ASSET_DIR=$(Join-Path $PSScriptRoot 'assets')" `
-        "/DRUFIN_LANGUAGES_FILE=$(Join-Path $work 'languages.nsh')" "/DRUFIN_FILES_FILE=$inventory" `
-        "/DRUFIN_PROJECT_NAME=$name" "/DRUFIN_DISPLAY_NAME=$name" `
-        "/DRUFIN_APP_ID=io.github.screwys.$name" "/DRUFIN_VERSION=$Version" `
-        "/DRUFIN_VERSION_QUAD=$Version.0" (Join-Path $PSScriptRoot 'rufin.nsi')
-    if ($LASTEXITCODE -ne 0) { throw 'Could not compile installer fixture' }
+    cargo run --locked -p xtask -- generate windows-installer $stage $LocaleDir $Compiler $work `
+        $Version $name $name "io.github.screwys.$name"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not build installer fixture' }
 }
 
 function Run-Installer([string]$Version, [bool]$Success) {
@@ -69,13 +60,6 @@ function Assert-Restored {
 }
 
 try {
-    $languages = '!insertmacro MUI_LANGUAGE "English"' + "`n"
-    $strings = Get-Content -Raw (Join-Path $PSScriptRoot 'strings.json') | ConvertFrom-Json
-    foreach ($entry in $strings.PSObject.Properties) {
-        $value = $entry.Value.Replace('$', '$$').Replace('"', '$\"').Replace("`n", '$\r$\n').Replace('{app_name}', '${RUFIN_DISPLAY_NAME}')
-        $languages += 'LangString ' + $entry.Name + ' ${LANG_ENGLISH} "' + $value + '"' + "`n"
-    }
-    [IO.File]::WriteAllText((Join-Path $work 'languages.nsh'), $languages)
     Build-Fixture '1.0.0'
     Build-Fixture '2.0.0'
     Run-Installer '1.0.0' $true
