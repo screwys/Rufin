@@ -304,7 +304,9 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                             val viewportHeight = maxHeight
                             // The line under the cover is the phone's; beside the pane the lyrics show in full.
-                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled && !wide, it.clipToBounds(),
+                            // Tapping it opens the lyrics, as their button does.
+                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled && !wide,
+                                { surface = PlayerSurface.LYRICS }.takeIf { lyricsEnabled }, it.clipToBounds(),
                                 trackOffset.value, neighbours) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
                                 PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp), onRadio) { navigation = it }
@@ -430,7 +432,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
 }
 
 @Composable
-private fun MainPlayerArtwork(player: PlayerConnection, artwork: Cover, showCurrentLine: Boolean, modifier: Modifier,
+private fun MainPlayerArtwork(player: PlayerConnection, artwork: Cover, showCurrentLine: Boolean, onCurrentLine: (() -> Unit)?, modifier: Modifier,
     offset: Float, neighbours: Pair<ByteArray?, ByteArray?>, onArtworkSize: (Int) -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     // The line keeps its place until the new track's lyrics are known, so a track change moves
@@ -456,7 +458,8 @@ private fun MainPlayerArtwork(player: PlayerConnection, artwork: Cover, showCurr
             PlayerCover(player, artwork, Modifier.size(side).graphicsLayer { translationX = offset }
                 .onSizeChanged { onArtworkSize(maxOf(it.width, it.height)) })
         }
-        Box(Modifier.fillMaxWidth().height(space), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxWidth().height(space).clickable(interactionSource = remember { MutableInteractionSource() },
+            indication = null, enabled = hasLyrics && onCurrentLine != null) { onCurrentLine?.invoke() }, contentAlignment = Alignment.CenterStart) {
             if (showCurrentLine) CurrentLyricsPreview(player)
         }
     }
