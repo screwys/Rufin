@@ -53,8 +53,7 @@ fn print_usage() {
   cargo run --locked -p xtask -- android install
   cargo run --locked -p xtask -- generate flatpak-sources [--check]
   cargo run --locked -p xtask -- generate i18n-template [--check] [--output PATH]
-  cargo run --locked -p xtask -- generate windows-installer-languages LOCALE_DIR MAKENSIS OUTPUT
-  cargo run --locked -p xtask -- generate windows-installer-files STAGE_DIR OUTPUT
+  cargo run --locked -p xtask -- generate windows-installer STAGE_DIR LOCALE_DIR MAKENSIS OUTPUT_DIR VERSION PROJECT_NAME DISPLAY_NAME APP_ID
   cargo run --locked -p xtask -- generate media-verification-files OUTPUT
   cargo run --locked -p xtask -- generate rpm-srpm TAG --output PATH
   cargo run --locked -p xtask -- lint BASE
