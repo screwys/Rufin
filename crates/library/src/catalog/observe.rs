@@ -1,5 +1,5 @@
 //! A source's tracks as another installation observes them, read by key.
-use crate::catalog::views::Owner;
+use crate::catalog::views::{Art, Owner};
 use crate::{Catalog, Freshness, LibraryResult, SourceId, TrackObservation};
 
 const SOURCE_KEY: &str = "(SELECT source_key FROM sources WHERE object_id=?1)";
@@ -117,7 +117,15 @@ impl Catalog {
         .bind(serde_json::to_string(ids)?)
         .fetch_all(&mut *connection)
         .await?;
-        let arts = self.arts(rows.iter().map(|row| Some(Owner::Track(row.track_key))));
+        // Only pictures from the source's files: a cover or artist lookup is the observer's own.
+        let arts = self
+            .arts(rows.iter().map(|row| Some(Owner::Track(row.track_key))))
+            .into_iter()
+            .map(|art| match art {
+                Art::Track(_) | Art::Album(_) => art,
+                _ => Art::None,
+            })
+            .collect::<Vec<_>>();
         let pictures = crate::catalog::fetch::bindings(&mut connection, &arts).await?;
         let hash = |bytes: Option<Vec<u8>>| bytes.and_then(|bytes| bytes.try_into().ok());
         rows.into_iter()
