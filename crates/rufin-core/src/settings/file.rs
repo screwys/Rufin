@@ -294,6 +294,7 @@ const STATE: &[&str] = &[
     "/cached_lyrics_sources",
     "/downloads",
     "/equalizer",
+    "/home_blocks_known",
     "/jellyfin_device_id",
     "/layout/preferred_left_sidebar_width",
     "/layout/preferred_right_sidebar_width",
