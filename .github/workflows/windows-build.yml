@@ -177,7 +177,9 @@ jobs:
       - name: Verify installer failure recovery
         shell: msys2 {0}
         run: |
-          pwsh.exe -NoProfile -File packaging/windows/check-installer.ps1 \
+          # The minimal MSYS2 PATH leaves out Program Files; PowerShell inherits the
+          # UCRT64 PATH that the script's cargo and makensis need. Folder 38 is Program Files.
+          "$(cygpath -u -F 38)/PowerShell/7/pwsh.exe" -NoProfile -File packaging/windows/check-installer.ps1 \
             -Compiler "$(cygpath -m "$(command -v makensis)")"
 
       - name: Retain executable symbols
