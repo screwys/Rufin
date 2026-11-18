@@ -12,7 +12,7 @@ use crate::source::SourceProgress;
 use crate::{SourceError, SourceResult};
 
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-pub(crate) const LOCAL_PARSER_VERSION: i64 = 23;
+pub(crate) const LOCAL_PARSER_VERSION: i64 = 24;
 
 pub(crate) async fn read_saved_file(
     observation: &library::Observation<'_>,
@@ -29,7 +29,8 @@ pub(crate) async fn read_saved_file(
         || normalize_observed_path(path),
         |file| PathBuf::from(&file.path),
     );
-    let track = media::read_saved_media(&path, path.clone()).await?;
+    let root = previous.as_ref().map(|file| PathBuf::from(&file.root));
+    let track = media::read_saved_media(&path, path.clone(), root).await?;
     let saved_path = path.clone();
     let (mut track, mut file, revision, audio_revision) = tokio::task::spawn_blocking(move || {
         let mut track = track;
@@ -91,7 +92,7 @@ pub(crate) async fn read_saved_document(
     let entry = tokio::task::spawn_blocking(move || crate::stat_document(&stat_uri))
         .await
         .map_err(|error| SourceError::Other(error.to_string()))??;
-    let mut track = media::read_saved_media(temporary, PathBuf::from(&entry.name)).await?;
+    let mut track = media::read_saved_media(temporary, PathBuf::from(&entry.name), None).await?;
     let path = source_path.unwrap_or_else(|| document_uri.to_owned());
     if let Some(file) = &mut file {
         file.size_bytes = entry.size.and_then(|size| i64::try_from(size).ok());
@@ -195,14 +196,18 @@ fn resolve_cue_file_path(cue_path: &Path, value: &str) -> PathBuf {
 fn read_cue_tracks(
     worker: &mut media::Worker,
     cue_path: &Path,
+    root: &Path,
     sheet: CueSheet,
 ) -> Option<Vec<ScannedTrack>> {
     let mut tracks = Vec::new();
     let album = sheet.album;
     for file in sheet.files {
-        let MediaRead::Accepted(mut backing) =
-            read_media(worker, resolve_cue_file_path(cue_path, &file.path), None)
-        else {
+        let MediaRead::Accepted(mut backing) = read_media(
+            worker,
+            resolve_cue_file_path(cue_path, &file.path),
+            Some(root),
+            None,
+        ) else {
             return None;
         };
         // Existing CUE URIs include the backing path as written in the sheet.
@@ -227,7 +232,11 @@ fn read_cue_tracks(
 }
 
 /// A CUE sheet and the media it plays.
-pub(crate) fn read_local_cue(worker: &mut media::Worker, path: &Path) -> walk::CueRead {
+pub(crate) fn read_local_cue(
+    worker: &mut media::Worker,
+    path: &Path,
+    root: &Path,
+) -> walk::CueRead {
     if super::online_only(path) {
         return walk::CueRead::Deferred;
     }
@@ -259,7 +268,7 @@ pub(crate) fn read_local_cue(worker: &mut media::Worker, path: &Path) -> walk::C
                 .into_owned()
         })
         .collect();
-    match read_cue_tracks(worker, path, sheet) {
+    match read_cue_tracks(worker, path, root, sheet) {
         Some(tracks) => walk::CueRead::Accepted {
             inputs,
             tracks: tracks

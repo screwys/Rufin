@@ -105,6 +105,7 @@ pub(crate) fn track_reference(scanned: ScannedTrack, media_uri: String) -> libra
 pub(crate) async fn read_saved_media(
     path: &Path,
     display_path: PathBuf,
+    root: Option<PathBuf>,
 ) -> crate::SourceResult<ScannedTrack> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -112,9 +113,14 @@ pub(crate) async fn read_saved_media(
             .map_err(|error| crate::SourceError::Other(error.to_string()))?;
         let uri = url::Url::from_file_path(&path).map_err(|_| crate::SourceError::NotFound)?;
         let mut worker = Worker::default();
-        let MediaRead::Accepted(track) =
-            read_media_input(&mut worker, display_path, &mut file, uri.as_str(), None)
-        else {
+        let MediaRead::Accepted(track) = read_media_input(
+            &mut worker,
+            display_path,
+            root.as_deref(),
+            &mut file,
+            uri.as_str(),
+            None,
+        ) else {
             return Err(crate::SourceError::Other(
                 "Saved media could not be read".into(),
             ));
@@ -144,9 +150,11 @@ pub(crate) fn excluded_from_audio_scan(path: &Path) -> bool {
             .is_some_and(|name| name.split('.').next() == Some("qt_temp"))
 }
 
+/// `root` is the source folder the file was found in, when the caller knows it.
 pub(crate) fn read_media_input(
     worker: &mut Worker,
     path: PathBuf,
+    root: Option<&Path>,
     file: &mut (impl Read + Seek),
     uri: &str,
     sidecar: Option<LocalImageRef>,
@@ -224,10 +232,16 @@ pub(crate) fn read_media_input(
             .filter(|(file, _)| lofty_supplies_required_audio(file));
     }
     let (tagged_file, album_version) = read.unzip();
+    let folder = folder_album(&path, root);
     let mut track = if let Some(tagged_file) = tagged_file.as_ref() {
-        lofty_track(&path, tagged_file, album_version.flatten(), sidecar)
+        lofty_track(&path, folder, tagged_file, album_version.flatten(), sidecar)
     } else {
-        discovered_track(&path, discovered.clone().unwrap_or_default(), sidecar)
+        discovered_track(
+            &path,
+            folder,
+            discovered.clone().unwrap_or_default(),
+            sidecar,
+        )
     };
     super::lyrics::set_lyrics(
         &mut track,
@@ -257,6 +271,7 @@ pub(crate) fn read_media_input(
 
 fn lofty_track(
     path: &Path,
+    folder: String,
     tagged_file: &lofty::file::TaggedFile,
     album_version: Option<String>,
     local_artwork: Option<LocalImageRef>,
@@ -266,8 +281,7 @@ fn lofty_track(
         .or_else(|| tagged_file.first_tag());
     let title = tag_string(tag, |tag| tag.title().map(|value| value.to_string()))
         .unwrap_or_else(|| file_title(path));
-    let album = tag_string(tag, |tag| tag.album().map(|value| value.to_string()))
-        .unwrap_or_else(|| folder_album(path));
+    let album = tag_string(tag, |tag| tag.album().map(|value| value.to_string())).unwrap_or(folder);
     let artist =
         joined_values(tag, ItemKey::TrackArtist).unwrap_or_else(|| "Unknown Artist".to_string());
     let tagged_album_artist = joined_values(tag, ItemKey::AlbumArtist);
@@ -433,11 +447,12 @@ fn replay_gain_peak(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
 
 fn discovered_track(
     path: &Path,
+    folder: String,
     metadata: discovery::Metadata,
     local_artwork: Option<LocalImageRef>,
 ) -> ScannedTrack {
     let title = metadata.title.unwrap_or_else(|| file_title(path));
-    let album = metadata.album.unwrap_or_else(|| folder_album(path));
+    let album = metadata.album.unwrap_or(folder);
     let artist = metadata
         .artist
         .unwrap_or_else(|| "Unknown Artist".to_string());
@@ -586,9 +601,10 @@ fn file_title(path: &Path) -> String {
         .to_string()
 }
 
-/// The album of a file whose tags name none.
-fn folder_album(path: &Path) -> String {
+/// The album of a file whose tags name none: its folder, unless that is the source's own folder.
+fn folder_album(path: &Path, root: Option<&Path>) -> String {
     path.parent()
+        .filter(|folder| Some(*folder) != root)
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap_or("Unknown Album")
@@ -927,7 +943,7 @@ mod tests {
     #[test]
     fn executable_contents_are_not_local_audio() {
         let path = std::env::current_exe().expect("test executable");
-        let result = read_media(&mut Worker::default(), path, None);
+        let result = read_media(&mut Worker::default(), path, None, None);
         assert!(matches!(result, MediaRead::Rejected), "{result:?}");
     }
 
@@ -993,7 +1009,8 @@ mod tests {
                 bytes.extend(fs::read(&path).expect("tagged audio"));
                 fs::write(&path, bytes).expect("leading junk");
             }
-            let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.clone(), None)
+            let MediaRead::Accepted(track) =
+                read_media(&mut Worker::default(), path.clone(), None, None)
             else {
                 panic!("audio content was rejected: {name}");
             };

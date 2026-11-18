@@ -128,6 +128,9 @@ pub fn search_metadata(
                 if let Some(artist) = artist_credit(entity) {
                     detail.push(artist);
                 }
+                if let Some(year) = year(entity, "first-release-date") {
+                    detail.push(year.to_string());
+                }
                 for key in ["date", "country", "disambiguation"] {
                     if let Some(value) = text(entity, key) {
                         detail.push(value);
