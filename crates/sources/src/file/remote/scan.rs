@@ -138,7 +138,7 @@ impl FileSource {
         } else {
             relative.to_owned()
         };
-        let mut track = media::read_saved_media(temporary, display_path.into()).await?;
+        let mut track = media::read_saved_media(temporary, display_path.into(), None).await?;
         self.read_track_lyrics(None, relative, &mut track).await?;
         track.observe_images(&mut observation)?;
         observation.state = LocalFileState::Accepted;
@@ -211,8 +211,14 @@ impl FileSource {
         let display_path = file.relative_path.clone();
         let mut parsed = tokio::task::spawn_blocking(move || {
             let mut worker = worker.lock().unwrap_or_else(|p| p.into_inner());
-            let mut parsed =
-                media::read_media_input(&mut worker, display_path.into(), &mut reader, &uri, None);
+            let mut parsed = media::read_media_input(
+                &mut worker,
+                display_path.into(),
+                None,
+                &mut reader,
+                &uri,
+                None,
+            );
             if let media::MediaRead::Accepted(track) = &mut parsed {
                 track.local_artwork = track
                     .picture_index

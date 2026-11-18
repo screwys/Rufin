@@ -17,7 +17,8 @@ pub fn local_media_identity_path(path: &Path) -> PathBuf {
 }
 
 pub fn read_local_track_reference(path: &Path) -> Option<library::TrackReference> {
-    let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.to_owned(), None)
+    let MediaRead::Accepted(track) =
+        read_media(&mut Worker::default(), path.to_owned(), None, None)
     else {
         return None;
     };
@@ -51,6 +52,7 @@ pub fn local_access_locator(media_uri: &str, access: &Path) -> Option<library::L
 pub(crate) fn read_media(
     worker: &mut Worker,
     path: PathBuf,
+    root: Option<&Path>,
     sidecar: Option<LocalImageRef>,
 ) -> MediaRead {
     if crate::file::media::excluded_from_audio_scan(&path) {
@@ -70,7 +72,7 @@ pub(crate) fn read_media(
     let Ok(access_uri) = url::Url::from_file_path(&path) else {
         return MediaRead::Unreadable;
     };
-    let mut read = read_media_input(worker, path, &mut file, access_uri.as_str(), sidecar);
+    let mut read = read_media_input(worker, path, root, &mut file, access_uri.as_str(), sidecar);
     if let MediaRead::Accepted(track) = &mut read {
         crate::file::lyrics::read_local(track);
         track.track.object_id = crate::file::media::track_id(&identity);

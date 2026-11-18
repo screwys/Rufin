@@ -1154,6 +1154,7 @@ mod tests {
                 &mut crate::file::media::Worker::default(),
                 path,
                 None,
+                None,
             )
         else {
             panic!("tagged WAV was not read");
