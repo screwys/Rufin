@@ -1,11 +1,10 @@
-//! One Local media candidate: Lofty metadata with GStreamer fallback and MP4 stream separation.
+//! One Local media candidate: Lofty metadata with GStreamer fallback.
 
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 use crate::LocalImageRef;
 use lofty::config::ParseOptions;
-use lofty::file::FileType;
 use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
@@ -194,24 +193,14 @@ pub(crate) fn read_media_input(
     })
     .ok()
     .flatten()
-    .filter(|(file, _)| file.file_type() == FileType::Mp4 || lofty_supplies_required_audio(file));
-    let discovered = if read
-        .as_ref()
-        .is_none_or(|(file, _)| file.file_type() == FileType::Mp4)
-    {
+    .filter(|(file, _)| lofty_supplies_required_audio(file));
+    let discovered = if read.is_none() {
         match worker.discovery.read_input(file, uri) {
             Ok(Some(metadata)) => Some(metadata),
             Ok(None) => return MediaRead::Rejected,
             Err(error) => {
                 tracing::warn!(?path, %error, "Media discovery failed");
-                if read
-                    .as_ref()
-                    .is_some_and(|(file, _)| lofty_supplies_required_audio(file))
-                {
-                    None
-                } else {
-                    return MediaRead::Unreadable;
-                }
+                return MediaRead::Unreadable;
             }
         }
     } else {
