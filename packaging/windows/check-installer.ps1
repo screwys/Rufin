@@ -1,9 +1,10 @@
 param([Parameter(Mandatory)][string]$Compiler)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$work = Join-Path ([IO.Path]::GetTempPath()) ('Rufin installer ü ' + [guid]::NewGuid())
-$destination = Join-Path $work 'installed'
-$result = Join-Path $work 'update result.json'
+# makensis compiles from the ASCII build tree; the installer meets non-ASCII paths at runtime.
+$work = Join-Path ([IO.Path]::GetTempPath()) ('Rufin installer ' + [guid]::NewGuid())
+$destination = Join-Path $work 'installed ü'
+$result = Join-Path $work 'update result ü.json'
 $name = 'RufinInstallerCheck'
 $registration = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$name"
 New-Item -ItemType Directory $work | Out-Null
