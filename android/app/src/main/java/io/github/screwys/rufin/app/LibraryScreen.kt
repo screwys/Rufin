@@ -33,7 +33,7 @@ import io.github.screwys.rufin.browse.BrowsePage
 import io.github.screwys.rufin.browse.DetailContent
 import io.github.screwys.rufin.browse.FieldRow
 import io.github.screwys.rufin.ui.ErrorRow
-import io.github.screwys.rufin.ui.ErrorNotice
+import io.github.screwys.rufin.ui.Toast
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.player.PlayerMenuActions
@@ -186,27 +186,16 @@ private class DetailBarState {
 }
 
 /** The feedback toast, `bottom` above the navigation bar: its own window, so it shows over sheets too, and
- *  no bigger than its card, so it never takes the taps meant for the bar under it. */
+ *  no bigger than the toast, so it never takes the taps meant for the bar under it. */
 @Composable
-internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection, bottom: androidx.compose.ui.unit.Dp) {
+internal fun FeedbackToast(model: RufinConnection, bottom: androidx.compose.ui.unit.Dp) {
     val feedback = model.feedback ?: return
     val lift = with(LocalDensity.current) { (bottom + 8.dp).roundToPx() + WindowInsets.navigationBars.getBottom(this) }
     androidx.compose.ui.window.Popup(alignment = Alignment.BottomCenter, offset = androidx.compose.ui.unit.IntOffset(0, -lift),
         properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
-        Surface(Modifier.padding(horizontal = 16.dp).widthIn(max = 360.dp),
-            shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 4.dp) {
-            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                feedback.artworkIdentity?.let { identity ->
-                    val pixels = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.roundToPx() }
-                    io.github.screwys.rufin.ui.Artwork(io.github.screwys.rufin.ui.rememberArtwork(identity, player, pixels),
-                        Modifier.size(40.dp).clip(CoverShape))
-                }
-                Text(feedback.message, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
-                feedback.action?.let { action ->
-                    TextButton({ model.dismissFeedback(); action.run() }) { Text(action.label) }
-                }
-            }
-        }
+        val action = feedback.action
+        Toast(feedback.message, Modifier.padding(horizontal = 16.dp),
+            action = action?.label, onAction = { model.dismissFeedback(); action?.run?.invoke() })
     }
 }
 
@@ -223,7 +212,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val connectState = model.connect.state
     if (model.connect.operationActive && connectState != null && connectState.pairing == null && (connectState.connecting || model.connect.visibleError != null)) {
         BackHandler { model.connect.dismissOperation() }
-        FeedbackToast(model, player, 0.dp)
+        FeedbackToast(model, 0.dp)
         ConnectProgressScreen(model)
         return
     }
@@ -457,7 +446,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         else -> 64.dp + if (hasMedia) 60.dp else 0.dp
     }
     // Over the player it clears the player's own buttons at the bottom.
-    FeedbackToast(model, player, if (fullPlayer) 64.dp else dockHeight)
+    FeedbackToast(model, if (fullPlayer) 64.dp else dockHeight)
     // The queue pane's opener ends the bar at the window's top right, with the desktop's right-sidebar icons.
     val queueToggle: @Composable () -> Unit = {
         if (tablet) PlayerIconButton(if (queuePanel) "rufin-sidebar-collapse-right-symbolic" else "rufin-sidebar-expand-right-symbolic",
@@ -668,35 +657,19 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         // so they never take the status bar or push the page's own bar down.
         Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = dockHeight + 8.dp)
             .padding(horizontal = 16.dp).widthIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val toast: @Composable (@Composable ColumnScope.() -> Unit) -> Unit = { content ->
-                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shadowElevation = 4.dp) { Column(content = content) }
+            if (!model.connect.operationActive && connectState?.let { it.connecting } == true)
+                Toast(label("Rufin Connect"), action = label("Open Rufin Connect"),
+                    onAction = model.connect::showOperation)
+            model.startupError?.let { failure ->
+                Toast(failure, action = label("Retry"), onAction = model::retryStartup)
             }
-            if (!model.connect.operationActive && connectState?.let { it.connecting } == true) toast {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(label("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(model.connect::showOperation) { Text(label("Open Rufin Connect")) }
-                }
-            }
-            model.startupError?.let { failure -> toast {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    ErrorNotice(failure)
-                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(model::retryStartup) { Text(label("Retry")) }
-                    }
-                }
-            } }
             // Pages that list the library wait for a switch, and the launch reopening it, with their own spinner.
-            model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading || model.sourceOperation is SourceOperation.Switching }?.let { status -> toast {
-                Text(status, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
+            model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading || model.sourceOperation is SourceOperation.Switching }?.let { status ->
                 val progress = model.sourceProgress
-                val total = progress?.total
-                if (progress != null && total != null && total > 0UL) {
-                    LinearProgressIndicator(progress = {
-                        (progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                    }, modifier = Modifier.fillMaxWidth())
-                } else LinearProgressIndicator(Modifier.fillMaxWidth())
-            } }
+                val total = progress?.total?.takeIf { it > 0UL }
+                Toast(status, working = true,
+                    progress = total?.let { (progress.completed.toFloat() / it.toFloat()).coerceIn(0f, 1f) })
+            }
         }
         Box(Modifier.align(Alignment.BottomCenter)) {
             if (phone) PhoneDock(tab, docked, hasMedia, player, ::selectTab, { docked = false },

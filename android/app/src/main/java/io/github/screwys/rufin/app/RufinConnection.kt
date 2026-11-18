@@ -41,16 +41,16 @@ import kotlinx.coroutines.flow.*
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class RufinConnection(application: Application) : AndroidViewModel(application) {
     internal class FeedbackAction(val label: String, val run: () -> Unit)
-    internal data class FeedbackMessage(val message: String, val artworkIdentity: ByteArray?, val action: FeedbackAction? = null)
+    internal data class FeedbackMessage(val message: String, val action: FeedbackAction? = null)
     internal var feedback by mutableStateOf<FeedbackMessage?>(null)
         private set
     internal var controlNotifications = true
     private var feedbackTimeout: Job? = null
-    internal fun showFeedback(message: String, artworkIdentity: ByteArray? = null, control: Boolean = false,
+    internal fun showFeedback(message: String, control: Boolean = false,
         action: FeedbackAction? = null) {
         if (control && !controlNotifications) return
         feedbackTimeout?.cancel()
-        feedback = FeedbackMessage(message, artworkIdentity, action)
+        feedback = FeedbackMessage(message, action)
         // An offer stays as long as GTK's toast does, long enough to reach its button.
         feedbackTimeout = viewModelScope.launch { delay(if (action == null) 2000 else 5000); feedback = null }
     }
@@ -59,7 +59,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     /// Work in progress, shown until its result's message replaces it.
     internal fun showWorking(message: String) {
         feedbackTimeout?.cancel()
-        feedback = FeedbackMessage(message, null)
+        feedback = FeedbackMessage(message)
     }
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
