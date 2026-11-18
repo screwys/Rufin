@@ -162,6 +162,9 @@ pub struct StoredSettings {
     pub(crate) jellyfin_device_id: String,
     #[serde(default)]
     visualizer_preset_bar_counts_updated: bool,
+    /// The Home blocks this settings file has offered; one it has not is added on load.
+    #[serde(default = "home_blocks_before_quick_mix")]
+    home_blocks_known: Vec<library::HomeBlockKind>,
     /// Rises when a restore replaces the credentials kept outside the settings, so the feed
     /// tells it.
     #[serde(skip)]
@@ -184,10 +187,19 @@ impl Default for StoredSettings {
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
             visualizer_preset_bar_counts_updated: true,
+            home_blocks_known: library::HomeBlockKind::all().to_vec(),
             secrets_revision: 0,
             web_controller_token_revision: 0,
         }
     }
+}
+
+/// The Home blocks settings files offered before they recorded which ones they had.
+fn home_blocks_before_quick_mix() -> Vec<library::HomeBlockKind> {
+    library::HomeBlockKind::all()
+        .into_iter()
+        .filter(|kind| *kind != library::HomeBlockKind::QuickMix)
+        .collect()
 }
 
 impl StoredSettings {
@@ -207,8 +219,30 @@ impl StoredSettings {
         }
         self.ui.visualizer.migrate_named_presets();
         app::migrate_library_lists(&mut self.ui.library_lists);
+        self.add_new_home_blocks();
         self.ui.sanitize();
         self.settle_server_recommendations();
+    }
+
+    /// A Home block added since this file was saved shows, in its default place among the
+    /// shown ones; one the user removed stays removed.
+    fn add_new_home_blocks(&mut self) {
+        let all = library::HomeBlockKind::all();
+        let blocks = &mut self.ui.application.home_blocks;
+        for (place, kind) in all.iter().enumerate() {
+            if self.home_blocks_known.contains(kind) {
+                continue;
+            }
+            self.home_blocks_known.push(*kind);
+            if blocks.contains(kind) {
+                continue;
+            }
+            let at = blocks
+                .iter()
+                .rposition(|shown| all[..place].contains(shown))
+                .map_or(0, |index| index + 1);
+            blocks.insert(at, *kind);
+        }
     }
 
     /// Server recommendations stay once a Navidrome or Plex server is configured, whose
@@ -323,7 +357,9 @@ impl SettingsFile {
         let (mut value, mut changed) = read_startup_settings(&path)?;
         // A first start, and the first after a `settings.json`, writes the two files.
         changed |= !path.is_file();
+        let read = value.clone();
         value.migrate_defaults();
+        changed |= value != read;
         for recent in &mut value.ui.recent_search_results {
             if let Some(binding) = &mut recent.artwork_binding {
                 let normalized = library::normalize_artwork_binding(binding)
