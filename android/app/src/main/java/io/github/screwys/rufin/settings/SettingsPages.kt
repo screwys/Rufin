@@ -111,7 +111,8 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
     val stops = remember(marks) { marks.map { it.toFloat() } }
     val count = ((range.endInclusive - range.start) / step).roundToInt()
     val colors = MaterialTheme.colorScheme
-    Surface(Modifier.fillMaxWidth(), color = colors.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
+    Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).then(searchHighlight(title)), color = colors.surfaceContainer,
+        shape = RoundedCornerShape(5.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,

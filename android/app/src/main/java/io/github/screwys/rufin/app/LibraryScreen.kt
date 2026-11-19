@@ -293,6 +293,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var metadata by remember { mutableStateOf<BrowseItem?>(null) }
     var moreStack by rememberSaveable { mutableStateOf(listOf(MoreDestination.Root)) }
     val moreDestination = moreStack.last()
+    // Search on Settings' root, as the preferences dialog's on desktop: null while it is closed.
+    var settingsQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    val settingsRoot = browse.section == AppSection.More && moreDestination == MoreDestination.Root
+    LaunchedEffect(settingsRoot) { if (!settingsRoot) settingsQuery = null }
     var integration by rememberSaveable { mutableStateOf<IntegrationPage?>(null) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -380,6 +384,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     BackHandler(drawer.isOpen || searchExpanded || browse.detail || browse.section != AppSection.Browse || browse.rootId != "Home") {
         when {
             drawer.isOpen -> closeDrawer()
+            settingsRoot && settingsQuery != null -> { settingsQuery = null; leaveInput() }
             browse.section == AppSection.More && moreStack.size > 1 -> moreStack = moreStack.dropLast(1)
             searchExpanded -> searchExpanded = false
             browse.section == AppSection.Browse && browse.detail -> browse.back()
@@ -512,6 +517,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             ShellTopBar(browse, moreDestination, if (moreDestination == MoreDestination.Integration) integration?.name.orEmpty() else translate(moreDestination.title),
                 // Under the tabs the Library tab's routes name themselves; Radio is a tab with the one page.
                 rootRoute?.takeIf { !tabs || it.route is Route.Radio }?.title, searchExpanded, searchFocus, tabs, !split,
+                settingsQuery.takeIf { settingsRoot }, { settingsQuery = it },
+                onSettingsSearch = { if (settingsQuery != null) { settingsQuery = null; leaveInput() } else { settingsQuery = ""; focusSearch++ } },
                 onMenu = { scope.launch { drawer.open() } },
                 onBack = { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) else selectTab(ShellTab.Home) },
                 onSearch = { if (searchExpanded) leaveInput() else { searchExpanded = true; focusSearch++ } },
@@ -640,7 +647,13 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                     if (moreDestination != MoreDestination.Integration) moreStack = moreStack + MoreDestination.Integration
                                 }, { if (moreStack.size > 1) moreStack = moreStack.dropLast(1) },
                                 onAddSource = { editSourceId = null; sources = true }, onEditSource = { editSourceId = it; sources = true },
-                                onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
+                                onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size,
+                                settingsQuery = settingsQuery.takeIf { settingsRoot }, openSearchResult = { item ->
+                                    settingsQuery = null
+                                    leaveInput()
+                                    item.integration?.let { integration = it }
+                                    moreStack = generateSequence(item.destination) { it.parent }.toList().reversed()
+                                })
                         }
                         AppSection.Search -> SearchContent(model, preferences, browse, player, { menu = it }, { playlist = it }, {})
                         AppSection.Pins -> routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage, selectingPins) { selectingPins = false } }
@@ -784,12 +797,16 @@ private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTit
     /** ☰ opens the sidebar where none is docked. */
     menu: Boolean,
     /** The route's filter opens in the bar, unless its pane keeps a field of its own. */
-    search: Boolean, onMenu: () -> Unit, onBack: () -> Unit, onSearch: () -> Unit, onSubmit: () -> Unit, onExpand: () -> Unit,
+    search: Boolean,
+    /** What Settings' root searches for, while its search is open; null elsewhere. */
+    settingsQuery: String?, onSettingsQuery: (String) -> Unit,
+    onMenu: () -> Unit, onBack: () -> Unit, onSearch: () -> Unit, onSettingsSearch: () -> Unit, onSubmit: () -> Unit, onExpand: () -> Unit,
     actions: @Composable RowScope.() -> Unit,
 ) {
     val searching = browse.section == AppSection.Search
     // The bar filters its route, whichever page is open beside it.
     val options = browse.optionsFor(browse.rootId)
+    val settingsRoot = browse.section == AppSection.More && more == MoreDestination.Root
     TopAppBar(expandedHeight = 56.dp, navigationIcon = {
         when {
             browse.section == AppSection.More && more != MoreDestination.Root ->
@@ -797,19 +814,11 @@ private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTit
             menu -> PlayerIconButton("rufin-open-menu-symbolic", "Open sidebar", onMenu)
         }
     }, title = {
-        if (searchExpanded || searching) BasicTextField(
-            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus).onFocusChanged { if (it.isFocused) onExpand() },
-            value = if (searching) browse.searchText else options.filter,
-            onValueChange = { if (searching) browse.searchText = it else options.filter = it },
-            singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
-            decorationBox = { input -> Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                if ((if (searching) browse.searchText else options.filter).isBlank())
-                    Text(translate(if (searching) "Search everything" else "Search"), style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                input()
-            } })
+        if (settingsRoot && settingsQuery != null) BarSearchField(settingsQuery, onSettingsQuery, translate("Search preferences"),
+            Modifier.focusRequester(searchFocus), onSubmit)
+        else if (searchExpanded || searching) BarSearchField(if (searching) browse.searchText else options.filter,
+            { if (searching) browse.searchText = it else options.filter = it }, translate(if (searching) "Search everything" else "Search"),
+            Modifier.focusRequester(searchFocus).onFocusChanged { if (it.isFocused) onExpand() }, onSubmit)
         else Text(when (browse.section) {
             AppSection.Browse -> route ?: translate("Library")
             AppSection.Search -> translate("Search")
@@ -819,8 +828,23 @@ private fun ShellTopBar(browse: BrowseConnection, more: MoreDestination, moreTit
     }, actions = {
         if (browse.section == AppSection.Browse && search) PlayerIconButton(if (searchExpanded) "rufin-window-close-symbolic" else "rufin-search-symbolic",
             if (searchExpanded) "Close" else "Search", onSearch)
+        if (settingsRoot) PlayerIconButton(if (settingsQuery != null) "rufin-window-close-symbolic" else "rufin-search-symbolic",
+            if (settingsQuery != null) "Close" else "Search", onSettingsSearch)
         actions()
     })
+}
+
+/** The bar's text field, in place of its title: [placeholder] until something is typed. */
+@Composable
+private fun BarSearchField(value: String, change: (String) -> Unit, placeholder: String, modifier: Modifier, submit: () -> Unit) {
+    BasicTextField(value, change, modifier.fillMaxWidth(),
+        singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { submit() }),
+        decorationBox = { input -> Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+            if (value.isBlank()) Text(placeholder, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            input()
+        } })
 }
 
 /** Home, Radio or the Library tab's routes: route tabs under the bar, and a swipe moves between routes. */

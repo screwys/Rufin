@@ -52,11 +52,12 @@ import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SegmentedPill
 
-private enum class CustomizationTab(val title: String) { Layout("Layout"), Home("Home"), Player("Player"), Menus("Menus") }
+internal enum class CustomizationTab(override val title: String) : SettingsTab { Layout("Layout"), Home("Home"), Player("Player"), Menus("Menus") }
 
 @Composable
 internal fun CustomizationSettingsPage(preferences: PreferencesConnection, browse: BrowseConnection, player: PlayerConnection) {
     var tab by rememberSaveable { mutableStateOf(CustomizationTab.Layout) }
+    SearchedTab<CustomizationTab> { tab = it }
     Column(Modifier.fillMaxSize()) {
         SegmentedPill(CustomizationTab.entries, tab, { tab = it }, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
             equal = true) { option, _ ->
@@ -301,11 +302,11 @@ private fun PlayerTab(player: PlayerConnection) {
 }
 
 /** The long-press menu's entries in its order, with their icons; the Play setting is its row of big buttons. */
-private val menuPlays = listOf(
+internal val menuPlays = listOf(
     "Play" to "rufin-media-playback-start-symbolic",
     "Play Next" to "rufin-mail-forward-symbolic",
     "Play Later" to "rufin-go-last-symbolic")
-private val menuActions = listOf(
+internal val menuActions = listOf(
     Triple(ContextMenuItem.PLAY_RADIO, "Play radio", "rufin-audio-only-symbolic"),
     Triple(ContextMenuItem.ADD_TO_PLAYLIST, "Add to Playlist", "rufin-playlists-symbolic"),
     Triple(ContextMenuItem.FAVORITES, "Favorites", "rufin-heart-outline-symbolic"),
@@ -401,7 +402,8 @@ internal fun <T> PreferenceChoice(title: String, selected: T, options: List<Pair
 ) {
     val active = options.any { enabled(it.first) }
     if (preview == null && options.size in 2..3 && options.all { it.second.length <= 12 && enabled(it.first) == active }) {
-        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
+        Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).then(searchHighlight(title)),
+            color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(5.dp)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (active) 1f else .38f))
