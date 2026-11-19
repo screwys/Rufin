@@ -11598,14 +11598,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/zip/zip-9.4.1.crate",
-        "sha256": "23f17fbc870bfac28c6228aed7d6e6df352e26bf7015c4313727e16a7a01ce5e",
-        "dest": "cargo/vendor/zip-9.4.1"
+        "url": "https://static.crates.io/crates/zip/zip-9.4.2.crate",
+        "sha256": "df3845f734baabdd02de353a20580e30ceccd03897def44a4eb8e9654992e294",
+        "dest": "cargo/vendor/zip-9.4.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"23f17fbc870bfac28c6228aed7d6e6df352e26bf7015c4313727e16a7a01ce5e\", \"files\": {}}",
-        "dest": "cargo/vendor/zip-9.4.1",
+        "contents": "{\"package\": \"df3845f734baabdd02de353a20580e30ceccd03897def44a4eb8e9654992e294\", \"files\": {}}",
+        "dest": "cargo/vendor/zip-9.4.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
