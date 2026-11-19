@@ -7,7 +7,7 @@ on:
       - synchronize
       - reopened
     paths:
-      - io.github.screwys.Rufin.json
+      - app.rufin.rufin.json
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   cargo-sources:
     if: >-
-      github.repository == 'flathub/io.github.screwys.Rufin' &&
+      github.repository == 'flathub/app.rufin.rufin' &&
       github.event.pull_request.user.login == 'flathubbot' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -43,8 +43,8 @@ jobs:
               | select(.name == "rufin")
               | .sources[]
               | select(type == "object")
-              | select(.type == "git" and .url == "https://github.com/screwys/Rufin.git")
-            ' io.github.screwys.Rufin.json
+              | select(.type == "git" and .url == "https://github.com/rufin-app/rufin.git")
+            ' app.rufin.rufin.json
           )"
           tag="$(jq -r '.tag // empty' <<< "$source")"
           commit="$(jq -r '.commit // empty' <<< "$source")"
@@ -66,7 +66,7 @@ jobs:
       - name: Check out Rufin source
         run: |
           set -euo pipefail
-          git clone --filter=blob:none --no-checkout https://github.com/screwys/Rufin.git upstream
+          git clone --filter=blob:none --no-checkout https://github.com/rufin-app/rufin.git upstream
           git -C upstream fetch --depth=1 origin "refs/tags/${{ steps.source.outputs.tag }}:refs/tags/${{ steps.source.outputs.tag }}"
           git -C upstream checkout --detach "${{ steps.source.outputs.tag }}"
           actual="$(git -C upstream rev-parse HEAD)"

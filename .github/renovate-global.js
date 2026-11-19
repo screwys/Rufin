@@ -1,6 +1,6 @@
 module.exports = {
   platform: "github",
-  repositories: ["screwys/Rufin"],
+  repositories: ["rufin-app/rufin"],
   onboarding: false,
   requireConfig: "required",
   allowedCommands: [

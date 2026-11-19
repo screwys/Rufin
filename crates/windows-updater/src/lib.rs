@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 #[cfg(target_os = "windows")]
 use std::sync::mpsc;
 
+#[cfg(target_os = "windows")]
 use app_identity::PROJECT_NAME;
 #[cfg(target_os = "windows")]
 use reqwest::blocking::Client;
@@ -358,8 +359,8 @@ fn take_previous_result(cache_dir: &Path) -> Result<Option<PreviousUpdateResult>
 /// Convenience entry point used during application startup, before a channel
 /// handle has necessarily been detected.
 pub fn take_previous_update_result() -> Result<Option<PreviousUpdateResult>, String> {
-    let cache_dir = directories::ProjectDirs::from("io.github", "screwys", PROJECT_NAME)
-        .map(|dirs| dirs.cache_dir().to_path_buf())
+    let cache_dir = app_identity::folders()
+        .map(|folders| folders.cache.clone())
         .ok_or_else(|| {
             UpdateError::Io(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -531,7 +532,7 @@ fn owned_old_helper_files(path: &Path, version: &str) -> Option<Vec<PathBuf>> {
 
 #[cfg(target_os = "windows")]
 fn release_api_url(version: &str) -> String {
-    format!("https://api.github.com/repos/screwys/Rufin/releases/tags/v{version}")
+    format!("https://api.github.com/repos/rufin-app/rufin/releases/tags/v{version}")
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -747,7 +748,7 @@ mod tests {
             "assets": [
                 {
                     "name": "Rufin-1.2.3-setup.exe",
-                    "browser_download_url": "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+                    "browser_download_url": "https://github.com/rufin-app/rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
                     "digest": format!("sha256:{digest}")
                 }
             ]
@@ -756,7 +757,7 @@ mod tests {
         assert_eq!(
             release_installer(&release, "1.2.3").unwrap(),
             (
-                "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+                "https://github.com/rufin-app/rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
                 digest
             )
         );
@@ -769,7 +770,7 @@ mod tests {
             "assets": [
                 {
                     "name": "Rufin-1.2.3-setup.exe",
-                    "browser_download_url": "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+                    "browser_download_url": "https://github.com/rufin-app/rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
                     "digest": "sha256:not-a-digest"
                 }
             ]
@@ -786,7 +787,7 @@ mod tests {
         ] {
             let mut asset = serde_json::json!({
                 "name": "Rufin-1.2.3-setup.exe",
-                "browser_download_url": "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+                "browser_download_url": "https://github.com/rufin-app/rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
             });
             if let Some(digest) = digest {
                 asset["digest"] = digest;

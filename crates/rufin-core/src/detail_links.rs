@@ -81,7 +81,7 @@ pub fn album_external_links(
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
-            icon_name: "io.github.screwys.Rufin.external.lastfm",
+            icon_name: "app.rufin.rufin.external.lastfm",
             url: Some(url),
         });
     }
@@ -90,7 +90,7 @@ pub fn album_external_links(
     {
         links.push(DetailLink {
             title: msgid("Open on MusicBrainz"),
-            icon_name: "io.github.screwys.Rufin.external.musicbrainz",
+            icon_name: "app.rufin.rufin.external.musicbrainz",
             url: Some(url),
         });
     }
@@ -117,7 +117,7 @@ pub fn artist_external_links(
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
-            icon_name: "io.github.screwys.Rufin.external.lastfm",
+            icon_name: "app.rufin.rufin.external.lastfm",
             url: Some(url),
         });
     }
@@ -126,7 +126,7 @@ pub fn artist_external_links(
     {
         links.push(DetailLink {
             title: msgid("Open on MusicBrainz"),
-            icon_name: "io.github.screwys.Rufin.external.musicbrainz",
+            icon_name: "app.rufin.rufin.external.musicbrainz",
             url: Some(url),
         });
     }

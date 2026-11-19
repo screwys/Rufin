@@ -48,8 +48,8 @@
                 ./crates
                 ./vendor
                 ./resources/icons/hicolor
-                ./resources/io.github.screwys.Rufin.desktop
-                ./resources/io.github.screwys.Rufin.metainfo.xml
+                ./resources/app.rufin.rufin.desktop
+                ./resources/app.rufin.rufin.metainfo.xml
                 ./resources/themes
                 ./locales
                 ./radio-stations
@@ -118,7 +118,7 @@
               ];
 
               postInstall = ''
-                substituteInPlace "$out/share/applications/io.github.screwys.Rufin.desktop" \
+                substituteInPlace "$out/share/applications/app.rufin.rufin.desktop" \
                   --replace-fail "Exec=rufin" "Exec=$out/bin/rufin"
               '';
 
@@ -131,7 +131,7 @@
 
               meta = {
                 description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
-                homepage = "https://github.com/screwys/Rufin";
+                homepage = "https://github.com/rufin-app/rufin";
                 license = lib.licenses.gpl3Plus;
                 mainProgram = "rufin";
                 platforms = lib.platforms.linux;

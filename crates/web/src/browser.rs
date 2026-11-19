@@ -426,10 +426,7 @@ struct HeadLink {
 
 /// The address of the picture core names `icon`: a site's or a source's.
 fn link_image(icon: &str) -> Option<String> {
-    match icon
-        .strip_prefix("io.github.screwys.Rufin.")?
-        .split_once('.')?
-    {
+    match icon.strip_prefix("app.rufin.rufin.")?.split_once('.')? {
         ("external", site) => Some(format!("/site-icons/{site}")),
         ("source", "opensubsonic") => Some("/source-icons/subsonic".to_owned()),
         ("source", kind) => Some(format!("/source-icons/{kind}")),
@@ -1332,7 +1329,7 @@ async fn source_icon(
             asset(
                 "image/png",
                 include_bytes!(concat!(
-                    "../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.",
+                    "../../../resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.",
                     $name,
                     ".png"
                 ))
@@ -1360,7 +1357,7 @@ async fn site_icon(
             asset(
                 "image/png",
                 include_bytes!(concat!(
-                    "../../../resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.external.",
+                    "../../../resources/icons/hicolor/64x64/apps/app.rufin.rufin.external.",
                     $name,
                     ".png"
                 ))
@@ -1391,16 +1388,16 @@ async fn icon(
         return Ok(asset(
             "image/svg+xml",
             include_bytes!(
-                "../../../resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
-            ).as_slice(),
+                "../../../resources/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg"
+            )
+            .as_slice(),
         ));
     }
     if name == "rufin.svg" || name == "favicon.svg" {
-        let svg = include_str!(
-            "../../../resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
-        )
-        .replacen("viewBox=\"0 0 128 128\"", "viewBox=\"0 0 112 112\"", 1)
-        .replacen(" transform=\"translate(4,4)\"", "", 1);
+        let svg =
+            include_str!("../../../resources/icons/hicolor/scalable/apps/app.rufin.rufin.svg")
+                .replacen("viewBox=\"0 0 128 128\"", "viewBox=\"0 0 112 112\"", 1)
+                .replacen(" transform=\"translate(4,4)\"", "", 1);
         return Ok(asset("image/svg+xml", svg));
     }
     let file = name

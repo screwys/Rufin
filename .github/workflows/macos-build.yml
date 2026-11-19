@@ -98,7 +98,7 @@ jobs:
           cache-bin: "false"
           cache-on-failure: true
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') }}
           shared-key: macos-package-${{ matrix.architecture }}-${{ steps.packages.outputs.versions }}
           workspaces: ". -> .local/target"
 

@@ -47,12 +47,12 @@ package requirements, see
 If you have nix available, it is easier to:
 
 ```bash
-git clone https://github.com/screwys/Rufin.git
+git clone https://github.com/rufin-app/rufin.git
 cd Rufin
 nix develop
 ```
 
-The cache for `main` and release tags is available through Cachix:
+The cache for `master` and release tags is available through Cachix:
 
 ```bash
 nix-shell -p cachix --run "cachix use rufin"

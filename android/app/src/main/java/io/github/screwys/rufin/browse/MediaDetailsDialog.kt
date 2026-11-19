@@ -153,7 +153,7 @@ internal fun MediaDetailsDialog(
                                                     IconButton({ model.runAction {
                                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                                     } }, Modifier.size(36.dp).semantics { contentDescription = openLabel }) {
-                                                        DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(20.dp))
+                                                        DetailLinkIcon("app.rufin.rufin.external.musicbrainz", Modifier.size(20.dp))
                                                     }
                                                 }
                                             }

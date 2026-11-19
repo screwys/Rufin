@@ -28,7 +28,7 @@ impl ApplicationAppearance {
         };
 
         let base_provider = gtk::CssProvider::new();
-        base_provider.load_from_resource("/io/github/screwys/Rufin/ui/style.css");
+        base_provider.load_from_resource("/app/rufin/rufin/ui/style.css");
         gtk::style_context_add_provider_for_display(
             &display,
             &base_provider,

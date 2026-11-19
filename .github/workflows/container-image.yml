@@ -3,7 +3,7 @@ name: Container image
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - packaging/container/**
       - '!packaging/container/**/*.md'
@@ -47,24 +47,24 @@ jobs:
           scripts/container run default none just _check-all
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
       - name: Publish image
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/rufin-dev"
           docker push "$image:$GITHUB_SHA"
           docker push "$image:latest"
 
       - name: Log out of GHCR
-        if: always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+        if: always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
         run: docker logout ghcr.io
 
       - name: Check public image
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/rufin-dev"
           docker image rm "$image:$GITHUB_SHA" "$image:latest"

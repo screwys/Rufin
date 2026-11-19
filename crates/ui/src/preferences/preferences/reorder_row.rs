@@ -8,7 +8,7 @@ mod reorder_row_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/preferences/reorder_row.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/preferences/reorder_row.ui")]
     pub(super) struct PreferencesReorderRow {
         #[template_child]
         pub(super) drag: TemplateChild<gtk::Image>,

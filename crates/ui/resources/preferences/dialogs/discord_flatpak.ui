@@ -18,7 +18,7 @@
           <property name="spacing">12</property>
           <style><class name="command-block"/></style>
           <child><object class="GtkLabel" id="user_command">
-            <property name="label">flatpak override --user --filesystem=xdg-run/discord-ipc-0 io.github.screwys.Rufin</property>
+            <property name="label">flatpak override --user --filesystem=xdg-run/discord-ipc-0 app.rufin.rufin</property>
             <property name="selectable">true</property><property name="wrap">true</property>
             <property name="wrap-mode">word-char</property><property name="max-width-chars">40</property>
             <property name="xalign">0</property><property name="hexpand">true</property>
@@ -39,7 +39,7 @@
           <property name="spacing">12</property>
           <style><class name="command-block"/></style>
           <child><object class="GtkLabel" id="system_command">
-            <property name="label">sudo flatpak override --filesystem=xdg-run/discord-ipc-0 io.github.screwys.Rufin</property>
+            <property name="label">sudo flatpak override --filesystem=xdg-run/discord-ipc-0 app.rufin.rufin</property>
             <property name="selectable">true</property><property name="wrap">true</property>
             <property name="wrap-mode">word-char</property><property name="max-width-chars">40</property>
             <property name="xalign">0</property><property name="hexpand">true</property>

@@ -7,13 +7,13 @@
   <a href="Cargo.toml"><img alt="Rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-f74c00?logo=rust"></a>
   <a href="https://gstreamer.freedesktop.org/"><img alt="GStreamer 1.26+" src="https://img.shields.io/badge/GStreamer-1.26%2B-3584E4?logo=gstreamer&amp;logoColor=white&amp;labelColor=2E3436"></a>
   <br>
-  <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
+  <a href="https://flathub.org/apps/app.rufin.rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/app.rufin.rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.screwys.Rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fscrewys%2FRufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D"><img alt="Obtainium version" src="https://img.shields.io/github/v/release/screwys/Rufin?logo=obtainium&amp;label=Obtainium&amp;color=6750A4"></a>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22app.rufin.rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Frufin-app%2Frufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D"><img alt="Obtainium version" src="https://img.shields.io/github/v/release/rufin-app/rufin?logo=obtainium&amp;label=Obtainium&amp;color=6750A4"></a>
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </p>
 
-<img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="80" height="196">
+<img align="right" alt="Rufin" src="resources/icons/hicolor/512x512/apps/app.rufin.rufin.png" width="80" height="196">
 
 <p align="left">
   Rufin is a fast, native music player for local folders, network shares and music servers, on <a href="#installation">Linux</a>, <a href="#windows">Windows</a>, <a href="#macos">macOS</a> and <a href="#android">Android</a>. It offers deep customization for its appearance and behavior, rich library browsing and management experience with in-app lyrics/metadata/artwork searching & editing, and a careful playback engine powered by GStreamer.
@@ -29,13 +29,13 @@
 
 | Source | Favorites, ratings and playlists | Metadata editing | Also |
 |---|---|---|---|
-| <img src="resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;**Local folders** | Kept by Rufin | Written to the files | Folders are watched for changes |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**WebDAV / Nextcloud** | Kept by Rufin | Written to the files | No mount needed |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**SMB / Samba** | Kept by Rufin | Written to the files | No mount needed, share discovery |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Jellyfin** | On the server | Over the server API | Instant Mix, live library updates |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.emby.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Emby** | On the server; ratings kept by Rufin | Over the server API | Instant Mix, live library updates |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Navidrome** / <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**OpenSubsonic** | On the server | Through matched local files | Radio, public share links |
-| <img src="resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.plex.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Plex** | On the server; favorites kept by Rufin | Over the server API | Recommendations, Plex Companion, Home profiles |
+| <img src="resources/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;**Local folders** | Kept by Rufin | Written to the files | Folders are watched for changes |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**WebDAV / Nextcloud** | Kept by Rufin | Written to the files | No mount needed |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**SMB / Samba** | Kept by Rufin | Written to the files | No mount needed, share discovery |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Jellyfin** | On the server | Over the server API | Instant Mix, live library updates |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.emby.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Emby** | On the server; ratings kept by Rufin | Over the server API | Instant Mix, live library updates |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Navidrome** / <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**OpenSubsonic** | On the server | Through matched local files | Radio, public share links |
+| <img src="resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.plex.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;**Plex** | On the server; favorites kept by Rufin | Over the server API | Recommendations, Plex Companion, Home profiles |
 
 Downloaded tracks, and tracks of a server matched to local folders, play from disk while activity still goes to the server. You can also configure a local and public adress for a server.
 
@@ -111,7 +111,7 @@ rufin --headless --listen
 
 ## Flatpak
 <p>
-  <a href="https://flathub.org/apps/io.github.screwys.Rufin">
+  <a href="https://flathub.org/apps/app.rufin.rufin">
     <img width="240" alt="Get it on Flathub" src="https://flathub.org/api/badge?svg&locale=en">
   </a>
 </p>
@@ -152,11 +152,11 @@ To add it to your profile:
 nix profile install nixpkgs#rufin
 ```
 
-You can also run `main` or an older release directly.
+You can also run `master` or an older release directly.
 
 ```bash
-nix run github:screwys/Rufin/main
-nix run github:screwys/Rufin/vX.Y.Z
+nix run github:rufin-app/rufin/master
+nix run github:rufin-app/rufin/vX.Y.Z
 ```
 
 ## Gentoo
@@ -189,7 +189,7 @@ emerge -av media-sound/rufin
 
 ## Windows
 
-Download the .exe from [GitHub Releases](https://github.com/screwys/Rufin/releases/latest).
+Download the .exe from [GitHub Releases](https://github.com/rufin-app/rufin/releases/latest).
 
 The installer has opt-in **Automatic updates** in General preferences to have Rufin install an
 available Windows update when the app starts. Alternatively, you can click `Update` button in
@@ -207,25 +207,25 @@ You can turn on **Automatic updates** in General preferences to have
 Rufin install an available update when the app starts or manually click `Update` button in Version History on the latest release.
 
 You can also download `.dmg` files directly from
-[GitHub Releases](https://github.com/screwys/Rufin/releases/latest), but then you have to update manually.
+[GitHub Releases](https://github.com/rufin-app/rufin/releases/latest), but then you have to update manually.
 
 ## Android
 
 <p>
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.screwys.Rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fscrewys%2FRufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D">
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22app.rufin.rufin%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Frufin-app%2Frufin%22%2C%22author%22%3A%22screwys%22%2C%22name%22%3A%22Rufin%22%7D">
     <img width="240" alt="Get it on Obtainium" src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png">
   </a>
 </p>
 
 Rufin for Android is installed and kept up to date with [Obtainium](https://obtainium.imranr.dev/). Open the badge on your
-phone, or add `https://github.com/screwys/Rufin` in Obtainium yourself. Android 7.0 or newer is required.
+phone, or add `https://github.com/rufin-app/rufin` in Obtainium yourself. Android 7.0 or newer is required.
 
 ## Building locally
 
 Start by cloning the repository. You can build Rufin natively or use our Linux development container if you want to keep dependencies outside of your system and have Docker or Podman available.
 
 ```bash
-git clone https://github.com/screwys/Rufin.git
+git clone https://github.com/rufin-app/rufin.git
 cd Rufin
 ```
 
@@ -326,7 +326,7 @@ the next launch. Logs have secrets and absolute folder paths redacted, but you m
 Or you can just run Rufin from the terminal:
 
 ```bash
-flatpak run --env=RUST_LOG=debug io.github.screwys.Rufin 2>&1 # for flatpak
+flatpak run --env=RUST_LOG=debug app.rufin.rufin 2>&1 # for flatpak
 ```
 
 ```bash
@@ -344,10 +344,10 @@ You can remove Rufin with your package manager, use the uninstaller included wit
 
 To delete all of Rufin’s local data, remove its directories for your operating system:
 
-- Linux and FreeBSD [(planned):](https://github.com/screwys/Rufin/issues/811#issuecomment-5471657038) `~/.cache/rufin` and `~/.local/share/rufin`
-- Flatpak: `~/.var/app/io.github.screwys.Rufin/`
-- macOS: `~/Library/Caches/io.github.screwys.Rufin` and `~/Library/Application Support/io.github.screwys.Rufin`
-- Windows: `%LOCALAPPDATA%\screwys\Rufin` 
+- Linux and FreeBSD [(planned):](https://github.com/rufin-app/rufin/issues/811#issuecomment-5471657038) `~/.cache/rufin` and `~/.local/share/rufin`
+- Flatpak: `~/.var/app/app.rufin.rufin/`
+- macOS: `~/Library/Caches/app.rufin.rufin` and `~/Library/Application Support/app.rufin.rufin`
+- Windows: `%APPDATA%\Rufin` and `%LOCALAPPDATA%\Rufin`
 
 # Contributing
 
@@ -371,7 +371,7 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 
 ## Translation credits
 
-<img alt="Translators of Rufin by language" src="https://raw.githubusercontent.com/screwys/Rufin/credits/translators.svg">
+<img alt="Translators of Rufin by language" src="https://raw.githubusercontent.com/rufin-app/rufin/credits/translators.svg">
 
 ## Donations
 
@@ -379,7 +379,7 @@ If you would like to contribute financially, you can do so on [Github](https://g
 
 I would like to thank everyone who has made a donation:
 
-<img alt="GitHub sponsors of Rufin" src="https://raw.githubusercontent.com/screwys/Rufin/credits/sponsors.svg">
+<img alt="GitHub sponsors of Rufin" src="https://raw.githubusercontent.com/rufin-app/rufin/credits/sponsors.svg">
 
 # License
 

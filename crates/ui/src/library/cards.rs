@@ -185,7 +185,7 @@ pub mod collection_grid_cover_view_imp {
     use gtk::{CompositeTemplate, TemplateChild, glib, prelude::*, subclass::prelude::*};
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/collection_grid_cover.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/collection_grid_cover.ui")]
     pub struct CollectionGridCoverView {
         #[template_child]
         pub overlay: TemplateChild<gtk::Overlay>,

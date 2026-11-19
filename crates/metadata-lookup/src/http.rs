@@ -11,7 +11,7 @@ use tracing::debug;
 const USER_AGENT: &str = concat!(
     "Rufin/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/screwys/Rufin)"
+    " (https://github.com/rufin-app/rufin)"
 );
 
 pub(crate) const IMAGE_MAX_BYTES: usize = 32 * 1024 * 1024;

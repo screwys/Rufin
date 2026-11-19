@@ -13,7 +13,7 @@ use std::{
 };
 
 crate::composite_box!(pub(crate) MetadataTrackRow, track_row, "RufinMetadataTrackRow",
-"/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_track.ui", {
+"/app/rufin/rufin/ui/preferences/dialogs/metadata_track.ui", {
     title: gtk::Label, status: gtk::Label,
 });
 

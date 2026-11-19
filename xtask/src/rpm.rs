@@ -323,7 +323,7 @@ fn verify_tag(root: &Path, tag: &str) -> Result<()> {
             "merge-base",
             "--is-ancestor",
             &tag_commit,
-            "origin/main",
+            "origin/master",
         ]),
         "release tag ancestry",
     )
@@ -359,11 +359,7 @@ fn verify_source_inputs(root: &Path, spec: &str, source_ref: &str, version: &str
         .into());
     }
 
-    let metainfo = git_file(
-        root,
-        source_ref,
-        "resources/io.github.screwys.Rufin.metainfo.xml",
-    )?;
+    let metainfo = git_file(root, source_ref, "resources/app.rufin.rufin.metainfo.xml")?;
     let metainfo_version = latest_metainfo_version(&metainfo)?;
     if metainfo_version != version {
         return Err(format!(

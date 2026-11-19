@@ -7,7 +7,16 @@ impl SourceOwner {
     pub async fn unavailable_local_folder(&self, media_uri: &str) -> Option<String> {
         let cue = library::cue_media_parts(media_uri);
         let uri = cue.as_ref().map_or(media_uri, |(_, uri, _, _)| uri);
-        let path = library::file_media_path(uri)?;
+        // A Flatpak reads the file through its folder grant, at a path other than its identity.
+        let access = self
+            .shared
+            .catalog
+            .playables_by_uri(&[uri.to_owned()])
+            .await
+            .ok()
+            .and_then(|playables| playables.into_iter().next())
+            .and_then(|playable| playable.local_uri());
+        let path = library::file_media_path(access.as_deref().unwrap_or(uri))?;
         unavailable_local_folder_for_path(&self.list_sources().local_folders, &path).await
     }
 

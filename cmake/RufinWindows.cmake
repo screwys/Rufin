@@ -20,11 +20,11 @@ cmake_path(GET RUFIN_WINDOWS_PIXBUF_MODULE_DIR PARENT_PATH RUFIN_WINDOWS_PIXBUF_
 cmake_path(GET RUFIN_WINDOWS_PIXBUF_ABI_DIR PARENT_PATH RUFIN_WINDOWS_PIXBUF_ROOT)
 
 if(RUFIN_BUILD_IDENTITY STREQUAL "development")
-  set(RUFIN_WINDOWS_APP_ID io.github.screwys.Rufin.Devel)
+  set(RUFIN_WINDOWS_APP_ID app.rufin.rufin.Devel)
   set(RUFIN_WINDOWS_DISPLAY_NAME "Rufin (Development)")
   set(RUFIN_WINDOWS_PROJECT_NAME Rufin.Devel)
 else()
-  set(RUFIN_WINDOWS_APP_ID io.github.screwys.Rufin)
+  set(RUFIN_WINDOWS_APP_ID app.rufin.rufin)
   set(RUFIN_WINDOWS_DISPLAY_NAME Rufin)
   set(RUFIN_WINDOWS_PROJECT_NAME Rufin)
 endif()

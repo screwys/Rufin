@@ -1,6 +1,6 @@
 FROM registry.fedoraproject.org/fedora-minimal:44
 
-LABEL org.opencontainers.image.source="https://github.com/screwys/Rufin" \
+LABEL org.opencontainers.image.source="https://github.com/rufin-app/rufin" \
       org.opencontainers.image.description="Rufin development environment"
 
 RUN sed -i 's/^countme=1$/countme=0/' /etc/yum.repos.d/*.repo \

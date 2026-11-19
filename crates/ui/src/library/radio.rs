@@ -46,7 +46,7 @@ crate::composite_box!(
     pub StationCardView,
     station_card_view_imp,
     "RufinStationCardView",
-    "/io/github/screwys/Rufin/ui/routes/radio_station_card.ui",
+    "/app/rufin/rufin/ui/routes/radio_station_card.ui",
     {
         cover: gtk::Box,
         heading: gtk::Box,

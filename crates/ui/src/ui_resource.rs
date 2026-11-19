@@ -2,7 +2,7 @@ use gtk::glib;
 use gtk::prelude::*;
 
 /// Where the compiled interface definitions and styles live.
-pub(crate) const UI_PREFIX: &str = "/io/github/screwys/Rufin/ui/";
+pub(crate) const UI_PREFIX: &str = "/app/rufin/rufin/ui/";
 
 macro_rules! composite_box {
     ($vis:vis $name:ident, $imp:ident, $gtype:literal, $resource:literal, {
@@ -89,11 +89,11 @@ mod tests {
     fn representative_rufin_icons_are_compiled_resources() {
         crate::register_resources().expect("resource registration");
         for relative_path in [
-            "scalable/apps/io.github.screwys.Rufin.svg",
-            "64x64/apps/io.github.screwys.Rufin.source.webdav.png",
-            "64x64/apps/io.github.screwys.Rufin.source.smb.png",
-            "64x64/apps/io.github.screwys.Rufin.source.plex.png",
-            "64x64/apps/io.github.screwys.Rufin.source.emby.png",
+            "scalable/apps/app.rufin.rufin.svg",
+            "64x64/apps/app.rufin.rufin.source.webdav.png",
+            "64x64/apps/app.rufin.rufin.source.smb.png",
+            "64x64/apps/app.rufin.rufin.source.plex.png",
+            "64x64/apps/app.rufin.rufin.source.emby.png",
             "scalable/actions/rufin-drive-harddisk-symbolic.svg",
             "scalable/actions/rufin-edit-clear-symbolic.svg",
             "scalable/actions/rufin-go-last-symbolic.svg",
@@ -118,9 +118,9 @@ mod tests {
             "scalable/actions/rufin-search-symbolic.svg",
             "scalable/actions/rufin-tag-outline-symbolic.svg",
             "scalable/actions/rufin-x-office-calendar-symbolic.svg",
-            "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
+            "symbolic/apps/app.rufin.rufin-symbolic.svg",
         ] {
-            let path = format!("/io/github/screwys/Rufin/icons/hicolor/{relative_path}");
+            let path = format!("/app/rufin/rufin/icons/hicolor/{relative_path}");
             gtk::gio::resources_lookup_data(&path, gtk::gio::ResourceLookupFlags::NONE)
                 .unwrap_or_else(|error| panic!("missing compiled Rufin resource {path}: {error}"));
         }

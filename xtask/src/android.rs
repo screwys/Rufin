@@ -439,7 +439,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
         "rufin-bindgen",
     ]))?;
     copy_file(
-        &root.join("resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"),
+        &root.join("resources/icons/hicolor/512x512/apps/app.rufin.rufin.png"),
         &generated.join("res/drawable-nodpi/app_icon.png"),
     )?;
     for provider in [
@@ -453,7 +453,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     ] {
         copy_file(
             &root.join(format!(
-                "resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.{provider}.png"
+                "resources/icons/hicolor/64x64/apps/app.rufin.rufin.source.{provider}.png"
             )),
             &generated.join(format!("res/drawable-nodpi/source_{provider}.png")),
         )?;
@@ -461,7 +461,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     for service in ["lastfm", "musicbrainz"] {
         copy_file(
             &root.join(format!(
-                "resources/icons/hicolor/64x64/apps/io.github.screwys.Rufin.external.{service}.png"
+                "resources/icons/hicolor/64x64/apps/app.rufin.rufin.external.{service}.png"
             )),
             &generated.join(format!("res/drawable-nodpi/external_{service}.png")),
         )?;
@@ -474,9 +474,8 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
 /// symbolic glyph in each tile's color, sized to stay inside every launcher's mask.
 fn launcher_icons(root: &Path, generated: &Path) -> Result<()> {
     let apps = root.join("resources/icons/hicolor");
-    let colored = fs::read_to_string(apps.join("scalable/apps/io.github.screwys.Rufin.svg"))?;
-    let symbolic =
-        fs::read_to_string(apps.join("symbolic/apps/io.github.screwys.Rufin-symbolic.svg"))?;
+    let colored = fs::read_to_string(apps.join("scalable/apps/app.rufin.rufin.svg"))?;
+    let symbolic = fs::read_to_string(apps.join("symbolic/apps/app.rufin.rufin-symbolic.svg"))?;
     for (name, svg, size) in [
         ("launcher_colored_foreground", colored, 232.0),
         (
@@ -535,9 +534,7 @@ fn icons(root: &Path, generated: &Path) -> Result<()> {
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<std::io::Result<Vec<_>>>()?;
     paths.sort();
-    paths.push(
-        root.join("resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"),
-    );
+    paths.push(root.join("resources/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg"));
     let mut mapping = String::from(
         "package io.github.screwys.rufin\n\ninternal data class RufinIconResource(val drawable: Int, val glyphScale: Float, val glyphX: Float, val glyphY: Float, val canvas: Float)\n\ninternal val rufinIconResources = mapOf(\n",
     );
@@ -549,7 +546,7 @@ fn icons(root: &Path, generated: &Path) -> Result<()> {
             .file_stem()
             .and_then(|name| name.to_str())
             .ok_or("Invalid icon filename")?;
-        let name = if name == "io.github.screwys.Rufin-symbolic" {
+        let name = if name == "app.rufin.rufin-symbolic" {
             "rufin-cover-fallback-symbolic"
         } else {
             name

@@ -120,7 +120,7 @@ crate::composite_box!(
     pub CollectionGridCardView,
     collection_grid_card_view_imp,
     "RufinCollectionGridCardView",
-    "/io/github/screwys/Rufin/ui/routes/collection_grid_card.ui",
+    "/app/rufin/rufin/ui/routes/collection_grid_card.ui",
     {
         title_row: gtk::Box,
         title: gtk::Label,

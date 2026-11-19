@@ -23,7 +23,7 @@ const TEMPLATE_HEADER: &str = "# Rufin translation template.\n\
 msgid \"\"\n\
 msgstr \"\"\n\
 \"Project-Id-Version: Rufin\\n\"\n\
-\"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\\n\"\n\
+\"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\\n\"\n\
 \"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\\n\"\n\
 \"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n\"\n\
 \"Last-Translator: Rufin translators\\n\"\n\
