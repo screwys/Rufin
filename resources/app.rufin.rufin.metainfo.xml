@@ -38,59 +38,59 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse artists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/artists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/artists.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the compact sidebar</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/compact_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/compact_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/playlist_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit metadata of several tracks</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/edit_metadata.png</image>
     </screenshot>
     <screenshot>
       <caption>Look up metadata on MusicBrainz</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata_lookup.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/edit_metadata_lookup.png</image>
     </screenshot>
     <screenshot>
       <caption>Find and sync lyrics</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata_lyrics.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/edit_metadata_lyrics.png</image>
     </screenshot>
     <screenshot>
       <caption>Tune the equalizer</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/equalizer_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/equalizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize how lists look</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/customize_display.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Rearrange the sidebar and the visualizer, queue and lyrics panes</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/reorder_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/reorder_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/integrations.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.19.0/resources/screenshots/integrations.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">app.rufin.rufin.desktop</launchable>
@@ -107,6 +107,12 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.19.0" date="2026-11-19">
+      <description>
+        <p>Rufin repo is now at the organization! This is only a minor release because app IDs changed. Even though I tried my best to make sure the new id does as little damage as possible, if there happens to be an issue I intend to do a patch release shortly after.</p>
+        <p>And an announcement: Last.fm has made a sudden change that their API is no longer offered for free, starting from December 1. This affects of course scrobbling and extra metadata lookups for us. Since Rufin also started to support self-hosted scrobblers like Koito and Maloja on top of already available ListenBrainz and Libre.fm, I believe we cover the scrobbling department enough. Currently there is not a real plan about this, it might just stop working.</p>
+      </description>
+    </release>
     <release version="0.18.0" date="2026-11-18">
       <description>
         <p>This release brings three substantive features alongside a more polished UI: internet radio, a new recommendation engine behind Auto DJ and Mixes. Rufin will also move to an organization by the next release, and the app ID will change. This can create some issues for Flatpak and Android users, therefore it is recommended to export a backup. Additionally, the Matrix chat has also moved to #rufin:rufin.app, come say hi!</p>
