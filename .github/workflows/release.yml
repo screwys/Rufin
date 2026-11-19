@@ -124,7 +124,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: "{Rufin-android-apks,io.github.screwys.Rufin-*.flatpak,Rufin-macos-*.dmg,Rufin-setup.exe,rpm-release-*,archlinux-*}"
+          pattern: "{Rufin-android-apks,app.rufin.rufin-*.flatpak,Rufin-macos-*.dmg,Rufin-setup.exe,rpm-release-*,archlinux-*}"
           merge-multiple: true
           path: dist
 
@@ -136,8 +136,8 @@ jobs:
           version="${TAG#v}"
           for asset in \
             "rufin-$version-archlinux-x86_64.tar.zst" \
-            io.github.screwys.Rufin-x86_64.flatpak \
-            io.github.screwys.Rufin-aarch64.flatpak \
+            app.rufin.rufin-x86_64.flatpak \
+            app.rufin.rufin-aarch64.flatpak \
             Rufin-android-arm64-v8a.apk \
             Rufin-android-armeabi-v7a.apk \
             Rufin-android-x86_64.apk \

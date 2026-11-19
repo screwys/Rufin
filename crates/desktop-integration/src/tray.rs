@@ -23,7 +23,7 @@ mod freedesktop {
     const TRAY_ICON_SIZES: [i32; 5] = [16, 22, 24, 32, 48];
     const APP_ICON_BYTES: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
+        "/../../resources/icons/hicolor/512x512/apps/app.rufin.rufin.png"
     ));
 
     pub struct Tray {
@@ -376,11 +376,11 @@ mod windows {
 
     const APP_ICON_BYTES: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"
+        "/../../resources/icons/hicolor/512x512/apps/app.rufin.rufin.png"
     ));
     const SYMBOLIC_ICON_SVG: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"
+        "/../../resources/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg"
     ));
     const SHOW_ID: &str = "rufin-tray-show";
     const PLAY_PAUSE_ID: &str = "rufin-tray-play-pause";

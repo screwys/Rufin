@@ -21,7 +21,7 @@ crate::composite_box!(
     pub FoldersRouteView,
     folders_route_view_imp,
     "RufinFoldersRouteView",
-    "/io/github/screwys/Rufin/ui/routes/folders.ui",
+    "/app/rufin/rufin/ui/routes/folders.ui",
     {
         toolbar_host: gtk::Box,
         breadcrumb_host: gtk::Box,

@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - master
     paths:
       - .cargo/**
       - nextest.toml
@@ -293,7 +293,7 @@ jobs:
     uses: ./.github/workflows/nix.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      upload_cache: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor == github.repository_owner }}
+      upload_cache: ${{ github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER"]'), github.event.pull_request.author_association) }}
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
@@ -344,7 +344,7 @@ jobs:
 
       - name: Check Rufin through container
         env:
-          RUFIN_CONTAINER_IMAGE: ${{ needs.changes.outputs.build_container_image == 'true' && 'localhost/rufin-dev:ci' || 'ghcr.io/screwys/rufin-dev:latest' }}
+          RUFIN_CONTAINER_IMAGE: ${{ needs.changes.outputs.build_container_image == 'true' && 'localhost/rufin-dev:ci' || 'ghcr.io/rufin-app/rufin-dev:latest' }}
           RUFIN_CONTAINER_RUNTIME: docker
         run: |
           set -euo pipefail
@@ -406,7 +406,7 @@ jobs:
           if [[ "$USE_CURRENT_NIX" == "true" || -z "$BASE_REF" ]]; then
             echo "target=." >> "$GITHUB_OUTPUT"
           else
-            echo "target=github:screwys/Rufin/$BASE_REF" >> "$GITHUB_OUTPUT"
+            echo "target=github:rufin-app/rufin/$BASE_REF" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Nix
@@ -425,7 +425,7 @@ jobs:
         with:
           cache-bin: "false"
           prefix-key: v2-rust
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           cmd-format: bash scripts/rust-cache-command nix "${{ steps.nix-environment.outputs.target }}" {0}
 
       - name: Check Rust lints
@@ -508,7 +508,7 @@ jobs:
         with:
           cache-bin: "false"
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           shared-key: macos-arm64-${{ steps.packages.outputs.versions }}
           workspaces: ". -> .local/target"
 
@@ -598,7 +598,7 @@ jobs:
           cache-bin: "false"
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           shared-key: windows-ucrt64
           workspaces: ". -> .local/target"
 

@@ -66,8 +66,6 @@ where
             warn!(%error, "could not migrate saved source credentials");
         }
     });
-    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-    runtime.spawn_blocking(crate::flatpak_documents::grant_to_next_app_id);
     let store_path = paths.store_file();
     let (catalog, temporary_store) = match library::Catalog::open_installation(
         &store_path,

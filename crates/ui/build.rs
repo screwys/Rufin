@@ -25,7 +25,7 @@ fn main() {
 
     let mut manifest = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gresources>\n  \
-         <gresource prefix=\"/io/github/screwys/Rufin/icons\">\n",
+         <gresource prefix=\"/app/rufin/rufin/icons\">\n",
     );
     for icon in &icon_files {
         if icon.ends_with("-symbolic.svg") {
@@ -37,7 +37,7 @@ fn main() {
         }
         manifest.push_str(&format!("    <file>{icon}</file>\n"));
     }
-    manifest.push_str("  </gresource>\n  <gresource prefix=\"/io/github/screwys/Rufin/ui\">\n");
+    manifest.push_str("  </gresource>\n  <gresource prefix=\"/app/rufin/rufin/ui\">\n");
     for interface in &interfaces {
         if interface.ends_with(".ui") {
             let definition = fs::read_to_string(resources.join(interface))

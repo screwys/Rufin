@@ -1,5 +1,5 @@
 {
-  "app-id": "io.github.screwys.Rufin",
+  "app-id": "app.rufin.rufin",
   "runtime": "org.gnome.Platform",
   "runtime-version": "51",
   "sdk": "org.gnome.Sdk",
@@ -148,7 +148,7 @@
       "sources": [
         {
           "type": "git",
-          "url": "https://github.com/screwys/Rufin.git",
+          "url": "https://github.com/rufin-app/rufin.git",
           "tag": "v0.17.1",
           "commit": "a815dee2f580925c47054aee2b504b1a13dfa9f5"
         },

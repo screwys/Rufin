@@ -11,7 +11,7 @@ use tracing::error;
 
 use rufin_core::runtime::RuntimeInputs;
 
-const ICON_RESOURCE_ROOT: &str = "/io/github/screwys/Rufin/icons/hicolor";
+const ICON_RESOURCE_ROOT: &str = "/app/rufin/rufin/icons/hicolor";
 const GTK_DECORATION_LAYOUT_OPTION: &str = "gtk-decoration-layout";
 const WINDOW_BAR_PREVIEW_OPTION: &str = "window-bar-preview";
 

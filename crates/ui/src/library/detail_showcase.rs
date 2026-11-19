@@ -36,7 +36,7 @@ mod showcase_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/detail_showcase.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/detail_showcase.ui")]
     pub struct DetailShowcaseView {
         #[template_child]
         pub layers: TemplateChild<gtk::Overlay>,

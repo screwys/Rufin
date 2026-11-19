@@ -314,7 +314,7 @@
                             <property name="halign">start</property>
                             <property name="factory">
                               <object class="GtkBuilderListItemFactory">
-                                <property name="resource">/io/github/screwys/Rufin/ui/player/equalizer-band-item.ui</property>
+                                <property name="resource">/app/rufin/rufin/ui/player/equalizer-band-item.ui</property>
                               </object>
                             </property>
                             <accessibility>

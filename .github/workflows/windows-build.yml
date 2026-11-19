@@ -100,7 +100,7 @@ jobs:
           cache-on-failure: true
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') }}
           shared-key: windows-package-ucrt64
           workspaces: ". -> .local/target"
 
@@ -213,7 +213,7 @@ jobs:
         shell: pwsh
         run: |
           $root = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/Rufin'))
-          $data = Join-Path $env:LOCALAPPDATA 'screwys/Rufin'
+          $data = Join-Path $env:LOCALAPPDATA 'Rufin'
           # /PURGE removes the cache and keeps the rest of the user's data.
           New-Item -ItemType Directory -Force (Join-Path $data 'cache') | Out-Null
           [IO.File]::WriteAllText((Join-Path $data 'cache/check.txt'), 'cache')

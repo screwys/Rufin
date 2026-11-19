@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_ID: io.github.screwys.Rufin
+  APP_ID: app.rufin.rufin
   RUNTIME_REPO_URL: https://flathub.org/repo/flathub.flatpakrepo
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
           || '[{"architecture":"x86_64","runner":"ubuntu-24.04"}]') }}
     runs-on: ${{ matrix.runner }}
     env:
-      BUNDLE_NAME: io.github.screwys.Rufin-${{ matrix.architecture }}.flatpak
+      BUNDLE_NAME: app.rufin.rufin-${{ matrix.architecture }}.flatpak
 
     steps:
       - name: Install Flatpak tooling

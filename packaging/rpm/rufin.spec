@@ -1,12 +1,12 @@
 %global debug_package %{nil}
 %global rustflags_debuginfo 0
 Name:           rufin
-Version:        0.18.0
+Version:        0.19.0
 Release:        1%{?dist}
 Summary:        Native GTK4/libadwaita music player written in Rust
 
 License:        GPL-3.0-or-later AND Apache-2.0 AND BSD-3-Clause AND CC0-1.0 AND CDLA-Permissive-2.0 AND ISC AND MIT AND MPL-2.0 AND NAIST-2003 AND Unicode-3.0 AND Unlicense AND Zlib
-URL:            https://github.com/screwys/Rufin
+URL:            https://github.com/rufin-app/rufin
 Source0:        Rufin-%{version}.tar.xz
 Source1:        Rufin-%{version}-vendor.tar.xz
 
@@ -78,8 +78,8 @@ find "%{buildroot}%{_datadir}/icons/hicolor" -type f -print \
   | LC_ALL=C sort >> rufin.lang
 
 %check
-desktop-file-validate resources/io.github.screwys.Rufin.desktop
-appstreamcli validate --no-net resources/io.github.screwys.Rufin.metainfo.xml
+desktop-file-validate resources/app.rufin.rufin.desktop
+appstreamcli validate --no-net resources/app.rufin.rufin.metainfo.xml
 
 %files -f rufin.lang
 %license LICENSE
@@ -87,8 +87,8 @@ appstreamcli validate --no-net resources/io.github.screwys.Rufin.metainfo.xml
 %license cargo-vendor.txt
 %doc README.md
 %{_bindir}/rufin
-%{_datadir}/applications/io.github.screwys.Rufin.desktop
-%{_metainfodir}/io.github.screwys.Rufin.metainfo.xml
+%{_datadir}/applications/app.rufin.rufin.desktop
+%{_metainfodir}/app.rufin.rufin.metainfo.xml
 
 %changelog
 * Fri Jul 17 2026 screwy <me@screwy.dev> - 0.9.0-1

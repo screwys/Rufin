@@ -9,10 +9,10 @@ use crate::process::{
     repo_root, repo_url_from_origin, run_command, write_string,
 };
 
-const FLATHUB_MANIFEST: &str = "packaging/flatpak/io.github.screwys.Rufin.flathub.json";
+const FLATHUB_MANIFEST: &str = "packaging/flatpak/app.rufin.rufin.flathub.json";
 const RPM_SPEC: &str = "packaging/rpm/rufin.spec";
 const LATEST_RELEASE_SUFFIX: &str = " (latest release)";
-const DEVELOPMENT_VERSION: &str = "main (development)";
+const DEVELOPMENT_VERSION: &str = "master (development)";
 
 pub(crate) fn run(mut args: Vec<String>) -> Result<()> {
     if args.is_empty() {
@@ -495,7 +495,7 @@ fn format_release_note_author(author: &str) -> String {
 }
 
 fn is_release_note_bot_author(author: &str) -> bool {
-    author.ends_with("[bot]") || author == "weblate"
+    author.ends_with("[bot]") || author == "weblate" || author == "rufinbot"
 }
 
 fn is_release_publish_pr_title(title: &str) -> bool {
@@ -544,7 +544,7 @@ fn update_flathub_manifest_source_text(input: &str, tag: &str, commit: &str) -> 
         .collect::<String>();
     let property_indent = format!("{indent}  ");
     let replacement = format!(
-        "{{\n{property_indent}\"type\": \"git\",\n{property_indent}\"url\": \"https://github.com/screwys/Rufin.git\",\n{property_indent}\"tag\": \"{tag}\",\n{property_indent}\"commit\": \"{commit}\"\n{indent}}}"
+        "{{\n{property_indent}\"type\": \"git\",\n{property_indent}\"url\": \"https://github.com/rufin-app/rufin.git\",\n{property_indent}\"tag\": \"{tag}\",\n{property_indent}\"commit\": \"{commit}\"\n{indent}}}"
     );
 
     let mut output = String::new();
@@ -713,7 +713,7 @@ fn replace_workspace_version_in_toml(input: &str, version: &str) -> Result<Strin
 }
 
 fn update_metainfo_release(version: &str, release_date: &str, notes: &str) -> Result<()> {
-    let path = PathBuf::from("resources/io.github.screwys.Rufin.metainfo.xml");
+    let path = PathBuf::from("resources/app.rufin.rufin.metainfo.xml");
     let input = read_to_string(&path)?;
     let without_existing = remove_existing_release_entries(&input, version);
     let entry = format_metainfo_release(version, release_date, notes);
@@ -869,8 +869,8 @@ pub(crate) fn metainfo_at_ref(reference: &str) -> Result<String> {
             "ls-tree",
             "--name-only",
             reference,
-            "resources/io.github.screwys.Rufin.metainfo.xml",
-            "data/io.github.screwys.Rufin.metainfo.xml",
+            "resources/app.rufin.rufin.metainfo.xml",
+            "data/app.rufin.rufin.metainfo.xml",
         ],
     )?;
     let path = paths
@@ -882,7 +882,7 @@ pub(crate) fn metainfo_at_ref(reference: &str) -> Result<String> {
 
 fn replace_raw_resource_refs(input: &str, version: &str) -> String {
     let mut output = String::new();
-    let needle = "https://raw.githubusercontent.com/screwys/Rufin/";
+    let needle = "https://raw.githubusercontent.com/rufin-app/rufin/";
     let mut index = 0;
 
     while let Some(offset) = input[index..].find(needle) {

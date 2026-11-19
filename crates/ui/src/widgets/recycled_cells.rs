@@ -20,7 +20,7 @@ crate::composite_box!(
     pub RowActions,
     row_actions_imp,
     "RufinRowActions",
-    "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
+    "/app/rufin/rufin/ui/routes/row_actions.ui",
     { menu: gtk::Button }
 );
 
@@ -76,7 +76,7 @@ pub mod artwork_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_artwork_cell.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/recycled_artwork_cell.ui")]
     pub struct RecycledArtworkCell {
         #[template_child]
         area: TemplateChild<gtk::Overlay>,
@@ -161,7 +161,7 @@ pub mod text_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/recycled_text_cell.ui")]
     pub struct RecycledTextCell {
         #[template_child]
         pub(super) label: TemplateChild<gtk::Label>,
@@ -247,7 +247,7 @@ crate::composite_box!(
     pub RecycledBadgedTextCell,
     badged_text_imp,
     "RufinRecycledBadgedTextCell",
-    "/io/github/screwys/Rufin/ui/routes/recycled_badged_text_cell.ui",
+    "/app/rufin/rufin/ui/routes/recycled_badged_text_cell.ui",
     {
         label: gtk::Label,
         folder_icon: gtk::Image,
@@ -284,7 +284,7 @@ pub mod merged_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_merged_cell.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/recycled_merged_cell.ui")]
     pub struct RecycledMergedCell {
         #[template_child]
         pub(super) cover: TemplateChild<RecycledArtworkCell>,
@@ -406,7 +406,7 @@ pub mod folder_imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/recycled_folder_cell.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/recycled_folder_cell.ui")]
     pub struct RecycledFolderCell {
         #[template_child]
         pub(super) icon: TemplateChild<gtk::Image>,

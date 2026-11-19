@@ -137,7 +137,7 @@
                                     </child>
                                     <child>
                                       <object class="GtkButton" id="lookup">
-                                        <property name="child"><object class="AdwButtonContent" id="lookup_content"><property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property><property name="label" translatable="yes">Search by AcoustID</property></object></property>
+                                        <property name="child"><object class="AdwButtonContent" id="lookup_content"><property name="icon-name">app.rufin.rufin.external.musicbrainz</property><property name="label" translatable="yes">Search by AcoustID</property></object></property>
                                       </object>
                                     </child>
                                   </object>

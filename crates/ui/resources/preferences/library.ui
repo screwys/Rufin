@@ -393,7 +393,7 @@
     <property name="activatable">true</property>
     <child type="prefix">
       <object class="GtkImage">
-        <property name="icon-name">io.github.screwys.Rufin-symbolic</property>
+        <property name="icon-name">app.rufin.rufin-symbolic</property>
         <property name="pixel-size">28</property>
       </object>
     </child>

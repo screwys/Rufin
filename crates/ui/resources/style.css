@@ -1728,7 +1728,7 @@ button.quick-mix-chip-button {
 .cover-tile.cover-fallback {
   color: #deddda;
   background-color: #77767b;
-  background-image: -gtk-icontheme("io.github.screwys.Rufin-symbolic");
+  background-image: -gtk-icontheme("app.rufin.rufin-symbolic");
   background-position: center;
   background-repeat: no-repeat;
   background-size: 75% 75%;

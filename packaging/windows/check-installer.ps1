@@ -22,7 +22,7 @@ function Build-Fixture([string]$Version) {
         [IO.File]::WriteAllText((Join-Path $stage 'z-conflict/child.txt'), 'new payload')
     }
     cargo run --locked -p xtask -- generate windows-installer $stage $LocaleDir $Compiler $work `
-        $Version $name $name "io.github.screwys.$name"
+        $Version $name $name "app.rufin.$name"
     if ($LASTEXITCODE -ne 0) { throw 'Could not build installer fixture' }
 }
 

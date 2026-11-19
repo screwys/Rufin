@@ -426,7 +426,7 @@ mod freedesktop {
     fn mpris_track_id(media: &playback::CurrentMediaId) -> MprisTrackId {
         let encoded = blake3::hash(media.media_uri.as_bytes()).to_hex();
         MprisTrackId::try_from(format!(
-            "/io/github/screwys/Rufin/track/{}/{encoded}",
+            "/app/rufin/rufin/track/{}/{encoded}",
             media.run.map_or(0, playback::RunId::get)
         ))
         .unwrap_or(MprisTrackId::NO_TRACK)

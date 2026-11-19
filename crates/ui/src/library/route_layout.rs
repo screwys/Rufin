@@ -16,7 +16,7 @@ crate::composite_box!(
     pub RoutePlaceholderView,
     route_placeholder_view_imp,
     "RufinRoutePlaceholderView",
-    "/io/github/screwys/Rufin/ui/routes/placeholder.ui",
+    "/app/rufin/rufin/ui/routes/placeholder.ui",
     {
         heading: gtk::Label,
         body: gtk::Label,

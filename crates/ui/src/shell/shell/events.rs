@@ -175,7 +175,6 @@ fn apply_source_configuration(shell: &Rc<Shell>) {
     shell.update_add_server_dialog();
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
-    crate::preferences::preferences::backup::show_notice(shell);
     if shell.products.source.selected_library().is_none() {
         shell.refresh_playlist_picker();
     }

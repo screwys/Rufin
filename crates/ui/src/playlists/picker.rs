@@ -16,7 +16,7 @@ crate::composite_box!(
     pub(crate) PlaylistPickerRowView,
     playlist_picker_row_view_imp,
     "RufinPlaylistPickerRowView",
-    "/io/github/screwys/Rufin/ui/routes/playlist_picker_row.ui",
+    "/app/rufin/rufin/ui/routes/playlist_picker_row.ui",
     {
         check: gtk::CheckButton,
         cover_host: gtk::Box,

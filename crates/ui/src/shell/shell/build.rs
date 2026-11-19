@@ -470,7 +470,7 @@ pub async fn build(
         let body = gtk::glib::markup_escape_text(&body.label())
             .replace(
                 "{link_start}",
-                "<a href=\"https://github.com/screwys/Rufin/issues/1055#issuecomment-5637922622\">",
+                "<a href=\"https://github.com/rufin-app/rufin/issues/1055#issuecomment-5637922622\">",
             )
             .replace("{link_end}", "</a>");
         secret_storage_fallback_dialog.set_body_use_markup(true);

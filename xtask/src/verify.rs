@@ -64,16 +64,16 @@ fn package_layout(args: Vec<String>) -> Result<()> {
     }
 
     for path in [
-        "share/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png",
-        "share/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg",
-        "share/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
+        "share/icons/hicolor/512x512/apps/app.rufin.rufin.png",
+        "share/icons/hicolor/scalable/apps/app.rufin.rufin.svg",
+        "share/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg",
     ] {
         require_file(&package_path(&root, &prefix, path))?;
     }
     if !windows_package {
         for path in [
-            "share/applications/io.github.screwys.Rufin.desktop",
-            "share/metainfo/io.github.screwys.Rufin.metainfo.xml",
+            "share/applications/app.rufin.rufin.desktop",
+            "share/metainfo/app.rufin.rufin.metainfo.xml",
         ] {
             require_file(&package_path(&root, &prefix, path))?;
         }
@@ -137,7 +137,7 @@ fn release_metadata(args: Vec<String>) -> Result<()> {
 
 fn verify_release_metadata_at(root: &Path, tag: &str) -> Result<()> {
     let cargo_toml = read_to_string(&root.join("Cargo.toml"))?;
-    let metainfo = read_to_string(&root.join("resources/io.github.screwys.Rufin.metainfo.xml"))?;
+    let metainfo = read_to_string(&root.join("resources/app.rufin.rufin.metainfo.xml"))?;
     verify_release_metadata_contents(tag, &cargo_toml, &metainfo)
 }
 
@@ -185,7 +185,7 @@ fn release_tag(args: Vec<String>) -> Result<()> {
             "fetch",
             "--force",
             "origin",
-            "refs/heads/main:refs/remotes/origin/main",
+            "refs/heads/master:refs/remotes/origin/master",
             &format!("refs/tags/{tag}:refs/tags/{tag}"),
         ],
     )?;
@@ -224,7 +224,7 @@ fn release_tag(args: Vec<String>) -> Result<()> {
             "merge-base",
             "--is-ancestor",
             tag_target.trim(),
-            "origin/main",
+            "origin/master",
         ],
     )
 }

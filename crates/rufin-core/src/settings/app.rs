@@ -236,8 +236,6 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     download_lyrics_automatically: bool = false => set_download_lyrics_automatically;
     #[serde(default)]
     lyrics_cache_prompt_dismissed: bool = false => set_lyrics_cache_prompt_dismissed;
-    #[serde(default)]
-    backup_notice_dismissed: bool = false => set_backup_notice_dismissed;
     notifications_enabled: bool = false => set_notifications_enabled;
     #[serde(default = "default_true")]
     control_notifications_enabled: bool = true => set_control_notifications_enabled;
