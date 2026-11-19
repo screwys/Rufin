@@ -20,7 +20,7 @@ crate::composite_box!(
     pub ReleaseNoteRowView,
     release_note_row_view_imp,
     "RufinReleaseNoteRowView",
-    "/io/github/screwys/Rufin/ui/preferences/dialogs/release_note_row.ui",
+    "/app/rufin/rufin/ui/preferences/dialogs/release_note_row.ui",
     {
         version: gtk::Button,
         version_text: gtk::Label,
@@ -204,7 +204,7 @@ fn append_github_text(output: &mut String, text: &str) {
             }
             let number = chars[start + 1..index].iter().collect::<String>();
             output.push_str(&format!(
-                "<a href=\"https://github.com/screwys/Rufin/issues/{number}\">#{number}</a>"
+                "<a href=\"https://github.com/rufin-app/rufin/issues/{number}\">#{number}</a>"
             ));
             continue;
         }
@@ -833,13 +833,13 @@ mod tests {
                 ReleaseNote {
                     version: "2.0.0".to_string(),
                     date: String::new(),
-                    url: "https://github.com/screwys/Rufin/releases/tag/v2.0.0".to_string(),
+                    url: "https://github.com/rufin-app/rufin/releases/tag/v2.0.0".to_string(),
                     body: String::new(),
                 },
                 ReleaseNote {
                     version: "1.0.0".to_string(),
                     date: String::new(),
-                    url: "https://github.com/screwys/Rufin/releases/tag/v1.0.0".to_string(),
+                    url: "https://github.com/rufin-app/rufin/releases/tag/v1.0.0".to_string(),
                     body: String::new(),
                 },
             ],
@@ -861,7 +861,7 @@ mod tests {
     #[test]
     fn github_changelog_references_and_contributors_become_links() {
         let blocks = release_markdown_blocks(
-            "## Changelog\n\n- Fix playback by @someone in #744\n\n## New Contributors\n\n- @newcomer made their first contribution in #745\n\n**Full Changelog:** [v1...v2](https://github.com/screwys/Rufin/compare/v1...v2)",
+            "## Changelog\n\n- Fix playback by @someone in #744\n\n## New Contributors\n\n- @newcomer made their first contribution in #745\n\n**Full Changelog:** [v1...v2](https://github.com/rufin-app/rufin/compare/v1...v2)",
         );
 
         assert_eq!(blocks[0].kind, ReleaseBlockKind::Heading);
@@ -871,7 +871,7 @@ mod tests {
         assert!(
             blocks[1]
                 .markup
-                .contains("https://github.com/screwys/Rufin/issues/744")
+                .contains("https://github.com/rufin-app/rufin/issues/744")
         );
         assert_eq!(blocks[2].kind, ReleaseBlockKind::Heading);
         assert_eq!(blocks[3].kind, ReleaseBlockKind::Bullet);
@@ -879,7 +879,7 @@ mod tests {
         assert!(
             blocks[4]
                 .markup
-                .contains("https://github.com/screwys/Rufin/compare/v1...v2")
+                .contains("https://github.com/rufin-app/rufin/compare/v1...v2")
         );
     }
 }

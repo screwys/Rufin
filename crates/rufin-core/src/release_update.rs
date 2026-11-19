@@ -20,7 +20,8 @@ use tracing::debug;
 use self::install::{InstallOutcome, ReleaseInstaller};
 use crate::settings::SettingsFile;
 
-const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/screwys/Rufin/releases?per_page=5";
+const GITHUB_RELEASES_URL: &str =
+    "https://api.github.com/repos/rufin-app/rufin/releases?per_page=5";
 const RELEASE_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -674,7 +675,7 @@ mod tests {
         ReleaseNote {
             version: version.to_string(),
             date: String::new(),
-            url: format!("https://github.com/screwys/Rufin/releases/tag/v{version}"),
+            url: format!("https://github.com/rufin-app/rufin/releases/tag/v{version}"),
             body: String::new(),
         }
     }
@@ -712,7 +713,7 @@ mod tests {
             notes: vec![ReleaseNote {
                 version: "2.0.0".to_string(),
                 date: "2026-01-02".to_string(),
-                url: "https://github.com/screwys/Rufin/releases/tag/v2.0.0".to_string(),
+                url: "https://github.com/rufin-app/rufin/releases/tag/v2.0.0".to_string(),
                 body: "Summary\n\n- Item".to_string(),
             }],
         };
@@ -939,7 +940,7 @@ mod tests {
             {
                 "tag_name": "v1.0.0",
                 "published_at": "2026-01-01T00:00:00Z",
-                "html_url": "https://github.com/screwys/Rufin/releases/tag/v1.0.0",
+                "html_url": "https://github.com/rufin-app/rufin/releases/tag/v1.0.0",
                 "draft": false,
                 "prerelease": false,
                 "body": "Older item"
@@ -947,7 +948,7 @@ mod tests {
             {
                 "tag_name": "v2.0.0",
                 "published_at": "2026-06-28T12:34:56Z",
-                "html_url": "https://github.com/screwys/Rufin/releases/tag/v2.0.0",
+                "html_url": "https://github.com/rufin-app/rufin/releases/tag/v2.0.0",
                 "draft": false,
                 "prerelease": false,
                 "body": "Summary & context.\n\n## Changelog\n\n- First item by @someone in #123"
@@ -955,7 +956,7 @@ mod tests {
             {
                 "tag_name": "v2.1.0-beta.1",
                 "published_at": "2026-07-01T12:34:56Z",
-                "html_url": "https://github.com/screwys/Rufin/releases/tag/v2.1.0-beta.1",
+                "html_url": "https://github.com/rufin-app/rufin/releases/tag/v2.1.0-beta.1",
                 "draft": false,
                 "prerelease": true,
                 "body": "Preview"
@@ -969,7 +970,7 @@ mod tests {
                     ReleaseNote {
                         version: "2.0.0".to_string(),
                         date: "2026-06-28".to_string(),
-                        url: "https://github.com/screwys/Rufin/releases/tag/v2.0.0".to_string(),
+                        url: "https://github.com/rufin-app/rufin/releases/tag/v2.0.0".to_string(),
                         body:
                             "Summary & context.\n\n## Changelog\n\n- First item by @someone in #123"
                                 .to_string(),
@@ -977,7 +978,7 @@ mod tests {
                     ReleaseNote {
                         version: "1.0.0".to_string(),
                         date: "2026-01-01".to_string(),
-                        url: "https://github.com/screwys/Rufin/releases/tag/v1.0.0".to_string(),
+                        url: "https://github.com/rufin-app/rufin/releases/tag/v1.0.0".to_string(),
                         body: "Older item".to_string(),
                     }
                 ],
@@ -993,7 +994,7 @@ mod tests {
                     "tag_name": format!("v1.0.{version}"),
                     "published_at": "2026-06-28T12:34:56Z",
                     "html_url": format!(
-                        "https://github.com/screwys/Rufin/releases/tag/v1.0.{version}"
+                        "https://github.com/rufin-app/rufin/releases/tag/v1.0.{version}"
                     ),
                     "draft": false,
                     "prerelease": false,

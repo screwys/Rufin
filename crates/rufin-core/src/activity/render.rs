@@ -422,7 +422,9 @@ impl ReportSvg {
                 x + size * 0.125,
                 y + size * 0.125,
                 size * 0.75,
-                include_str!("../../../../resources/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg"),
+                include_str!(
+                    "../../../../resources/icons/hicolor/symbolic/apps/app.rufin.rufin-symbolic.svg"
+                ),
                 "#deddda",
             );
         }

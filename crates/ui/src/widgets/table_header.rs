@@ -10,7 +10,7 @@ mod header_cell_imp {
     use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/column_view_header_cell.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/column_view_header_cell.ui")]
     pub struct HeaderCell {
         #[template_child]
         pub content: TemplateChild<gtk::Box>,

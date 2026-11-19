@@ -743,22 +743,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !mix) {
         ConnectPairingPrompt(model) { openMore(MoreDestination.Connect) }
     }
-    // Offers once, before the release that changes the app ID, to export a backup.
-    var backupNotice by rememberSaveable { mutableStateOf(false) }
-    val applicationSettings = preferences.applicationSettings
-    LaunchedEffect(applicationSettings, model.sources, sources) {
-        if (!sources && applicationSettings != null &&
-            showsBackupNotice(applicationSettings, model.sources?.sources.orEmpty())) {
-            preferences.changePreference { setBackupNoticeDismissed(true) }
-            backupNotice = true
-        }
-    }
-    if (backupNotice) AlertDialog(onDismissRequest = { backupNotice = false },
-        properties = DialogProperties(dismissOnClickOutside = false),
-        title = { Text(translate("Export a Backup")) },
-        text = { Text(translate("With the next release, the repo will move to an organization and the app ID will change. For flatpak users this means the logins will not migrate automatically, and Android users will need to re download the app. There should likely be no problems for other packages, but in either case, it is recommended to export a backup to restore from it.")) },
-        confirmButton = { TextButton({ backupNotice = false; openMore(MoreDestination.Privacy) }) { Text(translate("Export Backup")) } },
-        dismissButton = { TextButton({ backupNotice = false }) { Text(translate("Close")) } })
     if (sources) Dialog(onDismissRequest = { model.closeSourceSetup(); sources = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val close = { model.closeSourceSetup(); sources = false }

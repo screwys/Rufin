@@ -6,7 +6,7 @@ pkgver=0.1.4.r0.g52dbf66
 pkgrel=1
 pkgdesc='Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.'
 arch=('x86_64' 'aarch64')
-url='https://github.com/screwys/Rufin'
+url='https://github.com/rufin-app/rufin'
 license=('GPL-3.0-or-later')
 depends=(
   'libgcc_s.so'
@@ -34,7 +34,7 @@ makedepends=(
 provides=('rufin')
 conflicts=('rufin')
 options=('!lto')
-source=('Rufin::git+https://github.com/screwys/Rufin.git')
+source=('Rufin::git+https://github.com/rufin-app/rufin.git')
 sha256sums=('SKIP')
 
 pkgver() {

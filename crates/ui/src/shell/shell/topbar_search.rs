@@ -15,7 +15,7 @@ crate::composite_box!(
     pub SearchPreviewRow,
     search_preview_row_imp,
     "RufinSearchPreviewRow",
-    "/io/github/screwys/Rufin/ui/shell/search_row.ui",
+    "/app/rufin/rufin/ui/shell/search_row.ui",
     { cover_host: gtk::Box, title_row: gtk::Box, title: gtk::Label, subtitle: gtk::Label, lyrics: crate::widgets::lyrics_snippet::LyricsSnippetView, separator: gtk::Label, kind: gtk::Stack, remove: gtk::Button, play: gtk::Button, menu: gtk::Button }
 );
 

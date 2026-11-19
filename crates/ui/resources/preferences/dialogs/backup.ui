@@ -14,27 +14,6 @@
     <property name="close-response">cancel</property>
     <responses><response id="cancel" translatable="yes">Cancel</response><response id="restore" translatable="yes" appearance="destructive">Restore</response></responses>
   </object>
-  <!-- Floating in every window size: a bottom sheet closes on a tap outside it. -->
-  <object class="AdwDialog" id="backup_notice">
-    <property name="title" translatable="yes">Export a Backup</property>
-    <property name="content-width">360</property>
-    <property name="presentation-mode">floating</property>
-    <property name="default-widget">backup_notice_export</property>
-    <property name="child"><object class="AdwToolbarView">
-      <child type="top"><object class="AdwHeaderBar"/></child>
-      <property name="content"><object class="GtkBox">
-        <property name="orientation">vertical</property><property name="spacing">12</property>
-        <property name="margin-start">18</property><property name="margin-end">18</property><property name="margin-bottom">18</property>
-        <child><object class="GtkLabel"><property name="label" translatable="yes">With the next release, the repo will move to an organization and the app ID will change. For Flatpak and MacOS users this means the logins will not migrate automatically, and Android users will need to re download the app.
-
-        There should likely be no problems for other packages, but in either case, it is recommended to export a backup to restore from it.</property><property name="wrap">true</property><property name="xalign">0</property></object></child>
-        <child><object class="GtkBox">
-          <property name="halign">end</property><property name="spacing">8</property><property name="margin-top">6</property>
-          <child><object class="GtkButton" id="backup_notice_export"><property name="label" translatable="yes">Export Backup</property><style><class name="suggested-action"/></style></object></child>
-        </object></child>
-      </object></property>
-    </object></property>
-  </object>
   <object class="AdwAlertDialog" id="export_options">
     <property name="heading" translatable="yes">Backup Password</property>
     <property name="body" translatable="yes">Backup file may contain sensitive information. Do you want to set a password?</property>

@@ -8,7 +8,7 @@ Rust dependencies are checked with cargo-deny, including advisories, license pol
 
 Release tags are signed via maintainer GPG key.
 
-CI caches are only used to speed up builds. PRs can restore the Rust build cache, but cache writes are limited to pushes to `main`, and cached binaries are disabled. Nix/Cachix cache write is limited to `main` or releases, with releases verifying the signed release tag first.
+CI caches are only used to speed up builds. PRs can restore the Rust build cache, but cache writes are limited to pushes to `master`, and cached binaries are disabled. Nix/Cachix cache write is limited to `master` or releases, with releases verifying the signed release tag first.
 
 ## Stored Secrets
 

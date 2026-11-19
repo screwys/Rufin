@@ -6,10 +6,10 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use app_identity::APP_ID;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 use app_identity::PROJECT_NAME;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use app_identity::{APP_ID, PREVIOUS_APP_ID};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -518,7 +518,23 @@ impl SystemKeyringBackend {
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
             let keyring = runtime
                 .block_on(async {
-                    tokio::time::timeout(KEYRING_TIMEOUT, oo7::Keyring::new()).await
+                    tokio::time::timeout(KEYRING_TIMEOUT, async {
+                        match oo7::Keyring::new().await {
+                            // A Flatpak's keyring file is sealed for its app ID, so the one
+                            // releases up to 0.18 left under the old ID cannot open; its logins
+                            // are entered again or restored from a backup.
+                            Err(oo7::Error::File(oo7::file::Error::IncorrectSecret)) => {
+                                // oo7 keeps it here; a Flatpak always sets XDG_DATA_HOME.
+                                if let Some(data) = std::env::var_os("XDG_DATA_HOME") {
+                                    let path = Path::new(&data).join("keyrings/default.keyring");
+                                    let _ = std::fs::remove_file(path);
+                                }
+                                oo7::Keyring::new().await
+                            }
+                            keyring => keyring,
+                        }
+                    })
+                    .await
                 })
                 .map_err(|_| SecretError::Backend("secret service timed out".into()))
                 .and_then(|result| result.map_err(|error| SecretError::Backend(error.to_string())));
@@ -633,11 +649,25 @@ impl SystemKeyringBackend {
         })
     }
 
-    fn entry(&self, key: &SecretKey) -> SecretResult<keyring_core::Entry> {
+    fn entry(&self, service: &str, key: &SecretKey) -> SecretResult<keyring_core::Entry> {
         let user = key.scoped_config_key(&self.scope_id);
         self.store
-            .build(APP_ID, &user, None)
+            .build(service, &user, None)
             .map_err(native_credential_error)
+    }
+
+    /// Moves a secret saved under the ID releases up to 0.18 had. macOS refuses an app with a
+    /// new identifier the old items, so there the secret is entered again or restored.
+    fn take_previous(&self, key: &SecretKey) -> SecretResult<Option<String>> {
+        let previous = self.entry(PREVIOUS_APP_ID, key)?;
+        let Ok(secret) = previous.get_password() else {
+            return Ok(None);
+        };
+        self.entry(APP_ID, key)?
+            .set_password(&secret)
+            .map_err(native_credential_error)?;
+        let _ = previous.delete_credential();
+        Ok(Some(secret))
     }
 }
 
@@ -648,7 +678,7 @@ impl SecretStore for SystemKeyringBackend {
             .operation_lock
             .lock()
             .map_err(|_| SecretError::Locked)?;
-        self.entry(key)?
+        self.entry(APP_ID, key)?
             .set_password(secret)
             .map_err(native_credential_error)
     }
@@ -658,9 +688,9 @@ impl SecretStore for SystemKeyringBackend {
             .operation_lock
             .lock()
             .map_err(|_| SecretError::Locked)?;
-        match self.entry(key)?.get_password() {
+        match self.entry(APP_ID, key)?.get_password() {
             Ok(secret) => Ok(Some(secret)),
-            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => self.take_previous(key),
             Err(error) => Err(native_credential_error(error)),
         }
     }
@@ -670,7 +700,8 @@ impl SecretStore for SystemKeyringBackend {
             .operation_lock
             .lock()
             .map_err(|_| SecretError::Locked)?;
-        match self.entry(key)?.delete_credential() {
+        let _ = self.entry(PREVIOUS_APP_ID, key)?.delete_credential();
+        match self.entry(APP_ID, key)?.delete_credential() {
             Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(error) => Err(native_credential_error(error)),
         }

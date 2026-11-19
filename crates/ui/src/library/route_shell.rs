@@ -44,7 +44,7 @@ crate::composite_box!(
     pub LibraryPageView,
     library_page_view_imp,
     "RufinLibraryPageView",
-    "/io/github/screwys/Rufin/ui/routes/library_page.ui",
+    "/app/rufin/rufin/ui/routes/library_page.ui",
     {
         toolbar_host: gtk::Box,
         category_host: gtk::Box,
@@ -60,7 +60,7 @@ crate::composite_box!(
     pub LibraryToolbarView,
     library_toolbar_view_imp,
     "RufinLibraryToolbarView",
-    "/io/github/screwys/Rufin/ui/routes/library_toolbar.ui",
+    "/app/rufin/rufin/ui/routes/library_toolbar.ui",
     {
         search_host: gtk::Box,
         controls: gtk::Box,

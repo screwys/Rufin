@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.screwys.Rufin</id>
+  <id>app.rufin.rufin</id>
   <name>Rufin</name>
   <summary>All-in-one music player</summary>
-  <developer id="io.github.screwys">
+  <developer id="app.rufin">
     <name>screwy</name>
   </developer>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <url type="homepage">https://github.com/screwys/Rufin</url>
-  <url type="bugtracker">https://github.com/screwys/Rufin/issues</url>
+  <url type="homepage">https://github.com/rufin-app/rufin</url>
+  <url type="bugtracker">https://github.com/rufin-app/rufin/issues</url>
   <url type="donation">https://buymeacoffee.com/screwy</url>
-  <url type="vcs-browser">https://github.com/screwys/Rufin</url>
+  <url type="vcs-browser">https://github.com/rufin-app/rufin</url>
   <url type="translate">https://hosted.weblate.org/projects/rufin</url>
   <branding>
     <color type="primary" scheme_preference="light">#8ecad6</color>
@@ -38,62 +38,68 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/Rufin.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/artist_detail.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse artists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/artists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/artists.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the compact sidebar</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/compact_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/compact_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/fullscreen_player.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/fullscreen_player.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/smart_playlists.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit a playlist</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/playlist_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/playlist_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Edit metadata of several tracks</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/edit_metadata.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata.png</image>
     </screenshot>
     <screenshot>
       <caption>Look up metadata on MusicBrainz</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/edit_metadata_lookup.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata_lookup.png</image>
     </screenshot>
     <screenshot>
       <caption>Find and sync lyrics</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/edit_metadata_lyrics.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/edit_metadata_lyrics.png</image>
     </screenshot>
     <screenshot>
       <caption>Tune the equalizer</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/equalizer_settings.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/equalizer_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize how lists look</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/customize_display.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Rearrange the sidebar and the visualizer, queue and lyrics panes</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/reorder_sidebar.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/reorder_sidebar.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure integrations</caption>
-      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/screwys/Rufin/v0.18.0/resources/screenshots/integrations.png</image>
+      <image type="source" width="1050" height="750">https://raw.githubusercontent.com/rufin-app/rufin/v0.18.0/resources/screenshots/integrations.png</image>
     </screenshot>
   </screenshots>
-  <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
+  <launchable type="desktop-id">app.rufin.rufin.desktop</launchable>
+  <provides>
+    <id>io.github.screwys.Rufin</id>
+  </provides>
+  <replaces>
+    <id>io.github.screwys.Rufin</id>
+  </replaces>
   <content_rating type="oars-1.1" />
   <supports>
     <control>keyboard</control>
@@ -225,7 +231,7 @@
           <li>You can now drag and drop folders and files into Rufin. You can choose to import them as a playlist or as regular folders that can be watched for changes.</li>
         </ul>
         <ul>
-          <li>Better integration with the system: Rufin can now be used to open audio files or playlists directly. This also works from the CLI with `rufin track.mp4` or &quot;flatpak run io.github.screwys.Rufin playlist.m3u8&quot;.</li>
+          <li>Better integration with the system: Rufin can now be used to open audio files or playlists directly. This also works from the CLI with `rufin track.mp4` or &quot;flatpak run app.rufin.rufin playlist.m3u8&quot;.</li>
         </ul>
         <ul>
           <li>For local, WebDAV, and Samba sources, subfolders are browsable in the Folders route. You can now exclude subfolders from the library.</li>
@@ -1302,91 +1308,91 @@ Implemented a wider range of Auto DJ features.</p>
       </description>
     </release>
     <release version="0.3.10" date="2026-05-27">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.10</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.10</url>
       <description>
         <p>This is Rufin's initial Flathub release. Discord Rich Presence now requests access only to the IPC socket instead of the full Discord folder.</p>
       </description>
     </release>
     <release version="0.3.9" date="2026-05-27">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.9</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.9</url>
       <description>
         <p>Fixed version detection in packaged builds.</p>
       </description>
     </release>
     <release version="0.3.8" date="2026-05-27">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.8</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.8</url>
       <description>
         <p>Fixed Flatpak keyring reconnect handling so saved credentials reconnect more reliably.</p>
       </description>
     </release>
     <release version="0.3.7" date="2026-05-27">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.7</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.7</url>
       <description>
         <p>Added a fullscreen player. Restored album artwork, row context menus, artist cover fallbacks, and portal-backed secrets for Flatpak builds.</p>
       </description>
     </release>
     <release version="0.3.6" date="2026-05-25">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.6</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.6</url>
       <description>
         <p>Reduced cover art cache memory growth. Large libraries should use less memory during navigation.</p>
       </description>
     </release>
     <release version="0.3.5" date="2026-05-23">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.5</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.5</url>
       <description>
         <p>Improved library loading and scrolling responsiveness. Artwork lookup now blocks first-run navigation less and retries external cover misses after Last.fm changes.</p>
       </description>
     </release>
     <release version="0.3.2" date="2026-05-22">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.2</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.2</url>
       <description>
         <p>Moved cache data to XDG cache locations and separated app cache paths. Fixed local library setup, cover caching, window geometry persistence, and duplicate local genre covers.</p>
       </description>
     </release>
     <release version="0.3.1" date="2026-05-21">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.1</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.1</url>
       <description>
         <p>Refined playback controls, media context menus, playlist views, and library navigation. Improved route scrolling, sidebar alignment, cover alignment, and playback defaults.</p>
       </description>
     </release>
     <release version="0.3.0" date="2026-05-20">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.3.0</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.3.0</url>
       <description>
         <p>Added unified source selection for servers and local folders, path mapping for local playback, and draggable customization for sidebar and home sections. Improved first-run login, home refreshes, and source settings.</p>
       </description>
     </release>
     <release version="0.2.5" date="2026-05-19">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.2.5</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.2.5</url>
       <description>
         <p>Added scrobbling account connection flows and a daily update prompt. Improved metadata and artwork lookup, local playback matching, adaptive layout stability, lyrics handling, and sidebar behavior.</p>
       </description>
     </release>
     <release version="0.1.5" date="2026-05-18">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.1.5</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.1.5</url>
       <description>
         <p>Added built-in scrobbling for external services. Refined album details, restored window sizing, and updated packaging metadata.</p>
       </description>
     </release>
     <release version="0.1.4" date="2026-05-18">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.1.4</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.1.4</url>
       <description>
         <p>Added local playback support and improved playback behavior. Library pages now append more rows during browsing, and local folder management is easier to use.</p>
       </description>
     </release>
     <release version="0.1.3" date="2026-05-17">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.1.3</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.1.3</url>
       <description>
         <p>Added Subsonic streaming support, Jellyfin server discovery, Discord Rich Presence, and configurable library layouts. Improved search, lyrics lookup, and Flatpak packaging.</p>
       </description>
     </release>
     <release version="0.1.2" date="2026-05-17">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.1.2</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.1.2</url>
       <description>
         <p>Added cached Jellyfin home sections and improved right-panel queue search. Refined route headers, compact layouts, table links, and lyrics behavior.</p>
       </description>
     </release>
     <release version="0.1.1" date="2026-05-16">
-      <url type="details">https://github.com/screwys/Rufin/releases/tag/v0.1.1</url>
+      <url type="details">https://github.com/rufin-app/rufin/releases/tag/v0.1.1</url>
       <description>
         <p>Improved album card sizing, player controls, queue behavior, lyrics scrolling, and responsive navigation.</p>
       </description>

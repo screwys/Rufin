@@ -17,7 +17,7 @@ body:
       description: You can check which version you are running from Main Menu/About Rufin
       options:
         - 0.18.0 (latest release)
-        - main (development)
+        - master (development)
         - 0.17.1
         - 0.17.0
         - 0.16.6

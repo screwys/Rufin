@@ -28,11 +28,11 @@ if(NOT RUFIN_BUILD_IDENTITY STREQUAL "stable"
   message(FATAL_ERROR "RUFIN_BUILD_IDENTITY must be stable or development")
 endif()
 if(RUFIN_BUILD_IDENTITY STREQUAL "development")
-  set(RUFIN_APP_ID io.github.screwys.Rufin.Devel)
-  set(RUFIN_DESKTOP_FILE resources/io.github.screwys.Rufin.Devel.desktop)
+  set(RUFIN_APP_ID app.rufin.rufin.Devel)
+  set(RUFIN_DESKTOP_FILE resources/app.rufin.rufin.Devel.desktop)
 else()
-  set(RUFIN_APP_ID io.github.screwys.Rufin)
-  set(RUFIN_DESKTOP_FILE resources/io.github.screwys.Rufin.desktop)
+  set(RUFIN_APP_ID app.rufin.rufin)
+  set(RUFIN_DESKTOP_FILE resources/app.rufin.rufin.desktop)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -288,7 +288,7 @@ if(UNIX AND NOT APPLE)
     DESTINATION "${RUFIN_INSTALL_DATADIR}/applications"
     RENAME "${RUFIN_APP_ID}.desktop")
   install(FILES
-    resources/io.github.screwys.Rufin.metainfo.xml
+    resources/app.rufin.rufin.metainfo.xml
     DESTINATION "${RUFIN_INSTALL_DATADIR}/metainfo")
   install(DIRECTORY resources/icons/hicolor/
     DESTINATION "${RUFIN_INSTALL_DATADIR}/icons/hicolor")

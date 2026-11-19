@@ -47,7 +47,7 @@ state_dir="${shared_root}/.local/container"
 enabled_file="${state_dir}/enabled"
 image_file="${state_dir}/image"
 runtime_file="${state_dir}/runtime"
-default_image="ghcr.io/screwys/rufin-dev:latest"
+default_image="ghcr.io/rufin-app/rufin-dev:latest"
 
 runtime_is_podman() {
     local runtime="$1"

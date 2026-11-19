@@ -31,7 +31,7 @@
 !endif
 
 !ifndef RUFIN_APP_ID
-!define RUFIN_APP_ID "io.github.screwys.Rufin"
+!define RUFIN_APP_ID "app.rufin.rufin"
 !endif
 
 !ifndef RUFIN_DISPLAY_NAME
@@ -430,7 +430,7 @@ FunctionEnd
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "Publisher" "screwy"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
-        "URLInfoAbout" "https://github.com/screwys/Rufin"
+        "URLInfoAbout" "https://github.com/rufin-app/rufin"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "UninstallString" '$\"${DIRECTORY}\Uninstall.exe$\"'
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
@@ -787,8 +787,9 @@ uninstall_runtime_not_running:
 
     StrCmp $PurgeCache 1 0 uninstall_cache_preserved
     ClearErrors
-    RMDir /r "$LOCALAPPDATA\screwys\${RUFIN_PROJECT_NAME}\cache"
+    RMDir /r "$LOCALAPPDATA\${RUFIN_PROJECT_NAME}\cache"
     IfErrors uninstall_cleanup_failed
+    RMDir "$LOCALAPPDATA\${RUFIN_PROJECT_NAME}"
 
 uninstall_cache_preserved:
     ClearErrors

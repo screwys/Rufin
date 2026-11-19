@@ -104,16 +104,6 @@ pub fn shows_lyrics_cache_prompt(
         })
 }
 
-/// Whether the notice to export a backup before the app ID changes is shown: it was not
-/// dismissed and a source is configured.
-#[cfg_attr(feature = "bindings", uniffi::export)]
-pub fn shows_backup_notice(
-    application: crate::settings::ApplicationPreferences,
-    sources: Vec<SourceSummary>,
-) -> bool {
-    !application.backup_notice_dismissed && !sources.is_empty()
-}
-
 /// Whether the choice between a server's recommendations and Rufin's is shown: a configured
 /// source is a server that recommends.
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -457,14 +447,14 @@ pub fn source_kind_title(kind: &str) -> Option<&'static str> {
 pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
     use library::SourceKind;
     Some(match SourceKind::parse(kind)? {
-        SourceKind::Jellyfin => "io.github.screwys.Rufin.source.jellyfin",
-        SourceKind::Emby => "io.github.screwys.Rufin.source.emby",
-        SourceKind::Plex => "io.github.screwys.Rufin.source.plex",
-        SourceKind::Navidrome => "io.github.screwys.Rufin.source.navidrome",
-        SourceKind::Subsonic => "io.github.screwys.Rufin.source.opensubsonic",
-        SourceKind::Local => "io.github.screwys.Rufin-symbolic",
-        SourceKind::Webdav => "io.github.screwys.Rufin.source.webdav",
-        SourceKind::Smb => "io.github.screwys.Rufin.source.smb",
+        SourceKind::Jellyfin => "app.rufin.rufin.source.jellyfin",
+        SourceKind::Emby => "app.rufin.rufin.source.emby",
+        SourceKind::Plex => "app.rufin.rufin.source.plex",
+        SourceKind::Navidrome => "app.rufin.rufin.source.navidrome",
+        SourceKind::Subsonic => "app.rufin.rufin.source.opensubsonic",
+        SourceKind::Local => "app.rufin.rufin-symbolic",
+        SourceKind::Webdav => "app.rufin.rufin.source.webdav",
+        SourceKind::Smb => "app.rufin.rufin.source.smb",
         SourceKind::Peer => "rufin-phonelink-symbolic",
     })
 }

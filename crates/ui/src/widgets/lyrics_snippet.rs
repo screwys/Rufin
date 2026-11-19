@@ -5,7 +5,7 @@ mod imp {
     use std::{cell::RefCell, ops::Range};
 
     #[derive(gtk::CompositeTemplate, Default)]
-    #[template(resource = "/io/github/screwys/Rufin/ui/routes/lyrics_snippet.ui")]
+    #[template(resource = "/app/rufin/rufin/ui/routes/lyrics_snippet.ui")]
     pub struct LyricsSnippetView {
         #[template_child]
         pub label: gtk::TemplateChild<gtk::Label>,

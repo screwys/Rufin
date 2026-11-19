@@ -4,7 +4,7 @@ run-name: Build Nix ${{ inputs.ref || github.ref_name }}
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - .github/workflows/nix.yml
       - .cargo/**
@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           ref="$BUILD_REF"
 
-          if [[ "$ref" == "main" || "$ref" == "refs/heads/main" ]]; then
+          if [[ "$ref" == "master" || "$ref" == "refs/heads/master" ]]; then
             exit 0
           fi
 

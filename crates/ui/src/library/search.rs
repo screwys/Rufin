@@ -459,7 +459,7 @@ crate::composite_box!(
     pub SearchRouteView,
     search_route_view_imp,
     "RufinSearchRouteView",
-    "/io/github/screwys/Rufin/ui/routes/search.ui",
+    "/app/rufin/rufin/ui/routes/search.ui",
     {
         toolbar_host: gtk::Box,
         category_host: gtk::Box,

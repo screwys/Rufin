@@ -130,7 +130,7 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
-                DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
+                DetailLinkIcon("app.rufin.rufin.external.musicbrainz", Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp)); Text(if (track || connection.batch != null) translate("Search by AcoustID") else translate("Lookup"))
             }
         }

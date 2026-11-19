@@ -23,18 +23,19 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
         return Err("This check adds a source; use a disposable CI account".into());
     }
     let executable = fs::canonicalize(executable)?;
-    let directories = directories::ProjectDirs::from("io.github", "screwys", "Rufin")
-        .ok_or("Could not locate Rufin's configuration directory")?;
+    let config = &app_identity::folders()
+        .ok_or("Could not locate Rufin's configuration directory")?
+        .config;
     // What the check needs of the settings, in the two files Rufin keeps them in: an output
     // that follows the clock, unlike fakesink, so progress can be observed, and logins kept
     // in a file.
     let files = [
         (
-            directories.config_dir().join("state.json"),
+            config.join("state.json"),
             r#"{"playback":{"audio_output":"fakeaudiosink"}}"#,
         ),
         (
-            directories.config_dir().join("rufin.toml"),
+            config.join("rufin.toml"),
             "[privacy]\nsecret_storage = \"config-file\"\n",
         ),
     ];
@@ -46,7 +47,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
             Err(error) => return Err(error.into()),
         });
     }
-    fs::create_dir_all(directories.config_dir())?;
+    fs::create_dir_all(config)?;
     let result = (|| {
         for (path, content) in &files {
             fs::write(path, content)?;

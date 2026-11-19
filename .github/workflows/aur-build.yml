@@ -161,7 +161,7 @@ jobs:
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$source_dir/Cargo.toml" | head -n 1)"
           metainfo_version="$(
             sed -n 's/.*<release version="\([^"]*\)".*/\1/p' \
-              "$source_dir/resources/io.github.screwys.Rufin.metainfo.xml" |
+              "$source_dir/resources/app.rufin.rufin.metainfo.xml" |
               head -n 1
           )"
           test "$metainfo_version" = "$version"
@@ -262,11 +262,11 @@ jobs:
           pkgroot="$(mktemp -d)"
           bsdtar -xf "$pkgfile" -C "$pkgroot"
           test -x "$pkgroot/usr/bin/rufin"
-          test -f "$pkgroot/usr/share/applications/io.github.screwys.Rufin.desktop"
-          test -f "$pkgroot/usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml"
+          test -f "$pkgroot/usr/share/applications/app.rufin.rufin.desktop"
+          test -f "$pkgroot/usr/share/metainfo/app.rufin.rufin.metainfo.xml"
           pacman -U --noconfirm "$pkgfile"
-          desktop-file-validate /usr/share/applications/io.github.screwys.Rufin.desktop
-          appstreamcli validate --no-net /usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml
+          desktop-file-validate /usr/share/applications/app.rufin.rufin.desktop
+          appstreamcli validate --no-net /usr/share/metainfo/app.rufin.rufin.metainfo.xml
           pacman -Rns --noconfirm rufin-bin
 
       - name: Upload Arch payload
@@ -343,12 +343,12 @@ jobs:
             cd '$GITHUB_WORKSPACE/packaging/aur/rufin-git'
             diff -u .SRCINFO <(makepkg --printsrcinfo)
             sed -i \
-              's|git+https://github.com/screwys/Rufin.git|git+file://$GITHUB_WORKSPACE#branch=ci-candidate|' \
+              's|git+https://github.com/rufin-app/rufin.git|git+file://$GITHUB_WORKSPACE#branch=ci-candidate|' \
               PKGBUILD
             makepkg --cleanbuild --noconfirm --noprogressbar
             test \"\$(git -C src/Rufin rev-parse HEAD)\" = '$candidate_commit'
             sed -i \
-              's|git+file://$GITHUB_WORKSPACE#branch=ci-candidate|git+https://github.com/screwys/Rufin.git|' \
+              's|git+file://$GITHUB_WORKSPACE#branch=ci-candidate|git+https://github.com/rufin-app/rufin.git|' \
               PKGBUILD
             git diff --exit-code -I '^pkgver=' -- PKGBUILD
             makepkg --printsrcinfo > .SRCINFO
@@ -362,11 +362,11 @@ jobs:
           pkgroot="$(mktemp -d)"
           bsdtar -xf "$pkgfile" -C "$pkgroot"
           test -x "$pkgroot/usr/bin/rufin"
-          test -f "$pkgroot/usr/share/applications/io.github.screwys.Rufin.desktop"
-          test -f "$pkgroot/usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml"
+          test -f "$pkgroot/usr/share/applications/app.rufin.rufin.desktop"
+          test -f "$pkgroot/usr/share/metainfo/app.rufin.rufin.metainfo.xml"
           pacman -U --noconfirm "$pkgfile"
-          desktop-file-validate /usr/share/applications/io.github.screwys.Rufin.desktop
-          appstreamcli validate --no-net /usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml
+          desktop-file-validate /usr/share/applications/app.rufin.rufin.desktop
+          appstreamcli validate --no-net /usr/share/metainfo/app.rufin.rufin.metainfo.xml
           pacman -Rns --noconfirm rufin-git
 
       - name: Stage rufin-git metadata

@@ -83,7 +83,7 @@ _build-arch:
         commit --quiet --message='Build local package'
 
     sed \
-        "s|git+https://github.com/screwys/Rufin.git|git+file://$source_dir|" \
+        "s|git+https://github.com/rufin-app/rufin.git|git+file://$source_dir|" \
         packaging/aur/rufin-git/PKGBUILD \
         > "$package_dir/PKGBUILD"
 
@@ -341,7 +341,7 @@ debug *args:
         if [[ "${1:-}" == "--" ]]; then \
             shift; \
         fi; \
-        flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \
+        flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" app.rufin.rufin "$@" 2>&1; \
     else \
         executable_name=rufin; \
         if [[ "${1:-}" == "headless" ]]; then \
@@ -374,7 +374,7 @@ debug *args:
                 signing_args+=(--keychain "$RUFIN_MACOS_SIGN_KEYCHAIN"); \
             fi; \
             codesign "${signing_args[@]}" \
-                --identifier io.github.screwys.Rufin.Devel \
+                --identifier app.rufin.rufin.Devel \
                 "$executable"; \
             RUST_LOG="${RUST_LOG:-debug}" "$executable" "$@"; \
         elif [[ "$(uname -s)" == Linux && "$executable_name" == rufin ]]; then \
@@ -384,10 +384,10 @@ debug *args:
                 --dir="$data_home/applications" \
                 --set-key=Exec \
                 --set-value="$executable" \
-                resources/io.github.screwys.Rufin.Devel.desktop; \
+                resources/app.rufin.rufin.Devel.desktop; \
             install -Dm0644 \
-                resources/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg \
-                "$data_home/icons/hicolor/scalable/apps/io.github.screwys.Rufin.Devel.svg"; \
+                resources/icons/hicolor/scalable/apps/app.rufin.rufin.svg \
+                "$data_home/icons/hicolor/scalable/apps/app.rufin.rufin.Devel.svg"; \
             if command -v update-desktop-database >/dev/null 2>&1; then \
                 update-desktop-database "$data_home/applications"; \
             fi; \
@@ -410,7 +410,7 @@ _generate:
     @cargo run --locked -p xtask -- generate flatpak-sources
 
 # Check the commits since BASE: whitespace, dependency policy, formatting and Clippy for the crates they touch.
-lint base="origin/main":
+lint base="origin/master":
     @scripts/container run default none cargo run --locked -p xtask -- lint {{ base }}
 
 # Regenerate the shared desktop and web translation template, or pass --check.
@@ -487,11 +487,11 @@ _build-flatpak:
     build_dir="${work_root}/build"
     repository_dir="${work_root}/repo"
     state_dir="${work_root}/state"
-    bundle_name="io.github.screwys.Rufin-$(flatpak --default-arch).flatpak"
+    bundle_name="app.rufin.rufin-$(flatpak --default-arch).flatpak"
     bundle_path="${artifact_root}/${bundle_name}"
     temporary_bundle_path="${bundle_path}.new"
     work_bundle_path="${work_root}/${bundle_name}"
-    manifest="${repo_root}/packaging/flatpak/io.github.screwys.Rufin.json"
+    manifest="${repo_root}/packaging/flatpak/app.rufin.rufin.json"
     runtime_repo_url=https://flathub.org/repo/flathub.flatpakrepo
     declare -a builder_args=()
 
@@ -527,7 +527,7 @@ _build-flatpak:
         --runtime-repo="$runtime_repo_url" \
         "$repository_dir" \
         "$work_bundle_path" \
-        io.github.screwys.Rufin \
+        app.rufin.rufin \
         master
 
     cp "$work_bundle_path" "$temporary_bundle_path"

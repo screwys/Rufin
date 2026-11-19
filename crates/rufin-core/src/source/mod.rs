@@ -1309,12 +1309,15 @@ impl SourceOwner {
     ) -> Result<ConfiguredSource, String> {
         let mut configured = configured.clone();
         if let Some(secret) = credential {
+            // A saved login that no longer opens is replaced like any other.
             if configured
                 .credential
                 .as_ref()
-                .map(|credential| load_provider_secret(self.shared.secrets.as_ref(), credential))
-                .transpose()?
-                .flatten()
+                .and_then(|credential| {
+                    load_provider_secret(self.shared.secrets.as_ref(), credential)
+                        .ok()
+                        .flatten()
+                })
                 .as_deref()
                 != Some(secret.as_str())
             {
@@ -1344,12 +1347,12 @@ impl SourceOwner {
     async fn edit_configured_source(&self, input: SourceSettingsChange) -> Result<(), String> {
         let source_id = input.source_id().clone();
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
-        let credential = configured
-            .credential
-            .as_ref()
-            .map(|reference| load_provider_secret(self.shared.secrets.as_ref(), reference))
-            .transpose()?
-            .flatten();
+        // A saved login that no longer opens counts as none, so the password can be entered again.
+        let credential = configured.credential.as_ref().and_then(|reference| {
+            load_provider_secret(self.shared.secrets.as_ref(), reference)
+                .ok()
+                .flatten()
+        });
         let edit = Source::edit(
             configured.configuration.clone(),
             credential,
@@ -2370,6 +2373,35 @@ impl SourceOwner {
     }
 
     pub fn replace_local_folder(&self, current: String, replacement: PathBuf) {
+        // The same folder picked again is back within reach, as a sandbox's folder grant comes
+        // back at the same path; reading it again brings its tracks back.
+        if replacement.to_string_lossy() == current {
+            let Some(source_id) = self
+                .shared
+                .settings
+                .load()
+                .sources
+                .configured
+                .iter()
+                .find(|item| item.configuration.is_local())
+                .map(|item| item.configuration.source_id.clone())
+            else {
+                return;
+            };
+            let owner = self.clone();
+            self.shared.runtime.spawn(async move {
+                let refresh = async {
+                    let source = owner.open_client(source_id.clone()).await?;
+                    owner
+                        .refresh_now(&source_id, &source, false, sources::Refresh::Changed)
+                        .await
+                };
+                if let Err(error) = refresh.await {
+                    owner.shared.warn_nonfatal(&error);
+                }
+            });
+            return;
+        }
         edit_local_roots(self, move |roots| {
             if let Some(root) = roots
                 .iter_mut()

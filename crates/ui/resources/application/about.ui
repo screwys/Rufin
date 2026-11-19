@@ -6,8 +6,8 @@
   <object class="AdwAboutDialog" id="dialog">
     <property name="developer-name">screwy</property>
     <property name="developers">screwy &lt;me@screwy.dev&gt;</property>
-    <property name="website">https://github.com/screwys/Rufin</property>
-    <property name="issue-url">https://github.com/screwys/Rufin/issues</property>
+    <property name="website">https://github.com/rufin-app/rufin</property>
+    <property name="issue-url">https://github.com/rufin-app/rufin/issues</property>
     <property name="copyright">© 2026 screwy</property>
     <property name="license-type">custom</property>
     <property name="license">This application comes with absolutely no warranty and is licensed under GNU General Public Licence, version 3 or later.</property>

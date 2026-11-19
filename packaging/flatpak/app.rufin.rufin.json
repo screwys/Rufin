@@ -1,5 +1,5 @@
 {
-  "app-id": "io.github.screwys.Rufin",
+  "app-id": "app.rufin.rufin",
   "runtime": "org.gnome.Platform",
   "runtime-version": "51",
   "sdk": "org.gnome.Sdk",
