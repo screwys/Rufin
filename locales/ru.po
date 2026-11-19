@@ -5,7 +5,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-12 16:44+0000\n"
 "Last-Translator: Александр Стельмах "
@@ -290,23 +290,6 @@ msgid ""
 msgstr ""
 "Режим «Трек» выравнивает звучание каждой песни, а режим «Альбом» сохраняет "
 "задуманные различия между треками в каждом альбоме"
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
-msgstr ""
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
@@ -1777,11 +1760,6 @@ msgstr "Экспорт PNG"
 
 msgid "Export Playlist"
 msgstr "Экспортировать плейлист"
-
-#, fuzzy
-#| msgid "Export Backup"
-msgid "Export a Backup"
-msgstr "Экспортировать резервную копию"
 
 msgid "Export format"
 msgstr "Формат экспорта"
@@ -5400,6 +5378,11 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#, fuzzy
+#~| msgid "Export Backup"
+#~ msgid "Export a Backup"
+#~ msgstr "Экспортировать резервную копию"
 
 #~ msgid "Play genre"
 #~ msgstr "Воспроизвести жанр"
