@@ -8,7 +8,7 @@ msgstr ""
 "Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-20 08:54+0000\n"
-"Last-Translator: HPCesia <hpcesia@users.noreply.hosted.weblate.org>\n"
+"Last-Translator: Jiahao Li <thejiahao@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Chinese (Simplified Han script) <https://hosted.weblate.org/"
 "projects/rufin/app/zh_Hans/>\n"
 "Language: zh_Hans\n"
@@ -412,7 +412,7 @@ msgid "Added"
 msgstr ""
 
 msgid "Album Artists"
-msgstr ""
+msgstr "专辑艺术家"
 
 msgid "Album artist sort"
 msgstr ""
@@ -421,7 +421,7 @@ msgid "Album artist"
 msgstr ""
 
 msgid "Album artists"
-msgstr ""
+msgstr "专辑艺术家"
 
 msgid "Album covers"
 msgstr ""
@@ -454,7 +454,7 @@ msgid "Album"
 msgstr ""
 
 msgid "Albums"
-msgstr ""
+msgstr "专辑"
 
 msgid "All Music"
 msgstr ""
@@ -472,7 +472,7 @@ msgid "Allow downloading"
 msgstr ""
 
 msgid "Allow permanently deleting tracks"
-msgstr ""
+msgstr "允许永久删除曲目"
 
 msgid "Allow remote connections"
 msgstr ""
@@ -499,7 +499,7 @@ msgid "App icon"
 msgstr "应用图标"
 
 msgid "App settings"
-msgstr ""
+msgstr "应用设置"
 
 msgid "Appearance"
 msgstr "外观"
@@ -553,7 +553,7 @@ msgid "Artist"
 msgstr ""
 
 msgid "Artists"
-msgstr ""
+msgstr "艺术家"
 
 msgid "Artwork editing is no longer available"
 msgstr ""
@@ -703,7 +703,7 @@ msgid "Blocks"
 msgstr ""
 
 msgid "Blue"
-msgstr ""
+msgstr "蓝色"
 
 msgid "Bottom bar"
 msgstr ""
@@ -791,7 +791,7 @@ msgid "Changes apply to {count} tracks"
 msgstr "应用变更到 {count} 个曲目"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "重启 Rufin 后生效"
 
 msgid "Channels"
 msgstr ""
@@ -944,7 +944,7 @@ msgid "Color for the active word during playback"
 msgstr ""
 
 msgid "Colored"
-msgstr ""
+msgstr "彩色"
 
 msgid "Column borders"
 msgstr ""
@@ -1061,7 +1061,7 @@ msgid "Continue"
 msgstr "继续"
 
 msgid "Control notifications"
-msgstr ""
+msgstr "操作反馈"
 
 msgid "Controller status"
 msgstr ""
@@ -1088,7 +1088,7 @@ msgid "Copyright"
 msgstr ""
 
 msgid "Could not load listening overview"
-msgstr ""
+msgstr "无法加载收听概览"
 
 msgid "Could not load page"
 msgstr ""
@@ -1229,16 +1229,16 @@ msgid "Date"
 msgstr "日期"
 
 msgid "Days after month ends"
-msgstr ""
+msgstr "月末后天数"
 
 msgid "Days after year ends"
-msgstr ""
+msgstr "年末后天数"
 
 msgid "Days before month ends"
-msgstr ""
+msgstr "月末前天数"
 
 msgid "Days before year ends"
-msgstr ""
+msgstr "年末前天数"
 
 msgid "Debug logging"
 msgstr "调试日志"
@@ -1256,7 +1256,7 @@ msgid "Default"
 msgstr ""
 
 msgid "Delete Permanently?"
-msgstr ""
+msgstr "永久删除？"
 
 msgid "Delete Playlist"
 msgstr "删除播放列表"
@@ -1393,7 +1393,7 @@ msgid "Don't duplicate"
 msgstr ""
 
 msgid "Donate"
-msgstr ""
+msgstr "捐助"
 
 msgid "Done"
 msgstr ""
@@ -1858,7 +1858,7 @@ msgid "Fullscreen"
 msgstr "全屏"
 
 msgid "Furigana"
-msgstr ""
+msgstr "假名注音"
 
 msgid "Gain · dB"
 msgstr ""
@@ -1873,10 +1873,10 @@ msgid "Gapless"
 msgstr "无缝播放"
 
 msgid "General"
-msgstr ""
+msgstr "通用"
 
 msgid "Genius"
-msgstr ""
+msgstr "Genius"
 
 msgid "Genre radio"
 msgstr "曲风电台"
@@ -1972,7 +1972,7 @@ msgid "Home Profile"
 msgstr ""
 
 msgid "Home"
-msgstr ""
+msgstr "首页"
 
 msgid "Homepage"
 msgstr ""
@@ -2096,7 +2096,7 @@ msgid "Karaoke mode"
 msgstr ""
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "关闭时后台运行"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
@@ -2123,7 +2123,7 @@ msgid "Language and readings"
 msgstr ""
 
 msgid "Language"
-msgstr ""
+msgstr "语言"
 
 msgid "Laptop/Headphones"
 msgstr ""
@@ -2216,7 +2216,7 @@ msgid "ListenBrainz or Audioscrobbler API"
 msgstr ""
 
 msgid "Listening overview"
-msgstr ""
+msgstr "收听概览"
 
 msgid "Listening"
 msgstr ""
@@ -2461,16 +2461,16 @@ msgid "Month"
 msgstr ""
 
 msgid "Monthly"
-msgstr ""
+msgstr "月度"
 
 msgid "Mood tracks"
-msgstr ""
+msgstr "情绪曲目"
 
 msgid "Mood"
-msgstr ""
+msgstr "情绪"
 
 msgid "Moods"
-msgstr ""
+msgstr "情绪"
 
 msgid "More actions"
 msgstr ""
@@ -2803,7 +2803,7 @@ msgid "Now Playing"
 msgstr "正在播放"
 
 msgid "Now playing notifications"
-msgstr ""
+msgstr "当前曲目"
 
 msgid "Now playing updates"
 msgstr ""
@@ -2869,7 +2869,7 @@ msgid "Open approval page"
 msgstr ""
 
 msgid "Open automatically"
-msgstr ""
+msgstr "自动打开"
 
 msgid "Open custom themes folder"
 msgstr ""
@@ -3157,7 +3157,7 @@ msgid "Preamp"
 msgstr ""
 
 msgid "Prefer distinct track covers"
-msgstr ""
+msgstr "优先使用独立曲目封面"
 
 msgid "Prefer server lyrics"
 msgstr ""
@@ -3277,7 +3277,7 @@ msgid "Quit"
 msgstr ""
 
 msgid "Radio"
-msgstr ""
+msgstr "电台"
 
 msgid "Random"
 msgstr "随机"
@@ -3367,7 +3367,7 @@ msgid "Release group"
 msgstr ""
 
 msgid "Release notifications"
-msgstr ""
+msgstr "版本更新"
 
 msgid "Release type"
 msgstr ""
@@ -3583,7 +3583,7 @@ msgid "Rock"
 msgstr ""
 
 msgid "Romaji"
-msgstr ""
+msgstr "罗马音"
 
 msgid "Rounded bars"
 msgstr ""
@@ -3982,7 +3982,7 @@ msgid "Show star ratings"
 msgstr ""
 
 msgid "Show tray icon"
-msgstr ""
+msgstr "显示托盘图标"
 
 msgid "Show visualizer and lyrics in the right panel"
 msgstr ""
@@ -4096,16 +4096,16 @@ msgid "Small"
 msgstr ""
 
 msgid "Smart Playlist"
-msgstr ""
+msgstr "智能播放列表"
 
 msgid "Smart Playlists"
-msgstr ""
+msgstr "智能播放列表"
 
 msgid "Smart playlist tracks"
 msgstr ""
 
 msgid "Smart playlists"
-msgstr ""
+msgstr "智能播放列表"
 
 msgid "Soft spectrum"
 msgstr ""
@@ -4129,7 +4129,7 @@ msgid "Song"
 msgstr ""
 
 msgid "Sort artists and albums by their sort tags instead of their names"
-msgstr ""
+msgstr "按排序标签而非名称排序艺术家和专辑"
 
 msgid "Sort by"
 msgstr ""
@@ -4183,7 +4183,7 @@ msgid "Start from"
 msgstr ""
 
 msgid "Start minimized"
-msgstr ""
+msgstr "启动时最小化"
 
 msgid "Start playing automatically"
 msgstr ""
@@ -4192,7 +4192,7 @@ msgid "Start"
 msgstr ""
 
 msgid "Starting page"
-msgstr ""
+msgstr "默认页面"
 
 msgid "Starting..."
 msgstr ""
@@ -4276,7 +4276,7 @@ msgid "Switching library..."
 msgstr "媒体库切换中…"
 
 msgid "Symbolic"
-msgstr ""
+msgstr "单色"
 
 msgid "Sync folder"
 msgstr ""
@@ -4465,7 +4465,7 @@ msgid "Translation language"
 msgstr ""
 
 msgid "Tray icon"
-msgstr ""
+msgstr "托盘图标"
 
 msgid "Treble"
 msgstr ""
@@ -4498,7 +4498,7 @@ msgid "Type to search or create a new playlist"
 msgstr ""
 
 msgid "Type to search"
-msgstr ""
+msgstr "输入以搜索"
 
 msgid "Typography"
 msgstr ""
@@ -4537,7 +4537,7 @@ msgid "Untitled"
 msgstr ""
 
 msgid "Update check interval"
-msgstr ""
+msgstr "检查更新间隔"
 
 msgid "Update"
 msgstr "更新"
@@ -4585,7 +4585,7 @@ msgid "Use different layout below a threshold width"
 msgstr ""
 
 msgid "Use each track's own cover when available"
-msgstr ""
+msgstr "尽量使用各曲目专属封面"
 
 msgid "Use existing"
 msgstr ""
@@ -4600,7 +4600,7 @@ msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
 msgid "Use sort tags"
-msgstr ""
+msgstr "使用排序标签"
 
 msgid "Use source setting"
 msgstr ""
@@ -4723,7 +4723,7 @@ msgid "Year"
 msgstr ""
 
 msgid "Yearly"
-msgstr "每年"
+msgstr "年度"
 
 msgid "Years"
 msgstr ""
