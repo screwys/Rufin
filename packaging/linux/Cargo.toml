@@ -48,7 +48,7 @@ tar = "0.4.46"
 adw = { package = "libadwaita", version = "0.9.1" }
 apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
 async-channel = "2.5.0"
-ashpd = { version = "0.13.13", default-features = false, features = [
+ashpd = { version = "0.14.0", default-features = false, features = [
     "background",
     "tokio",
 ] }
