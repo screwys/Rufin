@@ -54,6 +54,10 @@ pub fn combining_mark(character: char) -> bool {
 /// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
 /// letter with diacritics becomes its base letter.
 pub fn fold(character: char, folded: &mut String) {
+    if character.is_ascii() {
+        folded.push(character.to_ascii_lowercase());
+        return;
+    }
     for lower in character.to_lowercase() {
         let mut parts = NFD.normalize_iter(std::iter::once(lower));
         let base = parts.next();
@@ -66,6 +70,15 @@ pub fn fold(character: char, folded: &mut String) {
             _ => folded.push(lower),
         }
     }
+}
+
+/// Text with every character folded, as names sort and as filters and Search compare.
+pub fn folded(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for character in text.chars() {
+        fold(character, &mut folded);
+    }
+    folded
 }
 
 /// What parts one credit's artists, lowercase; each keeps its byte length in any case.

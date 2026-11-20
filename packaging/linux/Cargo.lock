@@ -7949,7 +7949,6 @@ dependencies = [
  "playback",
  "quick-xml",
  "reqwest 0.13.5",
- "rustix",
  "serde",
  "serde_json",
  "serde_path_to_error",

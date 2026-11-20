@@ -41,7 +41,7 @@ impl FolderProjection {
             Self::Live { folders, .. } => folders.as_ref(),
             Self::Cached(_) => &[],
         };
-        let filter = filter.trim().to_lowercase();
+        let filter = names::folded(filter.trim());
         (0..folders.len())
             .map(move |index| {
                 &folders[if descending {
@@ -50,7 +50,7 @@ impl FolderProjection {
                     index
                 }]
             })
-            .filter(move |folder| folder.name.to_lowercase().contains(&filter))
+            .filter(move |folder| names::folded(&folder.name).contains(&filter))
     }
 }
 

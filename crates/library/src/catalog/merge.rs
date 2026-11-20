@@ -595,10 +595,18 @@ async fn track_page(
             .and_then(|before| stored.get(&before.key.raw()));
         let json = if authoritative {
             candidate.metadata = candidate.row.metadata.clone();
-            replace_known(
+            let mut json = replace_known(
                 old.map(|old| old.metadata.clone()),
                 serde_json::to_value(&candidate.row.metadata)?,
-            )
+            );
+            if let Value::Object(fields) = &mut json {
+                if candidate.row.tags.is_empty() {
+                    fields.remove("tags");
+                } else {
+                    fields.insert("tags".into(), serde_json::to_value(&candidate.row.tags)?);
+                }
+            }
+            json
         } else {
             let mut json = match old {
                 Some(old) => old.metadata.clone(),

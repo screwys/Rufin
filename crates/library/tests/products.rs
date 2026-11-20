@@ -1355,7 +1355,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let catalog = &fixture.catalog;
     let filtered = library::MemberRead {
-        filter: "i\u{307}st".into(),
+        filter: "istanbul".into(),
         ..smart(all)
     };
     assert_eq!(
@@ -1790,7 +1790,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
     }
     for (query, expected) in [
         ("toolbar 09", vec![toolbar[9].clone()]),
-        ("i\u{307}st", vec![toolbar[9].clone()]),
+        ("istanbul", vec![toolbar[9].clone()]),
         ("202", toolbar[..10].to_vec()),
         ("no match", vec![]),
         ("", toolbar.clone()),

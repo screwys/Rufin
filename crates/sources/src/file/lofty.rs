@@ -9,6 +9,8 @@ use lofty::file::{FileType, TaggedFile};
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, TagType};
 
+use super::tags::{RawTags, push};
+
 const LOFTY_ALLOCATION_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -153,21 +155,18 @@ pub(crate) fn read_lofty_file(
 }
 
 /// The tag keys of an album's version, as Navidrome reads them.
-const ALBUM_VERSION_KEYS: [&str; 3] = [
-    "ALBUMVERSION",
-    "MUSICBRAINZ_ALBUMCOMMENT",
-    "MusicBrainz Album Comment",
-];
-
-/// Reads a file for its scan, with its album version: Lofty's generic tag drops keys it
-/// does not map, so the version comes from the format's own tag.
+/// Reads a file for its scan, with the values of its own tag under that format's keys:
+/// Lofty's generic tag keeps only the keys it maps. The tag is the format's own, or else the
+/// fullest other one the file carries.
 pub(crate) fn read_lofty_scan(
     file: impl Read + Seek,
     options: ParseOptions,
-) -> Result<Option<(TaggedFile, Option<String>)>, lofty::error::FileParseError> {
+) -> Result<Option<(TaggedFile, RawTags)>, lofty::error::FileParseError> {
+    use lofty::aac::AacFile;
     use lofty::ape::{ApeFile, ApeTag};
     use lofty::file::AudioFile;
     use lofty::flac::FlacFile;
+    use lofty::id3::v1::Id3v1Tag;
     use lofty::id3::v2::{Frame, Id3v2Tag};
     use lofty::iff::{aiff::AiffFile, wav::WavFile};
     use lofty::mp4::{AtomData, AtomIdent, Ilst, Mp4File};
@@ -177,52 +176,134 @@ pub(crate) fn read_lofty_scan(
     use lofty::ogg::{OpusFile, SpeexFile, VorbisFile};
     use lofty::wavpack::WavPackFile;
 
-    fn version_key(key: &str) -> bool {
-        ALBUM_VERSION_KEYS
-            .iter()
-            .any(|version| version.eq_ignore_ascii_case(key))
+    fn vorbis(tag: &VorbisComments, raw: &mut RawTags) {
+        for (key, value) in tag.items() {
+            push(raw, key, value);
+        }
     }
-    fn vorbis(tag: &VorbisComments) -> Option<String> {
-        ALBUM_VERSION_KEYS
-            .iter()
-            .find_map(|key| tag.get(key))
-            .map(str::to_owned)
-    }
-    fn id3(tag: Option<&Id3v2Tag>) -> Option<String> {
-        tag?.into_iter().find_map(|frame| match frame {
-            Frame::UserText(text) if version_key(&text.description) => {
-                Some(text.content.to_string())
+    /// A TCON value as a genre name: `17` and `(17)` name a genre of ID3v1's list, and
+    /// `(17)Rock` refines one.
+    fn id3_genre(value: &str) -> String {
+        let listed = |number: &str| {
+            let index = number.trim().parse::<usize>().ok()?;
+            lofty::id3::v1::GENRES.get(index).map(ToString::to_string)
+        };
+        match value
+            .strip_prefix('(')
+            .and_then(|rest| rest.split_once(')'))
+        {
+            Some((_, refinement)) if !refinement.trim().is_empty() => {
+                Some(refinement.trim().to_owned())
             }
-            _ => None,
-        })
+            Some((number, _)) => listed(number),
+            None => listed(value),
+        }
+        .unwrap_or_else(|| value.to_owned())
     }
-    fn ape(tag: Option<&ApeTag>) -> Option<String> {
-        let tag = tag?;
-        ALBUM_VERSION_KEYS
-            .iter()
-            .find_map(|key| tag.get(key)?.value().text())
-            .map(str::to_owned)
-    }
-    fn ilst(tag: Option<&Ilst>) -> Option<String> {
-        tag?.into_iter().find_map(|atom| match atom.ident() {
-            AtomIdent::Freeform { name, .. } if version_key(name) => {
-                atom.data().find_map(|data| match data {
-                    AtomData::UTF8(text) => Some(text.clone()),
-                    _ => None,
-                })
+    fn id3v2(tag: &Id3v2Tag, raw: &mut RawTags) {
+        for frame in tag {
+            let id = frame.id_str();
+            match frame {
+                Frame::Text(text) => {
+                    for value in text.value.split('\0') {
+                        if id == "TCON" {
+                            push(raw, id, &id3_genre(value));
+                        } else {
+                            push(raw, id, value);
+                        }
+                    }
+                }
+                Frame::UserText(text) if !text.description.is_empty() => {
+                    for value in text.content.split('\0') {
+                        push(raw, &text.description, value);
+                        push(raw, &format!("txxx:{}", text.description), value);
+                    }
+                }
+                Frame::Comment(comment) if comment.description.is_empty() => {
+                    push(raw, "comment", &comment.content);
+                }
+                Frame::UniqueFileIdentifier(file) => {
+                    if let Ok(identifier) = std::str::from_utf8(&file.identifier) {
+                        push(raw, &format!("ufid:{}", file.owner), identifier);
+                    }
+                }
+                Frame::KeyValue(people) => {
+                    for (role, name) in people.key_value_pairs.iter() {
+                        push(raw, &format!("{id}:{role}"), name);
+                    }
+                }
+                Frame::Timestamp(time) => push(raw, id, &time.timestamp.to_string()),
+                Frame::Url(link) => push(raw, id, link.url()),
+                _ => {}
             }
-            _ => None,
-        })
+        }
+    }
+    fn id3v1(tag: &Id3v1Tag, raw: &mut RawTags) {
+        for (key, value) in [
+            ("title", &tag.title),
+            ("artist", &tag.artist),
+            ("album", &tag.album),
+            ("comment", &tag.comment),
+        ] {
+            if let Some(value) = value {
+                push(raw, key, value);
+            }
+        }
+        if let Some(year) = tag.year {
+            push(raw, "date", &year.to_string());
+        }
+        if let Some(number) = tag.track_number {
+            push(raw, "tracknumber", &number.to_string());
+        }
+        if let Some(genre) = tag
+            .genre
+            .and_then(|genre| lofty::id3::v1::GENRES.get(usize::from(genre)))
+        {
+            push(raw, "genre", genre);
+        }
+    }
+    fn ape(tag: &ApeTag, raw: &mut RawTags) {
+        for item in tag {
+            for value in item.text_values().into_iter().flatten() {
+                push(raw, item.key(), value);
+            }
+        }
+    }
+    fn ilst(tag: &Ilst, raw: &mut RawTags) {
+        for atom in tag {
+            let key = match atom.ident() {
+                AtomIdent::Fourcc(fourcc) => fourcc.iter().map(|byte| char::from(*byte)).collect(),
+                AtomIdent::Freeform { mean, name } => format!("----:{mean}:{name}"),
+            };
+            for data in atom.data() {
+                match data {
+                    AtomData::UTF8(text) | AtomData::UTF16(text) => push(raw, &key, text),
+                    AtomData::SignedInteger(number) => push(raw, &key, &number.to_string()),
+                    AtomData::UnsignedInteger(number) => push(raw, &key, &number.to_string()),
+                    AtomData::Bool(flag) => push(raw, &key, if *flag { "1" } else { "0" }),
+                    // A track or disc number and its total, two bytes each after two of padding.
+                    AtomData::Unknown { data, .. }
+                        if matches!(key.as_str(), "trkn" | "disk") && data.len() >= 6 =>
+                    {
+                        let number = u16::from_be_bytes([data[2], data[3]]);
+                        let total = u16::from_be_bytes([data[4], data[5]]);
+                        push(raw, &key, &format!("{number}/{total}"));
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn read<F: AudioFile + Into<TaggedFile>>(
         reader: &mut (impl Read + Seek),
         options: ParseOptions,
-        version: impl FnOnce(&F) -> Option<String>,
-    ) -> Result<(TaggedFile, Option<String>), lofty::error::FileParseError> {
+        tags: impl FnOnce(&F, &mut RawTags),
+    ) -> Result<(TaggedFile, RawTags), lofty::error::FileParseError> {
         let file = F::read_from(reader, options)?;
-        let version = version(&file);
-        Ok((file.into(), version))
+        let mut raw = RawTags::new();
+        tags(&file, &mut raw);
+        Ok((file.into(), raw))
     }
 
     let probe = probe(file, options)?;
@@ -231,35 +312,102 @@ pub(crate) fn read_lofty_scan(
     };
     let reader = &mut probe.into_inner();
     match file_type {
-        FileType::Flac => read(reader, options, |file: &FlacFile| {
-            (file.vorbis_comments().and_then(vorbis)).or_else(|| id3(file.id3v2()))
+        FileType::Flac => read(reader, options, |file: &FlacFile, raw| {
+            if let Some(tag) = file.vorbis_comments() {
+                vorbis(tag, raw);
+            } else if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            }
         }),
-        FileType::Vorbis => read(reader, options, |file: &VorbisFile| {
-            vorbis(file.vorbis_comments())
+        FileType::Vorbis => read(reader, options, |file: &VorbisFile, raw| {
+            vorbis(file.vorbis_comments(), raw);
         }),
-        FileType::Opus => read(reader, options, |file: &OpusFile| {
-            vorbis(file.vorbis_comments())
+        FileType::Opus => read(reader, options, |file: &OpusFile, raw| {
+            vorbis(file.vorbis_comments(), raw);
         }),
-        FileType::Speex => read(reader, options, |file: &SpeexFile| {
-            vorbis(file.vorbis_comments())
+        FileType::Speex => read(reader, options, |file: &SpeexFile, raw| {
+            vorbis(file.vorbis_comments(), raw);
         }),
-        FileType::Mpeg => read(reader, options, |file: &MpegFile| {
-            id3(file.id3v2()).or_else(|| ape(file.ape()))
+        FileType::Mpeg => read(reader, options, |file: &MpegFile, raw| {
+            if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(tag) = file.ape() {
+                ape(tag, raw);
+            } else if let Some(tag) = file.id3v1() {
+                id3v1(tag, raw);
+            }
         }),
-        FileType::Mp4 => read(reader, options, |file: &Mp4File| ilst(file.ilst())),
-        FileType::Aiff => read(reader, options, |file: &AiffFile| id3(file.id3v2())),
-        FileType::Wav => read(reader, options, |file: &WavFile| id3(file.id3v2())),
-        FileType::Ape => read(reader, options, |file: &ApeFile| {
-            ape(file.ape()).or_else(|| id3(file.id3v2()))
+        FileType::Aac => read(reader, options, |file: &AacFile, raw| {
+            if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(tag) = file.id3v1() {
+                id3v1(tag, raw);
+            }
         }),
-        FileType::Mpc => read(reader, options, |file: &MpcFile| {
-            ape(file.ape()).or_else(|| id3(file.id3v2()))
+        FileType::Mp4 => read(reader, options, |file: &Mp4File, raw| {
+            if let Some(tag) = file.ilst() {
+                ilst(tag, raw);
+            }
         }),
-        FileType::WavPack => read(reader, options, |file: &WavPackFile| ape(file.ape())),
+        FileType::Aiff => read(reader, options, |file: &AiffFile, raw| {
+            if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(chunks) = file.text_chunks() {
+                for (key, value) in [
+                    ("title", &chunks.name),
+                    ("artist", &chunks.author),
+                    ("copyright", &chunks.copyright),
+                ] {
+                    if let Some(value) = value {
+                        push(raw, key, value);
+                    }
+                }
+                for text in chunks.annotations.iter().flatten() {
+                    push(raw, "comment", text);
+                }
+                for comment in chunks.comments.iter().flatten() {
+                    push(raw, "comment", &comment.text);
+                }
+            }
+        }),
+        FileType::Wav => read(reader, options, |file: &WavFile, raw| {
+            if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(tag) = file.riff_info() {
+                for (key, value) in tag {
+                    push(raw, key, value);
+                }
+            }
+        }),
+        FileType::Ape => read(reader, options, |file: &ApeFile, raw| {
+            if let Some(tag) = file.ape() {
+                ape(tag, raw);
+            } else if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(tag) = file.id3v1() {
+                id3v1(tag, raw);
+            }
+        }),
+        FileType::Mpc => read(reader, options, |file: &MpcFile, raw| {
+            if let Some(tag) = file.ape() {
+                ape(tag, raw);
+            } else if let Some(tag) = file.id3v2() {
+                id3v2(tag, raw);
+            } else if let Some(tag) = file.id3v1() {
+                id3v1(tag, raw);
+            }
+        }),
+        FileType::WavPack => read(reader, options, |file: &WavPackFile, raw| {
+            if let Some(tag) = file.ape() {
+                ape(tag, raw);
+            } else if let Some(tag) = file.id3v1() {
+                id3v1(tag, raw);
+            }
+        }),
         _ => Probe::with_file_type(reader, file_type)
             .options(options)
             .read()
-            .map(|file| (file, None)),
+            .map(|file| (file, RawTags::new())),
     }
     .map(Some)
 }
