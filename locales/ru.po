@@ -592,6 +592,9 @@ msgstr "Настройки приложения"
 msgid "Appearance"
 msgstr "Оформление"
 
+msgid "Appears On"
+msgstr "Появляется в"
+
 msgid "Application name"
 msgstr "Название приложения"
 
@@ -5525,9 +5528,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "here"
 #~ msgstr "здесь"
-
-#~ msgid "Appears On"
-#~ msgstr "Появляется в"
 
 #~ msgid "Select"
 #~ msgstr "Выбрать"

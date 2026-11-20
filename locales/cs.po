@@ -577,6 +577,9 @@ msgstr "Nastavení aplikace"
 msgid "Appearance"
 msgstr "Vzhled"
 
+msgid "Appears On"
+msgstr "Objevuje se v"
+
 msgid "Application name"
 msgstr "Název aplikace"
 
@@ -6261,9 +6264,6 @@ msgstr ""
 
 #~ msgid "here"
 #~ msgstr "zde"
-
-#~ msgid "Appears On"
-#~ msgstr "Objevuje se v"
 
 #, fuzzy
 #~| msgid "Selection"

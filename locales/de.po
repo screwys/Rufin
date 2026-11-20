@@ -579,6 +579,9 @@ msgstr "App-Einstellungen"
 msgid "Appearance"
 msgstr "Darstellung"
 
+msgid "Appears On"
+msgstr "Erscheint auf"
+
 msgid "Application name"
 msgstr "Anwendungsname"
 
@@ -5316,9 +5319,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "here"
 #~ msgstr "hier"
-
-#~ msgid "Appears On"
-#~ msgstr "Erscheint auf"
 
 #, fuzzy
 #~| msgid "Selection"

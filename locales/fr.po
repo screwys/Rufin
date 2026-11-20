@@ -577,6 +577,9 @@ msgstr "Paramètres de l’application"
 msgid "Appearance"
 msgstr "Apparence"
 
+msgid "Appears On"
+msgstr "Apparaît sur"
+
 msgid "Application name"
 msgstr "Nom de l'application"
 
@@ -5325,9 +5328,6 @@ msgstr "Bienvenue dans l’installation de Rufin"
 
 #~ msgid "here"
 #~ msgstr "ici"
-
-#~ msgid "Appears On"
-#~ msgstr "Apparaît sur"
 
 #~ msgid "Select"
 #~ msgstr "Sélectionner"

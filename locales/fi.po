@@ -564,6 +564,11 @@ msgstr "Sovelluksen asetukset"
 msgid "Appearance"
 msgstr "Ulkoasu"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Appears On"
+msgstr "Ulkoasu"
+
 msgid "Application name"
 msgstr "Sovelluksen nimi"
 

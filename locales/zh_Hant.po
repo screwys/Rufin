@@ -562,6 +562,11 @@ msgstr "應用程式設定"
 msgid "Appearance"
 msgstr "外觀"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Appears On"
+msgstr "外觀"
+
 msgid "Application name"
 msgstr "應用程式名稱"
 

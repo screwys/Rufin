@@ -564,6 +564,9 @@ msgstr "Rakenduse seadistused"
 msgid "Appearance"
 msgstr "Välimus"
 
+msgid "Appears On"
+msgstr "Esineb"
+
 msgid "Application name"
 msgstr "Rakenduse nimi"
 
@@ -5432,9 +5435,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "here"
 #~ msgstr "siin"
-
-#~ msgid "Appears On"
-#~ msgstr "Esineb"
 
 #, fuzzy
 #~| msgid "Selection"

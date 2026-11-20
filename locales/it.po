@@ -590,6 +590,9 @@ msgstr "Impostazioni dell'app"
 msgid "Appearance"
 msgstr "Aspetto"
 
+msgid "Appears On"
+msgstr "Compare In"
+
 msgid "Application name"
 msgstr "Nome dell'applicazione"
 
@@ -5542,9 +5545,6 @@ msgstr ""
 #~| msgid "Allow remote connections"
 #~ msgid "File connections"
 #~ msgstr "Consenti connessioni remote"
-
-#~ msgid "Appears On"
-#~ msgstr "Compare In"
 
 #~ msgid "Apply Template"
 #~ msgstr "Applica Template"

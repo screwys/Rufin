@@ -600,6 +600,9 @@ msgstr "Pengaturan aplikasi"
 msgid "Appearance"
 msgstr "Tampilan"
 
+msgid "Appears On"
+msgstr "Muncul di"
+
 msgid "Application name"
 msgstr "Nama aplikasi"
 
@@ -5421,9 +5424,6 @@ msgstr ""
 #, fuzzy
 #~ msgid "Libre.fm"
 #~ msgstr "Libre.fm"
-
-#~ msgid "Appears On"
-#~ msgstr "Muncul di"
 
 #~ msgid "Apply Template"
 #~ msgstr "Terapkan Template"

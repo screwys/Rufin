@@ -604,6 +604,9 @@ msgstr "Lietotnes iestatījumi"
 msgid "Appearance"
 msgstr "Izskats"
 
+msgid "Appears On"
+msgstr "Parādās ierakstos"
+
 msgid "Application name"
 msgstr "Lietotnes nosaukums"
 
@@ -6109,9 +6112,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "here"
 #~ msgstr "šeit"
-
-#~ msgid "Appears On"
-#~ msgstr "Parādās ierakstos"
 
 #, fuzzy
 #~| msgid "Selection"

@@ -570,6 +570,11 @@ msgstr "Uygulama ayarları"
 msgid "Appearance"
 msgstr "Görünüm"
 
+#, fuzzy
+#| msgid "Appearance"
+msgid "Appears On"
+msgstr "Görünüm"
+
 msgid "Application name"
 msgstr "Uygulama adı"
 

@@ -503,6 +503,9 @@ msgstr ""
 msgid "Appearance"
 msgstr ""
 
+msgid "Appears On"
+msgstr ""
+
 msgid "Application name"
 msgstr ""
 
