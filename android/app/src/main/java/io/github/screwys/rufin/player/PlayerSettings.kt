@@ -19,6 +19,8 @@ import io.github.screwys.rufin.settings.PreferencesConnection
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.SettingsSliderNumber
 import io.github.screwys.rufin.settings.SettingsText
+import io.github.screwys.rufin.settings.SettingsTab
+import io.github.screwys.rufin.settings.SearchedTab
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -144,7 +146,7 @@ private fun TransitionAndSpeed(player: PlayerConnection) {
     PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
 }
 
-private enum class PlaybackTab(val title: String) { Queue("Queue"), AutoDj("Auto DJ"), Audio("Audio") }
+internal enum class PlaybackTab(override val title: String) : SettingsTab { Queue("Queue"), AutoDj("Auto DJ"), Audio("Audio") }
 
 @Composable
 internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection, sources: List<SourceSummary>, output: () -> Unit) {
@@ -153,6 +155,7 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
     val playback = state.playback
     var confirmEbu by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(PlaybackTab.Queue) }
+    SearchedTab<PlaybackTab> { tab = it }
     fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
     Column(Modifier.fillMaxSize()) {
         SegmentedPill(PlaybackTab.entries, tab, { tab = it }, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),

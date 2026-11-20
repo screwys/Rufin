@@ -73,7 +73,7 @@ internal fun SettingsGroup(title: String? = null, description: String? = null, c
             Text(it, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 2.dp), style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)),
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).then(searchHighlight(title)),
             verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
     }
 }
@@ -97,7 +97,7 @@ internal fun SettingsRow(
         trailingContent = trailing,
         colors = ListItemDefaults.colors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.clip(shape ?: RoundedCornerShape(5.dp)).then(modifier),
+        modifier = Modifier.clip(shape ?: RoundedCornerShape(5.dp)).then(searchHighlight(title)).then(modifier),
     )
 }
 
