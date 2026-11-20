@@ -500,18 +500,9 @@ fn latin(name: &str) -> bool {
     })
 }
 
-/// Text lowercase with Latin letters on their base letter, as names and sort tags sort.
-fn folded(text: &str) -> String {
-    let mut lower = String::with_capacity(text.len());
-    for character in text.chars() {
-        names::fold(character, &mut lower);
-    }
-    lower
-}
-
 /// A name as it sorts without sort tags: folded, past a leading article.
 fn plain_sort(name: &str) -> std::borrow::Cow<'_, str> {
-    let lower = folded(name);
+    let lower = names::folded(name);
     match lower.split_once(' ') {
         Some((article, rest)) if ARTICLES.contains(&article) && !rest.trim().is_empty() => {
             rest.trim_start().to_owned().into()
@@ -697,7 +688,7 @@ impl Snapshot {
         if !latin(name) {
             self.name_sort(artist.name, artist.sort)
         } else if self.sort_tags {
-            folded(&self.name_sort(artist.name, artist.sort)).into()
+            names::folded(&self.name_sort(artist.name, artist.sort)).into()
         } else {
             plain_sort(name)
         }
@@ -709,7 +700,7 @@ impl Snapshot {
         if !latin(title) {
             self.text(album.sort).into()
         } else if self.sort_tags {
-            folded(self.text(album.sort)).into()
+            names::folded(self.text(album.sort)).into()
         } else {
             plain_sort(title)
         }

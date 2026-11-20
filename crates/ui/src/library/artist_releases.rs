@@ -37,7 +37,7 @@ pub struct ArtistReleaseRoutePreamble {
 
 pub struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
-    counts: Rc<Cell<[usize; library::AlbumReleaseClass::COUNT]>>,
+    counts: Rc<Cell<[usize; library::ARTIST_RELEASE_GROUPS]>>,
     selection: gtk::SelectionModel,
     pub sparse: Rows<library::Row>,
     /// The releases read the page shows, for clearing a selection read in another one.
@@ -588,7 +588,7 @@ impl ArtistReleaseProjections {
     pub fn new(
         shell: &Rc<CatalogUi>,
         preamble: ArtistReleaseRoutePreamble,
-        titles: [&'static str; library::AlbumReleaseClass::COUNT],
+        titles: [&'static str; library::ARTIST_RELEASE_GROUPS],
         read: &mut Opened,
     ) -> Self {
         let settings = shell
@@ -746,7 +746,7 @@ impl ArtistReleaseProjections {
         self.sections.get(index).map(|section| section.search())
     }
 
-    pub fn filters(&self) -> [String; library::AlbumReleaseClass::COUNT] {
+    pub fn filters(&self) -> [String; library::ARTIST_RELEASE_GROUPS] {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
     }
 

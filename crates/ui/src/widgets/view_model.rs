@@ -571,15 +571,15 @@ impl RowList {
         })
     }
 
-    fn set_sections(&self, sections: Vec<(u32, i64)>) {
+    /// Takes the disc sections of the rows about to be shown; whether they differ from the
+    /// ones before. GTK asks for sections while it takes changed rows, so they are set first.
+    fn set_sections(&self, sections: Vec<(u32, i64)>) -> bool {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         if *self.imp().sections.borrow() == sections {
-            return;
+            return false;
         }
         self.imp().sections.replace(sections);
-        if self.n_items() > 0 {
-            self.emit_by_name::<()>("sections-changed", &[&0u32, &self.n_items()]);
-        }
+        true
     }
 
     pub(crate) fn set_collection_selection(
@@ -1214,8 +1214,9 @@ impl Rows<Row> {
             self.replace(read.view.favorites_len().unwrap_or(0), 0, rows, same);
         } else {
             let rows = std::mem::take(&mut read.rows);
-            self.replace(read.view.len(), read.first, rows, same);
-            self.list.set_sections(read.view.disc_sections().to_vec());
+            // Rows under other sections are other rows to GTK: it takes the whole list again.
+            let resectioned = self.list.set_sections(read.view.disc_sections().to_vec());
+            self.replace(read.view.len(), read.first, rows, same && !resectioned);
         }
     }
 

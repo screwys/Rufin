@@ -260,7 +260,7 @@ impl Catalog {
         offset: u64,
         limit: u32,
     ) -> LibraryResult<(Vec<usize>, u64)> {
-        let filter = filter.trim().to_lowercase();
+        let filter = crate::catalog::views::filter_text(filter);
         self.loaded().await;
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);

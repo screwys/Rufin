@@ -11,6 +11,9 @@ pub struct TrackObservation {
     pub media_uri: Option<String>,
     pub album_object_id: Option<String>,
     pub metadata: TrackMetadata,
+    /// The file's own tags by tag name, each value once, for a track a file scan read. They
+    /// are kept with the track's details; views do not read them.
+    pub tags: std::collections::BTreeMap<String, Vec<String>>,
     pub source_path: Option<String>,
     pub cue_path: Option<String>,
     pub cue_start_millis: Option<i64>,

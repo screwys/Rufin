@@ -213,8 +213,8 @@ pub fn album_release_title(value: library::AlbumReleaseClass) -> &'static str {
     }
 }
 
-/// An artist page's release groups, one per release class in its order.
-pub const ARTIST_RELEASE_TITLES: [&str; library::AlbumReleaseClass::COUNT] = [
+/// An artist page's release groups in their order: each release class, then Appears On.
+pub const ARTIST_RELEASE_TITLES: [&str; library::ARTIST_RELEASE_GROUPS] = [
     msgid("Albums"),
     msgid("EPs"),
     msgid("Singles"),
@@ -224,6 +224,7 @@ pub const ARTIST_RELEASE_TITLES: [&str; library::AlbumReleaseClass::COUNT] = [
     msgid("Remixes"),
     msgid("Demos"),
     msgid("Other releases"),
+    msgid("Appears On"),
 ];
 
 /// The title a list's sort choice shows for `field`.
