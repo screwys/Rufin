@@ -680,8 +680,8 @@ pub(crate) struct Inputs {
     pub(crate) now: i64,
 }
 
-/// Whether `parts` and `year`, joined by spaces and lowercased, hold the lowercase `text`; a
-/// `word` text matches a whole word only. The joined text reuses one buffer per thread.
+/// Whether `parts` and `year`, joined by spaces and folded, hold the folded `text`; a `word`
+/// text matches a whole word only. The joined text reuses one buffer per thread.
 // The Android targets' thread_local expansion hides its const block from this lint.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) fn holds(parts: &[&str], year: Option<i16>, text: &str, word: bool) -> bool {
@@ -691,7 +691,9 @@ pub(crate) fn holds(parts: &[&str], year: Option<i16>, text: &str, word: bool) -
         || JOINED.with_borrow_mut(|joined| {
             joined.clear();
             for part in parts {
-                joined.extend(part.chars().flat_map(char::to_lowercase));
+                for character in part.chars() {
+                    names::fold(character, joined);
+                }
                 joined.push(' ');
             }
             if let Some(year) = year {
@@ -705,22 +707,30 @@ pub(crate) fn holds(parts: &[&str], year: Option<i16>, text: &str, word: bool) -
         })
 }
 
-/// A filter as clients type it: trimmed, lowercase and bounded.
+/// A filter as clients type it: trimmed, folded and bounded.
 pub(crate) fn filter_text(filter: &str) -> String {
-    filter.trim().to_lowercase().chars().take(256).collect()
+    names::folded(filter.trim()).chars().take(256).collect()
 }
 
 impl Context<'_> {
-    /// Whether a track's title, artist, album, comment and year hold a filter or Search term.
+    /// Whether a track's title, artist, album, comment and year, or one of its album artists,
+    /// hold a filter or Search term.
     pub(crate) fn track_holds(&self, record: &TrackRec, text: &str, word: bool) -> bool {
+        let snapshot = self.snapshot;
         let parts = [
             record.title,
             record.artist,
             record.album_title,
             record.comment,
         ];
-        let parts = parts.map(|part| self.snapshot.text(part));
+        let parts = parts.map(|part| snapshot.text(part));
         holds(&parts, year_of(record.year), text, word)
+            || self.album_artists(record).iter().any(|slot| {
+                snapshot
+                    .artists
+                    .live(*slot)
+                    .is_some_and(|artist| holds(&[snapshot.text(artist.name)], None, text, word))
+            })
     }
 
     /// Whether an album's title and artist, its year, or a credited artist or tag holds a
@@ -1644,8 +1654,8 @@ impl Context<'_> {
             .collect()
     }
 
-    /// The albums an artist has visible tracks on, in a role.
-    fn artist_albums(&self, artist: u32, album_artist: bool, folder: Option<u32>) -> HashSet<u32> {
+    /// The albums an artist has visible tracks on, as an album artist or a track artist.
+    fn artist_albums(&self, artist: u32, folder: Option<u32>) -> HashSet<u32> {
         let mut albums = HashSet::new();
         for (_, record) in self.snapshot.tracks.iter() {
             if !record.indexed() || !self.in_folder(record, folder) {
@@ -1654,16 +1664,23 @@ impl Context<'_> {
             let Some(album) = self.album_of(record) else {
                 continue;
             };
-            let member = if album_artist {
-                self.album_artists(record).contains(&artist)
-            } else {
-                self.snapshot.track_runs(record)[0].contains(&artist)
-            };
-            if member {
+            if self.album_artists(record).contains(&artist)
+                || self.snapshot.track_runs(record)[0].contains(&artist)
+            {
                 albums.insert(album);
             }
         }
         albums
+    }
+
+    /// An album's group on an artist's page: its release class, or Appears On when the artist
+    /// is not one of its album artists.
+    fn release_group(&self, artist: u32, record: &AlbumRec) -> usize {
+        if self.snapshot.album_runs(record)[0].contains(&artist) {
+            usize::from(AlbumReleaseClass::of(record.flags).code())
+        } else {
+            AlbumReleaseClass::COUNT
+        }
     }
 
     fn album_row(&self, totals: Totals, slot: u32, record: &AlbumRec) -> ListRow<'_> {
@@ -1688,6 +1705,7 @@ impl Context<'_> {
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::ArtistAlbums {
+                artist,
                 release_class,
                 filters,
                 ..
@@ -1695,7 +1713,13 @@ impl Context<'_> {
                 let record = &snapshot.albums.records[slot as usize];
                 let class = AlbumReleaseClass::of(record.flags);
                 let text = filters.as_ref().map_or(filter.to_owned(), |filters| {
-                    filter_text(&filters[usize::from(class.code())])
+                    let group = snapshot
+                        .artists
+                        .slot(artist.raw())
+                        .map_or(usize::from(class.code()), |artist| {
+                            self.release_group(artist, record)
+                        });
+                    filter_text(&filters[group])
                 });
                 let named = [snapshot.text(record.title), snapshot.text(record.artist)];
                 let matched = holds(&named, None, &text, false)
@@ -1747,19 +1771,15 @@ impl Context<'_> {
                 }
                 rows.sort_by(|a, b| compare_albums(read.sort, read.descending, a, b));
             }
-            ListKind::ArtistAlbums {
-                artist,
-                album_artist,
-                ..
-            } => {
+            ListKind::ArtistAlbums { artist, .. } => {
                 let Some(artist) = snapshot.artists.slot(artist.raw()) else {
                     return Vec::new();
                 };
-                for slot in self.artist_albums(artist, *album_artist, folder) {
+                for slot in self.artist_albums(artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
                     if record.source == source {
                         let mut row = self.album_row(shown.album(slot), slot, record);
-                        row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
+                        row.class = self.release_group(artist, record);
                         rows.push(row);
                     }
                 }
@@ -2681,14 +2701,16 @@ impl Catalog {
             }
             Read::List(list) => {
                 let keys = self.list_keys(context, list, inputs, read_at);
-                if let ListKind::ArtistAlbums { .. } = list.kind {
-                    let mut classes = [0; AlbumReleaseClass::COUNT];
+                if let ListKind::ArtistAlbums { artist, .. } = &list.kind
+                    && let Some(artist) = snapshot.artists.slot(artist.raw())
+                {
+                    let mut groups = [0; crate::ARTIST_RELEASE_GROUPS];
                     for key in &keys {
                         if let Some(album) = snapshot.albums.get(*key) {
-                            classes[usize::from(AlbumReleaseClass::of(album.flags).code())] += 1;
+                            groups[context.release_group(artist, album)] += 1;
                         }
                     }
-                    counts = Some(classes);
+                    counts = Some(groups);
                 }
                 Members::Keys(keys.into_iter().map(|key| key as u32).collect())
             }

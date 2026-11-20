@@ -7,12 +7,12 @@ use crate::LocalImageRef;
 use lofty::config::ParseOptions;
 use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
-use lofty::tag::{ItemKey, Tag};
 
-use crate::policy::{date_year, normalized_date, stable_hash};
+use crate::policy::{date_year, stable_hash};
 
 use super::discovery;
 use super::lofty::{read_lofty_scan, source_format};
+use super::tags::{self, RawTags, Tags};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScannedTrack {
@@ -231,17 +231,44 @@ pub(crate) fn read_media_input(
             .flatten()
             .filter(|(file, _)| lofty_supplies_required_audio(file));
     }
-    let (tagged_file, album_version) = read.unzip();
+    let (tagged_file, raw) = read.unzip();
     let folder = folder_album(&path, root);
     let mut track = if let Some(tagged_file) = tagged_file.as_ref() {
-        lofty_track(&path, folder, tagged_file, album_version.flatten(), sidecar)
+        let properties = tagged_file.properties();
+        let facts = Facts {
+            duration_seconds: lofty_duration_seconds(tagged_file),
+            source_format: source_format(&path, tagged_file.file_type()),
+            audio_properties: library::AudioProperties {
+                bitrate_kbps: properties.audio_bitrate(),
+                sample_rate_hz: properties.sample_rate(),
+                bit_depth: properties.bit_depth().map(u32::from),
+                channels: properties.channels().map(u32::from),
+                size_bytes: None,
+            },
+            user_rating: tagged_file
+                .primary_tag()
+                .or_else(|| tagged_file.first_tag())
+                .and_then(|tag| tag.ratings().next())
+                .map(|rating| (rating.rating() as u8) * 2),
+        };
+        let tags = Tags::clean(&raw.unwrap_or_default());
+        tagged_track(&path, folder, &tags, facts, sidecar)
     } else {
-        discovered_track(
-            &path,
-            folder,
-            discovered.clone().unwrap_or_default(),
-            sidecar,
-        )
+        let metadata = discovered.clone().unwrap_or_default();
+        let facts = Facts {
+            duration_seconds: metadata.duration_seconds,
+            source_format: metadata.source_format.clone().or_else(|| {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            }),
+            audio_properties: metadata.audio_properties.clone(),
+            user_rating: None,
+        };
+        let tags = Tags::clean(&discovered_tags(&metadata));
+        tagged_track(&path, folder, &tags, facts, sidecar)
     };
     super::lyrics::set_lyrics(
         &mut track,
@@ -269,146 +296,6 @@ pub(crate) fn read_media_input(
     MediaRead::Accepted(Box::new(track))
 }
 
-fn lofty_track(
-    path: &Path,
-    folder: String,
-    tagged_file: &lofty::file::TaggedFile,
-    album_version: Option<String>,
-    local_artwork: Option<LocalImageRef>,
-) -> ScannedTrack {
-    let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag());
-    let title = tag_string(tag, |tag| tag.title().map(|value| value.to_string()))
-        .unwrap_or_else(|| file_title(path));
-    let album = tag_string(tag, |tag| tag.album().map(|value| value.to_string())).unwrap_or(folder);
-    let artist =
-        joined_values(tag, ItemKey::TrackArtist).unwrap_or_else(|| "Unknown Artist".to_string());
-    let tagged_album_artist = joined_values(tag, ItemKey::AlbumArtist);
-    let album_artist_tagged = tagged_album_artist.is_some();
-    let album_artist = tagged_album_artist.unwrap_or_else(|| artist.clone());
-    let artists = credits(
-        &artist_names(tag, &artist),
-        tag_mbids(tag, ItemKey::MusicBrainzArtistId),
-        tag_names(tag, ItemKey::TrackArtistSortOrder),
-        &[],
-    );
-    let album_artists = credits(
-        &split_names(&album_artist),
-        tag_mbids(tag, ItemKey::MusicBrainzReleaseArtistId),
-        tag_names(tag, ItemKey::AlbumArtistSortOrder),
-        &artists,
-    );
-    let release_types = album_release_types(tag);
-    let release_date = tag.and_then(|tag| {
-        [
-            ItemKey::ReleaseDate,
-            ItemKey::RecordingDate,
-            ItemKey::OriginalReleaseDate,
-            ItemKey::Year,
-        ]
-        .into_iter()
-        .find_map(|key| normalized_date(tag.get_string(key).map(str::to_owned)))
-    });
-    let sort_title = tag_string(tag, |tag| {
-        tag.get_string(ItemKey::TrackTitleSortOrder)
-            .map(str::to_owned)
-    });
-    let sort_album = tag_string(tag, |tag| {
-        tag.get_string(ItemKey::AlbumTitleSortOrder)
-            .map(str::to_owned)
-    });
-    let properties = tagged_file.properties();
-    let metadata = library::TrackMetadata {
-        album_tags: Some(library::AlbumTags {
-            sort_text: sort_album.as_deref().unwrap_or(&album).to_lowercase(),
-            is_compilation: album_compilation(tag, &release_types),
-            release_types,
-            version: album_version,
-            disc_subtitle: tag_string(tag, |tag| {
-                tag.get_string(ItemKey::SetSubtitle).map(str::to_owned)
-            }),
-        }),
-        groupings: tag.map(groupings).unwrap_or_default(),
-        sort_text: sort_title.as_deref().unwrap_or(&title).to_lowercase(),
-        title,
-        artist,
-        album,
-        album_display_artist: Some(album_artist),
-        year: release_date.as_deref().and_then(date_year).map(i64::from),
-        release_date,
-        duration_millis: i64::from(lofty_duration_seconds(tagged_file)) * 1_000,
-        disc_number: i64::from(
-            tag.and_then(|tag| tag.disk())
-                .unwrap_or(1)
-                .min(u32::from(u16::MAX)),
-        ),
-        track_number: i64::from(
-            tag.and_then(|tag| tag.track())
-                .unwrap_or_default()
-                .min(u32::from(u16::MAX)),
-        ),
-        musicbrainz_recording_id: tag
-            .and_then(|tag| tag_mbid(tag, ItemKey::MusicBrainzRecordingId)),
-        musicbrainz_release_track_id: tag
-            .and_then(|tag| tag_mbid(tag, ItemKey::MusicBrainzTrackId)),
-        musicbrainz_album_id: tag.and_then(|tag| tag_mbid(tag, ItemKey::MusicBrainzReleaseId)),
-        musicbrainz_release_group_id: tag
-            .and_then(|tag| tag_mbid(tag, ItemKey::MusicBrainzReleaseGroupId)),
-        source_format: source_format(path, tagged_file.file_type()),
-        comment: tag
-            .and_then(|tag| tag.get_string(ItemKey::Comment))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        bpm: tag_bpm(tag).map(i64::from),
-        audio_properties: library::AudioProperties {
-            bitrate_kbps: properties.audio_bitrate(),
-            sample_rate_hz: properties.sample_rate(),
-            bit_depth: properties.bit_depth().map(u32::from),
-            channels: properties.channels().map(u32::from),
-            size_bytes: None,
-        },
-        artists,
-        album_artists,
-        genres: tag_references(
-            "genre",
-            tag_values_optional(tag, ItemKey::Genre)
-                .iter()
-                .flat_map(|value| split_values(value))
-                .collect(),
-        ),
-        moods: tag_references(
-            "mood",
-            tag_values_optional(tag, ItemKey::Mood)
-                .iter()
-                .flat_map(|value| split_values(value))
-                .collect(),
-        ),
-        source_loudness: native_gain(
-            r128_integrated_lufs(tag, ItemKey::R128TrackGain),
-            replay_gain_db(tag, ItemKey::ReplayGainTrackGain),
-            replay_gain_peak(tag, ItemKey::ReplayGainTrackPeak),
-        ),
-        album_loudness: native_gain(
-            r128_integrated_lufs(tag, ItemKey::R128AlbumGain),
-            replay_gain_db(tag, ItemKey::ReplayGainAlbumGain),
-            replay_gain_peak(tag, ItemKey::ReplayGainAlbumPeak),
-        ),
-        ..Default::default()
-    };
-    let user_rating = tag
-        .and_then(|tag| tag.ratings().next())
-        .map(|rating| (rating.rating() as u8) * 2);
-    scanned_track(
-        path,
-        metadata,
-        album_artist_tagged,
-        user_rating,
-        local_artwork,
-    )
-}
-
 fn lofty_duration_seconds(tagged_file: &lofty::file::TaggedFile) -> u32 {
     tagged_file
         .properties()
@@ -422,14 +309,81 @@ fn lofty_supplies_required_audio(file: &lofty::file::TaggedFile) -> bool {
 }
 
 // Vorbis-style R128 gain is a signed Q7.8 dB adjustment to the -23 LUFS target.
-fn r128_integrated_lufs(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
-    let gain_q8 = tag?.get_string(key)?.trim().parse::<i32>().ok()?;
+/// What a read knows of a file beside its tags.
+struct Facts {
+    duration_seconds: u32,
+    source_format: Option<String>,
+    audio_properties: library::AudioProperties,
+    user_rating: Option<u8>,
+}
+
+/// The names of a credit, each once: those in the values of its plural tag, else in those of
+/// its singular one.
+fn artist_names(tags: &Tags, single: &str, plural: &str) -> Vec<String> {
+    let values = match tags.all(plural) {
+        [] => tags.all(single),
+        values => values,
+    };
+    let mut names = Vec::<String>::new();
+    for name in values.iter().flat_map(|value| split_names(value)) {
+        if !names.iter().any(|known| known.eq_ignore_ascii_case(&name)) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// A credit as it shows: its singular tag's values, else its plural one's.
+fn display_names(tags: &Tags, single: &str, plural: &str) -> Option<String> {
+    [single, plural]
+        .into_iter()
+        .map(|name| tags.all(name))
+        .find(|values| !values.is_empty())
+        .map(|values| values.join("; "))
+}
+
+/// The number a track or disc tag leads with, as `3` and `3/12` do.
+fn tag_number(value: Option<&str>) -> Option<i64> {
+    let digits = value?
+        .trim()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits
+        .parse::<u32>()
+        .ok()
+        .map(|number| i64::from(number.min(u32::from(u16::MAX))))
+}
+
+fn tag_bpm(value: Option<&str>) -> Option<i64> {
+    let rounded = value?.trim().parse::<f64>().ok()?.round();
+    (1.0..=f64::from(u16::MAX))
+        .contains(&rounded)
+        .then_some(rounded as i64)
+}
+
+/// Whether the album is a compilation: its flag, else what its release types say.
+fn album_compilation(flag: Option<&str>, release_types: &[String]) -> Option<bool> {
+    let flag = flag.map(str::trim);
+    let explicit_true = flag.is_some_and(|flag| flag == "1" || flag.eq_ignore_ascii_case("true"));
+    let explicit_false = flag.is_some_and(|flag| flag == "0" || flag.eq_ignore_ascii_case("false"));
+    if explicit_true || release_types.iter().any(|value| value == "compilation") {
+        Some(true)
+    } else if explicit_false || !release_types.is_empty() {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn r128_integrated_lufs(value: Option<&str>) -> Option<f64> {
+    let gain_q8 = value?.trim().parse::<i32>().ok()?;
     let integrated_lufs = -23.0 - f64::from(gain_q8) / 256.0;
     integrated_lufs.is_finite().then_some(integrated_lufs)
 }
 
-fn replay_gain_db(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
-    let value = tag?.get_string(key)?.trim();
+fn replay_gain_db(value: Option<&str>) -> Option<f64> {
+    let value = value?.trim();
     let value = value
         .strip_suffix("dB")
         .or_else(|| value.strip_suffix("db"))
@@ -440,102 +394,179 @@ fn replay_gain_db(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-fn replay_gain_peak(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
-    let value = tag?.get_string(key)?.trim().parse::<f64>().ok()?;
+fn replay_gain_peak(value: Option<&str>) -> Option<f64> {
+    let value = value?.trim().parse::<f64>().ok()?;
     (value.is_finite() && value >= 0.0).then_some(value)
 }
 
-fn discovered_track(
+/// A file's track from its cleaned tags. A file without an album artist takes its own artists.
+fn tagged_track(
     path: &Path,
     folder: String,
-    metadata: discovery::Metadata,
+    tags: &Tags,
+    facts: Facts,
     local_artwork: Option<LocalImageRef>,
 ) -> ScannedTrack {
-    let title = metadata.title.unwrap_or_else(|| file_title(path));
-    let album = metadata.album.unwrap_or(folder);
-    let artist = metadata
-        .artist
-        .unwrap_or_else(|| "Unknown Artist".to_string());
-    let album_artist_tagged = metadata.album_artist.is_some();
-    let album_artist = metadata.album_artist.unwrap_or_else(|| artist.clone());
-    let clean = |values: Vec<String>| {
-        values
-            .iter()
-            .filter_map(|value| clean_mbid(value))
-            .collect::<Vec<_>>()
-    };
+    let title = tags
+        .first("title")
+        .map_or_else(|| file_title(path), str::to_owned);
+    let album = tags.first("album").map_or(folder, str::to_owned);
+    let artist =
+        display_names(tags, "artist", "artists").unwrap_or_else(|| "Unknown Artist".to_string());
+    let mut names = artist_names(tags, "artist", "artists");
+    if names.is_empty() {
+        names.push(artist.clone());
+    }
     let artists = credits(
-        &split_names(&artist),
-        clean(metadata.artist_mbids),
-        metadata.artist_sort,
+        &names,
+        tags.all("musicbrainz_artistid").to_vec(),
+        artist_names(tags, "artistsort", "artistssort"),
         &[],
     );
+    let tagged_album_artist = display_names(tags, "albumartist", "albumartists");
+    let album_artist_tagged = tagged_album_artist.is_some();
+    let album_names = if album_artist_tagged {
+        artist_names(tags, "albumartist", "albumartists")
+    } else {
+        names
+    };
     let album_artists = credits(
-        &split_names(&album_artist),
-        clean(metadata.album_artist_mbids),
-        metadata.album_artist_sort,
+        &album_names,
+        tags.all("musicbrainz_albumartistid").to_vec(),
+        artist_names(tags, "albumartistsort", "albumartistssort"),
         &artists,
     );
+    let album_artist = tagged_album_artist.unwrap_or_else(|| artist.clone());
+    let release_types = library::normalize_release_types(
+        tags.all("releasetype")
+            .iter()
+            .flat_map(|value| value.split(';')),
+    );
+    let is_compilation = album_compilation(tags.first("compilation"), &release_types);
+    let release_date = ["releasedate", "recordingdate", "originaldate", "year"]
+        .into_iter()
+        .find_map(|name| tags.first(name))
+        .map(str::to_owned);
+    let mbid = |name: &str| tags.first(name).map(str::to_owned);
     let metadata = library::TrackMetadata {
         album_tags: Some(library::AlbumTags {
-            sort_text: metadata
-                .sort_album
-                .as_deref()
-                .unwrap_or(&album)
-                .to_lowercase(),
-            is_compilation: metadata.is_compilation,
-            release_types: library::normalize_release_types(metadata.release_types),
-            version: metadata.album_version,
-            disc_subtitle: metadata.disc_subtitle,
+            sort_text: tags.first("albumsort").unwrap_or(&album).to_lowercase(),
+            is_compilation,
+            release_types,
+            version: tags.first("albumversion").map(str::to_owned),
+            disc_subtitle: tags.first("discsubtitle").map(str::to_owned),
         }),
-        groupings: metadata.groupings,
-        sort_text: metadata
-            .sort_title
-            .as_deref()
-            .unwrap_or(&title)
-            .to_lowercase(),
+        groupings: tags.all("grouping").to_vec(),
+        sort_text: tags.first("titlesort").unwrap_or(&title).to_lowercase(),
         title,
         artist,
         album,
         album_display_artist: Some(album_artist),
-        year: metadata.year.map(i64::from).filter(|year| *year > 0),
-        release_date: metadata.release_date,
-        duration_millis: i64::from(metadata.duration_seconds) * 1_000,
-        disc_number: i64::from(metadata.disc_number.unwrap_or(1)),
-        track_number: i64::from(metadata.track_number.unwrap_or_default()),
-        musicbrainz_recording_id: metadata
-            .musicbrainz_recording_id
-            .as_deref()
-            .and_then(clean_mbid),
-        musicbrainz_release_track_id: metadata
-            .musicbrainz_release_track_id
-            .as_deref()
-            .and_then(clean_mbid),
-        musicbrainz_album_id: metadata
-            .musicbrainz_album_id
-            .as_deref()
-            .and_then(clean_mbid),
-        musicbrainz_release_group_id: metadata
-            .musicbrainz_release_group_id
-            .as_deref()
-            .and_then(clean_mbid),
-        source_format: metadata.source_format.or_else(|| {
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-        }),
-        comment: metadata.comment,
-        bpm: metadata.bpm.map(i64::from),
-        audio_properties: metadata.audio_properties,
+        year: release_date.as_deref().and_then(date_year).map(i64::from),
+        release_date,
+        duration_millis: i64::from(facts.duration_seconds) * 1_000,
+        disc_number: tag_number(tags.first("disc"))
+            .filter(|disc| *disc > 0)
+            .unwrap_or(1),
+        track_number: tag_number(tags.first("track")).unwrap_or_default(),
+        musicbrainz_recording_id: mbid("musicbrainz_recordingid"),
+        musicbrainz_release_track_id: mbid("musicbrainz_trackid"),
+        musicbrainz_album_id: mbid("musicbrainz_albumid"),
+        musicbrainz_release_group_id: mbid("musicbrainz_releasegroupid"),
+        source_format: facts.source_format,
+        comment: tags.first("comment").map(str::to_owned),
+        bpm: tag_bpm(tags.first("bpm")),
+        audio_properties: facts.audio_properties,
         artists,
         album_artists,
-        genres: tag_references("genre", metadata.genres),
-        moods: tag_references("mood", metadata.moods),
+        genres: tag_references("genre", tags.all("genre").to_vec()),
+        moods: tag_references("mood", tags.all("mood").to_vec()),
+        source_loudness: native_gain(
+            r128_integrated_lufs(tags.first("r128_track_gain")),
+            replay_gain_db(tags.first("replaygain_track_gain")),
+            replay_gain_peak(tags.first("replaygain_track_peak")),
+        ),
+        album_loudness: native_gain(
+            r128_integrated_lufs(tags.first("r128_album_gain")),
+            replay_gain_db(tags.first("replaygain_album_gain")),
+            replay_gain_peak(tags.first("replaygain_album_peak")),
+        ),
         ..Default::default()
     };
-    scanned_track(path, metadata, album_artist_tagged, None, local_artwork)
+    let mut track = scanned_track(
+        path,
+        metadata,
+        album_artist_tagged,
+        facts.user_rating,
+        local_artwork,
+    );
+    track.track.tags = tags.stored();
+    track
+}
+
+/// The tags discovery read, under keys the table names them by.
+fn discovered_tags(metadata: &discovery::Metadata) -> RawTags {
+    let mut raw = RawTags::new();
+    let one = [
+        ("title", &metadata.title),
+        ("album", &metadata.album),
+        ("artist", &metadata.artist),
+        ("albumartist", &metadata.album_artist),
+        ("titlesort", &metadata.sort_title),
+        ("albumsort", &metadata.sort_album),
+        ("date", &metadata.release_date),
+        ("comment", &metadata.comment),
+        ("musicbrainz_albumid", &metadata.musicbrainz_album_id),
+        (
+            "musicbrainz_releasegroupid",
+            &metadata.musicbrainz_release_group_id,
+        ),
+        ("musicbrainz_trackid", &metadata.musicbrainz_recording_id),
+        (
+            "musicbrainz_releasetrackid",
+            &metadata.musicbrainz_release_track_id,
+        ),
+        ("albumversion", &metadata.album_version),
+        ("discsubtitle", &metadata.disc_subtitle),
+    ];
+    for (key, value) in one {
+        if let Some(value) = value {
+            tags::push(&mut raw, key, value);
+        }
+    }
+    let many = [
+        ("artistsort", &metadata.artist_sort),
+        ("albumartistsort", &metadata.album_artist_sort),
+        ("musicbrainz_artistid", &metadata.artist_mbids),
+        ("musicbrainz_albumartistid", &metadata.album_artist_mbids),
+        ("genre", &metadata.genres),
+        ("mood", &metadata.moods),
+        ("releasetype", &metadata.release_types),
+        ("grouping", &metadata.groupings),
+    ];
+    for (key, values) in many {
+        for value in values {
+            tags::push(&mut raw, key, value);
+        }
+    }
+    let numbers = [
+        ("track", metadata.track_number),
+        ("disc", metadata.disc_number),
+        ("bpm", metadata.bpm),
+        (
+            "date",
+            metadata.year.filter(|_| metadata.release_date.is_none()),
+        ),
+    ];
+    for (key, number) in numbers {
+        if let Some(number) = number.filter(|number| *number > 0) {
+            tags::push(&mut raw, key, &number.to_string());
+        }
+    }
+    if let Some(compilation) = metadata.is_compilation {
+        tags::push(&mut raw, "compilation", if compilation { "1" } else { "0" });
+    }
+    raw
 }
 
 fn scanned_track(
@@ -567,6 +598,118 @@ fn scanned_track(
         flac_md5: None,
         lyrics: None,
     }
+}
+
+/// An album is its MusicBrainz release, or else its tagged album artists with its title and
+/// version, wherever its files are. Without an album artist tag its folder stands in for one:
+/// the tracks of a compilation stay one album, and same-titled albums in other folders stay
+/// apart. A cue sheet's album is its sheet's.
+pub(crate) fn album_id(
+    metadata: &library::TrackMetadata,
+    album_artist_tagged: bool,
+    path: &Path,
+    cue_path: Option<&Path>,
+) -> String {
+    let credits = metadata
+        .album_artists
+        .iter()
+        .filter(|_| album_artist_tagged)
+        .map(|credit| credit.object_id.as_str())
+        .collect::<Vec<_>>()
+        .join("\u{1f}");
+    let name = match metadata
+        .album_tags
+        .as_ref()
+        .and_then(|tags| tags.version.as_deref())
+    {
+        Some(version) => normalized_identity(&format!("{} ({version})", metadata.album)),
+        None => normalized_identity(&metadata.album),
+    };
+    let release = metadata.musicbrainz_album_id.as_deref();
+    let identity = if let Some(cue_path) = cue_path {
+        format!(
+            "{credits}:{name}:cue:{}:{}",
+            cue_path.to_string_lossy(),
+            release.unwrap_or_default()
+        )
+    } else if let Some(release) = release {
+        format!("musicbrainz:{release}")
+    } else if album_artist_tagged {
+        format!("{credits}:{name}")
+    } else {
+        format!(":{name}:{}", album_folder(path).to_string_lossy())
+    };
+    local_id("album", &identity)
+}
+
+/// The rest of `text` after the number it starts with: digits, or a number word.
+fn after_number(text: &str) -> Option<&str> {
+    let rest = text.trim_start_matches(|character: char| character.is_ascii_digit());
+    if rest.len() < text.len() {
+        return Some(rest);
+    }
+    [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    ]
+    .iter()
+    .find_map(|word| text.strip_prefix(word))
+}
+
+/// The rest of `text` after the disc it starts with, as `cd1`, `disc 2` and `vol. three` do.
+fn after_disc(text: &str) -> Option<&str> {
+    ["cd", "disc", "disk", "dvd", "volume", "vol"]
+        .iter()
+        .find_map(|marker| {
+            after_number(
+                text.strip_prefix(marker)?
+                    .trim_start_matches([' ', '-', '_', '.', '#']),
+            )
+        })
+}
+
+/// The folder an album's files share. A folder of one disc is its parent's: one named for the
+/// disc, as CD1, Disc 2 - Live and 3 are. A folder named for an album and one of its discs,
+/// as Album (Disc 1) and Album [CD2] are, is that album's beside it.
+fn album_folder(path: &Path) -> PathBuf {
+    let folder = path.parent().unwrap_or(Path::new(""));
+    let (Some(name), Some(parent)) = (
+        folder.file_name().and_then(|name| name.to_str()),
+        folder.parent(),
+    ) else {
+        return folder.to_owned();
+    };
+    let name = name.to_lowercase();
+    let ends = |rest: &str| !rest.starts_with(|character: char| character.is_alphanumeric());
+    if after_disc(&name).is_some_and(ends)
+        || (!name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return parent.to_owned();
+    }
+    for (at, _) in name.char_indices().skip(1) {
+        let (Some(stem), Some(disc)) = (name.get(..at), name.get(at..)) else {
+            continue;
+        };
+        let closed = |rest: &str| rest.trim_matches([' ', ')', ']']).is_empty();
+        let stem = stem.trim_end_matches([' ', '-', '_', ',', '(', '[']);
+        if after_disc(disc).is_some_and(closed)
+            && !stem.is_empty()
+            && !name
+                .get(..at)
+                .is_some_and(|before| before.ends_with(char::is_alphanumeric))
+        {
+            return parent.join(stem);
+        }
+    }
+    folder.to_owned()
+}
+
+/// The names in one credit value, empty parts included.
+pub(crate) fn name_parts(value: &str) -> impl Iterator<Item = &str> {
+    tags::parts(value, &tags::ARTIST_SEPARATORS).into_iter()
+}
+
+pub(crate) fn split_names(value: &str) -> Vec<String> {
+    tags::split(value, &tags::ARTIST_SEPARATORS)
 }
 
 /// The STREAMINFO MD5 of a FLAC stream, after an ID3v2 tag if one leads; None when the encoder
@@ -675,67 +818,6 @@ pub(crate) fn cue_track_id(cue_path: &Path, track_number: u16) -> String {
     )
 }
 
-/// An album is its MusicBrainz release, or else its title and version in its folder with its
-/// tagged album artists: same-titled albums in other folders stay apart, mixes in one folder
-/// stay apart, and the tracks of a compilation without an album artist stay one album. A cue
-/// sheet's album is its sheet's.
-pub(crate) fn album_id(
-    metadata: &library::TrackMetadata,
-    album_artist_tagged: bool,
-    path: &Path,
-    cue_path: Option<&Path>,
-) -> String {
-    let credits = metadata
-        .album_artists
-        .iter()
-        .filter(|_| album_artist_tagged)
-        .map(|credit| credit.object_id.as_str())
-        .collect::<Vec<_>>()
-        .join("\u{1f}");
-    let name = match metadata
-        .album_tags
-        .as_ref()
-        .and_then(|tags| tags.version.as_deref())
-    {
-        Some(version) => normalized_identity(&format!("{} ({version})", metadata.album)),
-        None => normalized_identity(&metadata.album),
-    };
-    let release = metadata.musicbrainz_album_id.as_deref();
-    let identity = if let Some(cue_path) = cue_path {
-        format!(
-            "{credits}:{name}:cue:{}:{}",
-            cue_path.to_string_lossy(),
-            release.unwrap_or_default()
-        )
-    } else if let Some(release) = release {
-        format!("musicbrainz:{release}")
-    } else {
-        format!("{credits}:{name}:{}", album_folder(path).to_string_lossy())
-    };
-    local_id("album", &identity)
-}
-
-/// The folder an album's files share: a disc folder such as CD1 or Disc 2 is its parent's.
-fn album_folder(path: &Path) -> &Path {
-    let folder = path.parent().unwrap_or(Path::new(""));
-    let disc = folder
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            let name = name.to_ascii_lowercase();
-            ["cd", "disc", "disk"].iter().any(|prefix| {
-                name.strip_prefix(prefix).is_some_and(|number| {
-                    let number = number.trim_start_matches([' ', '-', '_', '.']);
-                    !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
-                })
-            })
-        });
-    match folder.parent() {
-        Some(parent) if disc => parent,
-        _ => folder,
-    }
-}
-
 /// An artist is its name; its MusicBrainz id is metadata, so tracks tagged with and without it
 /// credit one artist.
 pub(crate) fn artist_credit(
@@ -746,152 +828,12 @@ pub(crate) fn artist_credit(
         object_id: local_id("artist", &normalized_identity(&name)),
         sort_text: Some(name.to_lowercase()),
         name,
-        musicbrainz_artist_id: musicbrainz_artist_id.and_then(clean_mbid),
+        musicbrainz_artist_id: musicbrainz_artist_id.and_then(tags::clean_mbid),
     }
-}
-
-/// The names in one credit value, untrimmed parts included: `;` and a spaced ` / ` separate
-/// them, so a name keeps its own slash, as AC/DC does.
-pub(crate) fn name_parts(value: &str) -> impl Iterator<Item = &str> {
-    value
-        .split(';')
-        .flat_map(|part| part.split(" / "))
-        .map(str::trim)
-}
-
-pub(crate) fn split_names(value: &str) -> Vec<String> {
-    name_parts(value)
-        .filter(|name| !name.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-/// The values in one genre, mood or id value, which `;` and `/` separate.
-fn split_values(value: &str) -> Vec<String> {
-    value
-        .split([';', '/'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect()
 }
 
 pub(crate) fn local_id(kind: &str, value: &str) -> String {
     format!("local:{kind}:{:016x}", stable_hash(value))
-}
-
-fn artist_names(tag: Option<&Tag>, fallback: &str) -> Vec<String> {
-    let tagged = tag
-        .map(|tag| {
-            tag.get_strings(ItemKey::TrackArtists)
-                .flat_map(split_names)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let fallback = split_names(fallback);
-    if tagged.is_empty()
-        || (tagged.len() == 1
-            && fallback.len() == 1
-            && tagged[0].eq_ignore_ascii_case(&fallback[0]))
-    {
-        fallback
-    } else {
-        tagged
-    }
-}
-
-fn tag_string(tag: Option<&Tag>, read: impl FnOnce(&Tag) -> Option<String>) -> Option<String> {
-    tag.and_then(read)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn tag_mbid(tag: &Tag, key: ItemKey) -> Option<String> {
-    tag_values(tag, key)
-        .into_iter()
-        .find_map(|value| clean_mbid(&value))
-}
-
-/// Every value of a tag, joined as several names are written.
-fn joined_values(tag: Option<&Tag>, key: ItemKey) -> Option<String> {
-    let values = tag_values_optional(tag, key);
-    let values = values
-        .iter()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    (!values.is_empty()).then(|| values.join("; "))
-}
-
-fn tag_mbids(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
-    tag_values_optional(tag, key)
-        .into_iter()
-        .flat_map(|value| split_values(&value))
-        .filter_map(|value| clean_mbid(&value))
-        .collect()
-}
-
-fn tag_names(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
-    tag_values_optional(tag, key)
-        .iter()
-        .flat_map(|value| split_names(value))
-        .collect()
-}
-
-fn tag_values_optional(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
-    tag.map(|tag| tag_values(tag, key)).unwrap_or_default()
-}
-
-fn tag_values(tag: &Tag, key: ItemKey) -> Vec<String> {
-    tag.get_items(key)
-        .filter_map(|item| item.value().text().map(ToString::to_string))
-        .collect()
-}
-
-/// A track's groupings, each value once; ID3v2 separates several with NUL.
-fn groupings(tag: &Tag) -> Vec<String> {
-    let mut values = Vec::new();
-    for value in tag_values(tag, super::lofty::grouping_key(tag.tag_type())) {
-        for value in value.split('\0').map(str::trim) {
-            if !value.is_empty() && !values.iter().any(|known| known == value) {
-                values.push(value.to_owned());
-            }
-        }
-    }
-    values
-}
-
-fn album_release_types(tag: Option<&Tag>) -> Vec<String> {
-    let mut values = Vec::new();
-    for value in tag_values_optional(tag, ItemKey::MusicBrainzReleaseType) {
-        values.extend(
-            value
-                .split([';', '\0'])
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string),
-        );
-    }
-    library::normalize_release_types(values)
-}
-
-fn album_compilation(tag: Option<&Tag>, release_types: &[String]) -> Option<bool> {
-    let mut explicit_true = false;
-    let mut explicit_false = false;
-    for value in tag_values_optional(tag, ItemKey::FlagCompilation) {
-        match value.trim() {
-            "1" => explicit_true = true,
-            "0" => explicit_false = true,
-            _ => {}
-        }
-    }
-    if explicit_true || release_types.iter().any(|value| value == "compilation") {
-        Some(true)
-    } else if explicit_false || !release_types.is_empty() {
-        Some(false)
-    } else {
-        None
-    }
 }
 
 fn aligned_values(names: &[String], values: Vec<String>) -> Vec<Option<String>> {
@@ -902,18 +844,6 @@ fn aligned_values(names: &[String], values: Vec<String>) -> Vec<Option<String>> 
     }
 }
 
-fn tag_bpm(tag: Option<&Tag>) -> Option<u16> {
-    tag_values_optional(tag, ItemKey::IntegerBpm)
-        .into_iter()
-        .chain(tag_values_optional(tag, ItemKey::Bpm))
-        .find_map(|value| {
-            let rounded = value.trim().parse::<f64>().ok()?.round();
-            (1.0..=f64::from(u16::MAX))
-                .contains(&rounded)
-                .then_some(rounded as u16)
-        })
-}
-
 fn normalized_identity(value: &str) -> String {
     value
         .split_whitespace()
@@ -922,19 +852,10 @@ fn normalized_identity(value: &str) -> String {
         .to_lowercase()
 }
 
-fn clean_mbid(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
-    .then(|| value.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use lofty::config::WriteOptions;
-    use lofty::tag::TagType;
+    use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::*;
     use crate::file::local::media::read_media;
@@ -1128,23 +1049,9 @@ mod tests {
 
     #[test]
     fn local_loudness_parses_replay_gain_and_r128_independently() {
-        let mut tag = Tag::new(TagType::VorbisComments);
-        tag.insert_text(ItemKey::ReplayGainTrackGain, "-4.25 dB".to_string());
-        tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.91".to_string());
-        tag.insert_text(ItemKey::R128TrackGain, "-512".to_string());
-
-        assert_eq!(
-            replay_gain_db(Some(&tag), ItemKey::ReplayGainTrackGain),
-            Some(-4.25)
-        );
-        assert_eq!(
-            replay_gain_peak(Some(&tag), ItemKey::ReplayGainTrackPeak),
-            Some(0.91)
-        );
-        assert_eq!(
-            r128_integrated_lufs(Some(&tag), ItemKey::R128TrackGain),
-            Some(-21.0)
-        );
+        assert_eq!(replay_gain_db(Some("-4.25 dB")), Some(-4.25));
+        assert_eq!(replay_gain_peak(Some("0.91")), Some(0.91));
+        assert_eq!(r128_integrated_lufs(Some("-512")), Some(-21.0));
     }
 }
 

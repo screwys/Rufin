@@ -48,10 +48,7 @@ impl SearchRequest {
     }
 
     pub fn with_limit(query: impl Into<String>, limit: usize) -> Self {
-        let query = query
-            .into()
-            .trim()
-            .to_lowercase()
+        let query = names::folded(query.into().trim())
             .chars()
             .take(SEARCH_TEXT_LIMIT)
             .collect();

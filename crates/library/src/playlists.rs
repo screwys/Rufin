@@ -1521,9 +1521,9 @@ pub(crate) async fn write_playlist_artwork(
     Ok(changed)
 }
 
-/// Whether a playlist or playlist folder name holds `filter`, ignoring case: the one filter of
-/// Add to Playlist and Add to folder choices.
+/// Whether a playlist or playlist folder name holds `filter`, ignoring case and Latin accents:
+/// the one filter of Add to Playlist and Add to folder choices.
 pub(crate) fn name_holds(filter: &str) -> impl Fn(&str) -> bool {
-    let filter = filter.trim().to_lowercase();
-    move |name| filter.is_empty() || name.to_lowercase().contains(&filter)
+    let filter = names::folded(filter.trim());
+    move |name| filter.is_empty() || names::folded(name).contains(&filter)
 }

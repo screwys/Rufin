@@ -81,6 +81,11 @@ impl AlbumReleaseClass {
             .unwrap_or(Self::Album)
     }
 }
+
+/// An artist page's release groups: one per release class in its order, then Appears On, the
+/// albums the artist has tracks on without being one of their album artists.
+pub const ARTIST_RELEASE_GROUPS: usize = AlbumReleaseClass::COUNT + 1;
+
 /// Release type tags as albums keep them: trimmed, lowercase and without repeats.
 pub fn normalize_release_types(types: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
     let mut values = Vec::new();

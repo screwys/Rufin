@@ -812,19 +812,13 @@ fn artist_values(current: &str, names: &[String], selected: &str, value: Option<
     values.join("; ")
 }
 
-#[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
+/// Puts the working copy in the target's place; every filesystem renames over a file.
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn replace(
     replacement: &mut tempfile::TempPath,
     target: &Path,
 ) -> Result<(), SourceMetadataError> {
-    rustix::fs::renameat_with(
-        rustix::fs::CWD,
-        &**replacement,
-        rustix::fs::CWD,
-        target,
-        rustix::fs::RenameFlags::EXCHANGE,
-    )
-    .map_err(write_error)
+    fs::rename(&**replacement, target).map_err(write_error)
 }
 
 #[cfg(target_os = "windows")]
@@ -849,19 +843,6 @@ pub(crate) fn replace(
     .map_err(write_error)?;
     *replacement = backup;
     Ok(())
-}
-
-#[cfg(not(any(
-    target_os = "android",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "windows"
-)))]
-pub(crate) fn replace(
-    _replacement: &mut tempfile::TempPath,
-    _target: &Path,
-) -> Result<(), SourceMetadataError> {
-    Err(SourceMetadataError::Unavailable)
 }
 
 #[cfg(unix)]
@@ -1459,12 +1440,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    ))]
     async fn later_commit_failure_preserves_earlier_successful_file() {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first.wav");

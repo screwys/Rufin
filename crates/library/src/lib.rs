@@ -107,8 +107,8 @@ pub use catalog::{
     StoredFile, TagObservation, TrackObservation, walk_key,
 };
 pub use collections::{
-    AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseClass, AlbumView, ArtistView,
-    CollectionSummary, FolderChoice, GenreChoice, normalize_release_types,
+    ARTIST_RELEASE_GROUPS, AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseClass,
+    AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice, normalize_release_types,
 };
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};

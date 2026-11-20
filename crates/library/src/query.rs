@@ -56,7 +56,7 @@ pub enum ListKind {
         artist: ArtistKey,
         album_artist: bool,
         release_class: Option<AlbumReleaseClass>,
-        filters: Option<Arc<[String; AlbumReleaseClass::COUNT]>>,
+        filters: Option<Arc<[String; crate::ARTIST_RELEASE_GROUPS]>>,
     },
     Artists {
         album_artist: bool,

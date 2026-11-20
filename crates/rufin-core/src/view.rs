@@ -57,7 +57,7 @@ pub struct OpenOptions {
     pub downloaded_only: bool,
     /// The one source History lists; every source when `None`.
     pub history_source: Option<sources::SourceId>,
-    pub release_filters: Option<[String; library::AlbumReleaseClass::COUNT]>,
+    pub release_filters: Option<[String; library::ARTIST_RELEASE_GROUPS]>,
     /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
     /// the page opened with; plays and syncs change them on the next visit.
     pub smart_opened: Option<i64>,
@@ -119,8 +119,8 @@ enum Body {
     /// artist's favorite tracks when the page shows them.
     Releases {
         read: ListRead,
-        counts: [usize; library::AlbumReleaseClass::COUNT],
-        source_counts: [usize; library::AlbumReleaseClass::COUNT],
+        counts: [usize; library::ARTIST_RELEASE_GROUPS],
+        source_counts: [usize; library::ARTIST_RELEASE_GROUPS],
         favorites: Option<(MemberRead, usize)>,
     },
     /// Child folders, then the folder's tracks. Cached child folders have a read; live ones
@@ -1644,8 +1644,8 @@ impl View {
     pub fn release_counts(
         &self,
     ) -> Option<(
-        [usize; library::AlbumReleaseClass::COUNT],
-        [usize; library::AlbumReleaseClass::COUNT],
+        [usize; library::ARTIST_RELEASE_GROUPS],
+        [usize; library::ARTIST_RELEASE_GROUPS],
     )> {
         match &self.body {
             Body::Releases {
@@ -2118,8 +2118,8 @@ pub fn home_sections(
     quick_mix: &[crate::settings::quick_mix::QuickMixEntry],
     filter: &str,
 ) -> Vec<HomeSection> {
-    let filter = filter.trim().to_lowercase();
-    let shown = |text: String| text.to_lowercase().contains(&filter);
+    let filter = names::folded(filter.trim());
+    let shown = |text: String| names::folded(&text).contains(&filter);
     let album = |row: &HomeAlbumRow| {
         filter.is_empty() || shown(format!("{} {}", row.title, row.album.artist))
     };

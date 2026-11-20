@@ -46,7 +46,6 @@ sha2.workspace = true
 smb.workspace = true
 smb-fscc.workspace = true
 smb-msg.workspace = true
-rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_path_to_error.workspace = true

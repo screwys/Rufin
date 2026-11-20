@@ -47,7 +47,7 @@ pub(crate) struct OrderInner {
     pub(crate) stamp: [u64; 5],
     pub(crate) members: Members,
     /// Albums of an artist by release class, counted at build.
-    pub(crate) counts: Option<[usize; AlbumReleaseClass::COUNT]>,
+    pub(crate) counts: Option<[usize; crate::ARTIST_RELEASE_GROUPS]>,
     /// The members of a smart playlist as its page opened it, which last while it holds them.
     pub(crate) opened: Option<Arc<Vec<i64>>>,
 }
@@ -263,8 +263,8 @@ impl Order {
         }
     }
 
-    /// An artist's albums by release class, for ArtistAlbums orders.
-    pub fn release_counts(&self) -> Option<[usize; AlbumReleaseClass::COUNT]> {
+    /// An artist's albums by release group, for ArtistAlbums orders.
+    pub fn release_counts(&self) -> Option<[usize; crate::ARTIST_RELEASE_GROUPS]> {
         self.0.counts
     }
 

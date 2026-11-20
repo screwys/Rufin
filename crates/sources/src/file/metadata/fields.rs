@@ -459,3 +459,36 @@ pub(super) fn scope_values(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file::tags;
+
+    /// A saved field is read back only if the scan's table knows the key it was written under.
+    /// The reader names an ID3v2 comment and file identifier itself.
+    #[test]
+    fn every_editor_field_is_written_under_a_key_the_scan_reads() {
+        let mut unread = Vec::new();
+        for tag_type in [
+            TagType::Id3v2,
+            TagType::VorbisComments,
+            TagType::Mp4Ilst,
+            TagType::Ape,
+            TagType::RiffInfo,
+        ] {
+            for field in FIELDS {
+                let Some(key) = item(field, tag_type).map_key(tag_type) else {
+                    continue;
+                };
+                if !matches!(key, "COMM" | "UFID")
+                    && tags::named(key).is_none()
+                    && tags::named(&format!("txxx:{key}")).is_none()
+                {
+                    unread.push(format!("{tag_type:?} {} -> {key}", field.key));
+                }
+            }
+        }
+        assert!(unread.is_empty(), "{unread:#?}");
+    }
+}
