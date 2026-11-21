@@ -5,7 +5,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-15 18:50+0000\n"
 "Last-Translator: Javcar Tech <javcarr@users.noreply.hosted.weblate.org>\n"
@@ -295,23 +295,6 @@ msgstr ""
 "dentro de cada álbum"
 
 msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
@@ -590,6 +573,9 @@ msgstr "Ajustes de la aplicación"
 
 msgid "Appearance"
 msgstr "Apariencia"
+
+msgid "Appears On"
+msgstr "Aparece en"
 
 msgid "Application name"
 msgstr "Nombre de la aplicación"
@@ -1751,11 +1737,6 @@ msgstr "Exportar PNG"
 
 msgid "Export Playlist"
 msgstr "Exportar la Lista de Reproducción"
-
-#, fuzzy
-#| msgid "Export Backup"
-msgid "Export a Backup"
-msgstr "Exportar Respaldo"
 
 msgid "Export format"
 msgstr "Exportar formato"
@@ -5379,6 +5360,11 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
 
+#, fuzzy
+#~| msgid "Export Backup"
+#~ msgid "Export a Backup"
+#~ msgstr "Exportar Respaldo"
+
 #~ msgid "Play genre"
 #~ msgstr "Reproducir género"
 
@@ -5517,9 +5503,6 @@ msgstr "Bienvenido al instalador de Rufin"
 
 #~ msgid "here"
 #~ msgstr "aquí"
-
-#~ msgid "Appears On"
-#~ msgstr "Aparece en"
 
 #~ msgid "Select"
 #~ msgstr "Seleccionar"

@@ -5,7 +5,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-17 22:24+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
@@ -288,23 +288,6 @@ msgstr ""
 "puhul säilivad iga albumi sisemised erinevused"
 
 msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
@@ -580,6 +563,9 @@ msgstr "Rakenduse seadistused"
 
 msgid "Appearance"
 msgstr "Välimus"
+
+msgid "Appears On"
+msgstr "Esineb"
 
 msgid "Application name"
 msgstr "Rakenduse nimi"
@@ -1719,9 +1705,6 @@ msgstr "Ekspordi PNG-failina"
 
 msgid "Export Playlist"
 msgstr "Ekspordi esitusloend"
-
-msgid "Export a Backup"
-msgstr "Ekspordi varukoopia"
 
 msgid "Export format"
 msgstr "Ekspordivorming"
@@ -5308,6 +5291,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
+#~ msgid "Export a Backup"
+#~ msgstr "Ekspordi varukoopia"
+
 #~ msgid "Play genre"
 #~ msgstr "Kuula žanri alusel"
 
@@ -5449,9 +5435,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "here"
 #~ msgstr "siin"
-
-#~ msgid "Appears On"
-#~ msgstr "Esineb"
 
 #, fuzzy
 #~| msgid "Selection"

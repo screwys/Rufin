@@ -5,7 +5,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-11-17 06:23+0000\n"
 "Last-Translator: Vixsonix <vixsonix@users.noreply.hosted.weblate.org>\n"
@@ -293,23 +293,6 @@ msgid ""
 msgstr ""
 "Opsi Lagu membuat semua lagu terdengar sama rata, sedangkan Album menjaga "
 "perbedaan volume asli di setiap album"
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
-msgstr ""
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
@@ -616,6 +599,9 @@ msgstr "Pengaturan aplikasi"
 
 msgid "Appearance"
 msgstr "Tampilan"
+
+msgid "Appears On"
+msgstr "Muncul di"
 
 msgid "Application name"
 msgstr "Nama aplikasi"
@@ -1804,11 +1790,6 @@ msgstr "Ekspor PNG"
 
 msgid "Export Playlist"
 msgstr "Ekspor Playlist"
-
-#, fuzzy
-#| msgid "Export Backup"
-msgid "Export a Backup"
-msgstr "Ekspor Cadangan"
 
 msgid "Export format"
 msgstr "Ekspor format"
@@ -5356,6 +5337,11 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
 
+#, fuzzy
+#~| msgid "Export Backup"
+#~ msgid "Export a Backup"
+#~ msgstr "Ekspor Cadangan"
+
 #~ msgid "Play genre"
 #~ msgstr "Putar genre"
 
@@ -5438,9 +5424,6 @@ msgstr ""
 #, fuzzy
 #~ msgid "Libre.fm"
 #~ msgstr "Libre.fm"
-
-#~ msgid "Appears On"
-#~ msgstr "Muncul di"
 
 #~ msgid "Apply Template"
 #~ msgstr "Terapkan Template"

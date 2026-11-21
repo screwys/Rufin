@@ -5,9 +5,9 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-17 20:34+0000\n"
+"PO-Revision-Date: 2026-11-21 09:54+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -298,23 +298,6 @@ msgstr ""
 "prévues au sein de chaque album"
 
 msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
 msgstr ""
@@ -593,6 +576,9 @@ msgstr "Paramètres de l’application"
 
 msgid "Appearance"
 msgstr "Apparence"
+
+msgid "Appears On"
+msgstr "Apparaît sur"
 
 msgid "Application name"
 msgstr "Nom de l'application"
@@ -1264,8 +1250,6 @@ msgstr "Créer les clés API"
 msgid "Create a playlist from queue"
 msgstr "Créer une playlist à partir de la file d'attente"
 
-#, fuzzy
-#| msgid "Create playlist"
 msgid "Create a playlist"
 msgstr "Créer une playlist"
 
@@ -1739,9 +1723,6 @@ msgstr "Exporter en PNG"
 msgid "Export Playlist"
 msgstr "Exporter la playlist"
 
-msgid "Export a Backup"
-msgstr "Exporter une sauvegarde"
-
 msgid "Export format"
 msgstr "Format d’exportation"
 
@@ -1793,10 +1774,8 @@ msgstr "Favori"
 msgid "Favorites and ratings"
 msgstr "Favoris et notes"
 
-#, fuzzy
-#| msgid "Favorites"
 msgid "Favorites only"
-msgstr "Favoris"
+msgstr "Favoris seulement"
 
 msgid "Favorites"
 msgstr "Favoris"
@@ -1921,10 +1900,8 @@ msgstr ""
 msgid "Forget Source"
 msgstr "Oublier la source"
 
-#, fuzzy
-#| msgid "Could not update favorites"
 msgid "Forgotten favorites"
-msgstr "Impossible de mettre à jour les favoris"
+msgstr "Favoris oubliés"
 
 msgid "Format not supported"
 msgstr "Format non supporté"
@@ -2585,10 +2562,8 @@ msgstr "Mix (jouer en suite)"
 msgid "Mix"
 msgstr "Mix"
 
-#, fuzzy
-#| msgid "Remixes"
 msgid "Mixes"
-msgstr "Remixes"
+msgstr "Mixes"
 
 msgid "Mode"
 msgstr "Mode"
@@ -2629,10 +2604,8 @@ msgstr "Le plus sauté"
 msgid "Most played"
 msgstr "Le plus écouté"
 
-#, fuzzy
-#| msgid "Most Skipped"
 msgid "Most skipped"
-msgstr "Le plus sauté"
+msgstr "Les plus ignorés"
 
 msgid "Motion"
 msgstr "Mouvement"
@@ -2756,10 +2729,8 @@ msgstr "Nouvelle playlist"
 msgid "New Smart Playlist"
 msgstr "Nouvelle playlist intelligente"
 
-#, fuzzy
-#| msgid "Never played"
 msgid "New and unplayed"
-msgstr "Jamais écouté"
+msgstr "Nouveaux et jamais écoutés"
 
 msgid "New download rule"
 msgstr "Nouvelle règle de téléchargement"
@@ -2974,10 +2945,8 @@ msgstr "Off"
 msgid "Offline"
 msgstr "Hors ligne"
 
-#, fuzzy
-#| msgid "Repeat"
 msgid "On repeat"
-msgstr "Répéter"
+msgstr "En boucle"
 
 msgid "On"
 msgstr "On"
@@ -3261,8 +3230,6 @@ msgstr "Lecture sur {device}"
 msgid "Playing stream"
 msgstr "Lecture du flux"
 
-#, fuzzy
-#| msgid "Now Playing"
 msgid "Playing"
 msgstr "En cours de lecture"
 
@@ -3428,7 +3395,7 @@ msgid "Quick Connect"
 msgstr "Connexion rapide"
 
 msgid "Quick Mix"
-msgstr ""
+msgstr "Mix rapide"
 
 msgid "Quit Rufin"
 msgstr "Quitter Rufin"
@@ -3484,10 +3451,8 @@ msgstr "Enregistrement"
 msgid "Red"
 msgstr "Rouge"
 
-#, fuzzy
-#| msgid "Nearby discovery"
 msgid "Rediscover"
-msgstr "Découverte à proximité"
+msgstr "Redécouvrir"
 
 msgid "Redo"
 msgstr "Rétablir"
@@ -4104,7 +4069,7 @@ msgid "Show Rufin"
 msgstr "Afficher Rufin"
 
 msgid "Show a badge for favorited items"
-msgstr ""
+msgstr "Afficher un badge pour les éléments favoris"
 
 msgid "Show artwork"
 msgstr "Afficher l’illustration"
@@ -4145,10 +4110,8 @@ msgstr "Afficher les notes dans la barre inférieure"
 msgid "Show sidebar"
 msgstr "Afficher la barre latérale"
 
-#, fuzzy
-#| msgid "Show tray icon"
 msgid "Show star ratings"
-msgstr "Afficher l’icône dans la zone de notification"
+msgstr "Afficher les notes en étoiles"
 
 msgid "Show tray icon"
 msgstr "Afficher l’icône dans la zone de notification"
@@ -4553,10 +4516,8 @@ msgstr "Cette playlist n’accepte que les morceaux de {source}"
 msgid "This source cannot edit this field"
 msgstr "Cette source ne peut pas modifier ce champ"
 
-#, fuzzy
-#| msgid "Finish the last track"
 msgid "This time last year"
-msgstr "Terminer le dernier morceau"
+msgstr "À la même époque l’an dernier"
 
 msgid "This will remove all configured state. Do you want to continue?"
 msgstr "Cela supprimera la configuration enregistrée. Voulez-vous continuer ?"
@@ -4591,10 +4552,8 @@ msgstr "Top artistes"
 msgid "Top genres"
 msgstr "Top genres"
 
-#, fuzzy
-#| msgid "Top genres"
 msgid "Top rated"
-msgstr "Top genres"
+msgstr "Les mieux notés"
 
 msgid "Top tracks"
 msgstr "Top morceaux"
@@ -5201,6 +5160,9 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue dans l’installation de Rufin"
 
+#~ msgid "Export a Backup"
+#~ msgstr "Exporter une sauvegarde"
+
 #~ msgid "Play genre"
 #~ msgstr "Lire le genre"
 
@@ -5342,9 +5304,6 @@ msgstr "Bienvenue dans l’installation de Rufin"
 
 #~ msgid "here"
 #~ msgstr "ici"
-
-#~ msgid "Appears On"
-#~ msgstr "Apparaît sur"
 
 #~ msgid "Select"
 #~ msgstr "Sélectionner"

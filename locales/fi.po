@@ -5,7 +5,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Rufin\n"
-"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "PO-Revision-Date: 2026-09-21 20:41+0000\n"
 "Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
@@ -224,23 +224,6 @@ msgstr ""
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For Flatpak and MacOS users this means the logins will not "
-"migrate automatically, and Android users will need to re download the app.\n"
-"\n"
-"        There should likely be no problems for other packages, but in either "
-"case, it is recommended to export a backup to restore from it."
-msgstr ""
-
-msgid ""
-"With the next release, the repo will move to an organization and the app ID "
-"will change. For flatpak users this means the logins will not migrate "
-"automatically, and Android users will need to re download the app. There "
-"should likely be no problems for other packages, but in either case, it is "
-"recommended to export a backup to restore from it."
 msgstr ""
 
 msgid ""
@@ -579,6 +562,11 @@ msgid "App settings"
 msgstr "Sovelluksen asetukset"
 
 msgid "Appearance"
+msgstr "Ulkoasu"
+
+#, fuzzy
+#| msgid "Appearance"
+msgid "Appears On"
 msgstr "Ulkoasu"
 
 msgid "Application name"
@@ -1963,11 +1951,6 @@ msgstr "Vie"
 
 msgid "Export Playlist"
 msgstr "Vie soittolista"
-
-#, fuzzy
-#| msgid "Import Backup"
-msgid "Export a Backup"
-msgstr "Tuo varmuuskopio"
 
 msgid "Export format"
 msgstr "Vientimuoto"
@@ -5949,6 +5932,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Import Backup"
+#~ msgid "Export a Backup"
+#~ msgstr "Tuo varmuuskopio"
 
 #~ msgid "Play playlist"
 #~ msgstr "Toista soittolista"
