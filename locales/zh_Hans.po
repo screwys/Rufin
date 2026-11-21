@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/rufin-app/rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-11-21 09:54+0000\n"
+"PO-Revision-Date: 2026-11-21 12:05+0000\n"
 "Last-Translator: r-blackstar <r-blackstar@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Chinese (Simplified Han script) <https://hosted.weblate.org/"
 "projects/rufin/app/zh_Hans/>\n"
@@ -187,67 +187,67 @@ msgstr ""
 msgid ""
 "Some changes were saved. Close this editor and reopen it to review the "
 "result."
-msgstr ""
+msgstr "部分更改已保存。关闭此编辑器后重新打开，以查看结果。"
 
 msgid ""
 "Temporary library storage is in use. Changes may be lost when Rufin closes."
-msgstr ""
+msgstr "正在使用临时曲库存储，关闭 Rufin 后，更改可能会丢失。"
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
-msgstr ""
+msgstr "感谢你尝试 Rufin！如有问题或提建议，请在 GitHub 上提出 issue。"
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
-msgstr ""
+msgstr "这是 Rufin 使用的备用封面，要将它设为该项目的封面吗？"
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
 "stars and then round them up for the source"
-msgstr ""
+msgstr "此来源原生不支持非整数星级，但 Rufin 可以显示半星，并在写入来源时向上取整"
 
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
-msgstr ""
+msgstr "此项目由 Rufin 创建，可包含所有已配置来源的条目，但不会同步到远端。"
 
 msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
-msgstr ""
+msgstr "此操作会使你退出登录并清除包括 API 凭据在内的敏感信息，但不会清除应用缓存。"
 
 msgid ""
 "This will overwrite your lyrics file with what Rufin fetched, it may be a "
 "better experience to use a dedicated program or plugin to fetch lyrics "
 "instead."
 msgstr ""
-"这会用 Rufin 获取到的内容覆盖你的歌词文件，改用专门的程序或插件来获取歌词可能"
-"会带来更好的体验。"
+"此操作会用 Rufin 获取的内容覆盖你的歌词文件，建议改用专门的歌词软件或插件来获"
+"取。"
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
-msgstr ""
+msgstr "按曲目让每首歌音量一致，按专辑保留各专辑内原有的音量差异"
 
 msgid ""
 "You have set Rufin to automatically download your entire library. This can "
 "use a lot of data. Do you confirm?"
-msgstr "你已将 Rufin 设置为自动下载你的整个曲库。这可能会占用大量数据。是否确认？"
+msgstr "你已设置 Rufin 自动下载整个曲库，这可能消耗大量流量，确定要继续吗？"
 
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
-msgstr ""
+msgstr "你需要使用新 API key 重新连接客户端。"
 
 msgid "(hold to shuffle)"
 msgstr "（长按随机播放）"
 
 msgid "+1 track"
-msgstr ""
+msgstr "添加 1 首曲目"
 
 msgid "+5 min"
-msgstr ""
+msgstr "快进 5 分钟"
 
 msgid "1 day"
 msgstr "1 天"
@@ -265,19 +265,19 @@ msgid "1 year"
 msgstr "1 年"
 
 msgid "10 bands"
-msgstr ""
+msgstr "10 个频段"
 
 msgid "12 hours"
 msgstr "12 小时"
 
 msgid "18 bands"
-msgstr ""
+msgstr "18个频段"
 
 msgid "24 hours"
 msgstr "24 小时"
 
 msgid "31 bands"
-msgstr ""
+msgstr "31个频段"
 
 msgid "5 Latest Albums"
 msgstr "最新的 5 张专辑"
@@ -292,25 +292,25 @@ msgid "A"
 msgstr ""
 
 msgid "API key (Subsonic)"
-msgstr "API 密钥（Subsonic）"
+msgstr "API key (Subsonic)"
 
 msgid "API key"
-msgstr "API 密钥"
+msgstr "API key"
 
 msgid "About Rufin"
 msgstr "关于 Rufin"
 
 msgid "Absolute"
-msgstr ""
+msgstr "绝对"
 
 msgid "Accent color"
-msgstr ""
+msgstr "主题颜色"
 
 msgid "Access denied"
-msgstr ""
+msgstr "拒绝访问"
 
 msgid "Access token"
-msgstr ""
+msgstr "访问令牌"
 
 msgid "Accessibility"
 msgstr "无障碍"
@@ -319,34 +319,34 @@ msgid "Account"
 msgstr "账户"
 
 msgid "Actions"
-msgstr ""
+msgstr "动作"
 
 msgid "Active"
-msgstr ""
+msgstr "已启用"
 
 msgid "Activity"
-msgstr ""
+msgstr "动态"
 
 msgid "Add Manually"
-msgstr ""
+msgstr "手动添加"
 
 msgid "Add SMB folder"
 msgstr "添加 SMB 文件夹"
 
 msgid "Add Source"
-msgstr ""
+msgstr "添加源"
 
 msgid "Add Station"
-msgstr ""
+msgstr "添加电台"
 
 msgid "Add WebDAV folder"
 msgstr "添加 WebDAV 文件夹"
 
 msgid "Add a matching server prefix"
-msgstr ""
+msgstr "添加匹配的服务器前缀"
 
 msgid "Add a music folder"
-msgstr ""
+msgstr "添加一个音乐文件夹"
 
 msgid "Add a music source to start listening."
 msgstr ""
@@ -558,10 +558,10 @@ msgid "Artist unavailable"
 msgstr ""
 
 msgid "Artist"
-msgstr "艺人"
+msgstr "歌手"
 
 msgid "Artists"
-msgstr "艺人"
+msgstr "歌手"
 
 msgid "Artwork editing is no longer available"
 msgstr ""
@@ -799,7 +799,7 @@ msgid "Changes apply to {count} tracks"
 msgstr "应用变更到 {count} 个曲目"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr "重启 Rufin 后生效"
+msgstr "更改在重启 Rufin 后生效"
 
 msgid "Channels"
 msgstr ""
@@ -1893,7 +1893,7 @@ msgid "Genre tracks"
 msgstr "曲风曲目"
 
 msgid "Genre"
-msgstr "曲风"
+msgstr "流派"
 
 msgid "Genres"
 msgstr "曲风"
@@ -2044,7 +2044,7 @@ msgid "Increase"
 msgstr ""
 
 msgid "Install available updates when Rufin starts"
-msgstr ""
+msgstr "Rufin 启动时安装可用更新"
 
 msgid "Installed"
 msgstr ""
@@ -2104,13 +2104,13 @@ msgid "Karaoke mode"
 msgstr ""
 
 msgid "Keep Rufin running after closing the window"
-msgstr "关闭时后台运行"
+msgstr "关闭窗口后使应用在后台运行"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
 
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "键盘快捷键"
 
 msgid "Koito, Maloja and other ListenBrainz servers."
 msgstr "Koito、Maloja 和其他 ListenBrainz 服务器。"
@@ -3174,7 +3174,7 @@ msgid "Prefer translations"
 msgstr ""
 
 msgid "Preferences"
-msgstr "偏好设置"
+msgstr "首选项"
 
 msgid "Preparing library..."
 msgstr "曲库准备中…"
@@ -4113,7 +4113,7 @@ msgid "Smart playlist tracks"
 msgstr ""
 
 msgid "Smart playlists"
-msgstr "智能播放列表"
+msgstr "最近播放"
 
 msgid "Soft spectrum"
 msgstr ""
@@ -4200,7 +4200,7 @@ msgid "Start"
 msgstr ""
 
 msgid "Starting page"
-msgstr "默认页面"
+msgstr "启动页面"
 
 msgid "Starting..."
 msgstr ""
@@ -4284,7 +4284,7 @@ msgid "Switching library..."
 msgstr "曲库切换中…"
 
 msgid "Symbolic"
-msgstr "单色"
+msgstr "黑白"
 
 msgid "Sync folder"
 msgstr ""
@@ -4545,7 +4545,7 @@ msgid "Untitled"
 msgstr ""
 
 msgid "Update check interval"
-msgstr "检查更新间隔"
+msgstr "更新检查间隔"
 
 msgid "Update"
 msgstr "更新"
